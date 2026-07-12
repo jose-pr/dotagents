@@ -1,0 +1,14 @@
+# Private agent work (plans, design logs, session artifacts) — never tracked
+.agents/
+CLAUDE.local.md
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
