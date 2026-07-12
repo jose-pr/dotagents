@@ -1,0 +1,62 @@
+name: Test
+
+# Validates the config payload: manifest completeness, forbidden patterns,
+# template instantiation, and a clean install into a scratch HOME.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to test (branch, tag, or SHA)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "ci-*"
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Audit (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.13"] # default mode must run on the 3.9 floor
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Audit checkout
+        run: python tools/audit_config.py --root .
+      - name: Template instantiation checks (3.11+ only)
+        if: matrix.python-version != '3.9'
+        run: python tools/audit_config.py --check-templates --root .
+
+  install:
+    name: Install into scratch HOME
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dry run
+        run: python install.py --dry-run
+      - name: Install and audit
+        run: |
+          export HOME="$(mktemp -d)"
+          python install.py
+          test -f "$HOME/.agents/AGENTS.md"
+          python "$HOME/.agents/tools/audit_config.py"
