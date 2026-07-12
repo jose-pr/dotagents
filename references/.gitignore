@@ -1,0 +1,20 @@
+# Agent/harness tooling (always excluded — see ~/.agents/flows/REPO.md)
+AGENTS.md
+.agents/
+CLAUDE*
+.claude
+
+# Build/dist output and generated docs site
+build/
+dist/
+site/
+
+# <!-- EXECUTOR: replace with the language block from kb/<LANG>.md; delete other languages. -->
+# Language-specific
+<language build/dependency output patterns>
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

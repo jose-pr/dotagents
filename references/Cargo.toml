@@ -1,0 +1,23 @@
+[package]
+name = "<project_name>"
+version = "0.1.0"
+edition = "2021"
+# MSRV floor — cargo refuses to build below it (kb/RUST.md); CI matrices over it.
+rust-version = "<msrv>"
+description = "<one-line description>"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/<gh_org>/<project_name>"
+
+# Zero required runtime deps where feasible; optional integrations are features.
+[dependencies]
+
+[dev-dependencies]
+
+[features]
+default = []
+# EXECUTOR: one feature per optional integration, gated via dep:<crate>.
+
+# docs.rs documents every feature (kb/RUST.md).
+[package.metadata.docs.rs]
+all-features = true

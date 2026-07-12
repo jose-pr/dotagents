@@ -1,0 +1,61 @@
+name: Test
+
+# On-demand / ad-hoc test workflow, kept separate from release.yaml's own
+# release-gate test job -- same two-trigger pattern as the Python template:
+# workflow_dispatch (with ref input) + throwaway "ci-*" tags (delete after).
+# Not triggered by push/PR on branches by default.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to test (branch, tag, or SHA)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "ci-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (node ${{ matrix.node-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu full matrix over supported LTS versions (mirror engines.node floor)
+          - os: ubuntu-latest
+            node-version: "18"
+          - os: ubuntu-latest
+            node-version: "20"
+          - os: ubuntu-latest
+            node-version: "22"
+          # Windows/macOS matrix edges (oldest + newest supported LTS)
+          - os: windows-latest
+            node-version: "18"
+          - os: windows-latest
+            node-version: "22"
+          - os: macos-latest
+            node-version: "18"
+          - os: macos-latest
+            node-version: "22"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install dependencies (lockfile-exact)
+        run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Run tests
+        run: npm test
