@@ -3,8 +3,8 @@
 
 Usage: python install.py [--dest <path>] [--dry-run]
 
-Copies the payload (AGENTS.md, CLAUDE.md, antigravity.md, flows/, kb/,
-references/, tools/) from this checkout into the destination (default
+Copies the payload/ directory (AGENTS.md, CLAUDE.md, antigravity.md, flows/,
+kb/, references/, tools/) from this checkout 1:1 into the destination (default
 ~/.agents). Files that would be overwritten with different content are first
 backed up to <dest>/install_backup/<timestamp>/, so a customized install is
 never silently clobbered. Everything else in the destination (harness state,
@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent
+SRC = Path(__file__).resolve().parent / "payload"
 PAYLOAD = ["AGENTS.md", "CLAUDE.md", "antigravity.md",
            "flows", "kb", "references", "tools"]
 
