@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Audit agent-config integrity. Default mode runs on Python 3.9+.
+
+Modes:
+  (default)              existence + forbidden-pattern scan + size table
+  --root <path>          audit this tree instead of ~/.agents (e.g. a checkout: .)
+  --probe <path>         add one extra file to the scan manifest (negative tests)
+  --check-templates      instantiate references/ templates in a temp dir and
+                         parse-check them (requires Python 3.11+ for tomllib)
+
+Exit 1 on missing manifest files, forbidden patterns, or failed template checks.
+Size budgets only warn. Scope is a closed manifest -- never a tree walk (the tree
+also holds harness state, backups, and private plans that legitimately contain
+the forbidden strings).
+"""
+import sys
+from pathlib import Path
+
+DEFAULT_ROOT = Path.home() / ".agents"
+
+SCAN = [
+    "AGENTS.md", "CLAUDE.md", "antigravity.md",
+    "flows/PLAN.md", "flows/EXEC.md", "flows/REVIEW.md", "flows/REPO.md",
+    "kb/PYTHON.md", "kb/NODE.md", "kb/RUST.md", "kb/RECOVERY.md",
+]
+REFS = [
+    "references/README.md", "references/CHANGELOG.md", "references/LICENSE",
+    "references/.gitignore", "references/docs-index.md", "references/mkdocs.yml",
+    "references/package.json", "references/pyproject.toml", "references/Cargo.toml",
+    "references/master_refactoring_plan.md",
+    "references/workflows/python/test.yml", "references/workflows/python/release.yml",
+    "references/workflows/node/test.yaml", "references/workflows/node/release.yaml",
+    "references/workflows/rust/test.yaml", "references/workflows/rust/release.yaml",
+]
+EXIST_ONLY = ["tools/audit_config.py", "tools/leak_check.py"]
+
+BASE_PATTERNS = ["file:///" + "~", "~/.agents/" + "examples/"]
+REF_PATTERNS = BASE_PATTERNS + ["pathlib" + "_next", "C:\\" + "Users", "jo" + "se"]
+
+BUDGETS = {"AGENTS.md": 2500, "flows/PLAN.md": 3000, "flows/EXEC.md": 3000,
+           "flows/REVIEW.md": 3000, "flows/REPO.md": 3000}
+
+SUBST = {"<project_name>": "demopkg", "<gh_org>": "demoorg",
+         "<package_name>": "demopkg", "<year>": "2026",
+         "<copyright_holder>": "Demo", "<msrv>": "1.70"}
+
+
+def audit(root, probe=None):
+    print("root: %s" % root)
+    failures, table = [], []
+    jobs = [(p, BASE_PATTERNS) for p in SCAN] + [(p, REF_PATTERNS) for p in REFS] \
+        + [(p, None) for p in EXIST_ONLY]
+    if probe:
+        jobs.append((probe, BASE_PATTERNS))
+    for rel, patterns in jobs:
+        path = Path(rel) if probe and rel is probe else root / rel
+        if not path.is_file():
+            failures.append("MISSING: %s" % rel)
+            continue
+        size = path.stat().st_size
+        table.append("%-55s%7d" % (rel, size))
+        if patterns:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for pat in patterns:
+                if pat in text:
+                    failures.append("FORBIDDEN %r in %s" % (pat, rel))
+        if BUDGETS.get(rel) and size > BUDGETS[rel]:
+            print("WARN: %s is %dB (budget %dB)" % (rel, size, BUDGETS[rel]))
+    print("\n".join(table))
+    return failures
+
+
+def check_templates(root):
+    if sys.version_info < (3, 11):
+        sys.stderr.write("--check-templates needs Python 3.11+ (tomllib); "
+                         "run via: py -3.12\n")
+        return ["python too old for --check-templates"]
+    import json
+    import shutil
+    import tempfile
+    import tomllib
+    failures = []
+    tmp = Path(tempfile.mkdtemp(prefix="agents_tpl_"))
+    try:
+        names = ["README.md", "CHANGELOG.md", ".gitignore", "docs-index.md",
+                 "mkdocs.yml", "package.json", "pyproject.toml", "Cargo.toml"]
+        for name in names:
+            text = (root / "references" / name).read_text(encoding="utf-8")
+            lines = [ln for ln in text.splitlines()
+                     if "<!-- EXECUTOR:" not in ln]
+            text = "\n".join(lines) + "\n"
+            for k, v in SUBST.items():
+                text = text.replace(k, v)
+            (tmp / name).write_text(text, encoding="utf-8")
+
+        def ck(name, fn):
+            try:
+                fn()
+                print("PASS %s" % name)
+            except Exception as exc:  # noqa: BLE001 - report, don't crash
+                failures.append("%s: %s" % (name, exc))
+                print("FAIL %s: %s" % (name, exc))
+
+        ck("pyproject.toml", lambda: tomllib.loads((tmp / "pyproject.toml").read_text(encoding="utf-8")))
+        ck("Cargo.toml", lambda: tomllib.loads((tmp / "Cargo.toml").read_text(encoding="utf-8")))
+        ck("package.json", lambda: json.loads((tmp / "package.json").read_text(encoding="utf-8")))
+
+        def has(name, needles):
+            text = (tmp / name).read_text(encoding="utf-8")
+            missing = [n for n in needles if n not in text]
+            if missing:
+                raise AssertionError("missing %s" % missing)
+
+        ck("mkdocs.yml", lambda: has("mkdocs.yml", ["theme:", "material", "mkdocstrings", "docs_dir: docs"]))
+        ck("README.md", lambda: has("README.md", ["img.shields.io", "## Install", "Optional", "## Development", "## License"]))
+        ck("CHANGELOG.md", lambda: has("CHANGELOG.md", ["[Unreleased]", "## [", "]: http"]))
+        ck(".gitignore", lambda: has(".gitignore", ["AGENTS.md", ".agents/", "CLAUDE*", ".claude"]))
+        ck("docs-index.md", lambda: has("docs-index.md", ["#"]))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return failures
+
+
+def main(argv):
+    root = DEFAULT_ROOT
+    if "--root" in argv:
+        root = Path(argv[argv.index("--root") + 1]).resolve()
+    probe = None
+    if "--probe" in argv:
+        probe = Path(argv[argv.index("--probe") + 1])
+    if "--check-templates" in argv:
+        failures = check_templates(root)
+    else:
+        failures = audit(root, probe)
+    if failures:
+        print("FAIL")
+        for f in failures:
+            print("  " + f)
+        return 1
+    print("PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
