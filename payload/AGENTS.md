@@ -29,6 +29,9 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
   `.agents/plans/` if needed) and delete the scratch copy. Active-work scans read
   only the top level of the project's plans dir — never descend into `completed/`
   unless asked about history.
+- **Global-config misses**: if these global instructions contributed to a mistake,
+  misread, or avoidable rework, record a short sanitized note in the dotagents
+  source repo `findings/` plus its config design log before moving on.
 
 ## Load on demand
 Read the matching file BEFORE starting such a task; skip it otherwise. Never load
