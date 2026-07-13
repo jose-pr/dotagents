@@ -22,22 +22,33 @@ from pathlib import Path
 DEFAULT_ROOT = Path.home() / ".agents"
 
 SCAN = [
-    "AGENTS.md", "CLAUDE.md", "antigravity.md", "dotagents/log.md",
+    "AGENTS.md", "CLAUDE.md", "dotagents/log.md",
     "flows/PLAN.md", "flows/EXEC.md", "flows/REVIEW.md", "flows/REPO.md",
-    "kb/PYTHON.md", "kb/NODE.md", "kb/RUST.md", "kb/RECOVERY.md",
+    "kb/RECOVERY.md",
 ]
 REFS = [
     "references/README.md", "references/CHANGELOG.md", "references/LICENSE",
-    "references/.gitignore", "references/docs-index.md", "references/mkdocs.yml",
-    "references/package.json", "references/pyproject.toml", "references/Cargo.toml",
+    "references/.gitignore", "references/docs-index.md",
     "references/master_refactoring_plan.md",
-    "references/workflows/python/test.yml", "references/workflows/python/release.yml",
-    "references/workflows/node/test.yaml", "references/workflows/node/release.yaml",
-    "references/workflows/rust/test.yaml", "references/workflows/rust/release.yaml",
 ]
 EXIST_ONLY = ["tools/audit_config.py", "tools/leak_check.py"]
+# examples/ is opt-in at install time (never required in ~/.agents), but a repo
+# checkout (--root) should still have every example present -- checked only when
+# root/examples exists, so a live ~/.agents without it isn't penalized.
+EXAMPLES = [
+    "examples/antigravity.md",
+    "examples/kb/PYTHON.md", "examples/kb/NODE.md", "examples/kb/RUST.md",
+    "examples/references/package.json", "examples/references/pyproject.toml",
+    "examples/references/Cargo.toml", "examples/references/mkdocs.yml",
+    "examples/references/workflows/python/test.yml",
+    "examples/references/workflows/python/release.yml",
+    "examples/references/workflows/node/test.yaml",
+    "examples/references/workflows/node/release.yaml",
+    "examples/references/workflows/rust/test.yaml",
+    "examples/references/workflows/rust/release.yaml",
+]
 
-BASE_PATTERNS = ["file:///" + "~", "~/.agents/" + "examples/"]
+BASE_PATTERNS = ["file:///" + "~"]
 REF_PATTERNS = BASE_PATTERNS + ["pathlib" + "_next", "C:\\" + "Users", "jo" + "se"]
 # Concatenated so this file never matches itself.
 PERSONAL_PATTERNS = ["C:\\" + "Users", "C:/" + "Users", "~/" + "devel/",
@@ -58,6 +69,8 @@ def audit(root, probe=None):
     failures, table = [], []
     jobs = [(p, BASE_PATTERNS) for p in SCAN] + [(p, REF_PATTERNS) for p in REFS] \
         + [(p, None) for p in EXIST_ONLY]
+    if (root / "examples").is_dir():
+        jobs += [(p, REF_PATTERNS) for p in EXAMPLES]
     if probe:
         jobs.append((probe, BASE_PATTERNS))
     for rel, patterns in jobs:
@@ -90,10 +103,12 @@ def check_templates(root):
     failures = []
     tmp = Path(tempfile.mkdtemp(prefix="agents_tpl_"))
     try:
-        names = ["README.md", "CHANGELOG.md", ".gitignore", "docs-index.md",
-                 "mkdocs.yml", "package.json", "pyproject.toml", "Cargo.toml"]
-        for name in names:
-            text = (root / "references" / name).read_text(encoding="utf-8")
+        refs_names = ["README.md", "CHANGELOG.md", ".gitignore", "docs-index.md"]
+        example_names = ["mkdocs.yml", "package.json", "pyproject.toml", "Cargo.toml"]
+        sources = [(root / "references" / n, n) for n in refs_names] + \
+            [(root / "examples" / "references" / n, n) for n in example_names]
+        for src, name in sources:
+            text = src.read_text(encoding="utf-8")
             lines = [ln for ln in text.splitlines()
                      if "<!-- EXECUTOR:" not in ln]
             text = "\n".join(lines) + "\n"

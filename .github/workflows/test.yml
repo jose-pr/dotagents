@@ -61,4 +61,11 @@ jobs:
           export HOME="$(mktemp -d)"
           python install.py
           test -f "$HOME/.agents/AGENTS.md"
+          test ! -e "$HOME/.agents/examples"
           python "$HOME/.agents/tools/audit_config.py"
+      - name: Install with examples (opt-in, additive only)
+        run: |
+          export HOME="$(mktemp -d)"
+          python install.py --with-examples
+          test -f "$HOME/.agents/examples/kb/PYTHON.md"
+          python install.py --with-examples | grep -q "skipped (already present)"

@@ -52,11 +52,11 @@ executor trial-and-error. Spend effort on precision, not length.
    `## Why This Phase`.
 
 ## Executor kickoff prompt (use verbatim, insert the plan path and language)
-> You are an expert execution assistant. Read `~/.agents/flows/EXEC.md` and
-> `~/.agents/kb/<LANG>.md` (the project's language: PYTHON, NODE, or RUST), then
-> execute the plan at `<path>` precisely. Do not deviate, re-evaluate, or make
-> unguided assumptions. If an item is blocked, record it in Progress and continue
-> with independent items; never ask the user anything.
+> You are an expert execution assistant. Read `~/.agents/flows/EXEC.md` and, if it
+> exists, `~/.agents/kb/<LANG>.md` (the project's language), then execute the plan
+> at `<path>` precisely. Do not deviate, re-evaluate, or make unguided assumptions.
+> If an item is blocked, record it in Progress and continue with independent items;
+> never ask the user anything.
 
 Format model (shape only, not content): `~/.agents/references/master_refactoring_plan.md`.
 
