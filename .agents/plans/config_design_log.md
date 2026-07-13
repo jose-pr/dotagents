@@ -103,7 +103,29 @@ Cost model in one line:
   The fix came only after re-checking the live plan tree and current source/tests.
   The config had strong plan-location rules, but no explicit rule to record when the
   global config itself contributed to a miss, so the lesson could easily have been
-  lost instead of fed back into the config.
+  lost instead of fed back into the config. Independently reconfirmed as a private
+  finding the same day (see F18) — corrective actions match.
+- F18 (findings-mechanism dogfooding, 2026-07-12): once D25's original "record
+  findings in the source repo" rule shipped, the very next uses of it surfaced
+  three more issues (F19–F21) — including a self-correction (F19) of D25 itself.
+  Signal that a first-draft feedback-loop rule needs a live trial before it's
+  considered settled.
+- F19 (findings forced unwanted repo edits, 2026-07-12): the original rule told
+  agents to write findings into the tracked dotagents repo and update the design log
+  immediately. The user's actual intent was a lightweight *personal* backlog kept
+  under `~/.agents/dotagents/findings/`, reconciled into the public repo only during
+  a deliberate, explicitly-requested triage pass. The rule conflated "capture a
+  lesson for later" with "update the source of truth now" — two different jobs with
+  different urgency and different audiences (private vs. public).
+- F20 (no draft-plan escape hatch, 2026-07-12): mid-execution, agents that noticed
+  adjacent work or improvements had only two options — silently drop the idea, or
+  scope-creep the current execution to cover it. No sanctioned way to capture the
+  idea without expanding scope.
+- F21 (plan discoverability, 2026-07-12): as a project's `.agents/plans/` grows,
+  nothing records which plans are active, which supersede others, or what order
+  dependent plans should run in — raising the same "stale plan state" risk as F17 at
+  the plan-directory level instead of the single-plan level. Flagged as a structural
+  idea worth prototyping, not yet a settled design (no chosen index format).
 
 ## Decisions
 
@@ -195,11 +217,46 @@ Cost model in one line:
   D22 wording judgment covers the rest). Machine-specific facts stay out of the
   tracked payload or are phrased generically. The pre-split core backup and harness
   state remain only in `~/.agents`.
-- **D25 — global-config misses get first-class writeups** (F17). When an agent
-  later determines that the global config materially contributed to a mistake,
-  misread, or avoidable rework, it records a short sanitized note in this repo's
-  `findings/` directory and logs the config-level lesson here before continuing.
-  Purpose: keep "we fixed it later" incidents from disappearing into chat history.
+- **D25 — global-config misses get first-class writeups, captured privately by
+  default** (F17, revised 2026-07-12 by F19 — supersedes the original same-day
+  version that wrote into the tracked repo). When an agent determines the global
+  config contributed to a mistake, misread, or avoidable rework — or has an
+  improvement idea — it writes a short note under `~/.agents/dotagents/findings/`
+  (create if absent) and stops there. This is deliberately decoupled from the
+  source of truth: no edit to the dotagents repo, its design log, or the installed
+  payload, unless the user explicitly asks for a triage/reconciliation pass. Purpose:
+  keep "we fixed it later" incidents from disappearing into chat history, without
+  forcing every capture to become a repo change.
+- **D26 — executors may leave `Status: draft` follow-up plans** (F20). Mid-execution
+  discoveries worth capturing but out of current scope become a new top-level plan
+  (`.agents/plans/<name>.md`) with just idea + rough scope + why, `Status: draft`.
+  Never expanded or executed in the same pass — an architect turns it into a `ready`
+  plan later. Recorded in core `AGENTS.md`.
+- **D27 — plan indexing left open** (F21). No index/README convention adopted yet;
+  candidate shape (`plans/<plan>/index.md` + sibling subplan files, replacing the
+  current `plan.md` + `plan/<sub>.md` split) stays a backlog idea until it's tried on
+  a real plan family and the trade-off against D8's existing sub-plan shape is clear.
+- **D28 — `~/.agents/dotagents/` is the private working area for the config itself**
+  (2026-07-12, formalizes the location F19 already established for findings).
+  Distinct from this repo's tracked `.agents/` (public, sanitized, reconciled only):
+  `~/.agents/dotagents/` is personal scratch, gitignored, never sanitized on write.
+  Layout, matching the same `plans/`/`findings/` shape used per-project elsewhere so
+  nothing already written there needs to move:
+  - `findings/YYYY-MM-DD_<slug>.md` — D25's private capture target; flat, no
+    subdirectory, one file per incident/idea. Existing files keep their names.
+  - `plans/<name>.md`, `plans/completed/` — for a plan *about the config* that the
+    user wants scratched privately before it's ready for the public repo (mirrors
+    D20's per-project rule, applied to this one meta-project). Most config work still
+    plans directly in the repo's tracked `.agents/plans/`; this is the private-draft
+    escape hatch, not the default.
+  - No other subdirectories added speculatively — extend only when a concrete need
+    appears (matches the "never load/create preemptively" principle already applied
+    elsewhere in this config).
+  Triage flow: a user-requested pass reads `findings/`, folds settled ones into this
+  design log (as F#/D# rows, referencing the source finding date) and the repo's
+  `flows/`/`kb/` files, then deletes the reconciled finding files — `findings/` holds
+  only *unprocessed* backlog, not a permanent archive (permanent history lives in
+  this log once triaged).
 
 ## Multi-architect review protocol — design notes
 
@@ -230,20 +287,26 @@ iterate. Choices in `flows/REVIEW.md`:
 - ~~Audit script~~ — CLOSED: `tools/audit_config.py`.
 - ~~Private-plan leakage guard~~ — CLOSED: `tools/leak_check.py` + REPO.md release
   step + repo cleanup (F15).
+- Plan index/dependency convention (D27/F21) — OPEN: no format chosen; prototype on
+  a real multi-plan project before deciding.
 
 ## How to iterate on this config
 
-1. Read this file first, then the current core + the flow file(s) being changed.
-2. Audit against reality: pick 1–2 recent plans in some project's
+1. First, triage `~/.agents/dotagents/findings/` (D28): read each note, decide
+   whether it becomes a design-log F/D entry (and, if so, a payload/flow-file
+   change), then delete the file once folded in — it's unprocessed backlog, not an
+   archive.
+2. Read this file, then the current core + the flow file(s) being changed.
+3. Audit against reality: pick 1–2 recent plans in some project's
    `.agents/plans/completed/` and check where executors deviated, re-derived facts,
    or asked questions — that's where the config failed.
-3. Record new findings/decisions here (F/D numbering continues), then edit the flow
+4. Record new findings/decisions here (F/D numbering continues), then edit the flow
    files under `payload/`. Keep the core ≤ ~60 lines; anything conditional goes in a
    flow file. Reinstall (`python install.py`) after editing.
-4. Never let a flow file restate another's content — link it.
-5. When updating after an incident, add a provenance note: primary source,
+5. Never let a flow file restate another's content — link it.
+6. When updating after an incident, add a provenance note: primary source,
    confirming sources, and superseded rules that should not be restored.
-6. This log is public: describe private repos/plans by role, never by name.
+7. This log is public: describe private repos/plans by role, never by name.
 
 ## Size-discipline pass (2026-07-12) — moved-rule mapping
 
