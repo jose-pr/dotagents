@@ -5,9 +5,10 @@ don't second-guess recorded decisions. Only execute plans with `Status: ready` o
 `executing` (set `executing` when you start); anything else, report and stop.
 
 ## Before you start — load these, nothing more
-1. `~/.agents/kb/<LANG>.md` for the project's language (your kickoff prompt names
-   it) — it holds environment conventions (venv layout, which executables to use,
-   install forms) that OVERRIDE generic habits like bare `python`/`pip`.
+1. `~/.agents/kb/<LANG>.md` for the project's language, if it exists (your kickoff
+   prompt names it) — it holds environment conventions (venv layout, which
+   executables to use, install forms) that OVERRIDE generic habits like bare
+   `python`/`pip`.
 2. The project's local knowledge — read BOTH, skipping one only if already
    auto-loaded: the **user-managed** `.agents/AGENTS.md` (user directives — wins on
    conflict; never write it unless explicitly told) and the **agent-maintained**

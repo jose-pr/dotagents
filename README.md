@@ -12,6 +12,11 @@ session.
   handful of always-on rules plus a routing table. Task-specific detail lives in
   `flows/` and `kb/` files that an agent reads only when the task matches. You pay for
   what you use.
+- **Language/agent content is opt-in.** The required install is language- and
+  agent-agnostic. Python/Node/Rust `kb/` files, named-agent directives, and
+  language-specific manifests/CI templates live in `examples/` and only land in
+  `~/.agents` via `install.py --with-examples` — additive-only, so it never
+  overwrites something you've already customized.
 - **Architect/executor split.** `flows/PLAN.md` makes a strong model write precise,
   autonomous plans; `flows/EXEC.md` makes a cheaper model execute them without
   re-deriving context; `flows/REVIEW.md` runs file-threaded multi-agent plan review.
@@ -30,18 +35,20 @@ is repo infrastructure (installer, CI, this repo's own working notes).
 | `payload/CLAUDE.md` | One-liner `@AGENTS.md` include for runners that want it |
 | `payload/dotagents/log.md` | Empty design-log template — every install gets its own, no repo required |
 | `payload/flows/` | PLAN / EXEC / REVIEW / REPO task flows |
-| `payload/kb/` | Language directives (PYTHON, NODE, RUST) + RECOVERY playbook |
-| `payload/references/` | Repo file templates (README, manifests, CI workflows, ...) |
+| `payload/kb/RECOVERY.md` | Config-recovery playbook (language-agnostic, so it's required) |
+| `payload/references/` | Language-agnostic repo templates (README, CHANGELOG, LICENSE, .gitignore, plan-shape example) |
 | `payload/tools/` | `audit_config.py` (config integrity), `leak_check.py` (repo leak scan) |
-| `install.py` | Copies `payload/` into `~/.agents` (backs up anything it replaces) |
+| `payload/examples/` | Opt-in only (`install.py --with-examples`): language `kb/` files, named-agent directives (`antigravity.md`), language-specific manifests + CI workflows |
+| `install.py` | Copies `payload/` into `~/.agents`; `--with-examples` additionally copies `payload/examples/`, additive-only (never overwrites) |
 | `AGENTS.md` | Directives for working *on this repo* (not part of the payload) |
 | `.agents/` | This config's own design log and plans — the "why" behind every rule |
 
 ## Install
 
 ```bash
-python install.py            # into ~/.agents (backs up files it would change)
-python install.py --dry-run  # show what would happen
+python install.py                  # core config into ~/.agents (backs up files it would change)
+python install.py --dry-run        # show what would happen
+python install.py --with-examples  # also copy language/agent examples (additive-only, never overwrites)
 ```
 
 Then wire your runner to it — e.g. Claude Code: put `@AGENTS.md` in

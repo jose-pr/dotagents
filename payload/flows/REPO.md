@@ -1,9 +1,10 @@
 # Flow: Repository Standard (language-agnostic)
 
 Applies when creating a repo or bringing one up to standard — a gap against this list
-gets flagged or fixed, never silently skipped. The matching `~/.agents/kb/<LANG>.md`
-supplies the concrete toolchain and may override specifics; neither file restates the
-other.
+gets flagged or fixed, never silently skipped. If `~/.agents/kb/<LANG>.md` exists it
+supplies the concrete toolchain and may override specifics (copy it in from
+`~/.agents/examples/kb/<LANG>.md` first if missing and the user wants one); neither
+file restates the other.
 
 ## Layout
 - Source in its own directory (language doc names it, e.g. `src/`), separate from
@@ -57,4 +58,4 @@ SemVer for git tags and `CHANGELOG.md`. The package manifest's own version synta
 legitimately differ (the language doc says how, e.g. PEP 440) — never "fix" one to
 match the other.
 
-Per-language CI templates: `~/.agents/references/workflows/<lang>/`.
+Per-language CI templates (opt-in examples): `~/.agents/examples/references/workflows/<lang>/`.

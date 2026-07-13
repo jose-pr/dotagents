@@ -46,13 +46,16 @@ preemptively "just in case".
 - Multi-architect plan review (as main or reviewer) → `~/.agents/flows/REVIEW.md`
 - Create a repo, bring one to standard, or touch CI/release/docs-site →
   `~/.agents/flows/REPO.md`
-- Python / Node-TS / Rust work → `~/.agents/kb/PYTHON.md` / `NODE.md` / `RUST.md`
-- You are the Antigravity agent → `~/.agents/antigravity.md`
-- Another explicitly named agent with a `~/.agents/<agent>.md` → read that file
+- Language-specific work → `~/.agents/kb/<language>.md` if present (installed
+  on request only; see `~/.agents/examples/kb/` for available languages)
+- You are a named agent (e.g. Antigravity) with a `~/.agents/<agent>.md` → read it
+  (installed on request only; see `~/.agents/examples/`)
 - Asked to iterate on this global config → `~/.agents/dotagents/log.md` (design log)
   and `~/.agents/dotagents/{findings,plans}/` (private scratch). If a `dotagents`
   source checkout also exists, edit there and reinstall; otherwise edit `~/.agents/`
   directly
 
-Templates (README, CHANGELOG, LICENSE, .gitignore, manifests, CI workflows) live under
-`~/.agents/references/`; flow/kb files link the specific ones.
+Generic templates (README, CHANGELOG, LICENSE, .gitignore, plan-shape example) live
+under `~/.agents/references/`. Language manifests, per-language CI workflows, and
+other agents' directives are opt-in examples under `~/.agents/examples/` — not
+installed by default; ask before copying one in and never overwrite an existing file.
