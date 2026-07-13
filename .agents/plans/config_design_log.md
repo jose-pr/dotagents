@@ -254,9 +254,11 @@ Cost model in one line:
     elsewhere in this config).
   Triage flow: a user-requested pass reads `findings/`, folds settled ones into this
   design log (as F#/D# rows, referencing the source finding date) and the repo's
-  `flows/`/`kb/` files, then deletes the reconciled finding files — `findings/` holds
-  only *unprocessed* backlog, not a permanent archive (permanent history lives in
-  this log once triaged).
+  `flows/`/`kb/` files, then **moves** (never deletes) each reconciled file to
+  `findings/processed/`, prefixed with an HTML comment naming which F#/D# it became.
+  `findings/` (top level) holds only *unprocessed* backlog; `findings/processed/` is
+  a disposable receipt trail — safe to prune later since the log is the permanent
+  record, but not auto-deleted at triage time.
 
 ## Multi-architect review protocol — design notes
 
