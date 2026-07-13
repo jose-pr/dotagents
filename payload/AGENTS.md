@@ -34,7 +34,8 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
   short note under `~/.agents/dotagents/findings/` (create it if absent) and move on.
   This is private capture only: never edit the dotagents source repo, its design log,
   or the installed payload for this — a separate triage pass (explicitly requested)
-  reconciles accumulated findings into the repo.
+  folds accumulated findings into the repo, then moves (never deletes) each processed
+  file into `~/.agents/dotagents/findings/processed/`.
 - **Executors may leave draft follow-ups**: adjacent work or improvements discovered
   mid-execution get a new top-level `Status: draft` plan (idea + rough scope + why) in
   the project's `.agents/plans/`, never expanded or executed in the same pass.
