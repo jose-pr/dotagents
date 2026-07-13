@@ -28,6 +28,7 @@ is repo infrastructure (installer, CI, this repo's own working notes).
 | --- | --- |
 | `payload/AGENTS.md` | Always-loaded core: rules + routing (the payload's entry point) |
 | `payload/CLAUDE.md` | One-liner `@AGENTS.md` include for runners that want it |
+| `payload/dotagents/log.md` | Empty design-log template — every install gets its own, no repo required |
 | `payload/flows/` | PLAN / EXEC / REVIEW / REPO task flows |
 | `payload/kb/` | Language directives (PYTHON, NODE, RUST) + RECOVERY playbook |
 | `payload/references/` | Repo file templates (README, manifests, CI workflows, ...) |
@@ -63,11 +64,13 @@ python payload/tools/audit_config.py --repo-hygiene . # no personal leftovers tr
 
 Fork it — that's the point. Keep `payload/AGENTS.md` small (the audit warns past
 ~2.5KB); push anything conditional into a `flows/` or `kb/` file and add a routing
-line. This repo tracks its own `.agents/` (design log + plans) as public, sanitized
-documentation of how the config evolved — if you fork, keep yours equally free of
-personal paths and private project names (`--repo-hygiene` checks mechanically), and
-use `payload/tools/leak_check.py <repo>` to scan any *other* repo for agent-plan
-leakage before its releases.
+line. Two design logs, two audiences: `~/.agents/dotagents/log.md` (from
+`payload/dotagents/log.md`) is *your* private, per-install log — installed empty,
+edited directly, never distributed. This repo's own `.agents/` (design log + plans)
+is the public, sanitized record of how *this* config evolved; if you fork, keep
+yours equally free of personal paths and private project names (`--repo-hygiene`
+checks mechanically), and use `payload/tools/leak_check.py <repo>` to scan any
+*other* repo for agent-plan leakage before its releases.
 
 ## License
 
