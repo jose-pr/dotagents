@@ -7,6 +7,9 @@ Modes:
   --probe <path>         add one extra file to the scan manifest (negative tests)
   --check-templates      instantiate references/ templates in a temp dir and
                          parse-check them (requires Python 3.11+ for tomllib)
+  --repo-hygiene <repo>  scan every git-tracked file in <repo> for personal
+                         leftovers (user accounts, machine paths, private repo
+                         names) — for repos that intentionally track agent config
 
 Exit 1 on missing manifest files, forbidden patterns, or failed template checks.
 Size budgets only warn. Scope is a closed manifest -- never a tree walk (the tree
@@ -36,6 +39,11 @@ EXIST_ONLY = ["tools/audit_config.py", "tools/leak_check.py"]
 
 BASE_PATTERNS = ["file:///" + "~", "~/.agents/" + "examples/"]
 REF_PATTERNS = BASE_PATTERNS + ["pathlib" + "_next", "C:\\" + "Users", "jo" + "se"]
+# Concatenated so this file never matches itself.
+PERSONAL_PATTERNS = ["C:\\" + "Users", "C:/" + "Users", "~/" + "devel/",
+                     "jo" + "se", "ala" + "can", "pathlib" + "_next",
+                     "proxy" + "lib", "pyd" + "hcp", "yaconfig" + "lib",
+                     "pytrue" + "nas"]
 
 BUDGETS = {"AGENTS.md": 2500, "flows/PLAN.md": 3000, "flows/EXEC.md": 3000,
            "flows/REVIEW.md": 3000, "flows/REPO.md": 3000}
@@ -121,6 +129,27 @@ def check_templates(root):
     return failures
 
 
+def repo_hygiene(repo):
+    import subprocess
+    out = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],
+                         capture_output=True, check=True)
+    tracked = [f for f in out.stdout.decode("utf-8").split("\0") if f]
+    print("repo: %s (%d tracked files)" % (repo, len(tracked)))
+    failures = []
+    for rel in tracked:
+        path = repo / rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for pat in PERSONAL_PATTERNS:
+            if pat in text:
+                failures.append("PERSONAL %r in %s" % (pat, rel))
+    return failures
+
+
 def main(argv):
     root = DEFAULT_ROOT
     if "--root" in argv:
@@ -128,7 +157,10 @@ def main(argv):
     probe = None
     if "--probe" in argv:
         probe = Path(argv[argv.index("--probe") + 1])
-    if "--check-templates" in argv:
+    if "--repo-hygiene" in argv:
+        failures = repo_hygiene(
+            Path(argv[argv.index("--repo-hygiene") + 1]).resolve())
+    elif "--check-templates" in argv:
         failures = check_templates(root)
     else:
         failures = audit(root, probe)
