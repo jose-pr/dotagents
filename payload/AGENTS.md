@@ -30,8 +30,14 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
   only the top level of the project's plans dir — never descend into `completed/`
   unless asked about history.
 - **Global-config misses**: if these global instructions contributed to a mistake,
-  misread, or avoidable rework, record a short sanitized note in the dotagents
-  source repo `findings/` plus its config design log before moving on.
+  misread, or avoidable rework — or you have an improvement idea for them — record a
+  short note under `~/.agents/dotagents/findings/` (create it if absent) and move on.
+  This is private capture only: never edit the dotagents source repo, its design log,
+  or the installed payload for this — a separate triage pass (explicitly requested)
+  reconciles accumulated findings into the repo.
+- **Executors may leave draft follow-ups**: adjacent work or improvements discovered
+  mid-execution get a new top-level `Status: draft` plan (idea + rough scope + why) in
+  the project's `.agents/plans/`, never expanded or executed in the same pass.
 
 ## Load on demand
 Read the matching file BEFORE starting such a task; skip it otherwise. Never load
@@ -45,7 +51,10 @@ preemptively "just in case".
 - You are the Antigravity agent → `~/.agents/antigravity.md`
 - Another explicitly named agent with a `~/.agents/<agent>.md` → read that file
 - Asked to iterate on this global config → the `dotagents` source repo (its
-  `.agents/plans/config_design_log.md` design log); edit there, then reinstall
+  `.agents/plans/config_design_log.md` design log); edit there, then reinstall.
+  Private scratch (findings, draft config plans not yet ready for the repo) lives
+  in `~/.agents/dotagents/{findings,plans}/` instead — never sanitized, never
+  auto-reconciled into the repo
 - Recover lost agent config/files → `~/.agents/kb/RECOVERY.md`
 
 Templates (README, CHANGELOG, LICENSE, .gitignore, manifests, CI workflows) live under
