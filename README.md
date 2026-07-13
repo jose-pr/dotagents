@@ -21,15 +21,20 @@ session.
 
 ## Layout
 
+`payload/` is the product — it installs 1:1 into `~/.agents`. Everything outside it
+is repo infrastructure (installer, CI, this repo's own working notes).
+
 | Path | What |
 | --- | --- |
-| `AGENTS.md` | Always-loaded core: rules + routing (the payload's entry point) |
-| `CLAUDE.md` | One-liner `@AGENTS.md` include for runners that want it |
-| `flows/` | PLAN / EXEC / REVIEW / REPO task flows |
-| `kb/` | Language directives (PYTHON, NODE, RUST) + RECOVERY playbook |
-| `references/` | Repo file templates (README, manifests, CI workflows, ...) |
-| `tools/` | `audit_config.py` (config integrity), `leak_check.py` (repo leak scan) |
-| `install.py` | Copies the payload into `~/.agents` (backs up anything it replaces) |
+| `payload/AGENTS.md` | Always-loaded core: rules + routing (the payload's entry point) |
+| `payload/CLAUDE.md` | One-liner `@AGENTS.md` include for runners that want it |
+| `payload/flows/` | PLAN / EXEC / REVIEW / REPO task flows |
+| `payload/kb/` | Language directives (PYTHON, NODE, RUST) + RECOVERY playbook |
+| `payload/references/` | Repo file templates (README, manifests, CI workflows, ...) |
+| `payload/tools/` | `audit_config.py` (config integrity), `leak_check.py` (repo leak scan) |
+| `install.py` | Copies `payload/` into `~/.agents` (backs up anything it replaces) |
+| `AGENTS.md` | Directives for working *on this repo* (not part of the payload) |
+| `.agents/` | This config's own design log and plans — the "why" behind every rule |
 
 ## Install
 
@@ -42,24 +47,27 @@ Then wire your runner to it — e.g. Claude Code: put `@AGENTS.md` in
 `~/.claude/CLAUDE.md`... which is exactly what the installed `CLAUDE.md` contains.
 
 **Or let your agent do it:** point it at this repo and say —
-> Read README.md and AGENTS.md, run `python install.py`, and confirm the final
-> audit prints PASS.
+> Read README.md and payload/AGENTS.md, run `python install.py`, and confirm the
+> final audit prints PASS.
 
 ## Validate
 
 ```bash
-python tools/audit_config.py --root .        # validate this checkout
-python tools/audit_config.py                 # validate the installed ~/.agents
-python tools/audit_config.py --check-templates --root .   # needs Python 3.11+
+python payload/tools/audit_config.py --root payload   # validate this checkout
+python payload/tools/audit_config.py                  # validate the installed ~/.agents
+python payload/tools/audit_config.py --check-templates --root payload  # needs 3.11+
+python payload/tools/audit_config.py --repo-hygiene . # no personal leftovers tracked
 ```
 
 ## Customize
 
-Fork it — that's the point. Keep `AGENTS.md` small (the audit warns past ~2.5KB);
-push anything conditional into a `flows/` or `kb/` file and add a routing line.
-Private, machine-specific work (plans, design logs) belongs in the gitignored
-`.agents/` directory of this repo, never in the tracked payload — `tools/leak_check.py <repo>`
-scans any repo's tracked files for that class of leak.
+Fork it — that's the point. Keep `payload/AGENTS.md` small (the audit warns past
+~2.5KB); push anything conditional into a `flows/` or `kb/` file and add a routing
+line. This repo tracks its own `.agents/` (design log + plans) as public, sanitized
+documentation of how the config evolved — if you fork, keep yours equally free of
+personal paths and private project names (`--repo-hygiene` checks mechanically), and
+use `payload/tools/leak_check.py <repo>` to scan any *other* repo for agent-plan
+leakage before its releases.
 
 ## License
 
