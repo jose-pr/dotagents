@@ -1,5 +1,5 @@
-# Private agent work (plans, design logs, session artifacts) — never tracked
-.agents/
+# Unlike other repos, this one intentionally tracks .agents/ (sanitized design
+# log + plans) — see AGENTS.md. Local-only harness artifacts stay ignored.
 CLAUDE.local.md
 .claude/
 
