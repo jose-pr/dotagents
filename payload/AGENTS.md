@@ -56,7 +56,6 @@ preemptively "just in case".
   Private scratch (findings, draft config plans not yet ready for the repo) lives
   in `~/.agents/dotagents/{findings,plans}/` instead — never sanitized, never
   auto-reconciled into the repo
-- Recover lost agent config/files → `~/.agents/kb/RECOVERY.md`
 
 Templates (README, CHANGELOG, LICENSE, .gitignore, manifests, CI workflows) live under
 `~/.agents/references/`; flow/kb files link the specific ones.
