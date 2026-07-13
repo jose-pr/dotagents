@@ -22,7 +22,7 @@ from pathlib import Path
 DEFAULT_ROOT = Path.home() / ".agents"
 
 SCAN = [
-    "AGENTS.md", "CLAUDE.md", "antigravity.md",
+    "AGENTS.md", "CLAUDE.md", "antigravity.md", "dotagents/log.md",
     "flows/PLAN.md", "flows/EXEC.md", "flows/REVIEW.md", "flows/REPO.md",
     "kb/PYTHON.md", "kb/NODE.md", "kb/RUST.md", "kb/RECOVERY.md",
 ]
