@@ -6,6 +6,14 @@ CLAUDE.local.md
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+src/*.egg-info/
+
+# dotagents CLI package build artifacts (release artifacts, not committed)
+dist/
+*.pyz
+.venv/
+.venv-test/
 
 # OS/editor
 .DS_Store
