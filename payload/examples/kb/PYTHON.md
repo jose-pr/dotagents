@@ -27,12 +27,26 @@ Python-specific extras/overrides on top of the generic repo standard in
 
 ## Testing and Development
 
-- **Virtual Environments**: project-local `.venv/<python-version>/` (e.g.
-  `.venv/3.12.10`), gitignored. **Never** install to system/user Python unless
-  explicitly told. Create: `python --version` then `python -m venv .venv/<version>`;
-  always invoke the venv-scoped executables
-  (Windows `.venv\<version>\Scripts\{python,pip,pytest}`, Unix `bin/`).
-- **Install**: `.venv/<version>/<Scripts|bin>/pip install -e ".[dev,<extras-with-tests>]"`
+- **Version policy**: develop and run on the **latest** stable Python (currently 3.14),
+  and also test the **floor** the package declares in `requires-python` (currently 3.9)
+  — that catches version-specific breakage (e.g. APIs added after the floor). Keep one
+  venv per version you test against, named per the scheme below. CI runs the full matrix;
+  locally, at minimum smoke-test latest + floor.
+- **Virtual Environments**: project-local, gitignored, named
+  `.venv/<ver>-<os>-<arch>[-<task>]` — `<os>` is `nt`/`posix`/`darwin`, `<arch>` from
+  `platform.machine().lower()` (e.g. `.venv/3.14-nt-amd64`, or
+  `.venv/3.14-nt-amd64-docs` for a task-specific env). One derivation:
+  `python -c "import os,platform;print(platform.python_version()+('-nt-' if os.name=='nt' else '-posix-')+platform.machine().lower())"`.
+  **Never** install to system/user Python unless explicitly told. Create with the
+  chosen interpreter (`py -<ver> -m venv .venv/<tag>` on Windows), then always invoke
+  venv-scoped executables (Windows `.venv\<tag>\Scripts\{python,pip,pytest}`, Unix `bin/`).
+- **Interpreter management**: use the **Python Manager** (`py install <ver>`;
+  `py -0p` lists installs with real paths) to add/select versions — the `py` launcher
+  then resolves them. **Avoid Microsoft Store Python**: its app-execution alias
+  sandboxes the filesystem and `pip install` silently hangs / no-ops (exits 0 having
+  installed nothing, no output past pip's startup line). A pymanager/python.org build
+  under a real path (`py -0p` shows one) does not have this problem.
+- **Install**: `.venv/<tag>/<Scripts|bin>/pip install -e ".[dev,<extras-with-tests>]"`
   — include every extra that has tests depending on it, or those tests silently skip
   instead of running.
 - **Test config**: `pythonpath = ["src"]` + `testpaths` under
@@ -82,4 +96,4 @@ Templates: `~/.agents/references/workflows/python/{test,release}.yml`.
 - MkDocs strict-nav errors on repo-level markdown when snippets `base_path: ["."]` →
   set `docs_dir: docs` (the template does).
 - Windows/PowerShell venv console script resolving outside the venv →
-  `.\.venv\<version>\Scripts\python.exe -m <module>` instead of the direct script.
+  `.\.venv\<tag>\Scripts\python.exe -m <module>` instead of the direct script.

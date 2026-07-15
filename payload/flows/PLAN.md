@@ -29,6 +29,7 @@ executor trial-and-error. Spend effort on precision, not length.
    extra, or tool means its literal install command is part of the plan).
 3. **Structure**, in order:
    - Title + `Status: draft | review | ready | executing | done` (single line).
+   - `Executor:` line — the model to run this plan (MODELS.md heuristic) + one-line why.
    - `## Progress` — one line per phase, all `[ ]` initially (update rules: EXEC.md).
    - `## Known Facts & Context` — everything already discovered/verified: exact paths,
      confirmed behaviors, root causes, absolute dates, environment/test commands.
@@ -55,8 +56,10 @@ executor trial-and-error. Spend effort on precision, not length.
 > You are an expert execution assistant. Read `~/.agents/flows/EXEC.md` and, if it
 > exists, `~/.agents/kb/<LANG>.md` (the project's language), then execute the plan
 > at `<path>` precisely. Do not deviate, re-evaluate, or make unguided assumptions.
-> If an item is blocked, record it in Progress and continue with independent items;
-> never ask the user anything.
+> Keep the plan's `## Progress` boxes live as you go — `[/]` when you start a phase,
+> `[x]` the moment it's done — never batch them at the end; the file is the only way a
+> checker or the next executor knows real state. If an item is blocked, record it in
+> Progress and continue with independent items; never ask the user anything.
 
 Format model (shape only, not content): `~/.agents/references/master_refactoring_plan.md`.
 
@@ -81,3 +84,5 @@ If peer-architect review is requested, set `Status: review` and follow
 5. Known Facts holds all discovered context — an executor re-derives nothing.
 6. Verification runs top-to-bottom on a standard checkout, setup lines first.
 7. Expected skip counts stated wherever optional-dependency tests exist.
+8. `Executor:` line present (MODELS.md heuristic); if it needs Opus to *execute*, it
+   isn't ready.
