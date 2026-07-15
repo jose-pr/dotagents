@@ -1,10 +1,17 @@
 # Agent Directives
 
-Startup: annotate that you read `~/.agents/AGENTS.md`.
+Startup: annotate that you read `~/.agents/AGENTS.md`. If `~/.agents/AGENTS.local.md`
+exists, read it too — it holds machine-specific facts (benchmark trustworthiness,
+broken tooling, local workarounds) that override generic assumptions. It is
+machine-local and NOT part of the dotagents templates: never copy its contents into a
+repo, plan, or the shared config, and never create it as part of an install.
 
 ## Always-on rules
 - **Git**: logical commits (feature+tests / docs+config / CI split apart, never one
   monolith), `type: desc` format (`feat:`, `fix:`, `docs:`, `chore:`).
+- **Performance numbers**: a local benchmark is a sanity check, not evidence. Any
+  perf claim in a release, changelog, or plan comes from CI unless stated otherwise —
+  and check `AGENTS.local.md` for how much this machine's timings can be trusted.
 - **Releases**: pushing a `v*` tag requires the user's explicit consent for *that*
   release, every time — publish is irreversible. `ci-*` tags are always safe to push.
 - **Leakage**: never create `CLAUDE.md` or commit agent configs/references into a repo
@@ -32,17 +39,28 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
 - **Global-config misses**: if these instructions caused a mistake, misread, or
   avoidable rework, or you have an improvement idea, drop a short note in
   `~/.agents/dotagents/findings/` and move on — don't edit the config itself. A
-  requested triage pass later folds notes into `~/.agents/dotagents/log.md` and
-  moves each file (never deletes) to `findings/processed/`.
+  requested triage pass later folds notes into `~/.agents/dotagents/DECISIONS.md`
+  (one file per decision under `decisions/`) and moves each file (never deletes) to
+  `findings/processed/`.
 - **Draft follow-ups**: adjacent work found mid-execution gets a new `Status: draft`
   plan (idea + scope + why) in the project's `.agents/plans/` — never expanded or
   executed in the same pass.
+- **Don't pay tokens to read what a script can decide.** Never dump a full test,
+  build, or benchmark log into context to learn one bit ("did it pass?", "did it
+  regress?"). Pipe it through a tool that prints a verdict + only the notable lines,
+  and keep the full log on disk to grep if needed: `~/.agents/tools/summarize_run.py`
+  (wrap any command), `~/.agents/tools/compare_bench.py` (diff two benchmark results).
+  Right-size the model too (`MODELS.md`). If you catch yourself doing the same manual
+  scan or arithmetic twice, write the script instead — a cheap subprocess beats an
+  expensive re-read, every turn, forever.
 
 ## Load on demand
 Read the matching file BEFORE starting such a task; skip it otherwise. Never load
 preemptively "just in case".
 - Write or revise a plan → `~/.agents/flows/PLAN.md`
 - Execute a plan → `~/.agents/flows/EXEC.md`
+- Assign a model to a plan / delegate to a subagent / judge if a task is worth an
+  expensive model → `~/.agents/MODELS.md`
 - Multi-architect plan review (as main or reviewer) → `~/.agents/flows/REVIEW.md`
 - Create a repo, bring one to standard, or touch CI/release/docs-site →
   `~/.agents/flows/REPO.md`
@@ -50,8 +68,9 @@ preemptively "just in case".
   on request only; see `~/.agents/examples/kb/` for available languages)
 - You are a named agent (e.g. Antigravity) with a `~/.agents/<agent>.md` → read it
   (installed on request only; see `~/.agents/examples/`)
-- Asked to iterate on this global config → `~/.agents/dotagents/log.md` (design log)
-  and `~/.agents/dotagents/{findings,plans}/` (private scratch). If a `dotagents`
+- Asked to iterate on this global config → `~/.agents/dotagents/DECISIONS.md` (design
+  log index; entries in `decisions/`) and `~/.agents/dotagents/{findings,plans}/`
+  (private scratch). If a `dotagents`
   source checkout also exists, edit there and reinstall; otherwise edit `~/.agents/`
   directly
 
