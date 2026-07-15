@@ -1,0 +1,6 @@
+name = "agents"
+description = "Named-agent directives (e.g. Antigravity)."
+requires = []
+routing = [
+  """- You are a named agent with a ~/.agents/<agent>.md (e.g. antigravity.md) → read it""",
+]

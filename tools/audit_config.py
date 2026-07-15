@@ -21,31 +21,39 @@ from pathlib import Path
 
 DEFAULT_ROOT = Path.home() / ".agents"
 
+# Manifest paths are relative to a repo checkout root (--root .). The config is
+# now a base overlay (src/dotagents/_overlay) plus opt-in overlays/<name>/; the
+# required tooling lives at top-level tools/.
 SCAN = [
-    "AGENTS.md", "CLAUDE.md", "dotagents/DECISIONS.md",
-    "flows/PLAN.md", "flows/EXEC.md", "flows/REVIEW.md", "flows/REPO.md",
-    "kb/RECOVERY.md",
+    "src/dotagents/_overlay/AGENTS.md", "src/dotagents/_overlay/CLAUDE.md",
+    "src/dotagents/_overlay/dotagents/DECISIONS.md",
+    "overlays/flows/flows/PLAN.md", "overlays/flows/flows/EXEC.md",
+    "overlays/flows/flows/REVIEW.md", "overlays/flows/flows/REPO.md",
+    "overlays/flows/MODELS.md",
+    "overlays/recovery/kb/RECOVERY.md",
 ]
 REFS = [
-    "references/README.md", "references/CHANGELOG.md", "references/LICENSE",
-    "references/.gitignore", "references/docs-index.md",
-    "references/master_refactoring_plan.md",
+    "overlays/references/references/README.md",
+    "overlays/references/references/CHANGELOG.md",
+    "overlays/references/references/LICENSE",
+    "overlays/references/references/.gitignore",
+    "overlays/references/references/docs-index.md",
+    "overlays/references/references/master_refactoring_plan.md",
 ]
 EXIST_ONLY = ["tools/audit_config.py", "tools/leak_check.py"]
-# examples/ is opt-in at install time (never required in ~/.agents), but a repo
-# checkout (--root) should still have every example present -- checked only when
-# root/examples exists, so a live ~/.agents without it isn't penalized.
+# The language/agent overlays -- opt-in at install time, but a repo checkout
+# (--root .) should have every example present. Checked only when overlays/ exists.
 EXAMPLES = [
-    "examples/antigravity.md",
-    "examples/kb/PYTHON.md", "examples/kb/NODE.md", "examples/kb/RUST.md",
-    "examples/references/package.json", "examples/references/pyproject.toml",
-    "examples/references/Cargo.toml", "examples/references/mkdocs.yml",
-    "examples/references/workflows/python/test.yml",
-    "examples/references/workflows/python/release.yml",
-    "examples/references/workflows/node/test.yaml",
-    "examples/references/workflows/node/release.yaml",
-    "examples/references/workflows/rust/test.yaml",
-    "examples/references/workflows/rust/release.yaml",
+    "overlays/agents/antigravity.md",
+    "overlays/python/kb/PYTHON.md", "overlays/node/kb/NODE.md", "overlays/rust/kb/RUST.md",
+    "overlays/node/references/package.json", "overlays/python/references/pyproject.toml",
+    "overlays/rust/references/Cargo.toml", "overlays/python/references/mkdocs.yml",
+    "overlays/python/references/workflows/python/test.yml",
+    "overlays/python/references/workflows/python/release.yml",
+    "overlays/node/references/workflows/node/test.yaml",
+    "overlays/node/references/workflows/node/release.yaml",
+    "overlays/rust/references/workflows/rust/test.yaml",
+    "overlays/rust/references/workflows/rust/release.yaml",
 ]
 
 BASE_PATTERNS = ["file:///" + "~"]
@@ -66,8 +74,9 @@ PERSONAL_PATTERNS = ["C:\\" + "Users", "C:/" + "Users", "~/" + "devel/",
 # file never matches itself.
 PUBLIC_ALLOWLIST = ["jo" + "se-pr"]
 
-BUDGETS = {"AGENTS.md": 2500, "flows/PLAN.md": 3000, "flows/EXEC.md": 3000,
-           "flows/REVIEW.md": 3000, "flows/REPO.md": 3000}
+BUDGETS = {"src/dotagents/_overlay/AGENTS.md": 2500,
+           "overlays/flows/flows/PLAN.md": 3000, "overlays/flows/flows/EXEC.md": 3000,
+           "overlays/flows/flows/REVIEW.md": 3000, "overlays/flows/flows/REPO.md": 3000}
 
 SUBST = {"<project_name>": "demopkg", "<gh_org>": "demoorg",
          "<package_name>": "demopkg", "<year>": "2026",
@@ -79,7 +88,7 @@ def audit(root, probe=None):
     failures, table = [], []
     jobs = [(p, BASE_PATTERNS) for p in SCAN] + [(p, REF_PATTERNS) for p in REFS] \
         + [(p, None) for p in EXIST_ONLY]
-    if (root / "examples").is_dir():
+    if (root / "overlays").is_dir():
         jobs += [(p, REF_PATTERNS) for p in EXAMPLES]
     if probe:
         jobs.append((probe, BASE_PATTERNS))
@@ -113,10 +122,15 @@ def check_templates(root):
     failures = []
     tmp = Path(tempfile.mkdtemp(prefix="agents_tpl_"))
     try:
-        refs_names = ["README.md", "CHANGELOG.md", ".gitignore", "docs-index.md"]
-        example_names = ["mkdocs.yml", "package.json", "pyproject.toml", "Cargo.toml"]
-        sources = [(root / "references" / n, n) for n in refs_names] + \
-            [(root / "examples" / "references" / n, n) for n in example_names]
+        refs_dir = root / "overlays" / "references" / "references"
+        sources = [(refs_dir / n, n) for n in
+                   ["README.md", "CHANGELOG.md", ".gitignore", "docs-index.md"]]
+        sources += [
+            (root / "overlays" / "python" / "references" / "mkdocs.yml", "mkdocs.yml"),
+            (root / "overlays" / "node" / "references" / "package.json", "package.json"),
+            (root / "overlays" / "python" / "references" / "pyproject.toml", "pyproject.toml"),
+            (root / "overlays" / "rust" / "references" / "Cargo.toml", "Cargo.toml"),
+        ]
         for src, name in sources:
             text = src.read_text(encoding="utf-8")
             lines = [ln for ln in text.splitlines()
