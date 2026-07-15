@@ -59,6 +59,13 @@ PERSONAL_PATTERNS = ["C:\\" + "Users", "C:/" + "Users", "~/" + "devel/",
                      "jo" + "se", "ala" + "can",
                      "proxy" + "lib", "pytrue" + "nas"]
 
+# Public identities that legitimately appear in tracked files (the published GitHub
+# org the packages ship under). Neutralized before pattern matching so e.g. the
+# `github.com/<org>` URL in pyproject.toml doesn't trip the bare-username pattern,
+# while a real leak like a Windows user-profile path still matches. Concatenated so this
+# file never matches itself.
+PUBLIC_ALLOWLIST = ["jo" + "se-pr"]
+
 BUDGETS = {"AGENTS.md": 2500, "flows/PLAN.md": 3000, "flows/EXEC.md": 3000,
            "flows/REVIEW.md": 3000, "flows/REPO.md": 3000}
 
@@ -162,6 +169,8 @@ def repo_hygiene(repo):
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
+        for allowed in PUBLIC_ALLOWLIST:
+            text = text.replace(allowed, "")
         for pat in PERSONAL_PATTERNS:
             if pat in text:
                 failures.append("PERSONAL %r in %s" % (pat, rel))
