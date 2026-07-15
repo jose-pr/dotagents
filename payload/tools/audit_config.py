@@ -22,7 +22,7 @@ from pathlib import Path
 DEFAULT_ROOT = Path.home() / ".agents"
 
 SCAN = [
-    "AGENTS.md", "CLAUDE.md", "dotagents/log.md",
+    "AGENTS.md", "CLAUDE.md", "dotagents/DECISIONS.md",
     "flows/PLAN.md", "flows/EXEC.md", "flows/REVIEW.md", "flows/REPO.md",
     "kb/RECOVERY.md",
 ]
@@ -51,10 +51,13 @@ EXAMPLES = [
 BASE_PATTERNS = ["file:///" + "~"]
 REF_PATTERNS = BASE_PATTERNS + ["pathlib" + "_next", "C:\\" + "Users", "jo" + "se"]
 # Concatenated so this file never matches itself.
+# Public PyPI package names are NOT personal leftovers — they may appear in tracked
+# docs/logs by name. Only truly private markers stay below: user accounts, machine
+# paths, and un-published project names. (pathlib_next, duho, yaconfiglib, pydhcp are
+# published — deliberately omitted.) Concatenated so this file never matches itself.
 PERSONAL_PATTERNS = ["C:\\" + "Users", "C:/" + "Users", "~/" + "devel/",
-                     "jo" + "se", "ala" + "can", "pathlib" + "_next",
-                     "proxy" + "lib", "pyd" + "hcp", "yaconfig" + "lib",
-                     "pytrue" + "nas"]
+                     "jo" + "se", "ala" + "can",
+                     "proxy" + "lib", "pytrue" + "nas"]
 
 BUDGETS = {"AGENTS.md": 2500, "flows/PLAN.md": 3000, "flows/EXEC.md": 3000,
            "flows/REVIEW.md": 3000, "flows/REPO.md": 3000}

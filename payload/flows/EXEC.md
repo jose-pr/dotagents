@@ -29,8 +29,11 @@ explicitly points at them.
 
 ## Progress tracking — live, never batched
 - `## Progress` at the top: `[x]` done, `[/]` in progress, `[ ]` pending, `[!]` blocked.
-- Update IMMEDIATELY after finishing each item, with a brief inline outcome
-  ("done", "skipped — N/A", "deviation: used X not Y because Z").
+- Set a phase to `[/]` BEFORE you start writing its code — not only after — so an
+  interrupted run still shows where it was. Update to `[x]` IMMEDIATELY when the item
+  finishes, with a brief inline outcome ("done", "skipped — N/A", "deviation: used X
+  not Y because Z"). Never batch progress updates to the end of the run: the plan file
+  is the only way a checker or the next executor knows real state without diffing code.
 - **Blockers**: mark `[!]` with a one-line reason, then continue with items that don't
   depend on it. Stop only when nothing executable remains. Never ask the user.
 - Never downgrade a required plan item into an "optional enhancement" — if it isn't
@@ -60,6 +63,12 @@ results in Progress. Failing checks stay `[/]`/`[!]` with the output noted — n
   no `[x]`/✅ on a test item that wasn't executed.
 
 ## Handoff
+Before you stop, reconcile: `## Progress` MUST match the working tree. If code for a
+phase exists, that phase is `[x]`/`[/]`/`[!]` — never still `[ ]`. Don't leave real
+work uncommitted with the boxes reporting "not started"; commit it (Collateral in the
+same set) or, if you must stop mid-phase, mark `[/]` with "uncommitted: <files>". A
+checker should never have to diff code to learn what you did.
+
 When every item is `[x]` or `[!]`-with-reason: state explicitly what remains
 unverified; report changed files, verification evidence, and any dirty working tree;
 set `Status: done` and move the plan to `.agents/plans/completed/` (preserving any

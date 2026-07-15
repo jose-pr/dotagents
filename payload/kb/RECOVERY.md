@@ -1,8 +1,8 @@
 # Recovering Lost Agent Config / Files
 
 Read this when `~/.agents` (or any agent-authored file) is lost or corrupted and needs
-reconstruction. Distilled from the 2026-07-12 loss+recovery of `~/.agents` (see
-`plans/config_design_log.md` F14).
+reconstruction. Distilled from a real loss+recovery of `~/.agents` (recorded in the
+config's design log).
 
 ## Priority order of sources (best first)
 
@@ -46,8 +46,8 @@ reconstruction. Distilled from the 2026-07-12 loss+recovery of `~/.agents` (see
 4. **Verify, don't trust**: byte-compare restored files against exact snapshots where
    they exist; for deterministically-transformed files, re-apply the transform to the
    exact original and compare.
-5. Record provenance afterward (in `plans/config_design_log.md` for this config): what was
-   restored from where, what remains lossy, what should be regenerated later.
+5. Record provenance afterward (in the config's design log): what was restored from
+   where, what remains lossy, what should be regenerated later.
 6. Only delete the quarantine dir once everything worth keeping is merged and the
    provenance note exists.
 7. After restoring, run `py -3.12 ~/.agents/tools/audit_config.py` — it checks the

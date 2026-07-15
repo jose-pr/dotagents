@@ -10,7 +10,13 @@ file restates the other.
 - Source in its own directory (language doc names it, e.g. `src/`), separate from
   tests/docs/examples/benchmarks.
 - `tests/`: a real suite, runnable by a single documented command.
-- `benchmarks/`: a dedicated perf suite, runnable by a documented command.
+- `benchmarks/`: a dedicated perf suite, runnable by a documented command. It emits
+  one structured JSON result per (version, interpreter) into `.agents/bench/<name>.json`
+  (a `--save` flag on the runner); each metric reports min/median/max ms-per-call over
+  N samples (compare on median — a single `timeit` average hides real run-to-run noise).
+  Keep a `.agents/bench/README.md` documenting the schema + reproduce command, and a
+  baseline entry for the pre-optimization state so before/after is always recoverable.
+  Run benchmarks on demand / manually, not as noisy per-push CI.
 - `examples/`: runnable scripts/configs, not scratch files.
 - `docs/` + a docs site: hand-written landing page (never a verbatim `README.md`
   embed — its relative links break once served from a docs-site root; see
@@ -49,6 +55,17 @@ never require cutting a release.
   always at top, one `## [x.y.z] - <date>` heading per release. Before release, run
   `py -3.12 ~/.agents/tools/leak_check.py <repo>` — it scans tracked files for
   private-plan leaks (`.agents/` refs, plan filenames, agent `Phase N` phrasing).
+- `RELEASENOTES.md` (repos with a perf story or non-trivial release narrative): the
+  detailed companion to `CHANGELOG.md` — `CHANGELOG.md` stays terse and public; the
+  durable audit trail for performance claims and release decisions lives here. Per
+  release it carries: a **previous→current benchmark table** (median, plus
+  unsupported-before cases) sourced from `.agents/bench/`; **behavior/migration nuance**
+  too detailed for Keep a Changelog; **benchmark caveats** (shared-runner noise, OS,
+  Python version, local-vs-CI); **validation evidence** (tests/build/docs/leak-check
+  results, CI run IDs when available); and **publication state** (prepared / main pushed
+  / tag not pushed until per-release user consent). `[Unreleased]` records the
+  next-release perf target so a regression is caught before tagging. Same leak rules as
+  public release notes: no plan names, `.agents` refs, or `Phase N` phrasing.
 - `LICENSE`: MIT by default (`references/LICENSE`; fill `<year>`/`<copyright_holder>`).
 - Template files may contain hidden `<!-- EXECUTOR: ... -->` comments — strip them
   before writing real repo files.
