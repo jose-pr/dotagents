@@ -1,7 +1,7 @@
 name: Test
 
-# Validates the config payload: manifest completeness, forbidden patterns,
-# template instantiation, and a clean install into a scratch HOME.
+# Validates the config: manifest completeness, forbidden patterns, template
+# instantiation, and a clean install (base + overlays) into a scratch HOME.
 on:
   workflow_dispatch:
     inputs:
@@ -36,13 +36,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Audit payload
-        run: python payload/tools/audit_config.py --root payload
+      - name: Audit config manifest
+        run: python tools/audit_config.py --root .
       - name: Repo hygiene scan (no personal leftovers in tracked files)
-        run: python payload/tools/audit_config.py --repo-hygiene .
+        run: python tools/audit_config.py --repo-hygiene .
       - name: Template instantiation checks (3.11+ only)
         if: matrix.python-version != '3.9'
-        run: python payload/tools/audit_config.py --check-templates --root payload
+        run: python tools/audit_config.py --check-templates --root .
 
   install:
     name: Install into scratch HOME
@@ -58,21 +58,23 @@ jobs:
         run: python -m pip install -e .
       - name: Dry run (minimal base overlay via init)
         run: python install.py init --dry-run
-      - name: Init and audit
+      - name: Init lays down the base overlay only
         run: |
           export HOME="$(mktemp -d)"
           python install.py init
           test -f "$HOME/.agents/AGENTS.md"
-      - name: Install full payload and audit
+          test -f "$HOME/.agents/dotagents/DECISIONS.md"
+          test ! -e "$HOME/.agents/flows"        # base imposes no flows
+      - name: Install base + opt-in overlays (copy, layered)
         run: |
           export HOME="$(mktemp -d)"
-          python install.py install --from payload
+          python install.py install --overlays overlays/flows --overlays overlays/references --overlays overlays/python
           test -f "$HOME/.agents/AGENTS.md"
-          test ! -e "$HOME/.agents/examples"
-          python "$HOME/.agents/tools/audit_config.py"
-      - name: Install with examples (opt-in, additive only)
+          test -f "$HOME/.agents/flows/PLAN.md"
+          test -f "$HOME/.agents/MODELS.md"
+          test -f "$HOME/.agents/kb/PYTHON.md"
+      - name: Re-applying overlays is idempotent (skips present files)
         run: |
           export HOME="$(mktemp -d)"
-          python install.py install --from payload --with-examples
-          test -f "$HOME/.agents/examples/kb/PYTHON.md"
-          python install.py install --from payload --with-examples | grep -q "skip (exists)"
+          python install.py install --overlays overlays/flows
+          python install.py install --overlays overlays/flows | grep -q "skip (exists)"
