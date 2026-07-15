@@ -109,7 +109,7 @@ list reported.
 
 ## Verification
 ```
-cd c:/Users/jose/devel/dotagents
+cd <repo-root>
 ls .agents/dotagents/decisions/ | wc -l              # expect 33
 test ! -f .agents/dotagents.md && echo "monolith removed"
 grep -rl 'config_design_log\|agents/dotagents\.md' AGENTS.md payload .agents/plans/*.md  # expect empty (only historical in decision files ok)
