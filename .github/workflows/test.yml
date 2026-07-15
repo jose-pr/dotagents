@@ -54,18 +54,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Dry run
-        run: python install.py --dry-run
-      - name: Install and audit
+      - name: Install the dotagents CLI package
+        run: python -m pip install -e .
+      - name: Dry run (minimal base overlay via init)
+        run: python install.py init --dry-run
+      - name: Init and audit
         run: |
           export HOME="$(mktemp -d)"
-          python install.py
+          python install.py init
+          test -f "$HOME/.agents/AGENTS.md"
+      - name: Install full payload and audit
+        run: |
+          export HOME="$(mktemp -d)"
+          python install.py install --from payload
           test -f "$HOME/.agents/AGENTS.md"
           test ! -e "$HOME/.agents/examples"
           python "$HOME/.agents/tools/audit_config.py"
       - name: Install with examples (opt-in, additive only)
         run: |
           export HOME="$(mktemp -d)"
-          python install.py --with-examples
+          python install.py install --from payload --with-examples
           test -f "$HOME/.agents/examples/kb/PYTHON.md"
-          python install.py --with-examples | grep -q "skipped (already present)"
+          python install.py install --from payload --with-examples | grep -q "skip (exists)"
