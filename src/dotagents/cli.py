@@ -62,23 +62,51 @@ def _package_data_dir(name: str) -> "Path | None":
     return extract_root
 
 
-OVERLAY_ROOT = _package_data_dir("_overlay") or (Path(__file__).resolve().parent / "_overlay")
-# Bundled full payload lives at <pyz-or-package>/dotagents/_payload (Phase 4
-# build-pyz stages it there); absent on a plain pip install (Design Q1).
-BUNDLED_PAYLOAD = _package_data_dir("_payload")
+# The base overlay (neutral minimum) is bundled package data at
+# `src/dotagents/_overlay`; `init` and `install` both lay it down. Overlays
+# beyond the base are opt-in examples applied from an external path via
+# `install --overlays <dir>` (the installer bundles none of them).
+BASE_ROOT = _package_data_dir("_overlay") or (Path(__file__).resolve().parent / "_overlay")
 
-PAYLOAD_ENTRIES = ["AGENTS.md", "CLAUDE.md", "MODELS.md", "dotagents", "flows", "kb", "references", "tools"]
-EXAMPLES_ENTRY = "examples"
-
-# Skeleton files that are create-if-absent only (never overwrite), i.e.
-# everything except the managed-block files (AGENTS.md/CLAUDE.md).
-OVERLAY_PLAIN_FILES = [
+# Base files that are create-if-absent only (never overwrite), i.e. everything
+# except the managed-block files (AGENTS.md/CLAUDE.md).
+BASE_PLAIN_FILES = [
     "README.md",
     "dotagents/DECISIONS.md",
-    "dotagents/decisions/.gitkeep",
-    "dotagents/findings/.gitkeep",
-    "dotagents/findings/processed/.gitkeep",
 ]
+
+
+def _apply_base(src: Path, dest: Path, force: bool, dry_run: bool, logger) -> None:
+    """Lay down the base overlay: managed-block merge AGENTS.md/CLAUDE.md,
+    create-if-absent the plain files. Shared by `init` and `install`."""
+    backup_root = timestamped_backup_root(dest) if force else None
+
+    branch = merge_block(
+        dest / "AGENTS.md",
+        (Path(src) / "AGENTS.md").read_text(encoding="utf-8"),
+        force=force, dry_run=dry_run, backup_root=backup_root,
+    )
+    logger.info("%s: AGENTS.md", branch)
+
+    branch = merge_claude_md(
+        dest / "CLAUDE.md",
+        (Path(src) / "CLAUDE.md").read_text(encoding="utf-8"),
+        force=force, dry_run=dry_run, backup_root=backup_root,
+    )
+    logger.info("%s: CLAUDE.md", branch)
+
+    for rel in BASE_PLAIN_FILES:
+        source_path = Path(src) / rel
+        if not source_path.exists():
+            continue
+        target_path = dest / rel
+        if target_path.exists():
+            logger.info("skipped (present): %s", rel)
+            continue
+        logger.info("created: %s", rel)
+        if not dry_run:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(source_path), str(target_path))
 
 
 def _resolve_from(from_arg: "str | None", default: Path) -> Path:
@@ -124,51 +152,21 @@ class Init(LoggingArgs):
     ("--force",)
 
     def __run__(self) -> int:
-        src = _resolve_from(self.from_, OVERLAY_ROOT)
+        src = _resolve_from(self.from_, BASE_ROOT)
         dest = Path(self.dest).expanduser().resolve()
-        backup_root = timestamped_backup_root(dest) if self.force else None
-
-        agents_src = Path(src) / "AGENTS.md"
-        claude_src = Path(src) / "CLAUDE.md"
-
-        branch = merge_block(
-            dest / "AGENTS.md",
-            agents_src.read_text(encoding="utf-8"),
-            force=self.force,
-            dry_run=self.dry_run,
-            backup_root=backup_root,
-        )
-        self._logger_.info("%s: AGENTS.md", branch)
-
-        branch = merge_claude_md(
-            dest / "CLAUDE.md",
-            claude_src.read_text(encoding="utf-8"),
-            force=self.force,
-            dry_run=self.dry_run,
-            backup_root=backup_root,
-        )
-        self._logger_.info("%s: CLAUDE.md", branch)
-
-        for rel in OVERLAY_PLAIN_FILES:
-            source_path = Path(src) / rel
-            if not source_path.exists():
-                continue
-            target_path = dest / rel
-            if target_path.exists():
-                self._logger_.info("skipped (present): %s", rel)
-                continue
-            self._logger_.info("created: %s", rel)
-            if not self.dry_run:
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(source_path), str(target_path))
-
+        _apply_base(Path(src), dest, self.force, self.dry_run, self._logger_)
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
         return 0
 
 
 class Install(LoggingArgs):
-    """Copy the full opinionated payload into the destination directory."""
+    """Install the base config, plus any opt-in overlays given with --overlays.
+
+    The installer bundles only the neutral base overlay. Overlays beyond the
+    base (flows, language kbs, tools, ...) are opt-in examples: point --overlays
+    at one or more overlay directories (e.g. this repo's overlays/flows) to layer
+    them in. A future `dotagents overlays` subcommand will manage them by name."""
 
     _parsername_ = "install"
 
@@ -177,70 +175,47 @@ class Install(LoggingArgs):
     ("--dest",)
 
     from_: Optional[str] = None
-    "Source directory/URI for the payload (default: bundled/repo payload)."
+    "Source directory/URI for the base overlay (default: bundled base)."
     ("--from",)
 
-    with_examples: bool = False
-    "Additionally copy the opt-in examples/ payload (never overwrites)."
-    ("--with-examples",)
+    overlays: "list[str]" = []
+    "Overlay directory to apply on top of the base (repeatable); an opt-in example path."
+    ("--overlays",)
 
     bin_dir: Optional[Path] = None
     "Directory to write dotagents/dotagents.cmd wrapper scripts into."
     ("--bin-dir",)
 
     dry_run: bool = False
-    "Show what would be installed/backed up without writing anything."
+    "Show what would be installed without touching anything."
     ("--dry-run",)
 
+    force: bool = False
+    "Replace AGENTS.md/CLAUDE.md wholesale (with backup) instead of block-merging."
+    ("--force",)
+
     def __run__(self) -> int:
-        default_payload = BUNDLED_PAYLOAD
-        if self.from_ is None and default_payload is None:
-            raise SystemExit(
-                "error: no bundled payload in this install; pass --from <path-to-payload> "
-                "(e.g. --from payload, from a dotagents repo checkout)"
-            )
-        src = _resolve_from(self.from_, default_payload)
+        src = _resolve_from(self.from_, BASE_ROOT)
         dest = Path(self.dest).expanduser().resolve()
 
-        from dotagents._sync import sync_payload
+        _apply_base(Path(src), dest, self.force, self.dry_run, self._logger_)
 
-        counts, lines, backup_root = sync_payload(
-            Path(src), dest, PAYLOAD_ENTRIES, dry_run=self.dry_run
-        )
-        for line in lines:
-            self._logger_.info(line)
-        self._logger_.info(
-            "%d installed, %d backed up (%s), %d unchanged%s",
-            counts.installed,
-            counts.backed_up,
-            backup_root if counts.backed_up and not self.dry_run else "none",
-            counts.unchanged,
-            " [dry-run]" if self.dry_run else "",
-        )
+        if self.overlays:
+            from dotagents._overlays import apply_overlay
 
-        if self.with_examples:
-            ex_src = Path(src) / EXAMPLES_ENTRY
-            ex_copied = ex_skipped = 0
-            if ex_src.exists():
-                for source_path in sorted(ex_src.rglob("*")):
-                    if not source_path.is_file() or "__pycache__" in source_path.parts:
-                        continue
-                    rel = Path(EXAMPLES_ENTRY) / source_path.relative_to(ex_src)
-                    target_path = dest / rel
-                    if target_path.exists():
-                        self._logger_.info("skip (exists): %s", rel.as_posix())
-                        ex_skipped += 1
-                        continue
-                    self._logger_.info("example: %s", rel.as_posix())
-                    if not self.dry_run:
-                        target_path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(str(source_path), str(target_path))
-                    ex_copied += 1
+            total_copied = total_skipped = 0
+            for ov in self.overlays:
+                ov_dir = Path(ov).expanduser()
+                if not ov_dir.is_dir():
+                    raise SystemExit("error: overlay path is not a directory: %s" % ov)
+                copied, skipped, lines = apply_overlay(ov_dir, dest, self.dry_run)
+                for line in lines:
+                    self._logger_.info(line)
+                total_copied += copied
+                total_skipped += skipped
             self._logger_.info(
-                "%d example(s) copied, %d skipped (already present)%s",
-                ex_copied,
-                ex_skipped,
-                " [dry-run]" if self.dry_run else "",
+                "%d overlay file(s) copied, %d skipped (already present)%s",
+                total_copied, total_skipped, " [dry-run]" if self.dry_run else "",
             )
 
         if self.bin_dir is not None and not self.dry_run:
@@ -248,12 +223,11 @@ class Install(LoggingArgs):
 
             pyz_path = Path(sys.argv[0]).resolve()
             if pyz_path.suffix != ".pyz":
-                # Running from a plain install (not a pyz): point the wrapper
-                # at `python -m dotagents` instead of a nonexistent pyz path.
+                # Running from a plain install (not a pyz): the wrappers point at
+                # `python -m dotagents` instead of a nonexistent pyz path.
                 pyz_path = None
             if pyz_path is not None:
-                written = write_wrappers(Path(self.bin_dir), pyz_path)
-                for w in written:
+                for w in write_wrappers(Path(self.bin_dir), pyz_path):
                     self._logger_.info("wrapper: %s", w)
             else:
                 self._logger_.info(
@@ -264,11 +238,7 @@ class Install(LoggingArgs):
                 self._logger_.warning(warning)
 
         if self.dry_run:
-            return 0
-
-        auditor = dest / "tools" / "audit_config.py"
-        if auditor.exists():
-            return subprocess.call([sys.executable, str(auditor), "--root", str(dest)])
+            self._logger_.info("dry-run: no files were written")
         return 0
 
 
@@ -292,10 +262,16 @@ class Audit(LoggingArgs):
     def __run__(self) -> int:
         auditor_path = Path(self.root) / "tools" / "audit_config.py"
         if not auditor_path.exists():
-            # Fall back to the auditor bundled with this package (e.g. when
-            # `root` is a bare payload without its own tools/ copy).
-            if BUNDLED_PAYLOAD is not None:
-                auditor_path = BUNDLED_PAYLOAD / "tools" / "audit_config.py"
+            # Fall back to the auditor bundled with this package (required
+            # tooling, shipped as package data `_tools`), then to a repo
+            # checkout's top-level tools/ (dev use).
+            bundled_tools = _package_data_dir("_tools")
+            if bundled_tools is not None and (bundled_tools / "audit_config.py").exists():
+                auditor_path = bundled_tools / "audit_config.py"
+            else:
+                repo_tool = Path(__file__).resolve().parents[2] / "tools" / "audit_config.py"
+                if repo_tool.exists():
+                    auditor_path = repo_tool
         if not auditor_path.exists():
             raise SystemExit("error: could not find audit_config.py under %s" % self.root)
 
@@ -332,17 +308,17 @@ class BuildPyz(LoggingArgs):
     "Pinned pathlib_next version to vendor."
     ("--pathlib-next-version",)
 
-    payload_dir: Optional[Path] = None
-    "Repo payload/ directory to bundle for offline `install` (default: autodetected)."
-    ("--payload-dir",)
+    tools_dir: Optional[Path] = None
+    "Repo tools/ dir (required tooling) to bundle as _tools (default: autodetected)."
+    ("--tools-dir",)
 
     def __run__(self) -> int:
         import zipapp
 
         repo_root = Path(__file__).resolve().parents[2]
-        payload_src = Path(self.payload_dir) if self.payload_dir else (repo_root / "payload")
-        if not payload_src.exists():
-            raise SystemExit("error: repo payload/ not found at %s (pass --payload-dir)" % payload_src)
+        tools_src = Path(self.tools_dir) if self.tools_dir else (repo_root / "tools")
+        if not tools_src.exists():
+            raise SystemExit("error: repo tools/ not found at %s (pass --tools-dir)" % tools_src)
 
         with tempfile.TemporaryDirectory(prefix="dotagents-pyz-") as tmp:
             stage = Path(tmp) / "stage"
@@ -376,10 +352,10 @@ class BuildPyz(LoggingArgs):
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
             )
 
-            payload_dest = dotagents_pkg_dest / "_payload"
+            tools_dest = dotagents_pkg_dest / "_tools"
             shutil.copytree(
-                payload_src,
-                payload_dest,
+                tools_src,
+                tools_dest,
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
             )
 
