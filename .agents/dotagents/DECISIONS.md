@@ -7,10 +7,10 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 
 ## How to iterate
 1. Triage `~/.agents/dotagents/findings/` (D25/D28): each note → keep as a decision here
-   (+ payload/flow change) or drop; **move** folded notes to `findings/processed/`.
+   (+ overlay/flow change) or drop; **move** folded notes to `findings/processed/`.
 2. Read this index + the current core + the flow file(s) you're changing.
 3. Audit vs reality: check a recent completed plan for where executors deviated/re-derived.
-4. New decision → new `decisions/D<nn>.md` + an index line here; edit payload; reinstall
+4. New decision → new `decisions/D<nn>.md` + an index line here; edit the base overlay or an overlay; reinstall
    (`python install.py`). Keep core ≤ ~60 lines; conditional detail → a flow file.
 5. Never let a flow file restate another's content — link it. Add provenance on incidents.
 
@@ -51,3 +51,5 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 - [D33](decisions/D33.md) — installable dotagents CLI package (init/install/build-pyz/audit), built on duho + pathlib_next
 - [D33-log-split](decisions/D33-log-split.md) — design log split onto the memory pattern: DECISIONS.md index + one file per decision
 - [D34](decisions/D34.md) — Python version policy (run latest, test floor) + venv naming .venv/<ver>-<os>-<arch> + Python Manager, avoid Store Python
+- [D35](decisions/D35.md) — payload/ decomposed into base overlay + opt-in overlays/<name>/; required tooling at top-level tools/ (supersedes D24)
+- [D36](decisions/D36.md) — installer is overlay-agnostic: init=base, install=base + copy-only --overlays <path>; overlay mgmt deferred to a future subcommand

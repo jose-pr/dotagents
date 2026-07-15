@@ -12,11 +12,12 @@ session.
   handful of always-on rules plus a routing table. Task-specific detail lives in
   `flows/` and `kb/` files that an agent reads only when the task matches. You pay for
   what you use.
-- **Language/agent content is opt-in.** The required install is language- and
-  agent-agnostic. Python/Node/Rust `kb/` files, named-agent directives, and
-  language-specific manifests/CI templates live in `examples/` and only land in
-  `~/.agents` via `install.py --with-examples` — additive-only, so it never
-  overwrites something you've already customized.
+- **A neutral base + opt-in overlays.** `init` lays down a minimal, opinion-free
+  **base overlay** (just the `AGENTS.md` scaffolding + design-log convention).
+  Everything opinionated — planning/execution/review flows, language `kb/` files,
+  repo templates, tools — lives in composable example **overlays** you layer in
+  explicitly (`install --overlays <path>`). Additive-only: overlays never overwrite
+  something you've already customized.
 - **Architect/executor split.** `flows/PLAN.md` makes a strong model write precise,
   autonomous plans; `flows/EXEC.md` makes a cheaper model execute them without
   re-deriving context; `flows/REVIEW.md` runs file-threaded multi-agent plan review.
@@ -26,23 +27,27 @@ session.
 
 ## Layout
 
-`payload/` is the product — it installs 1:1 into `~/.agents`. Everything outside it
-is repo infrastructure (installer, CI, this repo's own working notes).
+The config is a **base overlay** plus opt-in **overlays**; the `dotagents` CLI applies
+them. Everything else is repo infrastructure.
 
 | Path | What |
 | --- | --- |
-| `payload/AGENTS.md` | Always-loaded core: rules + routing (the payload's entry point) |
-| `payload/CLAUDE.md` | One-liner `@AGENTS.md` include for runners that want it |
-| `payload/dotagents/DECISIONS.md` | Empty design-log index (+ `decisions/` dir) — every install gets its own, no repo required |
-| `payload/flows/` | PLAN / EXEC / REVIEW / REPO task flows |
-| `payload/kb/RECOVERY.md` | Config-recovery playbook (language-agnostic, so it's required) |
-| `payload/references/` | Language-agnostic repo templates (README, CHANGELOG, LICENSE, .gitignore, plan-shape example) |
-| `payload/tools/` | `audit_config.py` (config integrity), `leak_check.py` (repo leak scan) |
-| `payload/examples/` | Opt-in only (`dotagents install --with-examples`): language `kb/` files, named-agent directives (`antigravity.md`), language-specific manifests + CI workflows |
-| `src/dotagents/` | The installable `dotagents` CLI package (`init`/`install`/`build-pyz`/`audit`) and its own minimal neutral base overlay (`src/dotagents/_overlay/`) — distinct from `payload/`, see below |
+| `src/dotagents/` | The installable `dotagents` CLI (`init`/`install`/`build-pyz`/`audit`) |
+| `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index). Neutral — imposes no flows |
+| `overlays/flows/` | PLAN / EXEC / REVIEW / REPO task flows + `MODELS.md` (executor selection) |
+| `overlays/recovery/` | `kb/RECOVERY.md` — config-recovery playbook |
+| `overlays/references/` | Language-neutral repo templates (README, CHANGELOG, LICENSE, .gitignore, plan-shape example) |
+| `overlays/python`, `node`, `rust` | Per-language `kb/` + manifests + CI workflows |
+| `overlays/agents/` | Named-agent directives (`antigravity.md`) |
+| `overlays/tools/` | Helper tools you opt into: `summarize_run.py`, `compare_bench.py` |
+| `tools/` | Required tooling (not an overlay): `audit_config.py`, `leak_check.py` |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
-| `AGENTS.md` | Directives for working *on this repo* (not part of the payload) |
+| `AGENTS.md` | Directives for working *on this repo* |
 | `.agents/` | This config's own design log and plans — the "why" behind every rule |
+
+Each `overlays/<name>/overlay.toml` carries a `name`/`description`/`requires`/`routing`
+manifest for a future `dotagents overlays` subcommand; today overlays are applied by
+path with `install --overlays`.
 
 ## Install
 
@@ -62,58 +67,57 @@ python install.py init --dry-run        # show what would happen
 python install.py init --force          # replace AGENTS.md/CLAUDE.md wholesale (backed up) instead of block-merging
 ```
 
-**`dotagents install`** — this repo's full opinionated payload (today's
-behavior: PLAN/EXEC/REVIEW/REPO flows, language kb, templates, tools):
+**`dotagents install`** — the base overlay plus any overlays you opt into with
+`--overlays <path>` (repeatable). The installer bundles only the base; overlays are
+example directories you point at (this repo's `overlays/`, your own, or a URI):
 
 ```bash
-python install.py install --from payload           # from a repo checkout
-python install.py install --dry-run
-python install.py install --from payload --with-examples   # also copy language/agent examples (additive-only)
-python install.py install --from payload --bin-dir ~/.local/bin  # also write a `dotagents` command
+python install.py install                                    # base only (like init)
+python install.py install --overlays overlays/flows --overlays overlays/python
+python install.py install --overlays overlays/flows --bin-dir ~/.local/bin  # also write a `dotagents` command
+python install.py install --dry-run --overlays overlays/flows
 ```
 
-A `pip install`-only environment (no repo checkout) has no bundled full
-payload — pass `--from <path-or-uri>` pointing at one (a git checkout dir,
-`file:`, `http(s):`, `zip:`, `sftp:`, or `s3:` URI via `pip install
-"dotagents[uri]"`). `dotagents init`'s bundled base overlay has no such
-limitation — it ships inside the package.
+Overlays are copied in additively (never clobbering an existing file), so re-running is
+idempotent. `--from <path-or-uri>` selects the *base* source for a `pip install`-only
+environment (a git checkout dir, `file:`, `http(s):`, `zip:`, `sftp:`, or `s3:` URI via
+`pip install "dotagents[uri]"`); `init`'s base ships inside the package, so it needs no
+`--from`. A future `dotagents overlays` subcommand will manage overlays by name.
 
 **Downloadable `dotagents.pyz`** — a self-contained zipapp with `duho`/
-`pathlib_next` vendored in and this repo's `payload/` bundled at build time, so
-it needs no `pip install` to run:
+`pathlib_next` and the required `tools/` bundled in, so it needs no `pip install`:
 
 ```bash
 python -m dotagents build-pyz --out dist/dotagents.pyz   # build it (needs this repo checkout)
-python dist/dotagents.pyz install --bin-dir ~/.local/bin # install the bundled payload + a `dotagents` command, offline
+python dist/dotagents.pyz init --bin-dir ~/.local/bin    # lay down the base + a `dotagents` command, offline
 ```
 
 Then wire your runner to it — e.g. Claude Code: put `@AGENTS.md` in
 `~/.claude/CLAUDE.md`... which is exactly what the installed `CLAUDE.md` contains.
 
 **Or let your agent do it:** point it at this repo and say —
-> Read README.md and payload/AGENTS.md, run `python install.py install --from payload`,
-> and confirm the final audit prints PASS.
+> Read README.md, run `python install.py install --overlays overlays/flows`, and
+> confirm `~/.agents/flows/PLAN.md` exists.
 
 ## Validate
 
 ```bash
-python payload/tools/audit_config.py --root payload   # validate this checkout
-python payload/tools/audit_config.py                  # validate the installed ~/.agents
-python payload/tools/audit_config.py --check-templates --root payload  # needs 3.11+
-python payload/tools/audit_config.py --repo-hygiene . # no personal leftovers tracked
+python tools/audit_config.py --root .                  # validate this checkout
+python tools/audit_config.py                           # validate the installed ~/.agents
+python tools/audit_config.py --check-templates --root .  # needs 3.11+
+python tools/audit_config.py --repo-hygiene .          # no personal leftovers tracked
 ```
 
 ## Customize
 
-Fork it — that's the point. Keep `payload/AGENTS.md` small (the audit warns past
-~2.5KB); push anything conditional into a `flows/` or `kb/` file and add a routing
-line. Two design logs, two audiences: `~/.agents/dotagents/DECISIONS.md` (from
-`payload/dotagents/DECISIONS.md`) is *your* private, per-install log — installed empty,
-edited directly, never distributed. This repo's own `.agents/` (design log + plans)
-is the public, sanitized record of how *this* config evolved; if you fork, keep
-yours equally free of personal paths and private project names (`--repo-hygiene`
-checks mechanically), and use `payload/tools/leak_check.py <repo>` to scan any
-*other* repo for agent-plan leakage before its releases.
+Fork it — that's the point. Keep the base `AGENTS.md` small (the audit warns past
+~2.5KB); put opinionated content in overlays. Your `~/.agents/dotagents/DECISIONS.md`
+is *your* private, per-install design log (index + `decisions/` files) — installed
+empty, edited directly, never distributed. This repo's own `.agents/` is the public,
+sanitized record of how *this* config evolved; if you fork, keep yours equally free of
+personal paths and private project names (`--repo-hygiene` checks mechanically), and
+use `tools/leak_check.py <repo>` to scan any *other* repo for agent-plan leakage before
+its releases.
 
 ## License
 
