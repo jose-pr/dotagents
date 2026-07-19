@@ -1,0 +1,19 @@
+{
+  "//": "Register these in ~/.claude/settings.json (the USER-level file, not a project .claude/, which projects git-ignore). Merge the hooks block into an existing settings.json rather than replacing it.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh \"$HOME/.agents/hooks/private-sync-start.sh\"" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh \"$HOME/.agents/hooks/private-sync-stop.sh\"" }
+        ]
+      }
+    ]
+  }
+}
