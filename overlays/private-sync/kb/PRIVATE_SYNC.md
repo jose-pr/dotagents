@@ -96,6 +96,15 @@ curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-se
 `.../dotagents/v0.2.0/tools/cloud-setup.sh` — for reproducibility.) The
 per-session hooks then handle pulls and sync-back once `~/.agents` is present.
 
+The setup-script clone runs very early and often loses a race with egress/proxy
+readiness. `cloud-setup.sh` self-heals: the clone retries with backoff, and if it still
+fails it persists a copy of itself to `~/.dotagents/cloud-setup.sh` and wires a
+SessionStart **recovery hook** that re-runs the bootstrap next session — by then egress
+is up, so the clone (and hook wiring) succeeds, and that run removes the recovery hook.
+This matters because hook wiring is the *last* step: without the recovery path, one early
+clone failure would skip it, leaving the SessionStart hook unregistered and nothing to
+recover the environment.
+
 Auth for the clone/push comes from the environment, never a committed file:
 
 - `DOTAGENTS_AGENTS_REMOTE` — git URL of your private repo. Prefer a **tokenless** HTTPS

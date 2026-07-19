@@ -15,11 +15,20 @@
 # hook it inlines its own auth and performs the very first clone.
 #
 # It: (1) authenticates with a token and bypasses a github.com -> in-session-proxy
-# rewrite when present, (2) clones or pulls the private repo into ~/.agents,
-# (3) ensures the dotagents CLI is installed, (4) links the current project's
-# .agents into the repo, (5) wires the private-sync hooks into
+# rewrite when present, (2) clones (with retry/backoff) or pulls the private repo
+# into ~/.agents, (3) ensures the dotagents CLI is installed, (4) links the current
+# project's .agents into the repo, (5) wires the private-sync hooks into
 # ~/.claude/settings.json so per-session pull/sync-back actually runs.
 # Safe to run at every container start; never fails hard.
+#
+# Self-heal: the container-start clone often loses a race with egress/proxy
+# readiness. Two defenses so a single early failure can't permanently disable the
+# environment: (a) the clone in step 2 retries with backoff, and (b) if it still
+# fails, we persist a copy of THIS script and wire a SessionStart *recovery* hook
+# that re-runs it next session -- when egress is up, the clone (and steps 3-5)
+# succeed, and that same run removes the recovery hook. Without (b) the private-sync
+# hooks -- which can themselves re-clone -- would never get registered, since step 5
+# is what registers them.
 #
 # Env (set as secrets/vars in the web UI):
 #   DOTAGENTS_AGENTS_REMOTE  tokenless https URL of your private repo, e.g.
@@ -78,14 +87,104 @@ dg_git() {
     fi
 }
 
-# --- 2. Clone or pull the private repo. ---------------------------------------
+# --- Self-heal helpers (recovery hook + settings.json editor). ----------------
+# The recovery hook is a persisted copy of this script wired into SessionStart, so
+# a clone that loses the container-start egress race is retried next session.
+_DG_RECOVERY_DIR="$HOME/.dotagents"
+_DG_RECOVERY_SCRIPT="$_DG_RECOVERY_DIR/cloud-setup.sh"
+# Stored literally (unexpanded) so the harness expands $HOME at hook-run time,
+# matching how the private-sync hooks reference "$HOME/.agents/...".
+_DG_RECOVERY_CMD='sh "$HOME/.dotagents/cloud-setup.sh"'
+
+# Edit ~/.claude/settings.json: optionally merge a private-sync snippet, and add or
+# remove the recovery SessionStart hook. Idempotent; preserves unrelated settings.
+#   _dg_settings <recovery: present|absent> [snippet_path]
+_dg_settings() {
+    _dg_state="$1"; _dg_snip="${2:-}"
+    _dg_py=$(command -v python || command -v python3)
+    [ -n "$_dg_py" ] || return 1
+    DG_RECOVERY_CMD="$_DG_RECOVERY_CMD" "$_dg_py" - \
+        "$HOME/.claude/settings.json" "$_dg_state" "$_dg_snip" <<'PYEOF'
+import json, os, sys
+dst_path, state, snip_path = sys.argv[1], sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 else "")
+recovery_cmd = os.environ.get("DG_RECOVERY_CMD", "")
+try:
+    with open(dst_path) as f:
+        settings = json.load(f)
+except (FileNotFoundError, ValueError):
+    settings = {}
+hooks = settings.setdefault("hooks", {})
+changed = False
+
+def cmds(entry):
+    return [h.get("command") for h in entry.get("hooks", [])]
+
+# Merge the private-sync snippet when one was given and exists (i.e. after a
+# successful clone made $AGENTS_DIR/hooks/settings.snippet.json available).
+if snip_path and os.path.isfile(snip_path):
+    with open(snip_path) as f:
+        snip_hooks = json.load(f).get("hooks", {})
+    for event, entries in snip_hooks.items():
+        have = {json.dumps(e, sort_keys=True) for e in hooks.get(event, [])}
+        for entry in entries:
+            if json.dumps(entry, sort_keys=True) not in have:
+                hooks.setdefault(event, []).append(entry)
+                changed = True
+
+# Add or remove the recovery SessionStart hook.
+ss = hooks.setdefault("SessionStart", [])
+has_recovery = any(recovery_cmd in cmds(e) for e in ss)
+if state == "present" and not has_recovery:
+    ss.append({"hooks": [{"type": "command", "command": recovery_cmd}]})
+    changed = True
+elif state == "absent" and has_recovery:
+    hooks["SessionStart"] = [e for e in ss if recovery_cmd not in cmds(e)]
+    changed = True
+
+if changed:
+    os.makedirs(os.path.dirname(dst_path) or ".", exist_ok=True)
+    with open(dst_path, "w") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+    print("dotagents: updated %s" % dst_path)
+PYEOF
+}
+
+# Persist a copy of this script and register the recovery hook, so the next
+# session (egress ready) retries the whole bootstrap.
+_dg_install_recovery_hook() {
+    [ -n "${HOME:-}" ] || return 0
+    mkdir -p "$_DG_RECOVERY_DIR" 2>/dev/null || return 0
+    # Copy ourselves outside ~/.agents (which doesn't exist yet on a failed clone).
+    # $0 is a real file under `sh <file>`; skip the copy for `curl | sh` ($0="sh").
+    if [ -f "$0" ] && [ "$0" != "$_DG_RECOVERY_SCRIPT" ]; then
+        cp "$0" "$_DG_RECOVERY_SCRIPT" 2>/dev/null || return 0
+    fi
+    [ -f "$_DG_RECOVERY_SCRIPT" ] || return 0
+    _dg_settings present \
+        && echo "dotagents: wired a SessionStart recovery hook; retrying the clone next session"
+}
+
+# --- 2. Clone (with retry/backoff) or pull the private repo. ------------------
 if [ -d "$AGENTS_DIR/.git" ]; then
     dg_git -C "$AGENTS_DIR" pull --rebase --autostash --quiet \
         || echo "dotagents: pull failed, using local copy"
 elif [ -n "${DOTAGENTS_AGENTS_REMOTE:-}" ]; then
     echo "dotagents: cloning private agents repo into $AGENTS_DIR"
-    dg_git clone --quiet "$DOTAGENTS_AGENTS_REMOTE" "$AGENTS_DIR" \
-        || { echo "dotagents: clone failed"; exit 0; }
+    _dg_tries=0
+    until dg_git clone --quiet "$DOTAGENTS_AGENTS_REMOTE" "$AGENTS_DIR"; do
+        _dg_tries=$((_dg_tries + 1))
+        if [ "$_dg_tries" -ge 5 ]; then
+            echo "dotagents: clone failed after $_dg_tries attempts (egress not ready at container start?)"
+            _dg_install_recovery_hook
+            exit 0
+        fi
+        # A failed clone can leave a partial target that would block a retry.
+        [ -d "$AGENTS_DIR" ] && [ ! -d "$AGENTS_DIR/.git" ] && rm -rf "$AGENTS_DIR"
+        _dg_wait=$((_dg_tries * _dg_tries))
+        echo "dotagents: clone attempt $_dg_tries failed, retrying in ${_dg_wait}s"
+        sleep "$_dg_wait"
+    done
 else
     echo "dotagents: set DOTAGENTS_AGENTS_REMOTE to clone the private repo; skipping"
     exit 0
@@ -111,38 +210,13 @@ fi
 # do nothing until registered in the USER-level settings file. A fresh container
 # has no ~/.claude/settings.json, and nothing else creates one -- without this
 # step the clone above would go stale and session changes would never push back.
-# Idempotent: each hook entry is appended only if not already present, and any
-# existing settings (other hooks included) are preserved.
+# Reaching this point means the clone succeeded, so we also drop any recovery hook
+# a prior failed run left behind. Idempotent; unrelated settings are preserved.
 _snippet="$AGENTS_DIR/hooks/settings.snippet.json"
-_py=$(command -v python || command -v python3)
-if [ -f "$_snippet" ] && [ -n "$_py" ]; then
-    "$_py" - "$_snippet" "$HOME/.claude/settings.json" <<'PYEOF' \
+if [ -f "$_snippet" ]; then
+    _dg_settings absent "$_snippet" \
         || echo "dotagents: hook wiring failed; register hooks/settings.snippet.json manually"
-import json, os, sys
-snip_path, dst_path = sys.argv[1], sys.argv[2]
-with open(snip_path) as f:
-    snip_hooks = json.load(f).get("hooks", {})
-try:
-    with open(dst_path) as f:
-        settings = json.load(f)
-except (FileNotFoundError, ValueError):
-    settings = {}
-dst_hooks = settings.setdefault("hooks", {})
-changed = False
-for event, entries in snip_hooks.items():
-    have = {json.dumps(e, sort_keys=True) for e in dst_hooks.get(event, [])}
-    for entry in entries:
-        if json.dumps(entry, sort_keys=True) not in have:
-            dst_hooks.setdefault(event, []).append(entry)
-            changed = True
-if changed:
-    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-    with open(dst_path, "w") as f:
-        json.dump(settings, f, indent=2)
-        f.write("\n")
-    print("dotagents: wired private-sync hooks into %s" % dst_path)
-PYEOF
-elif [ ! -f "$_snippet" ]; then
+else
     echo "dotagents: no hooks/settings.snippet.json in the repo; skipping hook wiring"
 fi
 
