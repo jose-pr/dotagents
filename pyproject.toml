@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "duho>=0.1.1",
+    "duho>=0.3.3",
     "pathlib_next>=0.8.0",
 ]
 
