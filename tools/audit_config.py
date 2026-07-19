@@ -45,6 +45,10 @@ EXIST_ONLY = ["tools/audit_config.py", "tools/leak_check.py"]
 # (--root .) should have every example present. Checked only when overlays/ exists.
 EXAMPLES = [
     "overlays/agents/antigravity.md",
+    "overlays/private-sync/kb/PRIVATE_SYNC.md",
+    "overlays/private-sync/hooks/private-sync-start.sh",
+    "overlays/private-sync/hooks/private-sync-stop.sh",
+    "overlays/private-sync/hooks/settings.snippet.json",
     "overlays/python/kb/PYTHON.md", "overlays/node/kb/NODE.md", "overlays/rust/kb/RUST.md",
     "overlays/node/references/package.json", "overlays/python/references/pyproject.toml",
     "overlays/rust/references/Cargo.toml", "overlays/python/references/mkdocs.yml",
