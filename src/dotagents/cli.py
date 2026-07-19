@@ -294,7 +294,13 @@ class Sync(LoggingArgs, Cmd):
     Runs ``git pull --rebase`` / commit / push on the global agents repo. Pass
     ``--project`` so a copy-mode project's .agents is copied back into its store
     first (symlinked projects need no copy-back). ``--remote`` bootstraps a fresh
-    repo (``git init`` + set ``origin``) in one command."""
+    repo (``git init`` + set ``origin``) in one command.
+
+    When ``DOTAGENTS_AGENTS_TOKEN`` is set, the pull/push authenticate directly
+    against github.com with that PAT -- and on a hosted runner that rewrites
+    github traffic to a scoped in-session proxy, they bypass the rewrite -- so a
+    standalone ``dotagents sync`` works without being run through the private-sync
+    Stop hook."""
 
     _parsername_ = "sync"
 

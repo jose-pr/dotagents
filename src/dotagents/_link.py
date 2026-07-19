@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -236,18 +237,111 @@ def _warn_gitignore(project_dir: Path, log) -> None:
         )
 
 
-def _git(agents_dir: Path, *args: str, capture: bool = False):
+def _git(
+    agents_dir: Path,
+    *args: str,
+    capture: bool = False,
+    config_args: "Optional[list[str]]" = None,
+    env: "Optional[dict]" = None,
+):
+    run_env = {**os.environ, **env} if env else None
     return subprocess.run(
-        ["git", "-C", str(agents_dir), *args],
+        ["git", *(config_args or []), "-C", str(agents_dir), *args],
         capture_output=capture,
         text=True,
         check=False,
+        env=run_env,
     )
 
 
 def _has_origin(agents_dir: Path) -> bool:
     res = _git(agents_dir, "remote", capture=True)
     return "origin" in (res.stdout or "").split()
+
+
+# Credential helper snippet: reads the PAT from the environment at auth time, so
+# the token is never written to .git/config or any file on disk. Mirrors
+# overlays/private-sync/hooks/_agents-git-auth.sh.
+_GITHUB_CRED_HELPER = (
+    '!f() { printf "username=x-access-token\\npassword=%s\\n" '
+    '"$DOTAGENTS_AGENTS_TOKEN"; }; f'
+)
+
+
+def _github_proxy_rewrite_active() -> bool:
+    """True when a global ``url.<other>.insteadOf https://github.com/...`` rewrite
+    is in effect -- a hosted runner routing github traffic to a scoped in-session
+    proxy that will not serve an out-of-scope private repo (403). SSH->HTTPS
+    convenience rewrites have ``git@``/``ssh://`` values, so they don't match."""
+    res = subprocess.run(
+        ["git", "config", "--get-regexp", r"^url\..*\.insteadof$"],
+        capture_output=True, text=True, check=False,
+    )
+    for line in (res.stdout or "").splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[1].strip().lower().startswith("https://github.com"):
+            return True
+    return False
+
+
+def _agents_git_auth(log) -> "tuple[list[str], Optional[dict], Optional[str]]":
+    """Authenticate the private agents repo directly against github.com when
+    ``DOTAGENTS_AGENTS_TOKEN`` is set, so a standalone ``dotagents sync`` reaches
+    the repo the same way the private-sync Stop hook does (it sources
+    ``_agents-git-auth.sh``; a direct CLI run never did, so it 403'd through the
+    scoped proxy). Returns ``(config_args, env_overlay, tmp_cfg_path)``:
+
+    * no token -> ``([], None, None)`` (no-op; ordinary git).
+    * token, no github->proxy rewrite (e.g. a local machine) -> a per-command
+      credential helper via ``-c`` (no global-config mutation).
+    * token + rewrite active (hosted runner) -> an isolated git config that
+      BYPASSES the rewrite so the token authenticates directly against github.com,
+      returned as a ``GIT_CONFIG_GLOBAL`` env overlay plus the temp file to unlink.
+    """
+    if not os.environ.get("DOTAGENTS_AGENTS_TOKEN"):
+        return [], None, None
+
+    if not _github_proxy_rewrite_active():
+        return (
+            ["-c", "credential.https://github.com.helper=" + _GITHUB_CRED_HELPER,
+             "-c", "credential.https://github.com.useHttpPath=false"],
+            None,
+            None,
+        )
+
+    def _cur(key: str) -> str:
+        r = subprocess.run(["git", "config", key], capture_output=True, text=True,
+                           check=False)
+        return (r.stdout or "").strip()
+
+    # Preserve the effective identity so a rebase/commit under the isolated config
+    # still has a committer.
+    name = _cur("user.name") or "dotagents"
+    email = _cur("user.email") or "dotagents@localhost"
+
+    fd, cfg = tempfile.mkstemp(prefix="dotagents-git-", suffix=".cfg")
+    os.close(fd)
+
+    def _set(key: str, val: str) -> None:
+        subprocess.run(["git", "config", "--file", cfg, key, val], check=False)
+
+    _set("credential.https://github.com.helper", _GITHUB_CRED_HELPER)
+    _set("credential.https://github.com.useHttpPath", "false")
+    _set("init.defaultBranch", "main")
+    _set("user.name", name)
+    _set("user.email", email)
+    # Re-terminated-TLS proxies need the CA bundle; fall back to the system trust
+    # store when none of these point at a readable file.
+    for ca in (os.environ.get("GIT_SSL_CAINFO"), os.environ.get("SSL_CERT_FILE"),
+               os.environ.get("CURL_CA_BUNDLE"), os.environ.get("REQUESTS_CA_BUNDLE"),
+               "/root/.ccr/ca-bundle.crt",
+               os.path.join(os.environ.get("HOME", ""), ".ccr/ca-bundle.crt")):
+        if ca and os.path.isfile(ca):
+            _set("http.sslCAInfo", ca)
+            break
+
+    log("github.com git is rewritten to an in-session proxy; bypassing it for token auth")
+    return [], {"GIT_CONFIG_GLOBAL": cfg, "GIT_CONFIG_SYSTEM": "/dev/null"}, cfg
 
 
 def sync_agents(
@@ -306,25 +400,37 @@ def sync_agents(
             " && push" if push else "")
         return 0
 
-    if pull and _has_origin(agents_dir):
-        log("git pull --rebase --autostash")
-        res = _git(agents_dir, "pull", "--rebase", "--autostash", "origin", "HEAD",
-                   capture=True)
-        if res.returncode != 0:
-            log("note: pull skipped/failed (%s)", (res.stderr or "").strip().splitlines()[-1:]
-                and (res.stderr or "").strip().splitlines()[-1] or "no upstream yet")
+    # Auth for the network ops (pull/push): a direct `dotagents sync` isn't run
+    # through the private-sync hook that would otherwise source the git-auth
+    # bypass, so apply it here too. No-op unless DOTAGENTS_AGENTS_TOKEN is set.
+    config_args, auth_env, auth_tmp = _agents_git_auth(log)
+    try:
+        if pull and _has_origin(agents_dir):
+            log("git pull --rebase --autostash")
+            res = _git(agents_dir, "pull", "--rebase", "--autostash", "origin", "HEAD",
+                       capture=True, config_args=config_args, env=auth_env)
+            if res.returncode != 0:
+                log("note: pull skipped/failed (%s)", (res.stderr or "").strip().splitlines()[-1:]
+                    and (res.stderr or "").strip().splitlines()[-1] or "no upstream yet")
 
-    _git(agents_dir, "add", "-A")
-    status = _git(agents_dir, "status", "--porcelain", capture=True)
-    if (status.stdout or "").strip():
-        log("git commit -m %r", message)
-        _git(agents_dir, "commit", "-m", message)
-    else:
-        log("nothing to commit")
+        _git(agents_dir, "add", "-A")
+        status = _git(agents_dir, "status", "--porcelain", capture=True)
+        if (status.stdout or "").strip():
+            log("git commit -m %r", message)
+            _git(agents_dir, "commit", "-m", message)
+        else:
+            log("nothing to commit")
 
-    if push and _has_origin(agents_dir):
-        log("git push -u origin HEAD")
-        res = _git(agents_dir, "push", "-u", "origin", "HEAD", capture=True)
-        if res.returncode != 0:
-            log("WARN: git push failed: %s", (res.stderr or "").strip())
+        if push and _has_origin(agents_dir):
+            log("git push -u origin HEAD")
+            res = _git(agents_dir, "push", "-u", "origin", "HEAD", capture=True,
+                       config_args=config_args, env=auth_env)
+            if res.returncode != 0:
+                log("WARN: git push failed: %s", (res.stderr or "").strip())
+    finally:
+        if auth_tmp:
+            try:
+                os.unlink(auth_tmp)
+            except OSError:
+                pass
     return 0
