@@ -54,3 +54,4 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 - [D35](decisions/D35.md) — payload/ decomposed into base overlay + opt-in overlays/<name>/; required tooling at top-level tools/ (supersedes D24)
 - [D36](decisions/D36.md) — installer is overlay-agnostic: init=base, install=base + copy-only --overlays <path>; overlay mgmt deferred to a future subcommand
 - [D37](decisions/D37.md) — private-agents git sync: ~/.agents is one private repo, per-project .agents symlinks to projects/<name>; dotagents link/sync + private-sync overlay
+- [D38](decisions/D38.md) — migrate CLI to duho >= 0.3.3 (Args/Cmd split, commands are (LoggingArgs, Cmd) with __call__); shim duho's zipapp AST-introspection bug so the .pyz keeps flags/help
