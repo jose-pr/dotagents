@@ -78,15 +78,23 @@ Wire them into your runner. For Claude Code, register them in **`~/.claude/setti
 add the clone/link step to your environment's setup script instead, or commit a
 repo `SessionStart` hook (see the `session-start-hook` skill).
 
-Auth for the clone comes from the environment, never a committed file:
+Auth for the clone/push comes from the environment, never a committed file:
 
-- `DOTAGENTS_AGENTS_REMOTE` — git URL of your private repo. For a token-based HTTPS
-  clone use `https://<token>@github.com/<you>/.agents.git`; prefer an SSH deploy key or
-  the environment's git credentials where available.
+- `DOTAGENTS_AGENTS_REMOTE` — git URL of your private repo. Prefer a **tokenless** HTTPS
+  URL (`https://github.com/<you>/.agents.git`) paired with `DOTAGENTS_AGENTS_TOKEN`.
+- `DOTAGENTS_AGENTS_TOKEN` — **(recommended)** a fine-grained PAT scoped to just this
+  repo (Contents: read/write). The hooks wire it via a git credential helper that reads
+  it from the environment at auth time, so the secret is never written to `.git/config`
+  or any file on disk. A token embedded directly in `DOTAGENTS_AGENTS_REMOTE` also works
+  but is then persisted in `.git/config` — avoid it.
 - `DOTAGENTS_AGENTS_DIR` — where the repo lives (default `$HOME/.agents`).
 
-The cloud network policy must allow your git host. Store the token/key as an
-environment secret — treat the private repo's read/write scope as sensitive.
+Why a PAT (not the session's own GitHub auth): a hosted agent runner authenticates git
+through a per-session, repo-scoped credential, and a repo whose name starts with `.`
+can't be added to that scope — so a dot-named private repo needs its own token. (A
+non-dot repo name can instead use the runner's built-in auth with no token.) Store the
+token as an environment secret and treat its read/write scope as sensitive; the cloud
+network policy must allow `github.com`.
 
 ## Gotchas
 
