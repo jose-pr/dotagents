@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- fix: `dotagents sync` now authenticates the private repo directly against github.com
+  when `DOTAGENTS_AGENTS_TOKEN` is set — and on a hosted runner that rewrites github
+  traffic to a scoped in-session proxy, bypasses the rewrite — so a **standalone**
+  `dotagents sync` no longer 403s. Previously only the private-sync Stop hook worked
+  (it sources `_agents-git-auth.sh`); a direct CLI run had no bypass, so its pull failed
+  (`could not read Password`) and its push returned HTTP 403 through the proxy. The CLI
+  now ports that logic: a per-command `-c` credential helper in a normal environment, or
+  an isolated `GIT_CONFIG_GLOBAL` (identity + CA bundle preserved) that skips the rewrite
+  when one is active. The token is still read from the environment at auth time and never
+  written to `.git/config`. See D40.
 - fix: `tools/cloud-setup.sh` no longer lets a single container-start clone failure
   permanently disable the environment. The clone often loses a race with egress/proxy
   readiness; previously it `exit 0`'d on the first failure, skipping the hook-wiring
