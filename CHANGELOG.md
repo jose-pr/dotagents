@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- fix: `tools/cloud-setup.sh` no longer lets a single container-start clone failure
+  permanently disable the environment. The clone often loses a race with egress/proxy
+  readiness; previously it `exit 0`'d on the first failure, skipping the hook-wiring
+  step — so the SessionStart hook (which can itself re-clone) was never registered and
+  nothing ever recovered. Now the clone retries with backoff (5 attempts), and if it
+  still fails the script persists a copy of itself and wires a SessionStart **recovery
+  hook** that re-runs the bootstrap next session (egress is up by then); the first
+  successful run merges the private-sync hooks and removes the recovery hook. See D39.
 - fix: `.gitignore` templates and `dotagents link` now use a slashless `.agents`
   instead of `.agents/`. `link` creates `.agents` as a *symlink*, which git treats
   as a file, so the directory-only `.agents/` pattern never actually ignored it —
