@@ -5,7 +5,8 @@ agent state (plans, kb, findings, a user-managed ``AGENTS.md``) lives under
 ``~/.agents/projects/<name>/`` and is symlinked into each checkout as
 ``<project>/.agents``. One private repo carries the global config AND every
 project's private agent state; the public project repos never track any of it
-(the Leakage rule already ``.gitignore``s ``.agents/``).
+(the Leakage rule already ``.gitignore``s ``.agents`` -- slashless, since the link
+is a symlink and a directory-only ``.agents/`` would not match it).
 
 - ``link_project`` — symlink (or ``--copy``) ``<project>/.agents`` to its store,
   adopting an existing real ``.agents/`` into the store on the first link.
@@ -84,11 +85,23 @@ def _is_link_to(target: Path, store: Path) -> bool:
 
 
 def _gitignore_excludes_agents(project_dir: Path) -> bool:
+    """True if ``.gitignore`` actually excludes this project's ``.agents``.
+
+    A symlink named ``.agents`` is a file to git, so a directory-only pattern
+    (``.agents/``) does NOT ignore it -- only a slashless ``.agents`` / ``/.agents``
+    does. A copy-mode real directory is excluded by either form, so we only insist
+    on a slashless pattern when the link is actually a symlink."""
     gi = project_dir / ".gitignore"
     if not gi.exists():
         return False
-    for line in gi.read_text(encoding="utf-8", errors="replace").splitlines():
-        if line.strip().rstrip("/") in (".agents", "/.agents"):
+    symlinked = os.path.islink(str(project_dir / ".agents"))
+    for raw in gi.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line in (".agents", "/.agents"):
+            return True
+        if not symlinked and line.rstrip("/") in (".agents", "/.agents"):
             return True
     return False
 
@@ -216,8 +229,9 @@ def link_project(
 def _warn_gitignore(project_dir: Path, log) -> None:
     if not _gitignore_excludes_agents(project_dir):
         log(
-            "WARN: %s/.gitignore does not exclude .agents/ -- add a '.agents/' line so "
-            "the link is never committed to the project repo",
+            "WARN: %s/.gitignore does not exclude .agents -- add a '.agents' line "
+            "(no trailing slash, so it also covers the symlink) so the link is never "
+            "committed to the project repo",
             project_dir.name,
         )
 

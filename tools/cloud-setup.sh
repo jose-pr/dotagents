@@ -4,8 +4,12 @@
 # at start, staying current without re-pasting. Put this ONE line in your Claude
 # Code web environment's SETUP SCRIPT field:
 #
-#   curl -fsSL https://raw.githubusercontent.com/jose-pr/dotagents/main/tools/cloud-setup.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/jose-pr/dotagents/main/tools/cloud-setup.sh -o /tmp/dg-cloud-setup.sh && sh /tmp/dg-cloud-setup.sh
 #
+# Use `curl … -o file && sh file`, NOT `curl … | sh`: a pipe makes the setup
+# script's exit code that of `sh` (which exits 0 on empty stdin), so a failed
+# fetch -- blocked egress, 404, proxy error at container start -- is silently
+# reported as SUCCESS. `&&` propagates curl's failure so the setup log shows it.
 # (Pin to a tag for reproducibility, e.g. .../dotagents/v0.2.0/tools/cloud-setup.sh.)
 # It runs at container start, BEFORE ~/.agents exists -- so unlike the SessionStart
 # hook it inlines its own auth and performs the very first clone.

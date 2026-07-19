@@ -130,8 +130,12 @@ self-contained bootstrap in this repo — it fetches the latest each start, so t
 nothing to re-paste:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-setup.sh | sh
+curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-setup.sh -o /tmp/dg-cloud-setup.sh && sh /tmp/dg-cloud-setup.sh
 ```
+
+Use `curl … -o file && sh file`, not `curl … | sh`: with a pipe the setup field's exit
+code is `sh`'s (0 on empty stdin), so a failed fetch is silently logged as success; `&&`
+propagates the curl failure instead.
 
 It authenticates (bypassing a hosted-runner `github.com`→proxy git rewrite), clones/pulls
 `~/.agents`, installs the CLI, and links the project — driven by `DOTAGENTS_AGENTS_REMOTE`
