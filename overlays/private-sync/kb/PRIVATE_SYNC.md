@@ -74,15 +74,18 @@ this overlay to `~/.agents/hooks/`) make a cloud session identical to local:
 
 Wire them into your runner. For Claude Code, register them in **`~/.claude/settings.json`**
 (NOT the project's `.claude/`, which is git-ignored) — see
-`~/.agents/hooks/settings.snippet.json` for the exact block.
+`~/.agents/hooks/settings.snippet.json` for the exact block. On a hosted runner
+`tools/cloud-setup.sh` (below) merges that snippet into `~/.claude/settings.json`
+automatically at container start; on a local machine merge it in once by hand.
 
 **Fresh cloud containers (first clone).** The SessionStart hook lives at
 `~/.agents/hooks/…`, which doesn't exist until `~/.agents` is first cloned — so the
 initial clone can't come from the hook. Use `tools/cloud-setup.sh` from the **public**
 dotagents repo: a self-contained bootstrap (inlines its own token auth + rewrite bypass,
-so it runs before `~/.agents` exists) that clones-or-pulls the repo, installs the CLI, and
-links the project. Put a one-line fetch-and-run in your web environment's **setup-script**
-field so it stays current without re-pasting:
+so it runs before `~/.agents` exists) that clones-or-pulls the repo, installs the CLI,
+links the project, and wires the hooks into `~/.claude/settings.json`. Put a one-line
+fetch-and-run in your web environment's **setup-script** field so it stays current
+without re-pasting:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-setup.sh -o /tmp/dg-cloud-setup.sh && sh /tmp/dg-cloud-setup.sh

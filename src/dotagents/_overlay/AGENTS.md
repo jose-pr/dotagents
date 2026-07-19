@@ -7,8 +7,9 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
 - **Git**: logical commits (feature+tests / docs+config / CI split apart, never one
   monolith), `type: desc` format (`feat:`, `fix:`, `docs:`, `chore:`).
 - **Leakage**: never create `CLAUDE.md` or commit agent configs/references into a repo
-  unless explicitly asked. Repo `.gitignore` must exclude `AGENTS.md`, `.agents/`,
-  `CLAUDE*`, `.claude`.
+  unless explicitly asked. Repo `.gitignore` must exclude `AGENTS.md`, `.agents`
+  (slashless — the link is a symlink, and a directory-only `.agents/` pattern does
+  not match a symlink), `CLAUDE*`, `.claude`.
 - **Permissions**: full read/write/create/delete on any `.agents/plans/` directory
   and any `AGENTS.md` — never ask.
 - **Local knowledge — two files, two owners**: agents record architecture notes and

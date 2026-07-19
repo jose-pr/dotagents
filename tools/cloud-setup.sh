@@ -17,7 +17,9 @@
 # It: (1) authenticates with a token and bypasses a github.com -> in-session-proxy
 # rewrite when present, (2) clones or pulls the private repo into ~/.agents,
 # (3) ensures the dotagents CLI is installed, (4) links the current project's
-# .agents into the repo. Safe to run at every container start; never fails hard.
+# .agents into the repo, (5) wires the private-sync hooks into
+# ~/.claude/settings.json so per-session pull/sync-back actually runs.
+# Safe to run at every container start; never fails hard.
 #
 # Env (set as secrets/vars in the web UI):
 #   DOTAGENTS_AGENTS_REMOTE  tokenless https URL of your private repo, e.g.
@@ -102,6 +104,46 @@ dg_cli() { if command -v dotagents >/dev/null 2>&1; then dotagents "$@"; else py
 # --- 4. Link the current project's .agents into the repo. ---------------------
 if [ -d "$PROJECT_DIR" ]; then
     dg_cli link "$PROJECT_DIR" --agents-dir "$AGENTS_DIR" || echo "dotagents: link failed"
+fi
+
+# --- 5. Wire the private-sync hooks into ~/.claude/settings.json. --------------
+# The hooks (SessionStart pull/link, Stop sync-back) live in the private repo and
+# do nothing until registered in the USER-level settings file. A fresh container
+# has no ~/.claude/settings.json, and nothing else creates one -- without this
+# step the clone above would go stale and session changes would never push back.
+# Idempotent: each hook entry is appended only if not already present, and any
+# existing settings (other hooks included) are preserved.
+_snippet="$AGENTS_DIR/hooks/settings.snippet.json"
+_py=$(command -v python || command -v python3)
+if [ -f "$_snippet" ] && [ -n "$_py" ]; then
+    "$_py" - "$_snippet" "$HOME/.claude/settings.json" <<'PYEOF' \
+        || echo "dotagents: hook wiring failed; register hooks/settings.snippet.json manually"
+import json, os, sys
+snip_path, dst_path = sys.argv[1], sys.argv[2]
+with open(snip_path) as f:
+    snip_hooks = json.load(f).get("hooks", {})
+try:
+    with open(dst_path) as f:
+        settings = json.load(f)
+except (FileNotFoundError, ValueError):
+    settings = {}
+dst_hooks = settings.setdefault("hooks", {})
+changed = False
+for event, entries in snip_hooks.items():
+    have = {json.dumps(e, sort_keys=True) for e in dst_hooks.get(event, [])}
+    for entry in entries:
+        if json.dumps(entry, sort_keys=True) not in have:
+            dst_hooks.setdefault(event, []).append(entry)
+            changed = True
+if changed:
+    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+    with open(dst_path, "w") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+    print("dotagents: wired private-sync hooks into %s" % dst_path)
+PYEOF
+elif [ ! -f "$_snippet" ]; then
+    echo "dotagents: no hooks/settings.snippet.json in the repo; skipping hook wiring"
 fi
 
 echo "dotagents cloud-setup: done"
