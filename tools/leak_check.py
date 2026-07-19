@@ -22,14 +22,21 @@ from pathlib import Path
 
 SKIP_NAMES = {".gitignore"}  # legitimately names agent artifacts
 
-# Commit-message markers that must never reach a public repo. Matched case-
-# insensitively as substrings of each message line.
-COMMIT_MSG_PATTERNS = ["Claude-Session:", "claude.ai/code/session"]
+# Commit-message leaks to catch, WITHOUT false-positiving on a message that merely
+# documents them (this tool's own commits, filter-branch remediation snippets, etc.):
+#   * the real git trailer -- a line that STARTS with `Claude-Session:` (a backticked
+#     `Claude-Session:` mid-sentence starts with a backtick, so it won't match), and
+#   * an actual session URL -- `claude.ai/code/session_<id>` (the bare phrase
+#     "claude.ai/code/session" with no id is a mention, not a leak).
+COMMIT_MSG_CHECKS = [
+    ("Claude-Session: trailer", re.compile(r"^\s*Claude-Session:", re.IGNORECASE)),
+    ("session URL", re.compile(r"claude\.ai/code/session_\w", re.IGNORECASE)),
+]
 
 
 def scan_commit_messages(repo: Path) -> int:
-    """Flag any commit whose message carries an agent-session trailer/URL. Scans
-    the current branch's history (HEAD); returns the hit count."""
+    """Flag any commit whose message carries an agent-session trailer or a real
+    session URL. Scans the current branch's history (HEAD); returns the hit count."""
     out = subprocess.run(
         ["git", "-C", str(repo), "log", "--format=%H%x1f%B%x1e", "HEAD"],
         capture_output=True, check=True,
@@ -41,10 +48,9 @@ def scan_commit_messages(repo: Path) -> int:
             continue
         sha, _, body = rec.partition("\x1f")
         for lineno, line in enumerate(body.splitlines(), 1):
-            low = line.lower()
-            for pat in COMMIT_MSG_PATTERNS:
-                if pat.lower() in low:
-                    print("commit %s:%d: %r" % (sha[:12], lineno, pat))
+            for label, rx in COMMIT_MSG_CHECKS:
+                if rx.search(line):
+                    print("commit %s:%d: %s" % (sha[:12], lineno, label))
                     hits += 1
     return hits
 
