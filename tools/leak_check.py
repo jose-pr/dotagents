@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Scan a repo's *tracked* files for private agent-plan leakage.
+"""Scan a repo's *tracked* files and commit messages for private agent leakage.
 
 Usage: py -3.12 ~/.agents/tools/leak_check.py <repo_path>
 
-Patterns: references to .agents/, AGENTS.md, "Phase N" plan phrasing, and every
-plan basename harvested from <repo>/.agents/plans/ (incl. completed/). Findings are
-human-judged: fix the file or consciously accept it. Exit 1 on any hit.
-Runs on Python 3.9+, stdlib only. See flows/REPO.md (release discipline).
+Tracked files -- patterns: references to .agents/, AGENTS.md, "Phase N" plan
+phrasing, and every plan basename harvested from <repo>/.agents/plans/ (incl.
+completed/).
+
+Commit messages -- agent-session trailers/URLs (a `Claude-Session:` trailer or a
+`claude.ai/code/session` link) that must never reach a public repo: the link
+exposes a session id, and the trailer is auto-added by the agent harness, so it
+slips in unless a gate catches it. Scanned across the current branch's history.
+
+Findings are human-judged: fix the file/message or consciously accept it. Exit 1
+on any hit. Runs on Python 3.9+, stdlib only. See flows/REPO.md (release discipline).
 """
 import re
 import subprocess
@@ -14,6 +21,32 @@ import sys
 from pathlib import Path
 
 SKIP_NAMES = {".gitignore"}  # legitimately names agent artifacts
+
+# Commit-message markers that must never reach a public repo. Matched case-
+# insensitively as substrings of each message line.
+COMMIT_MSG_PATTERNS = ["Claude-Session:", "claude.ai/code/session"]
+
+
+def scan_commit_messages(repo: Path) -> int:
+    """Flag any commit whose message carries an agent-session trailer/URL. Scans
+    the current branch's history (HEAD); returns the hit count."""
+    out = subprocess.run(
+        ["git", "-C", str(repo), "log", "--format=%H%x1f%B%x1e", "HEAD"],
+        capture_output=True, check=True,
+    )
+    hits = 0
+    for rec in out.stdout.decode("utf-8", "replace").split("\x1e"):
+        rec = rec.strip("\n")
+        if not rec:
+            continue
+        sha, _, body = rec.partition("\x1f")
+        for lineno, line in enumerate(body.splitlines(), 1):
+            low = line.lower()
+            for pat in COMMIT_MSG_PATTERNS:
+                if pat.lower() in low:
+                    print("commit %s:%d: %r" % (sha[:12], lineno, pat))
+                    hits += 1
+    return hits
 
 
 def main(argv):
@@ -54,6 +87,9 @@ def main(argv):
             if phase_re.search(line):
                 print("%s:%d: 'Phase N'" % (rel, lineno))
                 hits += 1
+
+    hits += scan_commit_messages(repo)
+
     print("FAIL (%d hits)" % hits if hits else "PASS")
     return 1 if hits else 0
 

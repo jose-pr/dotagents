@@ -56,7 +56,13 @@ never require cutting a release.
 - `CHANGELOG.md`: Keep a Changelog format (`references/CHANGELOG.md`) — `[Unreleased]`
   always at top, one `## [x.y.z] - <date>` heading per release. Before release, run
   `py -3.12 ~/.agents/tools/leak_check.py <repo>` — it scans tracked files for
-  private-plan leaks (`.agents/` refs, plan filenames, agent `Phase N` phrasing).
+  private-plan leaks (`.agents/` refs, plan filenames, agent `Phase N` phrasing) AND
+  commit messages for agent-session trailers/URLs (`Claude-Session:`,
+  `claude.ai/code/session`). The session trailer is auto-added by the agent harness and
+  must be stripped before pushing to a public repo — the link exposes a session id (the
+  content is account-gated, but the id shouldn't be in public history). If one already
+  landed, rewrite it out (`git filter-branch --msg-filter "sed '/^Claude-Session:/d'"`)
+  and note that the pre-rewrite SHAs stay reachable on the host until it GCs.
 - `RELEASENOTES.md` (repos with a perf story or non-trivial release narrative): the
   detailed companion to `CHANGELOG.md` — `CHANGELOG.md` stays terse and public; the
   durable audit trail for performance claims and release decisions lives here. Per

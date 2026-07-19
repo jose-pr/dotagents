@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- feat: `tools/leak_check.py` now also scans commit messages (current branch history)
+  for agent-session trailers/URLs — a `Claude-Session:` trailer or `claude.ai/code/session`
+  link — and exits 1 on any hit. The trailer is auto-added by the agent harness and
+  exposes a session id in public history if it slips through; the pre-existing tracked-file
+  scan didn't cover commit messages. `flows/REPO.md` release discipline documents the check
+  and the `git filter-branch --msg-filter` remediation for one that already landed. See D41.
 - feat: `tools/cloud-setup.sh` step 5 wires `hooks/settings.snippet.json` into the
   user-level `~/.claude/settings.json` (idempotent JSON merge, preserves existing
   settings/hooks). A fresh cloud container has no settings file and nothing else
