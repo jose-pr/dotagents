@@ -38,9 +38,9 @@ continue the D-numbering).
 
 Gotchas hit:
 - The dev container had `duho==0.3.3` installed, which drops the `LoggingArgs.__run__`
-  convention (`init` itself fails: "not runnable, make it a Cmd"). The repo targets the
-  pinned `duho==0.1.1` (see `build-pyz`/CI); verification must use a `0.1.1` venv, not
-  whatever is globally installed.
+  convention (`init` itself fails: "not runnable, make it a Cmd"). This was first worked
+  around with a pinned `duho==0.1.1` venv, then resolved properly by migrating the CLI to
+  the 0.3.3 `Args`/`Cmd` API — see D38 (and the follow-up plan `migrate_to_duho_0_3.md`).
 - `_link.py` stays pure-stdlib on purpose: `link`/`sync` must work under a plain
   `pip install dotagents` (no `pathlib_next` copy/URI machinery needed for local FS ops).
 - Basename keying (user choice over git-remote-slug) means two different repos sharing a

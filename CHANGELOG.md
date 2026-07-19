@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- chore: migrate the CLI to `duho>=0.3.3` (was `>=0.1.1`). duho's Plan-13 `Args`/`Cmd`
+  split means commands are now `class X(LoggingArgs, Cmd)` with a `__call__` entrypoint
+  (was a bare `LoggingArgs` with `__run__`) and the umbrella root is
+  `class Dotagents(LoggingArgs, Cli)`. Field declarations (annotation + help string +
+  flags tuple) are unchanged. Bumped the `build-pyz` vendored `duho` default to 0.3.3.
+- fix: restore full flag/help fidelity in the built `dotagents.pyz` under duho 0.3.3.
+  duho discovers each field's flags + help by AST-parsing its module source, and inside
+  a zipapp the zip-internal `__file__` isn't readable — degrading `--from` to `--from-`,
+  the `link` positional to `--path`, and dropping help text. `cli.main` now repoints the
+  affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
+  before dispatch; a no-op for a plain install.
+
 ### Added
 
 - feat: private-agents git sync — `dotagents link` symlinks a project's `.agents` to a
