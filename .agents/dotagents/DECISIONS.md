@@ -53,3 +53,4 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 - [D34](decisions/D34.md) — Python version policy (run latest, test floor) + venv naming .venv/<ver>-<os>-<arch> + Python Manager, avoid Store Python
 - [D35](decisions/D35.md) — payload/ decomposed into base overlay + opt-in overlays/<name>/; required tooling at top-level tools/ (supersedes D24)
 - [D36](decisions/D36.md) — installer is overlay-agnostic: init=base, install=base + copy-only --overlays <path>; overlay mgmt deferred to a future subcommand
+- [D37](decisions/D37.md) — private-agents git sync: ~/.agents is one private repo, per-project .agents symlinks to projects/<name>; dotagents link/sync + private-sync overlay
