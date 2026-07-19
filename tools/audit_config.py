@@ -48,6 +48,7 @@ EXAMPLES = [
     "overlays/private-sync/kb/PRIVATE_SYNC.md",
     "overlays/private-sync/hooks/private-sync-start.sh",
     "overlays/private-sync/hooks/private-sync-stop.sh",
+    "overlays/private-sync/hooks/_agents-git-auth.sh",
     "overlays/private-sync/hooks/settings.snippet.json",
     "overlays/python/kb/PYTHON.md", "overlays/node/kb/NODE.md", "overlays/rust/kb/RUST.md",
     "overlays/node/references/package.json", "overlays/python/references/pyproject.toml",

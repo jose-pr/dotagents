@@ -96,6 +96,14 @@ non-dot repo name can instead use the runner's built-in auth with no token.) Sto
 token as an environment secret and treat its read/write scope as sensitive; the cloud
 network policy must allow `github.com`.
 
+Such runners also often rewrite all `github.com` git traffic (via a global `insteadOf`)
+to that scoped proxy, which won't serve a repo outside session scope — so a plain
+`git clone`/`push` of the private repo would be redirected and fail. The hooks handle
+this automatically: `hooks/_agents-git-auth.sh` (sourced by both hooks) detects a
+github→proxy rewrite and, when a token is present, points git at an isolated config that
+bypasses the rewrite so the token authenticates directly against `github.com`. Nothing
+to configure beyond `DOTAGENTS_AGENTS_TOKEN`.
+
 ## Gotchas
 
 - **`.gitignore` must exclude `.agents/`** in every project, or the symlink/copy can be

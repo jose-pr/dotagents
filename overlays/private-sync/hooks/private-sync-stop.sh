@@ -17,13 +17,13 @@ dotagents_cmd() {
     fi
 }
 
-# Ensure the push can authenticate even if the SessionStart hook didn't run.
-# The helper reads the token from the environment at auth time; the value is
-# never written to disk (idempotent with the start hook's identical setup).
-if [ -n "${DOTAGENTS_AGENTS_TOKEN:-}" ]; then
-    git config --global credential."https://github.com".helper \
-        '!f() { printf "username=x-access-token\npassword=%s\n" "$DOTAGENTS_AGENTS_TOKEN"; }; f'
-    git config --global credential."https://github.com".useHttpPath false
+# Ensure the push can authenticate even if the SessionStart hook didn't run
+# (token credential helper + bypass of a github.com -> proxy rewrite). Sourced
+# so its exports reach the `dotagents sync` subprocess below.
+_DG_AUTH="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)/_agents-git-auth.sh"
+if [ -f "$_DG_AUTH" ]; then
+    . "$_DG_AUTH"
+    _dotagents_git_auth
 fi
 
 dotagents_cmd sync --agents-dir "$AGENTS_DIR" --project "$PROJECT_DIR" \
