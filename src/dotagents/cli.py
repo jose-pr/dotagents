@@ -242,6 +242,104 @@ class Install(LoggingArgs):
         return 0
 
 
+class Link(LoggingArgs):
+    """Link a project's .agents into the private ~/.agents/projects/<name> store.
+
+    Symlinks ``<project>/.agents`` to its per-project store inside the global
+    agents repo (``--copy`` mirrors it as a real dir instead, for Windows / no-
+    symlink environments). An existing real ``.agents/`` is adopted into an empty
+    store on the first link. See ``~/.agents/kb/PRIVATE_SYNC.md`` for the model."""
+
+    _parsername_ = "link"
+
+    path: Path = Path(".")
+    "Project directory to link (default: current directory)."
+    ("path",)
+
+    agents_dir: Path = Path.home() / ".agents"
+    "Global agents dir — the private repo clone that holds projects/<name>/."
+    ("--agents-dir",)
+
+    name: Optional[str] = None
+    "Store name under projects/ (default: the project directory's basename)."
+    ("--name",)
+
+    copy: bool = False
+    "Copy the store into the project instead of symlinking (no-symlink fallback)."
+    ("--copy",)
+
+    force: bool = False
+    "Replace an existing .agents symlink, or back up a conflicting real .agents dir."
+    ("--force",)
+
+    dry_run: bool = False
+    "Show what would happen without touching anything."
+    ("--dry-run",)
+
+    def __run__(self) -> int:
+        from dotagents._link import link_project
+
+        link_project(
+            self.path, self.agents_dir, name=self.name, copy=self.copy,
+            force=self.force, dry_run=self.dry_run, logger=self._logger_,
+        )
+        if self.dry_run:
+            self._logger_.info("dry-run: no files were written")
+        return 0
+
+
+class Sync(LoggingArgs):
+    """Sync the private ~/.agents repo: copy-back a copy-mode project, then git.
+
+    Runs ``git pull --rebase`` / commit / push on the global agents repo. Pass
+    ``--project`` so a copy-mode project's .agents is copied back into its store
+    first (symlinked projects need no copy-back). ``--remote`` bootstraps a fresh
+    repo (``git init`` + set ``origin``) in one command."""
+
+    _parsername_ = "sync"
+
+    agents_dir: Path = Path.home() / ".agents"
+    "Global agents dir (the private repo clone)."
+    ("--agents-dir",)
+
+    message: str = "dotagents: sync"
+    "Commit message for the sync."
+    ("--message", "-m")
+
+    project: Optional[Path] = None
+    "A project whose (copy-mode) .agents should be copied back into the store first."
+    ("--project",)
+
+    name: Optional[str] = None
+    "Store name for --project (default: that project's basename)."
+    ("--name",)
+
+    remote: Optional[str] = None
+    "Set origin to this URL (git init first if needed) before syncing."
+    ("--remote",)
+
+    no_pull: bool = False
+    "Skip the git pull --rebase step."
+    ("--no-pull",)
+
+    no_push: bool = False
+    "Skip the git push step."
+    ("--no-push",)
+
+    dry_run: bool = False
+    "Show what would happen without touching anything."
+    ("--dry-run",)
+
+    def __run__(self) -> int:
+        from dotagents._link import sync_agents
+
+        return sync_agents(
+            self.agents_dir, message=self.message, project_dir=self.project,
+            name=self.name, remote=self.remote, pull=not self.no_pull,
+            push=not self.no_push, dry_run=self.dry_run, logger=self._logger_,
+        )
+
+
 class Audit(LoggingArgs):
     """Run the config auditor against a payload/install destination."""
 
@@ -385,10 +483,12 @@ class Dotagents(LoggingArgs):
     """Umbrella CLI for installing and building the dotagents config."""
 
     _version_ = __version__
-    _subcommands_ = [Init, Install, Audit, BuildPyz]
+    _subcommands_ = [Init, Install, Link, Sync, Audit, BuildPyz]
 
     def __run__(self) -> int:
-        self._logger_.info("pick a subcommand, e.g. `init`, `install`, `audit`, `build-pyz`")
+        self._logger_.info(
+            "pick a subcommand, e.g. `init`, `install`, `link`, `sync`, `audit`, `build-pyz`"
+        )
         return 0
 
 
