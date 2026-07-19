@@ -27,6 +27,15 @@
 AGENTS_DIR="${DOTAGENTS_AGENTS_DIR:-$HOME/.agents}"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 
+# Banner so the environment's setup-script log unambiguously shows this ran (a
+# blank log means the setup-script field never invoked it -- a config issue, not
+# a script one).
+echo "dotagents cloud-setup: starting (repo -> $AGENTS_DIR, project -> $PROJECT_DIR)"
+
+# Some setup-script contexts start before HOME exists; git config --global
+# (used below) can't write ~/.gitconfig without it.
+[ -n "${HOME:-}" ] && [ ! -d "$HOME" ] && mkdir -p "$HOME" 2>/dev/null
+
 # --- 1. Token auth + github.com -> proxy rewrite bypass (applied per git call
 #        below via dg_git, never exported into the session environment). --------
 _DG_CFG=""
@@ -91,4 +100,5 @@ if [ -d "$PROJECT_DIR" ]; then
     dg_cli link "$PROJECT_DIR" --agents-dir "$AGENTS_DIR" || echo "dotagents: link failed"
 fi
 
+echo "dotagents cloud-setup: done"
 exit 0
