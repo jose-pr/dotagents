@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- fix: `.gitignore` templates and `dotagents link` now use a slashless `.agents`
+  instead of `.agents/`. `link` creates `.agents` as a *symlink*, which git treats
+  as a file, so the directory-only `.agents/` pattern never actually ignored it —
+  the link showed up as untracked in every project. `_gitignore_excludes_agents`
+  is now symlink-aware (a bare `.agents/` no longer counts as excluding a symlinked
+  link, so the WARN fires), and the reference template + REPO.md guidance recommend
+  `.agents`.
+- docs: recommend `curl … -o file && sh file` over `curl … | sh` for the setup-script
+  field (README, `kb/PRIVATE_SYNC.md`, `tools/cloud-setup.sh` header). With a pipe the
+  field's exit code is `sh`'s (0 on empty stdin), so a failed fetch at container start
+  is silently reported as success; `&&` propagates the fetch failure to the setup log.
+
 ### Changed
 
 - refactor: move the cloud bootstrap from `overlays/private-sync/hooks/cloud-setup.sh` to

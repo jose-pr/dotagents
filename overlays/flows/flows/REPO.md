@@ -49,8 +49,10 @@ never require cutting a release.
 
 ## Meta files (skeletons in `~/.agents/references/`; language doc adds specifics on top)
 - `README.md`, `.gitignore`: from `references/README.md` / `references/.gitignore`;
-  `.gitignore` always excludes agent artifacts (`AGENTS.md`, `.agents/`, `CLAUDE*`,
-  `.claude`) plus the language's build/dependency output.
+  `.gitignore` always excludes agent artifacts (`AGENTS.md`, `.agents`, `CLAUDE*`,
+  `.claude`) plus the language's build/dependency output. Note `.agents` has no
+  trailing slash: `dotagents link` makes it a symlink, and a directory-only
+  `.agents/` would not ignore a symlink.
 - `CHANGELOG.md`: Keep a Changelog format (`references/CHANGELOG.md`) — `[Unreleased]`
   always at top, one `## [x.y.z] - <date>` heading per release. Before release, run
   `py -3.12 ~/.agents/tools/leak_check.py <repo>` — it scans tracked files for

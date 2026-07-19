@@ -85,10 +85,12 @@ links the project. Put a one-line fetch-and-run in your web environment's **setu
 field so it stays current without re-pasting:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-setup.sh | sh
+curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-setup.sh -o /tmp/dg-cloud-setup.sh && sh /tmp/dg-cloud-setup.sh
 ```
 
-(Pin to a tag — `.../dotagents/v0.2.0/tools/cloud-setup.sh` — for reproducibility.) The
+(Use `curl … -o file && sh file`, not `curl … | sh`: a pipe makes the field's exit code
+`sh`'s, so a failed fetch is silently reported as success; `&&` surfaces it. Pin to a tag —
+`.../dotagents/v0.2.0/tools/cloud-setup.sh` — for reproducibility.) The
 per-session hooks then handle pulls and sync-back once `~/.agents` is present.
 
 Auth for the clone/push comes from the environment, never a committed file:
