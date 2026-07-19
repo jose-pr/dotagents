@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   environment setup-script field becomes a one-liner
   (`curl -fsSL …/tools/cloud-setup.sh | sh`) that stays current on every container start.
   Docs (README, `kb/PRIVATE_SYNC.md`) updated to the download bootstrap.
+- fix: `tools/cloud-setup.sh` prints `starting`/`done` banners (so a setup-script log
+  proves whether it executed — a blank log means the field never invoked it, a config
+  issue) and `mkdir -p "$HOME"` before `git config --global` (which fails if HOME isn't
+  created yet in some setup contexts).
 
 ## [0.2.0] - 2026-07-19
 
