@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- feat: private-agents git sync — `dotagents link` symlinks a project's `.agents` to a
+  per-project store under the global `~/.agents/projects/<name>` (basename-keyed, so a
+  local and a cloud checkout converge on the same store), adopting an existing real
+  `.agents/` into an empty store on the first link; `--copy` mirrors it as a real dir
+  for no-symlink environments (with automatic fallback), `--force` handles conflicts.
+  `dotagents sync` runs `git pull --rebase`/commit/push on the private repo, copies a
+  copy-mode project's `.agents` back into its store first (`--project`), and bootstraps
+  a fresh repo in one command (`--remote`). Logic in `src/dotagents/_link.py`; the model
+  keeps per-user config and every project's private `.agents` in one private repo while
+  the public project repos track none of it (the Leakage rule already `.gitignore`s
+  `.agents/`).
+- feat: `overlays/private-sync/` overlay — `kb/PRIVATE_SYNC.md` (the model, commands,
+  first-time + cloud setup, auth, gotchas) plus `hooks/private-sync-{start,stop}.sh`
+  (SessionStart clone/pull + link, Stop sync-back) and a `settings.snippet.json` for
+  `~/.claude/settings.json`, so cloud sessions link and sync automatically.
 - feat: installable `dotagents` CLI package (`src/dotagents/`, built on `duho` for
   the argument surface and `pathlib_next` for copy/URI handling) exposing `init`
   (lay down the neutral base overlay), `install` (base plus opt-in overlays via
