@@ -41,7 +41,7 @@ them. Everything else is repo infrastructure.
 | `overlays/agents/` | Named-agent directives (`antigravity.md`) |
 | `overlays/private-sync/` | `kb/PRIVATE_SYNC.md` + cloud `hooks/` for the one-private-repo, per-project `.agents` model (`dotagents link`/`sync`) |
 | `overlays/tools/` | Helper tools you opt into: `summarize_run.py`, `compare_bench.py` |
-| `tools/` | Required tooling (not an overlay): `audit_config.py`, `leak_check.py` |
+| `tools/` | Required tooling (not an overlay): `audit_config.py`, `leak_check.py`, `cloud-setup.sh` |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
 | `AGENTS.md` | Directives for working *on this repo* |
 | `.agents/` | This config's own design log and plans — the "why" behind every rule |
@@ -123,10 +123,20 @@ dotagents sync --remote git@github.com:<you>/.agents.git -m init   # one-command
 ```
 
 In cloud sessions, the installed `~/.agents/hooks/private-sync-{start,stop}.sh` clone/pull
-the private repo and link/sync the project automatically — register them in
-`~/.claude/settings.json` (see `~/.agents/hooks/settings.snippet.json`) or your web
-environment's setup script. Auth for the clone comes from a `DOTAGENTS_AGENTS_REMOTE`
-env secret, never a committed file. Full walkthrough: `~/.agents/kb/PRIVATE_SYNC.md`.
+the private repo and link/sync the project per session — register them in
+`~/.claude/settings.json` (see `~/.agents/hooks/settings.snippet.json`). For a **fresh
+container** (no `~/.agents` yet), point the web environment's **setup-script** field at the
+self-contained bootstrap in this repo — it fetches the latest each start, so there's
+nothing to re-paste:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-setup.sh | sh
+```
+
+It authenticates (bypassing a hosted-runner `github.com`→proxy git rewrite), clones/pulls
+`~/.agents`, installs the CLI, and links the project — driven by `DOTAGENTS_AGENTS_REMOTE`
+/ `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL` env vars (token never committed). Full
+walkthrough: `~/.agents/kb/PRIVATE_SYNC.md`.
 
 ## Validate
 
