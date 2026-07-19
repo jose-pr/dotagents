@@ -27,14 +27,13 @@ dotagents_cmd() {
     fi
 }
 
-# If a token is provided, wire a credential helper that supplies it at auth
-# time from the environment. The helper string stored in ~/.gitconfig only
-# NAMES the env var -- the secret value never lands on disk. Tokenless remote
-# URLs (https://github.com/...) then authenticate without embedding the PAT.
-if [ -n "${DOTAGENTS_AGENTS_TOKEN:-}" ]; then
-    git config --global credential."https://github.com".helper \
-        '!f() { printf "username=x-access-token\npassword=%s\n" "$DOTAGENTS_AGENTS_TOKEN"; }; f'
-    git config --global credential."https://github.com".useHttpPath false
+# Wire git auth for the private repo (token credential helper; bypass a
+# github.com -> in-session-proxy rewrite when present). Sourced so its exports
+# reach this shell and the `dotagents` subprocesses below.
+_DG_AUTH="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)/_agents-git-auth.sh"
+if [ -f "$_DG_AUTH" ]; then
+    . "$_DG_AUTH"
+    _dotagents_git_auth
 fi
 
 # 1. Ensure the private repo is present and current.

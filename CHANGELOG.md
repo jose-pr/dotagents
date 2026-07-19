@@ -37,7 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - feat: `overlays/private-sync/` overlay — `kb/PRIVATE_SYNC.md` (the model, commands,
   first-time + cloud setup, auth, gotchas) plus `hooks/private-sync-{start,stop}.sh`
   (SessionStart clone/pull + link, Stop sync-back) and a `settings.snippet.json` for
-  `~/.claude/settings.json`, so cloud sessions link and sync automatically.
+  `~/.claude/settings.json`, so cloud sessions link and sync automatically. Cloud auth is
+  a fine-grained PAT via `DOTAGENTS_AGENTS_TOKEN`, wired through a git credential helper
+  that reads it from the environment (never persisted to `.git/config`);
+  `hooks/_agents-git-auth.sh` auto-detects a hosted-runner `github.com`→in-session-proxy
+  `insteadOf` rewrite and bypasses it (isolated git config) so token auth reaches the
+  real github.com for a private repo outside the session's scope.
 - feat: installable `dotagents` CLI package (`src/dotagents/`, built on `duho` for
   the argument surface and `pathlib_next` for copy/URI handling) exposing `init`
   (lay down the neutral base overlay), `install` (base plus opt-in overlays via
