@@ -33,5 +33,6 @@ breaking — a bare `LoggingArgs` command is no longer runnable — so the whole
 - Verify against the duho the project actually targets: a globally-installed newer/older
   duho can mask or fake failures. After the bump, the target IS the installed 0.3.3.
 - The repoint shim is a workaround for an upstream duho bug (`getclsdef` swallows the
-  `_module_index` `OSError` before its `inspect.getsource` fallback). Drop it if duho
-  fixes that; the CI smoke will catch a regression either way.
+  `_module_index` `OSError` before its `inspect.getsource` fallback), filed as
+  jose-pr/duho#1. Drop it (and the build-pyz CI guard) once that lands; the CI smoke
+  will catch a regression either way.

@@ -505,7 +505,11 @@ def _repoint_zipapp_sources() -> None:
     repoint `__file__` so the read succeeds. A no-op for a plain install, where
     `__file__` already exists on disk. Covers this package's command module and
     duho's `LoggingArgs` preset (the only field-bearing sources dispatched
-    here)."""
+    here).
+
+    Tracked upstream: jose-pr/duho#1 — drop this shim (and the build-pyz CI
+    guard) once duho's getclsdef falls through to inspect.getsource when
+    _module_index raises."""
     import importlib.resources as _ir
 
     for modname in ("dotagents.cli", "duho.presets"):
