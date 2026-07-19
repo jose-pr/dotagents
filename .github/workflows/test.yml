@@ -111,3 +111,14 @@ jobs:
           echo "edit" > "$proj/.agents/plans/local.md"
           python -m dotagents sync --project "$proj" --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "sync"
           test -f "$HOME/.agents/projects/$(basename "$proj")/plans/local.md"  # copied back
+      - name: Built .pyz keeps flags/help/positional under duho 0.3.x (zipapp shim)
+        run: |
+          export HOME="$(mktemp -d)"
+          python -m dotagents build-pyz --out dist/dotagents.pyz
+          # A declared flag must NOT degrade to a name-derived one (--from, not --from-).
+          python dist/dotagents.pyz init --help | grep -q -- "--from FROM"
+          ! python dist/dotagents.pyz init --help | grep -q -- "--from-"
+          # The `link` positional must be accepted (not "unrecognized arguments").
+          proj="$(mktemp -d)"; printf '.agents/\n' > "$proj/.gitignore"
+          python dist/dotagents.pyz link "$proj"
+          test -L "$proj/.agents"
