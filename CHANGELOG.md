@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- refactor: move the cloud bootstrap from `overlays/private-sync/hooks/cloud-setup.sh` to
+  top-level `tools/cloud-setup.sh` (public, required tooling) so a fresh cloud container
+  can fetch-and-run it from the public repo instead of pasting its contents — the web
+  environment setup-script field becomes a one-liner
+  (`curl -fsSL …/tools/cloud-setup.sh | sh`) that stays current on every container start.
+  Docs (README, `kb/PRIVATE_SYNC.md`) updated to the download bootstrap.
+
 ## [0.2.0] - 2026-07-19
 
 ### Changed

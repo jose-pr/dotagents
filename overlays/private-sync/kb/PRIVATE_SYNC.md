@@ -78,11 +78,18 @@ Wire them into your runner. For Claude Code, register them in **`~/.claude/setti
 
 **Fresh cloud containers (first clone).** The SessionStart hook lives at
 `~/.agents/hooks/…`, which doesn't exist until `~/.agents` is first cloned — so the
-initial clone can't come from the hook. Use `hooks/cloud-setup.sh`: a self-contained
-bootstrap (inlines its own token auth + rewrite bypass, so it runs before `~/.agents`
-exists) that clones-or-pulls the repo, installs the CLI, and links the project. Paste its
-contents into your web environment's **setup-script** field (it runs at container start).
-The per-session hooks then handle pulls and sync-back once `~/.agents` is present.
+initial clone can't come from the hook. Use `tools/cloud-setup.sh` from the **public**
+dotagents repo: a self-contained bootstrap (inlines its own token auth + rewrite bypass,
+so it runs before `~/.agents` exists) that clones-or-pulls the repo, installs the CLI, and
+links the project. Put a one-line fetch-and-run in your web environment's **setup-script**
+field so it stays current without re-pasting:
+
+```
+curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-setup.sh | sh
+```
+
+(Pin to a tag — `.../dotagents/v0.2.0/tools/cloud-setup.sh` — for reproducibility.) The
+per-session hooks then handle pulls and sync-back once `~/.agents` is present.
 
 Auth for the clone/push comes from the environment, never a committed file:
 

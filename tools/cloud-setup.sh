@@ -1,8 +1,14 @@
 #!/usr/bin/env sh
-# Self-contained cloud bootstrap for the private agents repo. Paste the CONTENTS
-# of this file into your Claude Code web environment's SETUP SCRIPT field (it
-# runs at container start, BEFORE ~/.agents exists -- so unlike the SessionStart
-# hook it inlines its own auth and can perform the very first clone).
+# Self-contained cloud bootstrap for the private agents repo. Lives in the PUBLIC
+# dotagents repo (tools/cloud-setup.sh) so a fresh container can fetch and run it
+# at start, staying current without re-pasting. Put this ONE line in your Claude
+# Code web environment's SETUP SCRIPT field:
+#
+#   curl -fsSL https://raw.githubusercontent.com/jose-pr/dotagents/main/tools/cloud-setup.sh | sh
+#
+# (Pin to a tag for reproducibility, e.g. .../dotagents/v0.2.0/tools/cloud-setup.sh.)
+# It runs at container start, BEFORE ~/.agents exists -- so unlike the SessionStart
+# hook it inlines its own auth and performs the very first clone.
 #
 # It: (1) authenticates with a token and bypasses a github.com -> in-session-proxy
 # rewrite when present, (2) clones or pulls the private repo into ~/.agents,
