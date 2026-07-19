@@ -42,7 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   that reads it from the environment (never persisted to `.git/config`);
   `hooks/_agents-git-auth.sh` auto-detects a hosted-runner `github.com`→in-session-proxy
   `insteadOf` rewrite and bypasses it (isolated git config) so token auth reaches the
-  real github.com for a private repo outside the session's scope.
+  real github.com for a private repo outside the session's scope. `hooks/cloud-setup.sh`
+  is a self-contained container-start bootstrap (inlines auth + bypass, so it runs before
+  `~/.agents` exists) that clones/pulls the repo, installs the CLI, and links the project
+  — for the web environment's setup-script field, solving the first-clone chicken-and-egg
+  the SessionStart hook can't.
 - feat: installable `dotagents` CLI package (`src/dotagents/`, built on `duho` for
   the argument surface and `pathlib_next` for copy/URI handling) exposing `init`
   (lay down the neutral base overlay), `install` (base plus opt-in overlays via
