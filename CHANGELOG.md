@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- feat: `tools/cloud-setup.sh` step 5 wires `hooks/settings.snippet.json` into the
+  user-level `~/.claude/settings.json` (idempotent JSON merge, preserves existing
+  settings/hooks). A fresh cloud container has no settings file and nothing else
+  created one, so the SessionStart pull/link and Stop sync-back hooks never ran —
+  the private repo went stale and session changes were silently never pushed back.
+  `kb/PRIVATE_SYNC.md` documents the auto-wiring (manual merge still applies on
+  local machines).
+
 ### Fixed
 
 - fix: `.gitignore` templates and `dotagents link` now use a slashless `.agents`
@@ -14,8 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   as a file, so the directory-only `.agents/` pattern never actually ignored it —
   the link showed up as untracked in every project. `_gitignore_excludes_agents`
   is now symlink-aware (a bare `.agents/` no longer counts as excluding a symlinked
-  link, so the WARN fires), and the reference template + REPO.md guidance recommend
-  `.agents`.
+  link, so the WARN fires), and the reference template, REPO.md guidance, and the
+  starter `_overlay/AGENTS.md` Leakage rule all recommend `.agents`.
 - docs: recommend `curl … -o file && sh file` over `curl … | sh` for the setup-script
   field (README, `kb/PRIVATE_SYNC.md`, `tools/cloud-setup.sh` header). With a pipe the
   field's exit code is `sh`'s (0 on empty stdin), so a failed fetch at container start
