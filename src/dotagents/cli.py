@@ -1,4 +1,4 @@
-"""dotagents CLI: init / install / build-pyz / audit subcommands."""
+"""dotagents CLI: init / install / link / sync / audit / build-pyz subcommands."""
 
 import importlib.resources
 import shutil
@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 import duho
-from duho import LoggingArgs
+from duho import Cli, Cmd, LoggingArgs
 
 from dotagents import __version__
 from dotagents._merge import merge_block, merge_claude_md, timestamped_backup_root
@@ -130,7 +130,7 @@ def _resolve_from(from_arg: "str | None", default: Path) -> Path:
     raise SystemExit("error: --from path does not exist: %s" % from_arg)
 
 
-class Init(LoggingArgs):
+class Init(LoggingArgs, Cmd):
     """Install the minimal neutral base overlay (never the full opinionated payload)."""
 
     _parsername_ = "init"
@@ -151,7 +151,7 @@ class Init(LoggingArgs):
     "Replace AGENTS.md/CLAUDE.md wholesale (with backup) instead of block-merging."
     ("--force",)
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         src = _resolve_from(self.from_, BASE_ROOT)
         dest = Path(self.dest).expanduser().resolve()
         _apply_base(Path(src), dest, self.force, self.dry_run, self._logger_)
@@ -160,7 +160,7 @@ class Init(LoggingArgs):
         return 0
 
 
-class Install(LoggingArgs):
+class Install(LoggingArgs, Cmd):
     """Install the base config, plus any opt-in overlays given with --overlays.
 
     The installer bundles only the neutral base overlay. Overlays beyond the
@@ -194,7 +194,7 @@ class Install(LoggingArgs):
     "Replace AGENTS.md/CLAUDE.md wholesale (with backup) instead of block-merging."
     ("--force",)
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         src = _resolve_from(self.from_, BASE_ROOT)
         dest = Path(self.dest).expanduser().resolve()
 
@@ -242,7 +242,7 @@ class Install(LoggingArgs):
         return 0
 
 
-class Link(LoggingArgs):
+class Link(LoggingArgs, Cmd):
     """Link a project's .agents into the private ~/.agents/projects/<name> store.
 
     Symlinks ``<project>/.agents`` to its per-project store inside the global
@@ -276,7 +276,7 @@ class Link(LoggingArgs):
     "Show what would happen without touching anything."
     ("--dry-run",)
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         from dotagents._link import link_project
 
         link_project(
@@ -288,7 +288,7 @@ class Link(LoggingArgs):
         return 0
 
 
-class Sync(LoggingArgs):
+class Sync(LoggingArgs, Cmd):
     """Sync the private ~/.agents repo: copy-back a copy-mode project, then git.
 
     Runs ``git pull --rebase`` / commit / push on the global agents repo. Pass
@@ -330,7 +330,7 @@ class Sync(LoggingArgs):
     "Show what would happen without touching anything."
     ("--dry-run",)
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         from dotagents._link import sync_agents
 
         return sync_agents(
@@ -340,7 +340,7 @@ class Sync(LoggingArgs):
         )
 
 
-class Audit(LoggingArgs):
+class Audit(LoggingArgs, Cmd):
     """Run the config auditor against a payload/install destination."""
 
     _parsername_ = "audit"
@@ -357,7 +357,7 @@ class Audit(LoggingArgs):
     "Also run --repo-hygiene against the given repo root."
     ("--repo-hygiene",)
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         auditor_path = Path(self.root) / "tools" / "audit_config.py"
         if not auditor_path.exists():
             # Fall back to the auditor bundled with this package (required
@@ -385,7 +385,7 @@ class Audit(LoggingArgs):
         return rc
 
 
-class BuildPyz(LoggingArgs):
+class BuildPyz(LoggingArgs, Cmd):
     """Vendor duho/pathlib_next via pip --target and package a self-contained dotagents.pyz."""
 
     _parsername_ = "build-pyz"
@@ -398,7 +398,7 @@ class BuildPyz(LoggingArgs):
     "Shebang line to embed in the pyz."
     ("--python",)
 
-    duho_version: str = "0.1.1"
+    duho_version: str = "0.3.3"
     "Pinned duho version to vendor."
     ("--duho-version",)
 
@@ -410,7 +410,7 @@ class BuildPyz(LoggingArgs):
     "Repo tools/ dir (required tooling) to bundle as _tools (default: autodetected)."
     ("--tools-dir",)
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         import zipapp
 
         repo_root = Path(__file__).resolve().parents[2]
@@ -479,20 +479,60 @@ class BuildPyz(LoggingArgs):
         return 0
 
 
-class Dotagents(LoggingArgs):
+class Dotagents(LoggingArgs, Cli):
     """Umbrella CLI for installing and building the dotagents config."""
 
     _version_ = __version__
     _subcommands_ = [Init, Install, Link, Sync, Audit, BuildPyz]
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         self._logger_.info(
             "pick a subcommand, e.g. `init`, `install`, `link`, `sync`, `audit`, `build-pyz`"
         )
         return 0
 
 
+def _repoint_zipapp_sources() -> None:
+    """Make duho's AST field-introspection work when running from a zipapp.
+
+    duho 0.3.3 discovers each command's flags + help by parsing its module
+    source (`_introspect.getclsdef` -> `Path(module.__file__).read_text()`).
+    Inside a `.pyz` the module `__file__` is a zip-internal path `read_text()`
+    can't open, and duho catches that `OSError` *before* its `inspect.getsource`
+    fallback -- so every field silently loses its declared flags and help (the
+    positional `path` degrades to `--path`, `--from` to `--from-`, help text
+    vanishes). Extract the affected module sources to real temp files and
+    repoint `__file__` so the read succeeds. A no-op for a plain install, where
+    `__file__` already exists on disk. Covers this package's command module and
+    duho's `LoggingArgs` preset (the only field-bearing sources dispatched
+    here)."""
+    import importlib.resources as _ir
+
+    for modname in ("dotagents.cli", "duho.presets"):
+        mod = sys.modules.get(modname)
+        if mod is None:
+            continue
+        current = getattr(mod, "__file__", None)
+        if current and Path(current).exists():
+            continue  # plain install: source already readable
+        top, _sep, rest = modname.partition(".")
+        rel = (rest.replace(".", "/") or "__init__") + ".py"
+        try:
+            resource = _ir.files(top).joinpath(rel)
+            if not resource.is_file():
+                continue
+            text = resource.read_text(encoding="utf-8")
+        except (FileNotFoundError, ModuleNotFoundError, OSError, TypeError):
+            continue
+        tmp = Path(tempfile.mkdtemp(prefix="dotagents-src-")) / (
+            modname.replace(".", "_") + ".py"
+        )
+        tmp.write_text(text, encoding="utf-8")
+        mod.__file__ = str(tmp)
+
+
 def main(argv=None) -> int:
+    _repoint_zipapp_sources()
     return duho.main(Dotagents, argv)
 
 
