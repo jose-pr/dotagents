@@ -16,6 +16,15 @@ Python-specific extras/overrides on top of the generic repo standard in
 - **Typing**: ship `src/<package_name>/py.typed` in the wheel. Hatchling includes it
   automatically for standard `src/` layouts; avoid explicit packages config — it can
   break editable metadata builds.
+- **Ship the consumer's docs in the package**: both `README.md` (`readme = "README.md"`
+  → long-description) and the root `AGENTS.md` (agent-facing library-interface doc, see
+  REPO.md) must land in the built sdist AND wheel. Hatchling puts `README.md` in the
+  sdist by default; to ship them as real files inside the installed package (so a
+  consuming agent can read them via `importlib.resources` from site-packages),
+  force-include into the wheel, e.g.
+  `[tool.hatch.build.targets.wheel.force-include]` with
+  `"AGENTS.md" = "<package_name>/AGENTS.md"` (and the same for `README.md` if you want it
+  importable-adjacent). Verify with `python -m build` + `unzip -l dist/*.whl`.
 - **Optional Dependencies**: zero *required* runtime deps where feasible. One extra
   per integration (`pkg[s3]`, never a catch-all bucket), guarded in code by
   `try/except ImportError` with a stdlib fallback or clearly degraded behavior —

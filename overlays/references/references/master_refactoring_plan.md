@@ -68,7 +68,7 @@ graph TD
   `ci-*` (must not overlap the `v*` release trigger). Add a `concurrency` group so
   superseded runs cancel.
 - Matrix: mirror `release.yaml`'s test job (OS × supported Python versions).
-- **Agent usage** (document in root `AGENTS.md`): push a throwaway tag
+- **Agent usage** (document in `.agents/AGENTS.md`): push a throwaway tag
   (`git tag ci-<topic> && git push origin ci-<topic>`, delete after), or
   `gh workflow run test.yaml --ref <branch>`. Check results via `gh run list`/`view`.
   * *Why*: lets an agent validate platform-specific code without dashboard access, and
@@ -113,8 +113,8 @@ graph TD
 
 - Fold `CHANGELOG.md`'s `[Unreleased]` section into the new `## [x.y.z] - <date>`
   heading (keep an empty `[Unreleased]` placeholder above it); bump `pyproject.toml`'s
-  `version` (PEP 440 syntax) in the same commit; update root `AGENTS.md`'s architecture
-  notes for anything the phases above changed.
+  `version` (PEP 440 syntax) in the same commit; update `.agents/AGENTS.md`'s
+  architecture notes for anything the phases above changed.
 - Explicitly record what's genuinely **unverified** at handoff (e.g. "the release
   workflow's end-to-end run has not been observed — only dry-run-able by pushing a real
   `v*` tag, which is off-limits during execution") instead of implying full coverage.
