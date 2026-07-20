@@ -99,6 +99,25 @@ jobs:
           # Bootstrap the private repo as git and commit the store.
           python -m dotagents sync --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "init"
           git -C "$HOME/.agents" ls-files | grep -q "projects/$(basename "$proj")/plans/seed.md"
+      - name: A .agents that is itself a git checkout is never adopted or copied back
+        run: |
+          export HOME="$(mktemp -d)"
+          git config --global user.email ci@example.invalid
+          git config --global user.name CI
+          python install.py install
+          proj="$(mktemp -d)"; printf '.agents\n' > "$proj/.gitignore"
+          git init -q "$proj/.agents"
+          echo "checkout" > "$proj/.agents/AGENTS.md"
+          git -C "$proj/.agents" add -A && git -C "$proj/.agents" commit -qm seed
+          python -m dotagents link "$proj" | grep -q "skip:"
+          test -d "$proj/.agents" && test ! -L "$proj/.agents"   # left in place, untouched
+          test ! -e "$HOME/.agents/projects/$(basename "$proj")/AGENTS.md"  # not adopted
+          python -m dotagents sync --project "$proj" --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "sync" | grep -q "skip copy-back"
+          test ! -e "$HOME/.agents/projects/$(basename "$proj")/AGENTS.md"  # not copied back
+          # --force backs the checkout up (git state intact) and links the store.
+          python -m dotagents link "$proj" --force
+          test -L "$proj/.agents"
+          test -d "$proj/.agents.bak/.git"
       - name: Copy-mode link + copy-back on sync (no-symlink fallback path)
         run: |
           export HOME="$(mktemp -d)"

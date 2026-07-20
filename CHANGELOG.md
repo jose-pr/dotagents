@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- fix: `dotagents link`/`sync` never adopt or copy back a `<project>/.agents` that is
+  itself a git checkout (`.git` present — dir, or file for worktrees). A hosted-runner
+  session that lists the agents repo as a *source* gets it cloned to
+  `<project>/.agents` by the harness; first-link adoption then moved that entire
+  checkout — `.git`, foreign proxy remote, session branch — into
+  `~/.agents/projects/<name>/`, nesting a repo inside the private repo, which a later
+  sync's `git add -A` would push as a bare gitlink (and `sync`'s copy-back had the same
+  swallow, with `overwrite=True`). Both paths now log a skip and leave the checkout in
+  place; `link --force` keeps an escape hatch that backs the checkout up to
+  `.agents.bak*` (git state intact) and links the store. See D43.
+
 - fix: `dotagents sync` now authenticates the private repo directly against github.com
   when `DOTAGENTS_AGENTS_TOKEN` is set — and on a hosted runner that rewrites github
   traffic to a scoped in-session proxy, bypasses the rewrite — so a **standalone**
