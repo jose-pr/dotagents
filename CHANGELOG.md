@@ -43,6 +43,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   still fails the script persists a copy of itself and wires a SessionStart **recovery
   hook** that re-runs the bootstrap next session (egress is up by then); the first
   successful run merges the private-sync hooks and removes the recovery hook. See D39.
+- fix: `tools/cloud-setup.sh` also wires that recovery hook when
+  `DOTAGENTS_AGENTS_REMOTE` is **unset at setup time**, not only on clone failure.
+  Hosted runners often expose the remote/token secrets to session processes but not
+  to the setup-script phase, so the first bootstrap had no remote to clone and its
+  no-remote branch just `exit 0`'d, leaving nothing to retry — the environment stayed
+  dead every session (observed: setup ran the correct one-liner and emitted only the
+  banner + `skipping` line, ~154 bytes, no clone). The branch now persists the recovery
+  hook like the exhausted-clone path, so the next session — where the secret is present
+  — clones and self-removes the hook. A genuinely remote-less environment just re-skips
+  each session (idempotent; the hook never duplicates). See D42. (Durable fix is still
+  to expose the secrets to the Setup Script phase so the first container succeeds.)
 - fix: `.gitignore` templates and `dotagents link` now use a slashless `.agents`
   instead of `.agents/`. `link` creates `.agents` as a *symlink*, which git treats
   as a file, so the directory-only `.agents/` pattern never actually ignored it —
