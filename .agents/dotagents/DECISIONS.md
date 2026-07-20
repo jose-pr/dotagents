@@ -59,3 +59,4 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 - [D40](decisions/D40.md) — dotagents sync authenticates the private repo itself (token + github→proxy-rewrite bypass), so a standalone CLI sync works without the private-sync Stop hook
 - [D41](decisions/D41.md) — leak_check scans commit messages for agent-session trailers/URLs (Claude-Session:, claude.ai/code/session), not just tracked files, so a harness-added session id can't reach public history unnoticed
 - [D42](decisions/D42.md) — cloud-setup wires the recovery hook on the no-remote-at-setup branch too (not just clone failure), so a secret absent from the setup-script phase but present in-session heals next session
+- [D43](decisions/D43.md) — link/sync never adopt or copy back a `<project>/.agents` that is itself a git checkout (e.g. a hosted-runner session-source clone), so the store can't swallow a foreign repo; `--force` backs it up and links the store

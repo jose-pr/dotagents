@@ -142,7 +142,9 @@ def link_project(
     An existing real ``.agents/`` is *adopted* into an empty store on first link
     (its content moves into the private repo, then the link replaces it). A
     conflict (both the project's ``.agents`` and the store carry real content)
-    needs ``--force`` (which backs the project copy up and keeps the store)."""
+    needs ``--force`` (which backs the project copy up and keeps the store).
+    A ``.agents`` that is itself a git checkout is never adopted -- it is left
+    in place untouched (``--force`` backs it up and links the store instead)."""
     log = _Log(logger)
     project_dir = Path(project_dir).expanduser().resolve()
     agents_dir = Path(agents_dir).expanduser().resolve()
@@ -162,8 +164,30 @@ def link_project(
         _warn_gitignore(project_dir, log)
         return name
 
+    # A .agents that is itself a git checkout (`.git` is a dir, or a file for
+    # worktrees) is managed by something else -- e.g. a hosted-runner session
+    # that lists the agents repo as a source and clones it to <project>/.agents.
+    # Adopting it would move the whole checkout (.git, foreign remote, branch
+    # state) into the store, nesting a repo inside the private repo; a later
+    # sync's `git add` would then record it as a bare gitlink. Leave it alone.
+    if not target_is_link and target.is_dir() and (target / ".git").exists():
+        if not force:
+            log(
+                "skip: %s/.agents is itself a git checkout; leaving it in place "
+                "(re-run with --force to back it up and link the store)",
+                project_dir.name,
+            )
+            _warn_gitignore(project_dir, log)
+            return name
+        backup = _next_backup(project_dir)
+        log("force: backing up git checkout %s/.agents -> %s",
+            project_dir.name, backup.name)
+        if not dry_run:
+            shutil.move(str(target), str(backup))
+        target_is_link = False
+
     # A real .agents dir: adopt into an empty store, or flag a conflict.
-    if not target_is_link and target.is_dir():
+    elif not target_is_link and target.is_dir():
         target_has = any(p.is_file() for p in target.rglob("*"))
         if not _store_has_real_content(store):
             if target_has:
@@ -370,11 +394,21 @@ def sync_agents(
         project_dir = Path(project_dir).expanduser().resolve()
         target = project_dir / ".agents"
         if target.is_dir() and not os.path.islink(str(target)):
-            store = project_store(agents_dir, resolve_name(project_dir, name))
-            log("copy-back: %s/.agents -> %s", project_dir.name, store)
-            if not dry_run:
-                store.mkdir(parents=True, exist_ok=True)
-                _copy_tree(target, store, overwrite=True)
+            if (target / ".git").exists():
+                # Same guard as link_project's adoption: a git checkout at
+                # <project>/.agents belongs to something else; copying it back
+                # would swallow it (and its .git) into the store.
+                log(
+                    "skip copy-back: %s/.agents is itself a git checkout; not "
+                    "copying it into the store",
+                    project_dir.name,
+                )
+            else:
+                store = project_store(agents_dir, resolve_name(project_dir, name))
+                log("copy-back: %s/.agents -> %s", project_dir.name, store)
+                if not dry_run:
+                    store.mkdir(parents=True, exist_ok=True)
+                    _copy_tree(target, store, overwrite=True)
 
     is_git = (agents_dir / ".git").exists()
     if not is_git:
