@@ -53,3 +53,6 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 - [D34](decisions/D34.md) — Python version policy (run latest, test floor) + venv naming .venv/<ver>-<os>-<arch> + Python Manager, avoid Store Python
 - [D35](decisions/D35.md) — payload/ decomposed into base overlay + opt-in overlays/<name>/; required tooling at top-level tools/ (supersedes D24)
 - [D36](decisions/D36.md) — installer is overlay-agnostic: init=base, install=base + copy-only --overlays <path>; overlay mgmt deferred to a future subcommand
+- [D37](decisions/D37.md) — plans use named role/subrole executor routing with host-native providers; raw model IDs stay in MODELS.md
+- [D38](decisions/D38.md) — the calling agent chooses the host-native provider lane; cross-provider fallbacks require explicit permission
+- [D39](decisions/D39.md) — OpenAI role defaults use Luna for scoped implementation, Terra for broad exploration, and Sol for high-blast-radius work
