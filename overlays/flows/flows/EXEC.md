@@ -1,76 +1,46 @@
 # Flow: Plan Execution
 
-You are executing a plan from `.agents/plans/`. Follow it precisely — don't re-plan,
-don't second-guess recorded decisions. Only execute plans with `Status: ready` or
-`executing` (set `executing` when you start); anything else, report and stop.
+Execute only plans with `Status: ready` or `executing`; set `executing` at start.
+Do not re-plan, second-guess recorded decisions, or silently downgrade required work.
 
-## Before you start — load these, nothing more
-1. `~/.agents/kb/<LANG>.md` for the project's language, if it exists (your kickoff
-   prompt names it) — it holds environment conventions (venv layout, which
-   executables to use, install forms) that OVERRIDE generic habits like bare
-   `python`/`pip`.
-2. The project's local knowledge — read BOTH, skipping one only if already
-   auto-loaded: the **user-managed** `.agents/AGENTS.md` (user directives — wins on
-   conflict; never write it unless explicitly told) and the **agent-maintained**
-   root `AGENTS.md` (notes/gotchas from previous executions — this is where you
-   write yours back; Collateral, below). When a phase's work concentrates under a
-   subdirectory, also check the dirs between root and it for scoped `AGENTS.md`
-   files — deeper extends/overrides broader for its subtree; a subtree-specific
-   gotcha goes to that subtree's `AGENTS.md` if one exists, else root's. Follow root
-   `AGENTS.md` routing lines into `<project>/.agents/{kb,flows,references}/` only
-   when they match the task.
-3. The plan itself, in full — Known Facts before Phases. For a sub-plan: read the
-   parent first (shared facts, phase order, status table), then your assigned
-   sub-plan only — never siblings unless named as a prereq. Update both parent and
-   sub-plan when a phase's status changes.
+## Load Once
 
-Other global files (`flows/REPO.md`, `references/` templates) only if the plan
-explicitly points at them.
+1. Read `~/.agents/MODELS.md`; resolve the exact `Executor: family/subrole` using
+   the calling host's native lane (Codex/OpenAI, Claude/Anthropic, Gemini/Google).
+   Verify callability, apply settings, and record host/provider/model before edits.
+   A permitted fallback and its settings are a recorded deviation.
+2. Read the matching `~/.agents/kb/<LANG>.md`, if present; its environment commands
+   override generic habits.
+3. Read the project's user-managed `.agents/AGENTS.md`, agent-maintained root
+   `AGENTS.md`, and intervening subtree files; deeper scope wins. Follow matching
+   routing lines only.
+4. Read the plan in full. For a sub-plan, read its parent first and the assigned
+   sub-plan only; update both when phase status changes.
 
-## Progress tracking — live, never batched
-- `## Progress` at the top: `[x]` done, `[/]` in progress, `[ ]` pending, `[!]` blocked.
-- Set a phase to `[/]` BEFORE you start writing its code — not only after — so an
-  interrupted run still shows where it was. Update to `[x]` IMMEDIATELY when the item
-  finishes, with a brief inline outcome ("done", "skipped — N/A", "deviation: used X
-  not Y because Z"). Never batch progress updates to the end of the run: the plan file
-  is the only way a checker or the next executor knows real state without diffing code.
-- **Blockers**: mark `[!]` with a one-line reason, then continue with items that don't
-  depend on it. Stop only when nothing executable remains. Never ask the user.
-- Never downgrade a required plan item into an "optional enhancement" — if it isn't
-  done, it stays `[ ]` or `[!]`.
-- Record deviations and key decisions in Progress so the next executor resumes without
-  needing any conversation history.
+## Progress
 
-## Collateral — before a phase counts as done
-Update alongside the code, in the same commit set: `CHANGELOG.md` (`[Unreleased]`),
-`README.md`, the project's root `AGENTS.md` (architecture notes + any gotchas/bugs
-discovered — mandatory), `tests/`, `examples/`. Root `AGENTS.md` stays lean: a
-topical note that outgrows a few lines moves to `<project>/.agents/kb/<topic>.md`
-with a one-line routing entry left in root `AGENTS.md`.
+Use `[ ]` pending, `[/]` active, `[x]` done, `[!]` blocked. Mark a phase `[/]` before
+writing code and `[x]` immediately after it finishes with a short outcome. Blockers
+keep their reason; continue independent items and never ask the user. Record key
+decisions and deviations in Progress.
+
+## Collateral
+
+Before a phase counts as done, update the same commit set as applicable: changelog,
+README, root or subtree `AGENTS.md` notes, tests, and examples. Keep AGENTS notes
+lean; move topical detail to `.agents/{kb,flows,references}/` with a routing line.
 
 ## Verification
-Run the plan's literal commands and its observable done-when checks; record actual
-results in Progress. Failing checks stay `[/]`/`[!]` with the output noted — never
-`[x]` on hope. Checklist:
-- **Environment failure** (ImportError, missing tool) = the plan omitted a setup
-  command → `[!]` + the exact failing command; never improvise installs.
-- **Attempt, don't defer**: a `[!]` on verification cites an actual failed command,
-  not "not yet run".
-- **Skipped ≠ passed**: report skip counts (`pytest -rs`) and confirm the targeted
-  tests actually ran.
-- **Performance claims**: recorded baseline + final numbers, never intuition.
-- **Wording**: unrun verification = "implemented, unverified" — never "complete";
-  no `[x]`/✅ on a test item that wasn't executed.
+
+Run literal plan commands and done-when checks; record actual results. Missing tools
+or imports mean `[!]` and the exact failed command, never an improvised install.
+Skipped tests are not passed: report skip counts and confirm targeted tests ran.
+Performance claims require baseline and final evidence; unrun checks are
+“implemented, unverified”, never complete.
 
 ## Handoff
-Before you stop, reconcile: `## Progress` MUST match the working tree. If code for a
-phase exists, that phase is `[x]`/`[/]`/`[!]` — never still `[ ]`. Don't leave real
-work uncommitted with the boxes reporting "not started"; commit it (Collateral in the
-same set) or, if you must stop mid-phase, mark `[/]` with "uncommitted: <files>". A
-checker should never have to diff code to learn what you did.
 
-When every item is `[x]` or `[!]`-with-reason: state explicitly what remains
-unverified; report changed files, verification evidence, and any dirty working tree;
-set `Status: done` and move the plan to `.agents/plans/completed/` (preserving any
-sub-plan folder) only if nothing is `[!]` — otherwise leave it in place with the
-blocker report at the top of Progress.
+Reconcile Progress with the working tree. Existing code cannot remain `[ ]`; mark it
+done, active with `uncommitted: <files>`, or blocked. Report changed files, evidence,
+unverified items, dirty state, and resolved provider/model/settings. Set `Status: done`
+and move the plan to `.agents/plans/completed/` only when no blocker remains.
