@@ -56,3 +56,4 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 - [D37](decisions/D37.md) — plans use named role/subrole executor routing with host-native providers; raw model IDs stay in MODELS.md
 - [D38](decisions/D38.md) — the calling agent chooses the host-native provider lane; cross-provider fallbacks require explicit permission
 - [D39](decisions/D39.md) — OpenAI role defaults use Luna for scoped implementation, Terra for broad exploration, and Sol for high-blast-radius work
+- [D40](decisions/D40.md) — root AGENTS.md is the committed public library-interface doc (public API/args/gotchas, ships in the package); private working notes move under .agents/; .gitignore no longer excludes AGENTS.md

@@ -1,5 +1,6 @@
-# Agent/harness tooling (always excluded — see ~/.agents/flows/REPO.md)
-AGENTS.md
+# Private agent config (always excluded — see ~/.agents/flows/REPO.md).
+# Root AGENTS.md is NOT excluded: it is the committed, package-shipped public
+# library-interface doc for consuming agents.
 .agents/
 CLAUDE*
 .claude

@@ -11,9 +11,10 @@ Do not re-plan, second-guess recorded decisions, or silently downgrade required 
    A permitted fallback and its settings are a recorded deviation.
 2. Read the matching `~/.agents/kb/<LANG>.md`, if present; its environment commands
    override generic habits.
-3. Read the project's user-managed `.agents/AGENTS.md`, agent-maintained root
-   `AGENTS.md`, and intervening subtree files; deeper scope wins. Follow matching
-   routing lines only.
+3. Read the project's working knowledge — `.agents/AGENTS.md` (repo-root and any
+   intervening subtree `.agents/AGENTS.md`; deeper scope wins). A repo's root
+   `AGENTS.md` is the committed public library-interface doc, not working notes —
+   read it only when consuming this library. Follow matching routing lines only.
 4. Read the plan in full. For a sub-plan, read its parent first and the assigned
    sub-plan only; update both when phase status changes.
 
@@ -27,8 +28,10 @@ decisions and deviations in Progress.
 ## Collateral
 
 Before a phase counts as done, update the same commit set as applicable: changelog,
-README, root or subtree `AGENTS.md` notes, tests, and examples. Keep AGENTS notes
-lean; move topical detail to `.agents/{kb,flows,references}/` with a routing line.
+README, `.agents/AGENTS.md` working notes (repo-root or subtree), tests, and examples.
+Keep those notes lean; move topical detail to `.agents/{kb,flows,references}/` with a
+routing line. If the change alters the library's public API, also update the committed
+root `AGENTS.md` interface doc in the same commit.
 
 ## Verification
 
