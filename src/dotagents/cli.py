@@ -151,7 +151,7 @@ class Init(LoggingArgs):
     "Replace AGENTS.md/CLAUDE.md wholesale (with backup) instead of block-merging."
     ("--force",)
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         src = _resolve_from(self.from_, BASE_ROOT)
         dest = Path(self.dest).expanduser().resolve()
         _apply_base(Path(src), dest, self.force, self.dry_run, self._logger_)
@@ -194,7 +194,7 @@ class Install(LoggingArgs):
     "Replace AGENTS.md/CLAUDE.md wholesale (with backup) instead of block-merging."
     ("--force",)
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         src = _resolve_from(self.from_, BASE_ROOT)
         dest = Path(self.dest).expanduser().resolve()
 
@@ -259,7 +259,7 @@ class Audit(LoggingArgs):
     "Also run --repo-hygiene against the given repo root."
     ("--repo-hygiene",)
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         auditor_path = Path(self.root) / "tools" / "audit_config.py"
         if not auditor_path.exists():
             # Fall back to the auditor bundled with this package (required
@@ -312,7 +312,7 @@ class BuildPyz(LoggingArgs):
     "Repo tools/ dir (required tooling) to bundle as _tools (default: autodetected)."
     ("--tools-dir",)
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         import zipapp
 
         repo_root = Path(__file__).resolve().parents[2]
@@ -387,7 +387,7 @@ class Dotagents(LoggingArgs):
     _version_ = __version__
     _subcommands_ = [Init, Install, Audit, BuildPyz]
 
-    def __run__(self) -> int:
+    def __call__(self) -> int:
         self._logger_.info("pick a subcommand, e.g. `init`, `install`, `audit`, `build-pyz`")
         return 0
 
