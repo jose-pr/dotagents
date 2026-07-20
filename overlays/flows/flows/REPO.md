@@ -53,13 +53,15 @@ never require cutting a release.
   inside the built package (sdist + wheel). `.gitignore` always excludes private agent
   artifacts (`.agents/`, `CLAUDE*`, `.claude`) plus the language's build/dependency
   output — but NOT root `AGENTS.md` (a committed public doc, below).
-- `AGENTS.md` (repo root, committed + package-shipped): the agent-facing **library
-  interface doc** — a concise, header-file-style description of how to *use* the library
-  so a consuming agent needs no source dive: public exports/API each with its
-  signature/accepted args/defaults/required, return-or-contract, key env vars, and
-  gotchas. Keep it current with the public API (a public-API change updates it in the
-  same commit). Distinct from the private `.agents/AGENTS.md` working notes; ship it in
-  the package alongside `README.md`.
+- `AGENTS.md` — committed public agent docs, never gitignored (see core `AGENTS.md`):
+  - **repo root `AGENTS.md`**: a dev-facing project overview — what it is, code layout,
+    entry points, how to build/develop/use at a high level; links to the module headers.
+  - **`src/**/AGENTS.md`**: one "header" file per source module/package dir, colocated
+    with the code — that module's public API header-file-style (exports with
+    signatures/accepted args/defaults/required, return-or-contract, env vars, gotchas)
+    so a consuming agent uses it without a source dive; keep current with the public API
+    (same commit). Ship these plus `README.md` inside the built package. Distinct from
+    the private `.agents/AGENTS.md` working notes.
 - `CHANGELOG.md`: Keep a Changelog format (`references/CHANGELOG.md`) — `[Unreleased]`
   always at top, one `## [x.y.z] - <date>` heading per release. Before release, run
   `py -3.12 ~/.agents/tools/leak_check.py <repo>` — it scans tracked files for
