@@ -58,3 +58,4 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 - [D39](decisions/D39.md) — cloud-setup self-heals the container-start clone (retry/backoff + persisted SessionStart recovery hook) so one early egress-race failure can't permanently disable the environment
 - [D40](decisions/D40.md) — dotagents sync authenticates the private repo itself (token + github→proxy-rewrite bypass), so a standalone CLI sync works without the private-sync Stop hook
 - [D41](decisions/D41.md) — leak_check scans commit messages for agent-session trailers/URLs (Claude-Session:, claude.ai/code/session), not just tracked files, so a harness-added session id can't reach public history unnoticed
+- [D42](decisions/D42.md) — cloud-setup wires the recovery hook on the no-remote-at-setup branch too (not just clone failure), so a secret absent from the setup-script phase but present in-session heals next session

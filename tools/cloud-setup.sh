@@ -28,7 +28,10 @@
 # that re-runs it next session -- when egress is up, the clone (and steps 3-5)
 # succeed, and that same run removes the recovery hook. Without (b) the private-sync
 # hooks -- which can themselves re-clone -- would never get registered, since step 5
-# is what registers them.
+# is what registers them. (b) also fires when DOTAGENTS_AGENTS_REMOTE is unset at
+# setup time: hosted runners often expose secrets to the session but not to the
+# setup-script phase, so the very first bootstrap has no remote to clone -- the
+# recovery hook retries next session, where the secret is present, and heals it.
 #
 # Env (set as secrets/vars in the web UI):
 #   DOTAGENTS_AGENTS_REMOTE  tokenless https URL of your private repo, e.g.
@@ -186,7 +189,14 @@ elif [ -n "${DOTAGENTS_AGENTS_REMOTE:-}" ]; then
         sleep "$_dg_wait"
     done
 else
-    echo "dotagents: set DOTAGENTS_AGENTS_REMOTE to clone the private repo; skipping"
+    # No remote at setup time. On a hosted runner this is usually not "never
+    # configured" but the secret not being injected into the setup-script phase
+    # (it is present in-session) -- so treat it like an exhausted clone: wire the
+    # recovery hook and retry next session, when the secret is available. A run
+    # that genuinely has no remote just re-skips next session (~100ms, idempotent);
+    # the first session that sees it clones and drops the hook in step 5.
+    echo "dotagents: DOTAGENTS_AGENTS_REMOTE unset at setup time (secret not injected into the setup phase?)"
+    _dg_install_recovery_hook
     exit 0
 fi
 
