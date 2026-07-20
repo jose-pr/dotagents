@@ -12,18 +12,23 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
   file (the library interface doc, below).
 - **Permissions**: full read/write/create/delete on any `.agents/` directory (plans,
   notes, the working `AGENTS.md`) and any root `AGENTS.md` — never ask.
-- **Two kinds of `AGENTS.md`** (do not conflate):
+- **`AGENTS.md` has three roles, by location** (do not conflate). Only `.agents/`
+  (+ `CLAUDE*`/`.claude`) is gitignored — every OTHER `AGENTS.md` is committed:
   - **`<project>/.agents/AGENTS.md`** — PRIVATE working knowledge for an agent working
-    *on* this repo: architecture notes, gotchas, per-directory guidance. Repo-root's
-    `.agents/AGENTS.md` for project-wide, a subfolder's for subtree-specific (deeper
-    extends/overrides broader for its subtree). Agents write it; the user edits it too
-    and their directives win on conflict. Keep it lean; topical detail goes in
-    `<project>/.agents/{kb,flows,references}/` behind routing lines. Gitignored.
-  - **`<project>/AGENTS.md`** (repo root) — a COMMITTED, package-shipped, agent-facing
-    description of how to *use* the library: public API, accepted args, return/contract,
-    and gotchas — header-file-style, so a consuming agent understands it without reading
-    the source. Shape/standard in `flows/REPO.md`. (This global `~/.agents/AGENTS.md`
-    is neither — it's the global directives.)
+    *on* this repo (architecture notes, gotchas, per-directory guidance). Repo-root or
+    subtree `.agents/AGENTS.md`, deeper extends/overrides broader. Agents write it; the
+    user edits it and wins on conflict. Keep lean; detail in
+    `<project>/.agents/{kb,flows,references}/`. Gitignored.
+  - **`<project>/AGENTS.md`** (repo root) — a COMMITTED, public **dev-facing overview**:
+    what the project is, how the code is organized, entry points, how to build/develop/
+    use it at a high level; points at the per-module headers below.
+  - **`<project>/src/**/AGENTS.md`** — COMMITTED, package-shipped **"header" files**:
+    one per source module/package dir, colocated with the code, describing THAT module's
+    public API header-file-style (exports with signatures/accepted args/defaults/
+    required, return-or-contract, env vars, gotchas) so a consuming agent uses it
+    without reading the source. Kept current with the public API (same commit).
+  (This global `~/.agents/AGENTS.md` is none of these — it's the global directives.)
+  Shape/standards in `flows/REPO.md`.
 - **Plans**: ALWAYS under the project the plan is about:
   `<project>/.agents/plans/<name>.md`, descriptive snake_case names; sub-plans at
   `.../<name>/<sub>.md`. Finished plans move to `<project>/.agents/plans/completed/`
