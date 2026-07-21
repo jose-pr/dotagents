@@ -1,9 +1,13 @@
 # Engineering discipline — always-on rules (opt-in)
 
-Paste these into your `~/.agents/AGENTS.md` under `## Always-on rules`. They are
-**opinions**, not mechanisms: nothing in the `dotagents` CLI depends on them, which
-is why they live here rather than in the neutral base overlay. Each one exists
-because its absence cost something real (see the D-numbers in `design/`).
+`install --overlays <this>` merges the bullets below into your
+`~/.agents/AGENTS.md` under `## Always-on rules` (declared by this overlay's
+`rules` key). They are **opinions**, not mechanisms: nothing in the `dotagents`
+CLI depends on them, which is why they live here rather than in the neutral base
+overlay. Each one exists because its absence cost something real (see the
+D-numbers in `design/`).
+
+Everything from the first `## ` heading down is documentation, not merged.
 
 - **`<project>/.agents/` is private and never committed**: it is the working area for
   an agent working *on* this repo. Keep it out of the project's history — a slashless
