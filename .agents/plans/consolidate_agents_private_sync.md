@@ -1,6 +1,6 @@
 # Consolidate ~/.agents onto the private .agents repo
 
-Status: draft
+Status: executing
 Executor: code-executor/implemented — multi-repo git surgery with a destructive
 final step; needs judgment on conflict resolution, not mechanical edits.
 
@@ -277,9 +277,9 @@ config-wording facts). New decisions continue at **D49+**.
 
 ## Progress
 
-- [ ] Phase 1 — reconcile the `devel/dotagents` git divergence
-- [ ] Phase 2 — always-on secret-printing guard (D48)
-- [ ] Phase 3 — verify the public repo (3 audits + CLI smoke)
+- [x] Phase 1 — reconcile the `devel/dotagents` git divergence
+- [x] Phase 2 — always-on secret-printing guard (D48)
+- [x] Phase 3 — verify the public repo (3 audits + CLI smoke)
 - [ ] Phase 4 — merge content into the private `.agents` repo
 - [ ] Phase 5 — cut `~/.agents` over to the clone **(destructive; user-gated)**
 - [ ] Phase 6 — prove the cross-device loop
