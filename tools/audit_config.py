@@ -16,6 +16,7 @@ Size budgets only warn. Scope is a closed manifest -- never a tree walk (the tre
 also holds harness state, backups, and private plans that legitimately contain
 the forbidden strings).
 """
+import re
 import sys
 from pathlib import Path
 
@@ -62,22 +63,47 @@ EXAMPLES = [
 ]
 
 BASE_PATTERNS = ["file:///" + "~"]
-REF_PATTERNS = BASE_PATTERNS + ["pathlib" + "_next", "C:\\" + "Users", "jo" + "se"]
-# Concatenated so this file never matches itself.
-# Public PyPI package names are NOT personal leftovers — they may appear in tracked
-# docs/logs by name. Only truly private markers stay below: user accounts, machine
-# paths, and un-published project names. (pathlib_next, duho, yaconfiglib, pydhcp are
-# published — deliberately omitted.) Concatenated so this file never matches itself.
-PERSONAL_PATTERNS = ["C:\\" + "Users", "C:/" + "Users", "~/" + "devel/",
-                     "jo" + "se", "ala" + "can",
-                     "proxy" + "lib", "pytrue" + "nas"]
 
-# Public identities that legitimately appear in tracked files (the published GitHub
-# org the packages ship under). Neutralized before pattern matching so e.g. the
-# `github.com/<org>` URL in pyproject.toml doesn't trip the bare-username pattern,
-# while a real leak like a Windows user-profile path still matches. Concatenated so this
-# file never matches itself.
-PUBLIC_ALLOWLIST = ["jo" + "se-pr"]
+# Machine-path patterns are universal; who you are is not. Personal markers
+# (usernames, real names, un-published project names) belong to the person
+# running this, not to a public repo's tooling -- so they load from
+# `~/.agents/audit_patterns.local.json` (override with $DOTAGENTS_AUDIT_PATTERNS),
+# which `*.local.*` already keeps out of every repo.
+#
+# Shape -- every key optional, each a list of strings:
+#   {"personal": ["..."], "public_allowlist": ["..."], "refs": ["..."]}
+#
+# `public_allowlist` entries are blanked before matching, so a published org name
+# in a URL does not trip a bare-username pattern while a real user-profile path
+# still does. Published package names are NOT personal leftovers and must not be
+# listed -- they legitimately appear in tracked docs.
+# Deliberately NOT "/home/": generic docs legitimately use `/home/user/...` as an
+# example path, so it flags prose rather than leaks.
+_DEFAULT_PERSONAL = ["C:\\" + "Users", "C:/" + "Users", "~/" + "devel/"]
+
+
+def _load_local_patterns():
+    """Read the machine-local pattern file, if any. Never fails the run."""
+    import json
+    import os
+
+    raw = os.environ.get("DOTAGENTS_AUDIT_PATTERNS")
+    path = Path(raw) if raw else Path.home() / ".agents" / "audit_patterns.local.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as exc:
+        sys.stderr.write("warning: could not read %s (%s); "
+                         "using built-in patterns only\n" % (path, exc))
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+_LOCAL = _load_local_patterns()
+PERSONAL_PATTERNS = _DEFAULT_PERSONAL + list(_LOCAL.get("personal", []))
+PUBLIC_ALLOWLIST = list(_LOCAL.get("public_allowlist", []))
+REF_PATTERNS = BASE_PATTERNS + _DEFAULT_PERSONAL + list(_LOCAL.get("refs", []))
 
 BUDGETS = {"src/dotagents/_overlay/AGENTS.md": 2500,
            "overlays/flows/flows/PLAN.md": 3000, "overlays/flows/flows/EXEC.md": 3000,
@@ -112,6 +138,31 @@ def audit(root, probe=None):
         if BUDGETS.get(rel) and size > BUDGETS[rel]:
             print("WARN: %s is %dB (budget %dB)" % (rel, size, BUDGETS[rel]))
     print("\n".join(table))
+    failures += _check_overlay_manifests(root)
+    return failures
+
+
+def _check_overlay_manifests(root):
+    """Every `rules` path in an overlay.toml must exist.
+
+    A typo there silently drops an always-on rule from every install -- the exact
+    failure that let three rules live only in the install target and nowhere in
+    source. Cheap to catch here, invisible otherwise."""
+    failures = []
+    overlays = root / "overlays"
+    if not overlays.is_dir():
+        return failures
+    for manifest in sorted(overlays.glob("*/overlay.toml")):
+        text = manifest.read_text(encoding="utf-8", errors="replace")
+        block = re.search(r"(?ms)^rules\s*=\s*\[(.*?)\]", text)
+        if not block:
+            continue
+        for rel in re.findall(r'"([^"\n]+)"', block.group(1)):
+            if not (manifest.parent / rel).is_file():
+                failures.append(
+                    "MISSING rules file %r declared by %s"
+                    % (rel, manifest.relative_to(root).as_posix())
+                )
     return failures
 
 
