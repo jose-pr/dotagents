@@ -4,15 +4,15 @@
 Startup: annotate that you read `~/.agents/AGENTS.md`.
 
 ## Always-on rules
-- **Permissions**: read any `AGENTS.md`; full read/write/create/delete on any
-  `.agents/` directory — never ask.
+- **Permissions**: read any `AGENTS.md`; full read/write/create/delete inside this
+  config directory (`~/.agents` unless installed elsewhere) — never ask.
 - **Read the local `AGENTS.md`**: before working in a directory, read the ones
-  governing it — at each level from this global file down to that directory, any of
-  `AGENTS.md`, `AGENTS.local.md`, `.agents/AGENTS.md`, `.agents/AGENTS.local.md`.
-  Deeper extends/overrides broader, and `.local` wins at its own level: it is the
-  unshared override (machine- or user-specific — either way, never committed or copied
-  into a repo, plan, or shared config). These files say what lives there and how to
-  work in it, so reading them first is cheaper than rediscovering it from the source.
+  governing it — at each level from this global file down to that directory, both
+  `AGENTS.md` and `AGENTS.local.md`. Deeper extends/overrides broader, and `.local`
+  wins at its own level: it is the unshared override (machine- or user-specific —
+  either way, never committed or copied into a repo, plan, or shared config). These
+  files say what lives there and how to work in it, so reading them first is cheaper
+  than rediscovering it from the source.
 - **Global-config misses**: if these instructions caused a mistake or rework, or you
   have an improvement idea, drop a note in `~/.agents/dotagents/findings/` and move on
   — don't edit the config. Triage later folds them into `.../dotagents/DECISIONS.md`

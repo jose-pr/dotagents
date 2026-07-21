@@ -5,6 +5,10 @@ Paste these into your `~/.agents/AGENTS.md` under `## Always-on rules`. They are
 is why they live here rather than in the neutral base overlay. Each one exists
 because its absence cost something real (see the D-numbers in `design/`).
 
+- **`<project>/.agents/` is the private working area**: full read/write/create/delete
+  there — never ask. `dotagents link` symlinks it to the per-project store; the
+  `AGENTS.md` lookup extends to `.agents/AGENTS.md` and `.agents/AGENTS.local.md` at
+  each level, which win over the plain files beside them.
 - **`AGENTS.md`, two kinds** — no repo-root one:
   - **`<project>/src/**/AGENTS.md`** — COMMITTED, package-shipped "header" per module
     dir: that module's public API header-file-style (exports with signatures/args/
