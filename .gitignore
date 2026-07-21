@@ -1,5 +1,11 @@
-# Unlike other repos, this one intentionally tracks .agents/ (sanitized design
-# log + plans) — see AGENTS.md. Local-only harness artifacts stay ignored.
+# Unlike other repos, this one intentionally tracks the sanitized design log
+# (.agents/dotagents/) — CHANGELOG.md cites its D-numbers publicly, so it must
+# stay readable. See .agents/AGENTS.md. Plans are private working material and
+# live in the private agents repo instead (D56); the private working notes
+# .agents/AGENTS.md is likewise untracked.
+.agents/plans/
+.agents/AGENTS.md
+.agents/archive/
 CLAUDE.local.md
 .claude/
 

@@ -166,7 +166,10 @@ def check_templates(root):
         ck("mkdocs.yml", lambda: has("mkdocs.yml", ["theme:", "material", "mkdocstrings", "docs_dir: docs"]))
         ck("README.md", lambda: has("README.md", ["img.shields.io", "## Install", "Optional", "## Development", "## License"]))
         ck("CHANGELOG.md", lambda: has("CHANGELOG.md", ["[Unreleased]", "## [", "]: http"]))
-        ck(".gitignore", lambda: has(".gitignore", ["AGENTS.md", ".agents/", "CLAUDE*", ".claude"]))
+        # No "AGENTS.md" (D54: no repo-root one) and no trailing slash on
+        # .agents (D55/1c9bf7c: `dotagents link` makes it a symlink, which a
+        # directory-only pattern would not match).
+        ck(".gitignore", lambda: has(".gitignore", ["\n.agents\n", "CLAUDE*", ".claude"]))
         ck("docs-index.md", lambda: has("docs-index.md", ["#"]))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

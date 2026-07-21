@@ -71,3 +71,4 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 - [D52](decisions/D52.md) — repo standard ships three workflows: docs get a dispatchable docs.yml so Pages is exercised before the first release; enabling Pages is two owner-only API calls, not one
 - [D53](decisions/D53.md) — leak_check hard-fails only on multi-word plan basenames; generic one-word names WARN, since they collide with legitimate public doc filenames
 - [D55](decisions/D55.md) — dotagents is never `dotagents link`ed: its .agents/ is tracked public content, so adopt-then-rmtree would delete the design log from the repo; link now refuses when .agents has tracked files
+- [D56](decisions/D56.md) — plans + repo working notes move to the private agents store; only the sanitized design log stays tracked, because CHANGELOG.md cites its D-numbers publicly
