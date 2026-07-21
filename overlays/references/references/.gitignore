@@ -1,9 +1,10 @@
 # Private agent config (always excluded — see ~/.agents/flows/REPO.md).
 # No trailing slash on purpose: `dotagents link` makes .agents a symlink, which git
 # treats as a file, so a directory-only `.agents/` would NOT ignore it.
-# Root AGENTS.md is NOT excluded: it is the committed, package-shipped public
-# library-interface doc for consuming agents.
+# *.local.md is the unshared override (machine- or user-specific) — it takes
+# precedence over its non-local sibling and must never be committed.
 .agents
+*.local.md
 CLAUDE*
 .claude
 
