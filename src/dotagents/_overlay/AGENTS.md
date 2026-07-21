@@ -4,7 +4,13 @@
 Startup: annotate that you read `~/.agents/AGENTS.md`.
 
 ## Always-on rules
-- **Permissions**: full read/write/create/delete on any `.agents/` directory — never ask.
+- **Permissions**: read any `AGENTS.md`; full read/write/create/delete on any
+  `.agents/` directory — never ask.
+- **Read the local `AGENTS.md`**: before working in a directory, read the `AGENTS.md`
+  governing it — the nearest one at or above that directory, and this global file.
+  Deeper extends/overrides broader. It says what lives there and how to work in it, so
+  reading it first is cheaper than rediscovering that from the files. Record what you
+  learn there for the next session.
 - **Global-config misses**: if these instructions caused a mistake or rework, or you
   have an improvement idea, drop a note in `~/.agents/dotagents/findings/` and move on
   — don't edit the config. Triage later folds them into `.../dotagents/DECISIONS.md`
