@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dotagents"
-version = "0.1.0"
+version = "0.2.0"
 authors = [{ name = "Jose A." }]
 description = "Installable CLI for the dotagents agent-config payload (init/install/build-pyz/audit)"
 readme = "README.md"
@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "duho>=0.2.0",
+    "duho>=0.3.3",
     "pathlib_next>=0.8.0",
 ]
 

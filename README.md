@@ -32,15 +32,16 @@ them. Everything else is repo infrastructure.
 
 | Path | What |
 | --- | --- |
-| `src/dotagents/` | The installable `dotagents` CLI (`init`/`install`/`build-pyz`/`audit`) |
+| `src/dotagents/` | The installable `dotagents` CLI (`init`/`install`/`link`/`sync`/`build-pyz`/`audit`) |
 | `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index). Neutral — imposes no flows |
 | `overlays/flows/` | PLAN / EXEC / REVIEW / REPO task flows + `MODELS.md` (executor selection) |
 | `overlays/recovery/` | `kb/RECOVERY.md` — config-recovery playbook |
 | `overlays/references/` | Language-neutral repo templates (README, CHANGELOG, LICENSE, .gitignore, plan-shape example) |
 | `overlays/python`, `node`, `rust` | Per-language `kb/` + manifests + CI workflows |
 | `overlays/agents/` | Named-agent directives (`antigravity.md`) |
+| `overlays/private-sync/` | `kb/PRIVATE_SYNC.md` + cloud `hooks/` for the one-private-repo, per-project `.agents` model (`dotagents link`/`sync`) |
 | `overlays/tools/` | Helper tools you opt into: `summarize_run.py`, `compare_bench.py` |
-| `tools/` | Required tooling (not an overlay): `audit_config.py`, `leak_check.py` |
+| `tools/` | Required tooling (not an overlay): `audit_config.py`, `leak_check.py`, `cloud-setup.sh` |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
 | `AGENTS.md` | Directives for working *on this repo* |
 | `.agents/` | This config's own design log and plans — the "why" behind every rule |
@@ -98,6 +99,48 @@ Then wire your runner to it — e.g. Claude Code: put `@AGENTS.md` in
 **Or let your agent do it:** point it at this repo and say —
 > Read README.md, run `python install.py install --overlays overlays/flows`, and
 > confirm `~/.agents/flows/PLAN.md` exists.
+
+## Private sync (per-user + per-project, one private repo)
+
+Keep your global config **and** every project's private `.agents` (plans, kb, findings)
+in a single private git repo — synced across machines and cloud sessions — without ever
+committing any of it into the (often public) project repos.
+
+The idea: your global `~/.agents` **is** a private git repo. Its root is the per-user
+config; a `projects/<name>/` tree holds each project's private `.agents` payload. For a
+checked-out project, `<project>/.agents` is a **symlink** to `~/.agents/projects/<name>`
+(the project's `.gitignore` already excludes `.agents/` per the Leakage rule, so the
+link never lands in the public repo). `<name>` defaults to the project's basename, so a
+local `~/code/app` and a cloud `/home/user/app` resolve to the same store.
+
+```bash
+python install.py install --overlays overlays/private-sync   # kb + cloud hooks
+dotagents link .        # symlink this project's .agents into the private repo
+                        #   (an existing .agents/ is adopted in on the first link;
+                        #    --copy mirrors it as a real dir for no-symlink systems)
+dotagents sync -m msg   # git pull --rebase / commit / push the private repo
+dotagents sync --remote git@github.com:<you>/.agents.git -m init   # one-command bootstrap
+```
+
+In cloud sessions, the installed `~/.agents/hooks/private-sync-{start,stop}.sh` clone/pull
+the private repo and link/sync the project per session — register them in
+`~/.claude/settings.json` (see `~/.agents/hooks/settings.snippet.json`). For a **fresh
+container** (no `~/.agents` yet), point the web environment's **setup-script** field at the
+self-contained bootstrap in this repo — it fetches the latest each start, so there's
+nothing to re-paste:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-setup.sh -o /tmp/dg-cloud-setup.sh && sh /tmp/dg-cloud-setup.sh
+```
+
+Use `curl … -o file && sh file`, not `curl … | sh`: with a pipe the setup field's exit
+code is `sh`'s (0 on empty stdin), so a failed fetch is silently logged as success; `&&`
+propagates the curl failure instead.
+
+It authenticates (bypassing a hosted-runner `github.com`→proxy git rewrite), clones/pulls
+`~/.agents`, installs the CLI, and links the project — driven by `DOTAGENTS_AGENTS_REMOTE`
+/ `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL` env vars (token never committed). Full
+walkthrough: `~/.agents/kb/PRIVATE_SYNC.md`.
 
 ## Validate
 

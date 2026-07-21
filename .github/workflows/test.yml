@@ -78,3 +78,66 @@ jobs:
           export HOME="$(mktemp -d)"
           python install.py install --overlays overlays/flows
           python install.py install --overlays overlays/flows | grep -q "skip (exists)"
+      - name: Link a project into the private store, then sync (git bootstrap)
+        run: |
+          export HOME="$(mktemp -d)"
+          git config --global user.email ci@example.invalid
+          git config --global user.name CI
+          python install.py install --overlays overlays/private-sync
+          test -f "$HOME/.agents/kb/PRIVATE_SYNC.md"
+          test -f "$HOME/.agents/hooks/private-sync-start.sh"
+          # A project with an existing .agents is adopted into the store and symlinked.
+          proj="$(mktemp -d)"
+          mkdir -p "$proj/.agents/plans"
+          echo "seed" > "$proj/.agents/plans/seed.md"
+          printf '.agents/\n' > "$proj/.gitignore"
+          python -m dotagents link "$proj"
+          test -L "$proj/.agents"                              # symlinked
+          test -f "$HOME/.agents/projects/$(basename "$proj")/plans/seed.md"  # adopted
+          cat "$proj/.agents/plans/seed.md" | grep -q seed     # reachable through the link
+          python -m dotagents link "$proj" | grep -q "already" # idempotent
+          # Bootstrap the private repo as git and commit the store.
+          python -m dotagents sync --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "init"
+          git -C "$HOME/.agents" ls-files | grep -q "projects/$(basename "$proj")/plans/seed.md"
+      - name: A .agents that is itself a git checkout is never adopted or copied back
+        run: |
+          export HOME="$(mktemp -d)"
+          git config --global user.email ci@example.invalid
+          git config --global user.name CI
+          python install.py install
+          proj="$(mktemp -d)"; printf '.agents\n' > "$proj/.gitignore"
+          git init -q "$proj/.agents"
+          echo "checkout" > "$proj/.agents/AGENTS.md"
+          git -C "$proj/.agents" add -A && git -C "$proj/.agents" commit -qm seed
+          python -m dotagents link "$proj" | grep -q "skip:"
+          test -d "$proj/.agents" && test ! -L "$proj/.agents"   # left in place, untouched
+          test ! -e "$HOME/.agents/projects/$(basename "$proj")/AGENTS.md"  # not adopted
+          python -m dotagents sync --project "$proj" --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "sync" | grep -q "skip copy-back"
+          test ! -e "$HOME/.agents/projects/$(basename "$proj")/AGENTS.md"  # not copied back
+          # --force backs the checkout up (git state intact) and links the store.
+          python -m dotagents link "$proj" --force
+          test -L "$proj/.agents"
+          test -d "$proj/.agents.bak/.git"
+      - name: Copy-mode link + copy-back on sync (no-symlink fallback path)
+        run: |
+          export HOME="$(mktemp -d)"
+          git config --global user.email ci@example.invalid
+          git config --global user.name CI
+          python install.py install
+          proj="$(mktemp -d)"; printf '.agents/\n' > "$proj/.gitignore"
+          python -m dotagents link "$proj" --copy
+          test -d "$proj/.agents" && test ! -L "$proj/.agents"  # real dir, not a symlink
+          echo "edit" > "$proj/.agents/plans/local.md"
+          python -m dotagents sync --project "$proj" --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "sync"
+          test -f "$HOME/.agents/projects/$(basename "$proj")/plans/local.md"  # copied back
+      - name: Built .pyz keeps flags/help/positional under duho 0.3.x (zipapp shim)
+        run: |
+          export HOME="$(mktemp -d)"
+          python -m dotagents build-pyz --out dist/dotagents.pyz
+          # A declared flag must NOT degrade to a name-derived one (--from, not --from-).
+          python dist/dotagents.pyz init --help | grep -q -- "--from FROM"
+          ! python dist/dotagents.pyz init --help | grep -q -- "--from-"
+          # The `link` positional must be accepted (not "unrecognized arguments").
+          proj="$(mktemp -d)"; printf '.agents/\n' > "$proj/.gitignore"
+          python dist/dotagents.pyz link "$proj"
+          test -L "$proj/.agents"
