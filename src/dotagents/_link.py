@@ -107,6 +107,27 @@ def _gitignore_excludes_agents(project_dir: Path) -> bool:
     return False
 
 
+def _tracked_agents_files(project_dir: Path) -> int:
+    """How many files under ``<project>/.agents`` the project's git repo tracks.
+
+    Adoption is destructive to *tracked* content: it copies the directory into
+    the store and then removes it, which git records as deleting every one of
+    those files. A repo that deliberately tracks its ``.agents/`` (the dotagents
+    repo itself does -- its sanitized design log is public) must therefore never
+    be linked. The D43 git-checkout guard does not cover this: a tracked plain
+    directory has no ``.git`` of its own. Returns 0 when not a git repo."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(project_dir), "ls-files", "--", ".agents"],
+            capture_output=True, text=True,
+        )
+    except OSError:
+        return 0
+    if res.returncode != 0:
+        return 0
+    return len([ln for ln in res.stdout.splitlines() if ln.strip()])
+
+
 def _next_backup(project_dir: Path) -> Path:
     cand = project_dir / ".agents.bak"
     i = 1
@@ -163,6 +184,21 @@ def link_project(
         log("linked (already): %s/.agents -> %s", project_dir.name, store)
         _warn_gitignore(project_dir, log)
         return name
+
+    # A .agents whose files are TRACKED by the project's own repo is public
+    # content, not a private store: adopting it would rmtree the directory and
+    # git would record every tracked file as deleted (D55). Refuse outright --
+    # unlike the conflict cases below there is no --force story, because the
+    # correct fix is "don't link this repo", never "back it up and link anyway".
+    if not target_is_link and target.is_dir():
+        n_tracked = _tracked_agents_files(project_dir)
+        if n_tracked:
+            raise SystemExit(
+                "error: %s/.agents has %d file(s) tracked by this repo; linking "
+                "would delete them from it. This repo keeps a real .agents/ "
+                "(see D55) -- do not link it."
+                % (project_dir.name, n_tracked)
+            )
 
     # A .agents that is itself a git checkout (`.git` is a dir, or a file for
     # worktrees) is managed by something else -- e.g. a hosted-runner session
