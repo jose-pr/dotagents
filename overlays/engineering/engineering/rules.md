@@ -13,7 +13,9 @@ because its absence cost something real (see the D-numbers in `design/`).
   - **`<project>/.agents/AGENTS.md`** — PRIVATE working knowledge (architecture,
     gotchas, per-dir guidance); deeper subtree extends/overrides broader. Agents write
     it, the user wins on conflict. Keep lean; detail in `.agents/{kb,flows,references}/`.
-  (The global `~/.agents/AGENTS.md` is neither.)
+  (The global `~/.agents/AGENTS.md` is neither.) Record what you learn while working —
+  a gotcha, a non-obvious layout, a command that had to be rediscovered — back into
+  the one governing that directory, so the next session starts where this one ended.
 - **Leakage**: never create `CLAUDE.md` or commit private agent config unless asked.
   Repo `.gitignore` excludes `.agents` (slashless — the link is a symlink, which a
   directory-only `.agents/` won't match), `CLAUDE*`, `.claude`. Never print `DOTAGENTS_*`
