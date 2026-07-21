@@ -22,16 +22,20 @@ no opinionated flows, model-routing, or repo-standards content.
   processed/` is where triaged notes land (moved, never deleted) once folded into
   `dotagents/DECISIONS.md`.
 
-## Growing your own flows
+## Growing your own config
 
 As you build out routines you want agents to follow repeatedly (planning, execution,
-code review, repo standards, language-specific conventions), add them under
-`~/.agents/flows/`, `~/.agents/kb/<language>.md`, or `~/.agents/<agent>.md`, and add
-one routing line to `AGENTS.md`'s "Load on demand" list per file — loaded only when
-the task matches, never preemptively. This keeps every-session cost low regardless
-of how much topical detail accumulates.
+code review, repo standards, language-specific conventions), put each in its own file
+under `~/.agents/` and add one routing line to `AGENTS.md`'s "Load on demand" list —
+loaded only when the task matches, never preemptively. This keeps every-session cost
+low regardless of how much topical detail accumulates. How you group those files is
+up to you; the overlays in this project happen to use `flows/` and `kb/`, but nothing
+in `dotagents` requires that layout.
 
-If you'd rather start from a fuller, opinionated example instead of building from
-scratch, see this project's `examples/` payload (language knowledge bases, named-
-agent directives, CI/reference templates) — copy pieces in deliberately, never
-wholesale.
+One filename *is* conventional: a named agent (Claude, Antigravity, …) reads its own
+`~/.agents/<agent>.md` on top of this file, so per-runner directives go there.
+
+If you'd rather start from a fuller, opinionated example than build from scratch, see
+this project's opt-in overlays (`engineering` rules, planning/execution flows, language
+knowledge bases, CI/reference templates) — layer them in deliberately with
+`dotagents install --overlays <path>`, never wholesale.
