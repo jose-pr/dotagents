@@ -29,6 +29,12 @@ For each checked-out project, `<project>/.agents` is a **symlink** →
 `~/code/app` and a cloud checkout at `/home/user/app` both resolve to
 `projects/app`. Override with `--name` when two different repos share a basename.
 
+Everything below is **one way to use `link`/`sync`, not what dotagents requires**.
+Two knobs make that concrete: `--store-dir` / `$DOTAGENTS_STORE_DIR` moves the
+stores anywhere (relative to the agents dir, or an absolute path outside it), and
+a `hooks/sync` script replaces git entirely. Both `link` and `sync` are optional
+subcommands — `init`/`install` never touch a project directory.
+
 ## Commands
 
 - `dotagents link [PATH]` — symlink `PATH/.agents` (default: current dir) to its
@@ -39,11 +45,19 @@ For each checked-out project, `<project>/.agents` is a **symlink** →
     any no-symlink environment; a symlink failure auto-falls back to this).
   - `--force` backs up a conflicting real `.agents/` (both project and store carry
     content) or replaces a stale symlink.
-- `dotagents sync` — `git pull --rebase` / commit / push the private repo.
+- `dotagents sync` — reconcile a copy-mode project, then move the store.
   - `--project PATH` first copies a **copy-mode** project's `.agents` back into its
     store (symlinked projects need no copy-back — their `.agents` *is* the store).
-  - `--remote <url>` bootstraps a fresh repo (`git init` + set `origin`) in one command.
-  - `--no-pull` / `--no-push` / `-m <msg>` / `--dry-run` as expected.
+    This is the only part dotagents genuinely owns: it repairs the divergence its
+    own `--copy` fallback creates.
+  - **Transport** is then handed to `<agents-dir>/hooks/sync` if that exists — it
+    gets the store path as `$1` and the message as `$2` (plus `DOTAGENTS_AGENTS_DIR`
+    / `DOTAGENTS_SYNC_MESSAGE`), and its exit code is returned. Use it for rsync, a
+    cloud drive, or nothing at all.
+  - With no hook, a built-in git path runs as a convenience: `git pull --rebase` /
+    commit / push. `--remote <url>` bootstraps a fresh repo (`git init` + set
+    `origin`) in one command; `--no-pull` / `--no-push` apply to this path only.
+  - `-m <msg>` / `--dry-run` as expected (`--dry-run` never executes the hook).
 
 ## First-time setup
 
