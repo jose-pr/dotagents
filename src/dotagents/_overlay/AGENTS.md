@@ -7,9 +7,11 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
 - **Git**: logical commits (feature+tests / docs+config / CI split apart, never one
   monolith), `type: desc` format (`feat:`, `fix:`, `docs:`, `chore:`).
 - **Leakage**: never create `CLAUDE.md` or commit private agent config into a repo
-  unless explicitly asked. Repo `.gitignore` must exclude `.agents/`, `CLAUDE*`,
-  `.claude` — but NOT a repo's root `AGENTS.md`, which is a **committed, public**
-  file (the library interface doc, below).
+  unless explicitly asked. Repo `.gitignore` must exclude `.agents` (slashless — the
+  link is a symlink, and a directory-only `.agents/` pattern does not match it),
+  `CLAUDE*`, `.claude` — but NOT a repo's root `AGENTS.md`, which is a **committed,
+  public** file (the library interface doc, below). Never print or echo `DOTAGENTS_*`
+  values (no bare `env`/`printenv`); test emptiness instead — they hold secrets.
 - **Permissions**: full read/write/create/delete on any `.agents/` directory (plans,
   notes, the working `AGENTS.md`) and any root `AGENTS.md` — never ask.
 - **`AGENTS.md` has three roles, by location** (do not conflate). Only `.agents/`

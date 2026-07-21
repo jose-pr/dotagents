@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
-"""Scan a repo's *tracked* files for private agent-plan leakage.
+"""Scan a repo's *tracked* files and commit messages for private agent leakage.
 
 Usage: py -3.12 ~/.agents/tools/leak_check.py <repo_path>
 
-Patterns: references to .agents/, "Phase N" plan phrasing, and every plan basename
-harvested from <repo>/.agents/plans/ (incl. completed/). The bare filename AGENTS.md
-is NOT a pattern: post-D40 it is a committed, public file that tracked config/docs
-legitimately reference; a genuinely private notes ref is .agents/AGENTS.md, already
-caught by the .agents/ pattern. Findings are
-human-judged: fix the file or consciously accept it. Exit 1 on any hit.
-Runs on Python 3.9+, stdlib only. See flows/REPO.md (release discipline).
+Tracked files -- patterns: references to .agents/, "Phase N" plan phrasing, and
+every plan basename harvested from <repo>/.agents/plans/ (incl. completed/). The
+bare filename AGENTS.md is NOT a pattern: post-D47 it is a committed, public file
+that tracked config/docs legitimately reference; a genuinely private notes ref is
+.agents/AGENTS.md, already caught by the .agents/ pattern.
+
+Commit messages -- agent-session trailers/URLs (a `Claude-Session:` trailer or a
+`claude.ai/code/session` link) that must never reach a public repo: the link
+exposes a session id, and the trailer is auto-added by the agent harness, so it
+slips in unless a gate catches it. Scanned across the current branch's history.
+
+Findings are human-judged: fix the file/message or consciously accept it. Exit 1
+on any hit. Runs on Python 3.9+, stdlib only. See flows/REPO.md (release discipline).
 """
 import re
 import subprocess
@@ -17,6 +23,38 @@ import sys
 from pathlib import Path
 
 SKIP_NAMES = {".gitignore"}  # legitimately names agent artifacts
+
+# Commit-message leaks to catch, WITHOUT false-positiving on a message that merely
+# documents them (this tool's own commits, filter-branch remediation snippets, etc.):
+#   * the real git trailer -- a line that STARTS with `Claude-Session:` (a backticked
+#     `Claude-Session:` mid-sentence starts with a backtick, so it won't match), and
+#   * an actual session URL -- `claude.ai/code/session_<id>` (the bare phrase
+#     "claude.ai/code/session" with no id is a mention, not a leak).
+COMMIT_MSG_CHECKS = [
+    ("Claude-Session: trailer", re.compile(r"^\s*Claude-Session:", re.IGNORECASE)),
+    ("session URL", re.compile(r"claude\.ai/code/session_\w", re.IGNORECASE)),
+]
+
+
+def scan_commit_messages(repo: Path) -> int:
+    """Flag any commit whose message carries an agent-session trailer or a real
+    session URL. Scans the current branch's history (HEAD); returns the hit count."""
+    out = subprocess.run(
+        ["git", "-C", str(repo), "log", "--format=%H%x1f%B%x1e", "HEAD"],
+        capture_output=True, check=True,
+    )
+    hits = 0
+    for rec in out.stdout.decode("utf-8", "replace").split("\x1e"):
+        rec = rec.strip("\n")
+        if not rec:
+            continue
+        sha, _, body = rec.partition("\x1f")
+        for lineno, line in enumerate(body.splitlines(), 1):
+            for label, rx in COMMIT_MSG_CHECKS:
+                if rx.search(line):
+                    print("commit %s:%d: %s" % (sha[:12], lineno, label))
+                    hits += 1
+    return hits
 
 
 def main(argv):
@@ -26,7 +64,7 @@ def main(argv):
     repo = Path(argv[0]).resolve()
     print("repo: %s" % repo)
 
-    patterns = [".agents/"]  # NOT "AGENTS.md" — it's a public file post-D40 (see module docstring)
+    patterns = [".agents/"]  # NOT "AGENTS.md" — it's a public file post-D47 (see module docstring)
     plans_dir = repo / ".agents" / "plans"
     if plans_dir.is_dir():
         for p in plans_dir.rglob("*.md"):
@@ -57,6 +95,9 @@ def main(argv):
             if phase_re.search(line):
                 print("%s:%d: 'Phase N'" % (rel, lineno))
                 hits += 1
+
+    hits += scan_commit_messages(repo)
+
     print("FAIL (%d hits)" % hits if hits else "PASS")
     return 1 if hits else 0
 

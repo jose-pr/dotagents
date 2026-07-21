@@ -1,0 +1,8 @@
+name = "private-sync"
+description = "One private git repo for per-user + per-project .agents: link a project's .agents to ~/.agents/projects/<name>, sync via git, and auto-link in cloud sessions."
+requires = []
+routing = [
+  """- Set up or understand private-agents git sync — make ~/.agents a private repo,
+  link a project's .agents to ~/.agents/projects/<name>, or wire cloud auto-linking →
+  ~/.agents/kb/PRIVATE_SYNC.md""",
+]

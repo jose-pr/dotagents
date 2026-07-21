@@ -53,7 +53,14 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 - [D34](decisions/D34.md) — Python version policy (run latest, test floor) + venv naming .venv/<ver>-<os>-<arch> + Python Manager, avoid Store Python
 - [D35](decisions/D35.md) — payload/ decomposed into base overlay + opt-in overlays/<name>/; required tooling at top-level tools/ (supersedes D24)
 - [D36](decisions/D36.md) — installer is overlay-agnostic: init=base, install=base + copy-only --overlays <path>; overlay mgmt deferred to a future subcommand
-- [D37](decisions/D37.md) — plans use named role/subrole executor routing with host-native providers; raw model IDs stay in MODELS.md
-- [D38](decisions/D38.md) — the calling agent chooses the host-native provider lane; cross-provider fallbacks require explicit permission
-- [D39](decisions/D39.md) — OpenAI role defaults use Luna for scoped implementation, Terra for broad exploration, and Sol for high-blast-radius work
-- [D40](decisions/D40.md) — root AGENTS.md is the committed public library-interface doc (public API/args/gotchas, ships in the package); private working notes move under .agents/; .gitignore no longer excludes AGENTS.md
+- [D37](decisions/D37.md) — private-agents git sync: ~/.agents is one private repo, per-project .agents symlinks to projects/<name>; dotagents link/sync + private-sync overlay
+- [D38](decisions/D38.md) — migrate CLI to duho >= 0.3.3 (Args/Cmd split, commands are (LoggingArgs, Cmd) with __call__); shim duho's zipapp AST-introspection bug so the .pyz keeps flags/help
+- [D39](decisions/D39.md) — cloud-setup self-heals the container-start clone (retry/backoff + persisted SessionStart recovery hook) so one early egress-race failure can't permanently disable the environment
+- [D40](decisions/D40.md) — dotagents sync authenticates the private repo itself (token + github→proxy-rewrite bypass), so a standalone CLI sync works without the private-sync Stop hook
+- [D41](decisions/D41.md) — leak_check scans commit messages for agent-session trailers/URLs (Claude-Session:, claude.ai/code/session), not just tracked files, so a harness-added session id can't reach public history unnoticed
+- [D42](decisions/D42.md) — cloud-setup wires the recovery hook on the no-remote-at-setup branch too (not just clone failure), so a secret absent from the setup-script phase but present in-session heals next session
+- [D43](decisions/D43.md) — link/sync never adopt or copy back a `<project>/.agents` that is itself a git checkout (e.g. a hosted-runner session-source clone), so the store can't swallow a foreign repo; `--force` backs it up and links the store
+- [D44](decisions/D44.md) — plans use named role/subrole executor routing with host-native providers; raw model IDs stay in MODELS.md
+- [D45](decisions/D45.md) — the calling agent chooses the host-native provider lane; cross-provider fallbacks require explicit permission
+- [D46](decisions/D46.md) — OpenAI role defaults use Luna for scoped implementation, Terra for broad exploration, and Sol for high-blast-radius work
+- [D47](decisions/D47.md) — root AGENTS.md is the committed public library-interface doc (public API/args/gotchas, ships in the package); private working notes move under .agents/; .gitignore no longer excludes AGENTS.md
