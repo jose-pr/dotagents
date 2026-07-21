@@ -1,11 +1,8 @@
-# Unlike other repos, this one intentionally tracks the sanitized design log
-# (.agents/dotagents/) — CHANGELOG.md cites its D-numbers publicly, so it must
-# stay readable. See .agents/AGENTS.md. Plans are private working material and
-# live in the private agents repo instead (D56); the private working notes
-# .agents/AGENTS.md is likewise untracked.
-.agents/plans/
-.agents/AGENTS.md
-.agents/archive/
+# Private agent config. No trailing slash: `dotagents link` makes .agents a
+# symlink, which git treats as a file, so a directory-only `.agents/` would not
+# match it. The sanitized design log is NOT in here — it lives in design/ at the
+# repo root and is tracked, because CHANGELOG.md cites its D-numbers (D56).
+.agents
 CLAUDE.local.md
 .claude/
 

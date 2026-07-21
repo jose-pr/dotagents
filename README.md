@@ -43,7 +43,7 @@ them. Everything else is repo infrastructure.
 | `overlays/tools/` | Helper tools you opt into: `summarize_run.py`, `compare_bench.py` |
 | `tools/` | Required tooling (not an overlay): `audit_config.py`, `leak_check.py`, `cloud-setup.sh` |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
-| `.agents/` | This config's own working notes (`AGENTS.md`), design log, and plans — the "why" behind every rule |
+| `design/` | This config's own design log — `DECISIONS.md` + one file per decision — the "why" behind every rule |
 
 Each `overlays/<name>/overlay.toml` carries a `name`/`description`/`requires`/`routing`
 manifest for a future `dotagents overlays` subcommand; today overlays are applied by
