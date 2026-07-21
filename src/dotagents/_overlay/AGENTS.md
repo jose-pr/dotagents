@@ -30,7 +30,7 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
     required, return-or-contract, env vars, gotchas) so a consuming agent uses it
     without reading the source. Kept current with the public API (same commit).
   (This global `~/.agents/AGENTS.md` is none of these — it's the global directives.)
-  Shape/standards in `flows/REPO.md`.
+  Shape/standards in `~/.agents/flows/REPO.md`.
 - **Plans**: ALWAYS under the project the plan is about:
   `<project>/.agents/plans/<name>.md`, descriptive snake_case names; sub-plans at
   `.../<name>/<sub>.md`. Finished plans move to `<project>/.agents/plans/completed/`
@@ -41,7 +41,7 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
   avoidable rework, or you have an improvement idea, drop a short note in
   `~/.agents/dotagents/findings/` and move on — don't edit the config itself. A
   requested triage pass later folds notes into `~/.agents/dotagents/DECISIONS.md` and
-  moves each file (never deletes) to `findings/processed/`.
+  moves each file (never deletes) to `~/.agents/dotagents/findings/processed/`.
 - **Draft follow-ups**: adjacent work found mid-execution gets a new `Status: draft`
   plan (idea + scope + why) in the project's `.agents/plans/` — never expanded or
   executed in the same pass.
