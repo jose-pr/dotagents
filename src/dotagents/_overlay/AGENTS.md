@@ -13,7 +13,6 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
   unshared override (machine- or user-specific — either way, never committed or copied
   into a repo, plan, or shared config). These files say what lives there and how to
   work in it, so reading them first is cheaper than rediscovering it from the source.
-  Record what you learn back into them.
 - **Global-config misses**: if these instructions caused a mistake or rework, or you
   have an improvement idea, drop a note in `~/.agents/dotagents/findings/` and move on
   — don't edit the config. Triage later folds them into `.../dotagents/DECISIONS.md`
