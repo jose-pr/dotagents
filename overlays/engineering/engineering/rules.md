@@ -5,10 +5,11 @@ Paste these into your `~/.agents/AGENTS.md` under `## Always-on rules`. They are
 is why they live here rather than in the neutral base overlay. Each one exists
 because its absence cost something real (see the D-numbers in `design/`).
 
-- **`<project>/.agents/` is the private working area**: full read/write/create/delete
-  there — never ask. `dotagents link` symlinks it to the per-project store; the
-  `AGENTS.md` lookup extends to `.agents/AGENTS.md` and `.agents/AGENTS.local.md` at
-  each level, which win over the plain files beside them.
+- **`<project>/.agents/` is private and never committed**: it is the working area for
+  an agent working *on* this repo. Keep it out of the project's history — a slashless
+  `.agents` line in `.gitignore` (a directory-only `.agents/` won't match the symlink
+  `dotagents link` creates). Linking it to a per-project store in one private repo is
+  the sync workflow; a plain untracked directory works just as well.
 - **`AGENTS.md`, two kinds** — no repo-root one:
   - **`<project>/src/**/AGENTS.md`** — COMMITTED, package-shipped "header" per module
     dir: that module's public API header-file-style (exports with signatures/args/
