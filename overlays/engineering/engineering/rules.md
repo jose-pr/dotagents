@@ -27,6 +27,12 @@ because its absence cost something real (see the D-numbers in `design/`).
   values (no bare `env`/`printenv`) — they hold secrets; test emptiness instead.
 - **Git**: logical commits (feature+tests / docs+config / CI split apart, never one
   monolith), `type: desc` format (`feat:`, `fix:`, `docs:`, `chore:`).
+  **No agent attribution in commit messages** — strip any `Co-Authored-By:` naming a
+  model/assistant, any `*-Session:` trailer, any session URL, and any "generated with"
+  footer. The harness adds some of these automatically, so check before committing,
+  not after: a session URL exposes an id, and the rest is noise in a human history.
+  Already pushed? Rewriting is a force-push and the old SHAs stay reachable until the
+  host GCs — so catch it while the commits are still local.
 - **Releases**: pushing a `v*` tag requires the user's explicit consent for *that*
   release, every time — publish is irreversible. `ci-*` tags are always safe to push.
 - **Performance numbers**: a local benchmark is a sanity check, not evidence — perf
