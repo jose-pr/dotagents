@@ -3,8 +3,11 @@
 
 Usage: py -3.12 ~/.agents/tools/leak_check.py <repo_path>
 
-Patterns: references to .agents/, AGENTS.md, "Phase N" plan phrasing, and every
-plan basename harvested from <repo>/.agents/plans/ (incl. completed/). Findings are
+Patterns: references to .agents/, "Phase N" plan phrasing, and every plan basename
+harvested from <repo>/.agents/plans/ (incl. completed/). The bare filename AGENTS.md
+is NOT a pattern: post-D40 it is a committed, public file that tracked config/docs
+legitimately reference; a genuinely private notes ref is .agents/AGENTS.md, already
+caught by the .agents/ pattern. Findings are
 human-judged: fix the file or consciously accept it. Exit 1 on any hit.
 Runs on Python 3.9+, stdlib only. See flows/REPO.md (release discipline).
 """
@@ -23,7 +26,7 @@ def main(argv):
     repo = Path(argv[0]).resolve()
     print("repo: %s" % repo)
 
-    patterns = [".agents/", "AGENTS.md"]
+    patterns = [".agents/"]  # NOT "AGENTS.md" — it's a public file post-D40 (see module docstring)
     plans_dir = repo / ".agents" / "plans"
     if plans_dir.is_dir():
         for p in plans_dir.rglob("*.md"):
