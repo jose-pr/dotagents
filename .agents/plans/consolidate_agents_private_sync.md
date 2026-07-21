@@ -20,10 +20,10 @@ Verified 2026-07-20 by inspection of all three sources.
 | --- | --- | --- |
 | `~/.agents/` | Install target, **not a git repo** (no `.git`, no remote) | Newest global config (D37–D40 line) + 22 local findings + `AGENTS.local.md` + `dotagents/log.md` |
 | `jose-pr/.agents` (private, GitHub) | The intended sync repo. Created 2026-07-19, last push 2026-07-20, 17 commits, `main` | Has `hooks/`, `kb/PRIVATE_SYNC.md`, `kb/CLOUD_ENV.md`, `projects/{glyphive,pkgforge,user}/`. Global config is **stale** (pre-D37–D40) |
-| `c:\Users\jose\devel\dotagents` | Public source repo for the config + CLI | Local `main` **diverged: 5 ahead, 22 behind** `origin/main` |
+| the public `dotagents` checkout | Public source repo for the config + CLI | Local `main` **diverged: 5 ahead, 22 behind** `origin/main` |
 
 Scratch clone of the private repo already at:
-`C:\Users\jose\AppData\Local\Temp\claude\c--Users-jose-devel-dotagents\720cec55-788d-468a-ba56-270aa5638260\scratchpad\agents_upstream`
+`<scratchpad>/agents_upstream`
 (Re-clone if stale: `git clone https://github.com/jose-pr/.agents.git <dest>`.)
 
 ### Git divergence in `devel/dotagents` (the root cause)
@@ -85,7 +85,7 @@ cleanly. All other local-only files (`overlays/flows/*`, `overlays/python/kb/`,
 
 ### Environment
 
-- Venv: `c:\Users\jose\devel\dotagents\.venv\3.14-nt-amd64` (`dotagents` installed
+- Venv: `$VENV` (`dotagents` installed
   editable from this checkout, version 0.1.0).
 - **duho 0.2.0 is currently installed** — the 0.3.3 pin needs a reinstall before the
   CLI runs post-merge.
@@ -130,7 +130,7 @@ Guidance:
   meanings (`overlays/`, `src/dotagents/_overlay/AGENTS.md`, `NOTES.md`, plans) and
   repoint to D44–D47. *Why:* `_overlay/AGENTS.md` carries `[D40]` markers inline.
 - Reinstall after the pin change:
-  `c:\Users\jose\devel\dotagents\.venv\3.14-nt-amd64\Scripts\python.exe -m pip install -e .`
+  `$VENV\Scripts\python.exe -m pip install -e .`
 
 Done when: `git merge` is committed with no conflict markers anywhere
 (`git grep -nE '^(<<<<<<<|=======|>>>>>>>)'` is empty); `D01`–`D47` each appear
@@ -161,9 +161,9 @@ Goal: the source repo is green before it becomes the merge input.
 
 Guidance — run all three, all must PASS (per repo `AGENTS.md`):
 ```
-c:\Users\jose\devel\dotagents\.venv\3.14-nt-amd64\Scripts\python.exe tools/audit_config.py --root .
-c:\Users\jose\devel\dotagents\.venv\3.14-nt-amd64\Scripts\python.exe tools/audit_config.py --check-templates --root .
-c:\Users\jose\devel\dotagents\.venv\3.14-nt-amd64\Scripts\python.exe tools/audit_config.py --repo-hygiene .
+$VENV\Scripts\python.exe tools/audit_config.py --root .
+$VENV\Scripts\python.exe tools/audit_config.py --check-templates --root .
+$VENV\Scripts\python.exe tools/audit_config.py --repo-hygiene .
 ```
 Then smoke-test the merged CLI actually loads under duho 0.3.3:
 `...\Scripts\dotagents.exe --help` and `...\Scripts\dotagents.exe link --help`.
@@ -255,12 +255,12 @@ Done when: the marker round-trips through the remote and is then cleanly removed
 ## Verification
 
 ```
-cd c:\Users\jose\devel\dotagents
-c:\Users\jose\devel\dotagents\.venv\3.14-nt-amd64\Scripts\python.exe tools/audit_config.py --root .
-c:\Users\jose\devel\dotagents\.venv\3.14-nt-amd64\Scripts\python.exe tools/audit_config.py --check-templates --root .
-c:\Users\jose\devel\dotagents\.venv\3.14-nt-amd64\Scripts\python.exe tools/audit_config.py --repo-hygiene .
-c:\Users\jose\devel\dotagents\.venv\3.14-nt-amd64\Scripts\dotagents.exe --help
-git -C c:\Users\jose\devel\dotagents grep -nE "^(<<<<<<<|=======|>>>>>>>)"
+cd <dotagents-checkout>
+$VENV\Scripts\python.exe tools/audit_config.py --root .
+$VENV\Scripts\python.exe tools/audit_config.py --check-templates --root .
+$VENV\Scripts\python.exe tools/audit_config.py --repo-hygiene .
+$VENV\Scripts\dotagents.exe --help
+git -C <dotagents-checkout> grep -nE "^(<<<<<<<|=======|>>>>>>>)"
 git -C %USERPROFILE%\.agents status --short
 git -C %USERPROFILE%\.agents check-ignore -v AGENTS.local.md
 ```
