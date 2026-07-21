@@ -1,17 +1,24 @@
-"""Private-agents linking and git sync.
+"""Optional per-project ``.agents`` linking, and a sync hand-off.
 
-Model: your global ``~/.agents`` IS a private git repo. Per-project private
-agent state (plans, kb, findings, a user-managed ``AGENTS.md``) lives under
-``~/.agents/projects/<name>/`` and is symlinked into each checkout as
-``<project>/.agents``. One private repo carries the global config AND every
-project's private agent state; the public project repos never track any of it
-(the Leakage rule already ``.gitignore``s ``.agents`` -- slashless, since the link
-is a symlink and a directory-only ``.agents/`` would not match it).
+Neither of these is required to use dotagents: ``init``/``install`` never touch a
+project directory. They exist for one workflow -- keeping each checkout's private
+agent state (plans, kb, findings, a user-managed ``AGENTS.md``) outside the public
+project repo, in a single place that can be carried between machines.
+
+What dotagents actually does here: point ``<project>/.agents`` at a store, and
+reconcile the copy it made if symlinking wasn't available. Two things around that
+are **conventions, not requirements**:
+
+- **Where stores live.** ``<agents_dir>/projects/<name>`` is only the default; see
+  ``store_root`` (``--store-dir`` / ``DOTAGENTS_STORE_DIR``, absolute paths allowed).
+- **How a store reaches other machines.** ``hooks/sync`` owns that if present. The
+  bundled git path is a convenience, not the model -- a store that never leaves the
+  machine is a perfectly valid setup.
 
 - ``link_project`` — symlink (or ``--copy``) ``<project>/.agents`` to its store,
   adopting an existing real ``.agents/`` into the store on the first link.
-- ``sync_agents`` — copy a copy-mode project's ``.agents`` back into the store,
-  then ``git pull --rebase`` / commit / push the private repo.
+- ``sync_agents`` — reconcile a copy-mode project, then hand off to ``hooks/sync``
+  or the built-in git path.
 
 Kept out of ``cli.py`` (which only wires args to these) to match ``_merge.py`` /
 ``_sync.py`` / ``_overlays.py``.
@@ -27,9 +34,28 @@ from pathlib import Path
 from typing import Optional
 
 
-def project_store(agents_dir: Path, name: str) -> Path:
-    """Path to a project's private store inside the global agents repo."""
-    return agents_dir / "projects" / name
+#: Default subdirectory of the agents dir that holds per-project stores. This is
+#: a convention, not a requirement -- dotagents does not care how you file them.
+#: Override per-invocation with ``--store-dir`` or ``DOTAGENTS_STORE_DIR`` (which
+#: may be an absolute path, putting the stores outside the agents dir entirely).
+DEFAULT_STORE_SUBDIR = "projects"
+
+
+def store_root(agents_dir: Path, store_dir: "str | os.PathLike | None" = None) -> Path:
+    """Directory holding the per-project stores.
+
+    Resolution order: explicit argument, ``DOTAGENTS_STORE_DIR``, then
+    ``<agents_dir>/projects``. An absolute value is used as-is."""
+    raw = store_dir or os.environ.get("DOTAGENTS_STORE_DIR") or DEFAULT_STORE_SUBDIR
+    p = Path(raw).expanduser()
+    return p if p.is_absolute() else agents_dir / p
+
+
+def project_store(
+    agents_dir: Path, name: str, store_dir: "str | os.PathLike | None" = None
+) -> Path:
+    """Path to a project's private store."""
+    return store_root(agents_dir, store_dir) / name
 
 
 def resolve_name(project_dir: Path, name: Optional[str]) -> str:
@@ -151,12 +177,14 @@ def link_project(
     agents_dir,
     *,
     name: Optional[str] = None,
+    store_dir: "str | os.PathLike | None" = None,
     copy: bool = False,
     force: bool = False,
     dry_run: bool = False,
     logger=None,
 ) -> str:
-    """Link ``<project>/.agents`` to ``<agents_dir>/projects/<name>``.
+    """Link ``<project>/.agents`` to its store (default ``<agents_dir>/projects/<name>``;
+    see ``store_root`` -- the layout is a convention, overridable with ``store_dir``).
 
     Default is a symlink; ``--copy`` (or a symlink failure, e.g. Windows without
     privilege) mirrors the store into the project as a real directory instead.
@@ -173,7 +201,7 @@ def link_project(
         raise SystemExit("error: project path is not a directory: %s" % project_dir)
 
     name = resolve_name(project_dir, name)
-    store = project_store(agents_dir, name)
+    store = project_store(agents_dir, name, store_dir)
     target = project_dir / ".agents"
     target_is_link = os.path.islink(str(target))
 
@@ -404,28 +432,88 @@ def _agents_git_auth(log) -> "tuple[list[str], Optional[dict], Optional[str]]":
     return [], {"GIT_CONFIG_GLOBAL": cfg, "GIT_CONFIG_SYSTEM": "/dev/null"}, cfg
 
 
+#: Hook script run by ``sync`` instead of the built-in git path, if present.
+#: Tried in order; the first executable one wins.
+SYNC_HOOK_NAMES = ("sync", "sync.sh", "sync.cmd", "sync.bat")
+
+
+def _find_sync_hook(agents_dir: Path) -> "Path | None":
+    hooks = agents_dir / "hooks"
+    if not hooks.is_dir():
+        return None
+    for name in SYNC_HOOK_NAMES:
+        cand = hooks / name
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _run_sync_hook(agents_dir: Path, *, message: str, dry_run: bool, log) -> "int | None":
+    """Run ``<agents_dir>/hooks/sync`` if it exists; return its exit code, else None.
+
+    Transport is not dotagents' concern -- git is only the bundled default. A hook
+    lets the store reach other machines however the user wants (or not at all).
+    It receives the store path as ``$1`` and the message as ``$2``, plus
+    ``DOTAGENTS_AGENTS_DIR`` / ``DOTAGENTS_SYNC_MESSAGE`` in the environment.
+    A non-zero exit is reported and returned; it does NOT fall through to git,
+    since a failed hook means the user's own sync failed."""
+    hook = _find_sync_hook(agents_dir)
+    if hook is None:
+        return None
+
+    log("sync hook: %s", hook)
+    if dry_run:
+        log("[dry-run] would run %s %s %r", hook.name, agents_dir, message)
+        return 0
+
+    env = dict(os.environ)
+    env["DOTAGENTS_AGENTS_DIR"] = str(agents_dir)
+    env["DOTAGENTS_SYNC_MESSAGE"] = message
+    cmd = [str(hook), str(agents_dir), message]
+    if hook.suffix.lower() in (".sh", "") and os.name == "nt":
+        # .sh (and extensionless) are not directly executable on Windows.
+        cmd = ["sh"] + cmd
+    try:
+        res = subprocess.run(cmd, cwd=str(agents_dir), env=env)
+    except OSError as exc:
+        log("sync hook failed to start (%s); falling back to the built-in git path", exc)
+        return None
+    if res.returncode != 0:
+        log("sync hook exited %d", res.returncode)
+    return res.returncode
+
+
 def sync_agents(
     agents_dir,
     *,
     message: str = "dotagents: sync",
     project_dir=None,
     name: Optional[str] = None,
+    store_dir: "str | os.PathLike | None" = None,
     remote: Optional[str] = None,
     pull: bool = True,
     push: bool = True,
     dry_run: bool = False,
     logger=None,
 ) -> int:
-    """Sync the private agents repo: copy a copy-mode project's ``.agents`` back
-    into its store, then ``git pull --rebase`` / commit / push.
+    """Sync the agents store: copy a copy-mode project's ``.agents`` back into it,
+    then hand off to whatever moves it between machines.
 
-    Symlinked projects need no copy-back (their ``.agents`` *is* the store). With
-    ``--remote`` on a non-git ``agents_dir``, ``git init`` + set ``origin`` first,
-    making first-time bootstrap a single command."""
+    Symlinked projects need no copy-back (their ``.agents`` *is* the store).
+
+    Transport is **not** dotagents' concern. If ``<agents_dir>/hooks/sync`` exists
+    it owns that step entirely and its exit code is returned. Otherwise the bundled
+    git path runs (``pull --rebase`` / commit / push) as a convenient default --
+    with ``--remote`` on a non-git ``agents_dir``, ``git init`` + set ``origin``
+    first, making first-time bootstrap a single command. Neither is required: a
+    store that never leaves the machine is a valid setup."""
     log = _Log(logger)
     agents_dir = Path(agents_dir).expanduser().resolve()
 
-    # Copy-back for a copy-mode (non-symlink) project.
+    # Copy-back reconciles copy mode, which is dotagents' own mess to clean up:
+    # `link --copy` mirrors store -> project when symlinking isn't available, so
+    # the two diverge as soon as the project's copy is edited. This folds those
+    # edits back. A symlinked project has no divergence and needs none of it.
     if project_dir is not None:
         project_dir = Path(project_dir).expanduser().resolve()
         target = project_dir / ".agents"
@@ -440,18 +528,27 @@ def sync_agents(
                     project_dir.name,
                 )
             else:
-                store = project_store(agents_dir, resolve_name(project_dir, name))
+                store = project_store(agents_dir, resolve_name(project_dir, name), store_dir)
                 log("copy-back: %s/.agents -> %s", project_dir.name, store)
                 if not dry_run:
                     store.mkdir(parents=True, exist_ok=True)
                     _copy_tree(target, store, overwrite=True)
 
+    # Everything past this point is transport, which dotagents does not own: how
+    # the store reaches other machines -- git, rsync, a cloud drive, nothing at
+    # all -- is the user's choice. A hook takes it over entirely; the git path
+    # below is only the bundled default.
+    hook_rc = _run_sync_hook(agents_dir, message=message, dry_run=dry_run, log=log)
+    if hook_rc is not None:
+        return hook_rc
+
     is_git = (agents_dir / ".git").exists()
     if not is_git:
         if remote is None:
             log(
-                "WARN: %s is not a git repo and no --remote given; skipping git sync. "
-                "Bootstrap with `dotagents sync --remote <url>` or `git init` there.",
+                "WARN: %s is not a git repo, no sync hook, and no --remote given; "
+                "nothing to sync. Add a hooks/sync script, or bootstrap git with "
+                "`dotagents sync --remote <url>`.",
                 agents_dir,
             )
             return 0
