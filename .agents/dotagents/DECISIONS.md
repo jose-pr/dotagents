@@ -64,3 +64,9 @@ what you need. Design context (goals, cost model, review protocol, size mapping)
 - [D45](decisions/D45.md) — the calling agent chooses the host-native provider lane; cross-provider fallbacks require explicit permission
 - [D46](decisions/D46.md) — OpenAI role defaults use Luna for scoped implementation, Terra for broad exploration, and Sol for high-blast-radius work
 - [D47](decisions/D47.md) — root AGENTS.md is the committed public library-interface doc (public API/args/gotchas, ships in the package); private working notes move under .agents/; .gitignore no longer excludes AGENTS.md
+- [D48](decisions/D48.md) — the "never print DOTAGENTS_* values" guard is an always-on Leakage rule, not on-demand kb content: the leak happens during first-look triage, before any routing line fires
+- [D49](decisions/D49.md) — token budgets are WARN-only and were silently over; record real sizes (core AGENTS.md 3649B/2500B, REPO.md 7012B/3000B) and treat each WARN as recorded debt
+- [D50](decisions/D50.md) — config-internal cross-refs are absolute (`~/.agents/` prefix): the file is inlined by Claude and symlinked by Codex/Antigravity, so a bare relative path resolves three different wrong ways
+- [D51](decisions/D51.md) — repo-mutating git commands are strictly sequential (one index lock); plan phases parallelize by write-scope matrix. The discriminator is shared mutable state, not logical independence
+- [D52](decisions/D52.md) — repo standard ships three workflows: docs get a dispatchable docs.yml so Pages is exercised before the first release; enabling Pages is two owner-only API calls, not one
+- [D53](decisions/D53.md) — leak_check hard-fails only on multi-word plan basenames; generic one-word names WARN, since they collide with legitimate public doc filenames
