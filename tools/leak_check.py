@@ -65,11 +65,18 @@ def main(argv):
     print("repo: %s" % repo)
 
     patterns = [".agents/"]  # NOT "AGENTS.md" — it's a public file post-D47 (see module docstring)
+    # A plan basename is only distinctive enough to be a leak signal when it is
+    # multi-word (snake_case, as the plan-naming rule requires). A generic
+    # one-word name like codec.md/compression.md collides with legitimate public
+    # doc and API filenames, so it is reported as a WARN for conscious review
+    # rather than failing the scan outright (D53).
+    soft_patterns = []
     plans_dir = repo / ".agents" / "plans"
     if plans_dir.is_dir():
         for p in plans_dir.rglob("*.md"):
-            if p.stem.lower() not in ("readme", "index"):
-                patterns.append(p.name)
+            if p.stem.lower() in ("readme", "index"):
+                continue
+            (patterns if "_" in p.stem else soft_patterns).append(p.name)
     phase_re = re.compile(r"\bPhase [0-9]")
 
     out = subprocess.run(
@@ -79,6 +86,7 @@ def main(argv):
     tracked = [f for f in out.stdout.decode("utf-8").split("\0") if f]
 
     hits = 0
+    warns = 0
     for rel in tracked:
         path = repo / rel
         if path.name in SKIP_NAMES or not path.is_file():
@@ -92,12 +100,19 @@ def main(argv):
                 if pat in line:
                     print("%s:%d: %r" % (rel, lineno, pat))
                     hits += 1
+            for pat in soft_patterns:
+                if pat in line:
+                    print("WARN %s:%d: %r (generic plan basename -- review)"
+                          % (rel, lineno, pat))
+                    warns += 1
             if phase_re.search(line):
                 print("%s:%d: 'Phase N'" % (rel, lineno))
                 hits += 1
 
     hits += scan_commit_messages(repo)
 
+    if warns:
+        print("%d warning(s): generic plan basenames, judge each" % warns)
     print("FAIL (%d hits)" % hits if hits else "PASS")
     return 1 if hits else 0
 
