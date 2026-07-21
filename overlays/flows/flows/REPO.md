@@ -48,43 +48,33 @@ never require cutting a release.
   standing consent. (`ci-*` is always safe — see core `AGENTS.md`.)
 
 ## Meta files (skeletons in `~/.agents/references/`; language doc adds specifics on top)
-- `README.md`, `.gitignore`: from `references/README.md` / `references/.gitignore`;
-  `README.md` is the package long-description (`readme=` in the manifest) and MUST ship
-  inside the built package (sdist + wheel). `.gitignore` always excludes private agent
-  artifacts (`.agents`, `CLAUDE*`, `.claude`) plus the language's build/dependency
-  output — but NOT root `AGENTS.md` (a committed public doc, below). Note `.agents`
-  has no trailing slash: `dotagents link` makes it a symlink, and a directory-only
-  `.agents/` would not ignore a symlink.
-- `AGENTS.md` — committed public agent docs, never gitignored (see core `AGENTS.md`):
-  - **repo root `AGENTS.md`**: a dev-facing project overview — what it is, code layout,
-    entry points, how to build/develop/use at a high level; links to the module headers.
-  - **`src/**/AGENTS.md`**: one "header" file per source module/package dir, colocated
-    with the code — that module's public API header-file-style (exports with
-    signatures/accepted args/defaults/required, return-or-contract, env vars, gotchas)
-    so a consuming agent uses it without a source dive; keep current with the public API
-    (same commit). Ship these plus `README.md` inside the built package. Distinct from
-    the private `.agents/AGENTS.md` working notes.
+- `README.md`, `.gitignore`: from `references/`. `README.md` is the package
+  long-description (`readme=` in the manifest) and MUST ship in the built package
+  (sdist + wheel). `.gitignore` excludes `.agents` (slashless — `dotagents link` makes
+  it a symlink, which a directory-only `.agents/` won't match), `CLAUDE*`, `.claude`,
+  plus the language's build output.
+- `src/**/AGENTS.md` — one committed, package-shipped "header" per module dir: that
+  module's public API header-file-style (exports with signatures/args/defaults,
+  return-or-contract, env vars, gotchas) so a consuming agent skips the source. Current
+  with the API, same commit. **No repo-root `AGENTS.md`** — private working notes live
+  in `.agents/AGENTS.md`, human-facing overview in `README.md`.
 - `CHANGELOG.md`: Keep a Changelog format (`references/CHANGELOG.md`) — `[Unreleased]`
   always at top, one `## [x.y.z] - <date>` heading per release. Before release, run
   `py -3.12 ~/.agents/tools/leak_check.py <repo>` — it scans tracked files for
-  private-plan leaks (`.agents/` refs, plan filenames, agent `Phase N` phrasing) AND
-  commit messages for agent-session trailers/URLs (`Claude-Session:`,
-  `claude.ai/code/session`). The session trailer is auto-added by the agent harness and
-  must be stripped before pushing to a public repo — the link exposes a session id (the
-  content is account-gated, but the id shouldn't be in public history). If one already
-  landed, rewrite it out (`git filter-branch --msg-filter "sed '/^Claude-Session:/d'"`)
-  and note that the pre-rewrite SHAs stay reachable on the host until it GCs.
-- `RELEASENOTES.md` (repos with a perf story or non-trivial release narrative): the
-  detailed companion to `CHANGELOG.md` — `CHANGELOG.md` stays terse and public; the
-  durable audit trail for performance claims and release decisions lives here. Per
-  release it carries: a **previous→current benchmark table** (median, plus
-  unsupported-before cases) sourced from `.agents/bench/`; **behavior/migration nuance**
-  too detailed for Keep a Changelog; **benchmark caveats** (shared-runner noise, OS,
-  Python version, local-vs-CI); **validation evidence** (tests/build/docs/leak-check
-  results, CI run IDs when available); and **publication state** (prepared / main pushed
-  / tag not pushed until per-release user consent). `[Unreleased]` records the
-  next-release perf target so a regression is caught before tagging. Same leak rules as
-  public release notes: no plan names, `.agents` refs, or `Phase N` phrasing.
+  private-plan leaks AND commit messages for agent-session trailers/URLs
+  (`Claude-Session:`, `claude.ai/code/session`). That trailer is auto-added by the
+  harness and must be stripped before pushing public — the link exposes a session id.
+  If one already landed, rewrite it out
+  (`git filter-branch --msg-filter "sed '/^Claude-Session:/d'"`); pre-rewrite SHAs stay
+  reachable on the host until it GCs.
+- `RELEASENOTES.md` (repos with a perf story): the detailed companion to a terse
+  `CHANGELOG.md` — the durable audit trail for perf claims and release decisions. Per
+  release: a **previous→current benchmark table** (median) from `.agents/bench/`;
+  **migration nuance** too detailed for Keep a Changelog; **benchmark caveats** (runner
+  noise, OS, language version, local-vs-CI); **validation evidence** (tests/build/docs/
+  leak-check, CI run IDs); **publication state** (prepared / main pushed / tag awaiting
+  per-release consent). `[Unreleased]` records the next perf target so a regression is
+  caught before tagging. Same leak rules as public notes.
 - `LICENSE`: MIT by default (`references/LICENSE`; fill `<year>`/`<copyright_holder>`).
 - Template files may contain hidden `<!-- EXECUTOR: ... -->` comments — strip them
   before writing real repo files.
