@@ -169,7 +169,8 @@ def check_templates(root):
         # No "AGENTS.md" (D54: no repo-root one) and no trailing slash on
         # .agents (D55/1c9bf7c: `dotagents link` makes it a symlink, which a
         # directory-only pattern would not match).
-        ck(".gitignore", lambda: has(".gitignore", ["\n.agents\n", "CLAUDE*", ".claude"]))
+        ck(".gitignore", lambda: has(".gitignore",
+                                     ["\n.agents\n", "*.local.md", "CLAUDE*", ".claude"]))
         ck("docs-index.md", lambda: has("docs-index.md", ["#"]))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

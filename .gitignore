@@ -3,6 +3,7 @@
 # match it. The sanitized design log is NOT in here — it lives in design/ at the
 # repo root and is tracked, because CHANGELOG.md cites its D-numbers (D56).
 .agents
+*.local.md
 CLAUDE.local.md
 .claude/
 
