@@ -3,13 +3,10 @@ description = "Opinionated always-on engineering discipline: commit shape, relea
 requires = []
 routing = []
 
-# These are always-on RULES, not load-on-demand routing. The installer is
-# copy-only today (D36) and has no mechanism to merge them into AGENTS.md's
-# managed block, so applying this overlay means pasting `rules.md` into your
-# own `~/.agents/AGENTS.md` under "Always-on rules". Tracked here so the text
-# is versioned rather than hand-edited into the install target and lost on the
-# next rebuild -- see the finding
-# `overlays_cannot_contribute_agents_md_rules`.
+# Always-on RULES, not load-on-demand routing: `install` merges each listed
+# file's `- **…` bullets into AGENTS.md's managed block under "Always-on rules"
+# (D59). Only the leading bullet run is taken, so the prose sections in
+# `rules.md` explaining *why* these are not in the base stay out of the core.
 rules = [
   "engineering/rules.md",
 ]

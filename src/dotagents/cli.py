@@ -1,6 +1,7 @@
 """dotagents CLI: init / install / link / sync / audit / build-pyz subcommands."""
 
 import importlib.resources
+import re
 import shutil
 import subprocess
 import sys
@@ -76,14 +77,68 @@ BASE_PLAIN_FILES = [
 ]
 
 
-def _apply_base(src: Path, dest: Path, force: bool, dry_run: bool, logger) -> None:
+def _compose_block(base_text: str, overlays: "list[Path]", logger) -> str:
+    """Fold each overlay's `rules`/`routing` contributions into the base block.
+
+    Rules append to "Always-on rules" and routing to "Load on demand", in overlay
+    order, after the base's own -- the base carries the mechanism (D57) and should
+    read first, and overlay order is already the user's stated preference via
+    repeated `--overlays`. Returns `base_text` unchanged when nothing contributes,
+    so `init` (which takes no overlays) is completely unaffected."""
+    from dotagents._overlays import read_manifest, rule_blocks
+
+    rules: "list[str]" = []
+    routing: "list[str]" = []
+    for overlay_dir in overlays:
+        manifest = read_manifest(overlay_dir)
+        blocks, warnings = rule_blocks(overlay_dir, manifest["rules"])  # type: ignore[arg-type]
+        for warning in warnings:
+            logger.warning("overlay %s: %s", manifest["name"], warning)
+        rules.extend(blocks)
+        routing.extend(manifest["routing"])  # type: ignore[arg-type]
+
+    if not rules and not routing:
+        return base_text
+
+    text = base_text
+    if rules:
+        # Append after the last always-on bullet, i.e. just before the next heading.
+        m = re.search(r"(?m)^## Load on demand", text)
+        if m is None:
+            logger.warning("base AGENTS.md has no 'Load on demand' heading; "
+                           "appending overlay rules at the end of the block")
+        else:
+            text = text[: m.start()] + "\n".join(rules) + "\n\n" + text[m.start():]
+    if routing:
+        # The base's placeholder sentence only makes sense with no routing lines.
+        text = re.sub(
+            r"(?m)^Nothing ships here by default[^\n]*\n(?:[^\n#<][^\n]*\n)*",
+            "",
+            text,
+        )
+        end = re.search(r"(?m)^<!-- dotagents:end -->", text)
+        insert_at = end.start() if end else len(text)
+        text = text[:insert_at] + "\n".join(routing) + "\n" + text[insert_at:]
+    return text
+
+
+def _apply_base(
+    src: Path, dest: Path, force: bool, dry_run: bool, logger,
+    overlays: "list[Path] | None" = None,
+) -> None:
     """Lay down the base overlay: managed-block merge AGENTS.md/CLAUDE.md,
-    create-if-absent the plain files. Shared by `init` and `install`."""
+    create-if-absent the plain files. Shared by `init` and `install`.
+
+    `overlays` (install only) contribute rules/routing into the managed block."""
     backup_root = timestamped_backup_root(dest) if force else None
+
+    base_agents = (Path(src) / "AGENTS.md").read_text(encoding="utf-8")
+    if overlays:
+        base_agents = _compose_block(base_agents, overlays, logger)
 
     branch = merge_block(
         dest / "AGENTS.md",
-        (Path(src) / "AGENTS.md").read_text(encoding="utf-8"),
+        base_agents,
         force=force, dry_run=dry_run, backup_root=backup_root,
     )
     logger.info("%s: AGENTS.md", branch)
@@ -198,7 +253,10 @@ class Install(LoggingArgs, Cmd):
         src = _resolve_from(self.from_, BASE_ROOT)
         dest = Path(self.dest).expanduser().resolve()
 
-        _apply_base(Path(src), dest, self.force, self.dry_run, self._logger_)
+        _apply_base(
+            Path(src), dest, self.force, self.dry_run, self._logger_,
+            overlays=[Path(o) for o in (self.overlays or [])],
+        )
 
         if self.overlays:
             from dotagents._overlays import apply_overlay
