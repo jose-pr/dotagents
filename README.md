@@ -38,12 +38,17 @@ them. Everything else is repo infrastructure.
 | `overlays/recovery/` | `kb/RECOVERY.md` — config-recovery playbook |
 | `overlays/references/` | Language-neutral repo templates (README, CHANGELOG, LICENSE, .gitignore, plan-shape example) |
 | `overlays/python`, `node`, `rust` | Per-language `kb/` + manifests + CI workflows |
-| `overlays/agents/` | Named-agent directives (`antigravity.md`) |
+| `overlays/release/` | Host-agnostic release helper: agent-driven commit-plan loop + tag/CI monitoring across GitHub (`gh`) and GitLab (`gitlabq`) |
 | `overlays/private-sync/` | `kb/PRIVATE_SYNC.md` + cloud `hooks/` for the one-private-repo, per-project `.agents` model (`dotagents link`/`sync`) |
 | `overlays/tools/` | Helper tools you opt into: `summarize_run.py`, `compare_bench.py` |
 | `tools/` | Required tooling (not an overlay): `audit_config.py`, `leak_check.py`, `cloud-setup.sh` |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
-| `design/` | This config's own design log — `DECISIONS.md` + one file per decision — the "why" behind every rule |
+
+Named-agent directives aren't a shipped overlay — a named agent (Claude, Antigravity,
+…) just reads its own `~/.agents/<agent>.md` on top of the shared `AGENTS.md`, which the
+base overlay's routing already states. This config's own design log lives **privately**
+under its untracked `.agents/dotagents/` (`DECISIONS.md` + one file per decision) — like
+every project, `.agents/` is never tracked or pushed.
 
 Each `overlays/<name>/overlay.toml` carries a `name`/`description`/`requires`/`routing`
 manifest for a future `dotagents overlays` subcommand; today overlays are applied by
@@ -155,11 +160,12 @@ python tools/audit_config.py --repo-hygiene .          # no personal leftovers t
 Fork it — that's the point. Keep the base `AGENTS.md` small (the audit warns past
 ~2.5KB); put opinionated content in overlays. Your `~/.agents/dotagents/DECISIONS.md`
 is *your* private, per-install design log (index + `decisions/` files) — installed
-empty, edited directly, never distributed. This repo's own `.agents/` is the public,
-sanitized record of how *this* config evolved; if you fork, keep yours equally free of
-personal paths and private project names (`--repo-hygiene` checks mechanically), and
-use `tools/leak_check.py <repo>` to scan any *other* repo for agent-plan leakage before
-its releases.
+empty, edited directly, never distributed. This repo follows the same rule: its own
+design log and all working material live in an **untracked** `.agents/dotagents/`, never
+committed — so what's public here is only the CLI, the base overlay, and the opt-in
+overlays. If you fork, keep the tracked surface free of personal paths and private
+project names (`--repo-hygiene` checks mechanically), and use `tools/leak_check.py
+<repo>` to scan any *other* repo for agent-plan leakage before its releases.
 
 ## License
 
