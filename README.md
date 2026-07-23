@@ -16,7 +16,7 @@ session.
   **base overlay** (just the `AGENTS.md` scaffolding + design-log convention).
   Everything opinionated — planning/execution/review flows, language `kb/` files,
   repo templates, tools — lives in composable example **overlays** you layer in
-  explicitly (`install --overlays <path>`). Additive-only: overlays never overwrite
+  explicitly (`dotagents overlays add <name>`). Additive-only: overlays never overwrite
   something you've already customized.
 - **Architect/executor split.** `flows/PLAN.md` makes a strong model write precise,
   autonomous plans; `flows/EXEC.md` makes a cheaper model execute them without
@@ -51,8 +51,8 @@ under its untracked `.agents/dotagents/` (`DECISIONS.md` + one file per decision
 every project, `.agents/` is never tracked or pushed.
 
 Each `overlays/<name>/overlay.toml` carries a `name`/`description`/`requires`/`routing`
-manifest for a future `dotagents overlays` subcommand; today overlays are applied by
-path with `install --overlays`.
+manifest read by the `dotagents overlays` subcommand, which manages overlays by name
+(`add`/`remove`/`list`/`sync`) — see [Managing overlays](#managing-overlays) below.
 
 ## Install
 
@@ -72,22 +72,48 @@ python install.py init --dry-run        # show what would happen
 python install.py init --force          # replace AGENTS.md/CLAUDE.md wholesale (backed up) instead of block-merging
 ```
 
-**`dotagents install`** — the base overlay plus any overlays you opt into with
-`--overlays <path>` (repeatable). The installer bundles only the base; overlays are
-example directories you point at (this repo's `overlays/`, your own, or a URI):
+**`dotagents install`** — lays down the base overlay (like `init`), plus optional
+wrapper-script install:
 
 ```bash
 python install.py install                                    # base only (like init)
-python install.py install --overlays overlays/flows --overlays overlays/python
-python install.py install --overlays overlays/flows --bin-dir ~/.local/bin  # also write a `dotagents` command
-python install.py install --dry-run --overlays overlays/flows
+python install.py install --bin-dir ~/.local/bin            # base + a `dotagents` command
+python install.py install --dry-run
 ```
 
-Overlays are copied in additively (never clobbering an existing file), so re-running is
-idempotent. `--from <path-or-uri>` selects the *base* source for a `pip install`-only
-environment (a git checkout dir, `file:`, `http(s):`, `zip:`, `sftp:`, or `s3:` URI via
+`--from <path-or-uri>` selects the *base* source for a `pip install`-only environment
+(a git checkout dir, `file:`, `http(s):`, `zip:`, `sftp:`, or `s3:` URI via
 `pip install "dotagents[uri]"`); `init`'s base ships inside the package, so it needs no
-`--from`. A future `dotagents overlays` subcommand will manage overlays by name.
+`--from`.
+
+> **`install --overlays <path>` is deprecated** (one-release shim): it still applies an
+> overlay by flat-copy but prints a warning. Use `dotagents overlays add <name>` instead
+> — it installs into `<scope>/.agents/overlays/<name>/` (discoverable) and publishes the
+> overlay's skills into the shared skills dir. See below.
+
+### Managing overlays
+
+`dotagents overlays` manages opt-in overlays **by name**, resolving each name against a
+source (the bundled `overlays/` by default; override with `--source <dir>` or
+`$DOTAGENTS_OVERLAYS_SRC`). Installed overlays are *discovered* by their presence under
+`<scope>/.agents/overlays/` — there is no registry file.
+
+```bash
+python install.py overlays add python flows        # install into the scope, publish skills, merge D59 rules/routing
+python install.py overlays list                    # installed (discovered) + available (from source)
+python install.py overlays sync 'py*'              # refresh installed overlays matching a glob, resync their skills
+python install.py overlays remove python           # delete the overlay dir + unpublish its skills
+```
+
+Scope is **project** by default (`<project>/.agents/`, when run inside one) or **user**
+with `-g`/`--global` (`~/.agents/`, the configurable store). Each overlay installs as a
+directory (kept, discoverable), its `routing`/`rules` merge additively into `AGENTS.md`'s
+managed block, and its `skills/<name>/` are symlinked (or `--copy`'d, for Windows /
+no-symlink) into the shared `<scope>/.agents/skills/` so every agent sees the same skills.
+`add`/`sync` are additive and never clobber a file you hand-edited inside an installed
+overlay. Removing an overlay deletes only its dir and unpublishes only the skills **it**
+published; its lines in `AGENTS.md`'s managed block are not auto-pruned (a warning points
+at the manual edit, or re-run `install`).
 
 **Downloadable `dotagents.pyz`** — a self-contained zipapp with `duho`/
 `pathlib_next` and the required `tools/` bundled in, so it needs no `pip install`:
@@ -101,8 +127,8 @@ Then wire your runner to it — e.g. Claude Code: put `@AGENTS.md` in
 `~/.claude/CLAUDE.md`... which is exactly what the installed `CLAUDE.md` contains.
 
 **Or let your agent do it:** point it at this repo and say —
-> Read README.md, run `python install.py install --overlays overlays/flows`, and
-> confirm `~/.agents/flows/PLAN.md` exists.
+> Read README.md, run `python install.py init && python install.py overlays add flows -g`,
+> and confirm `~/.agents/overlays/flows/flows/PLAN.md` exists.
 
 ## Private sync (per-user + per-project, one private repo)
 
@@ -118,7 +144,7 @@ link never lands in the public repo). `<name>` defaults to the project's basenam
 local `~/code/app` and a cloud `/home/user/app` resolve to the same store.
 
 ```bash
-python install.py install --overlays overlays/private-sync   # kb + cloud hooks
+python install.py install --overlays overlays/private-sync   # kb + cloud hooks (flat-copied to ~/.agents/hooks/)
 dotagents link .        # symlink this project's .agents into the private repo
                         #   (an existing .agents/ is adopted in on the first link;
                         #    --copy mirrors it as a real dir for no-symlink systems)
