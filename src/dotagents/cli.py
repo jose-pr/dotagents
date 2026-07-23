@@ -125,30 +125,39 @@ def _compose_block(base_text: str, overlays: "list[Path]", logger) -> str:
 def _apply_base(
     src: Path, dest: Path, force: bool, dry_run: bool, logger,
     overlays: "list[Path] | None" = None,
+    agents: "list[str] | None" = None,
 ) -> None:
     """Lay down the base overlay: managed-block merge AGENTS.md/CLAUDE.md,
     create-if-absent the plain files. Shared by `init` and `install`.
 
     `overlays` (install only) contribute rules/routing into the managed block."""
-    backup_root = timestamped_backup_root(dest) if force else None
-
+    from dotagents import _agents
+    import os
+    
     base_agents = (Path(src) / "AGENTS.md").read_text(encoding="utf-8")
     if overlays:
         base_agents = _compose_block(base_agents, overlays, logger)
 
-    branch = merge_block(
-        dest / "AGENTS.md",
-        base_agents,
-        force=force, dry_run=dry_run, backup_root=backup_root,
-    )
-    logger.info("%s: AGENTS.md", branch)
+    active_agents = []
+    if agents:
+        for name in agents:
+            agent = _agents.get_agent(name)
+            if agent:
+                active_agents.append(agent)
+            else:
+                logger.warning(f"Unknown agent: {name}")
+    else:
+        # Default: all detected + claude
+        all_agents = _agents.get_all_agents()
+        active_agents = [a for a in all_agents if a.detect_env(os.environ)]
+        if not any(a.name == "claude" for a in active_agents):
+            active_agents.append(_agents.ClaudeAgent())
+            
+    for agent in active_agents:
+        agent.write_base_config(
+            dest, src, base_agents, force=force, dry_run=dry_run, logger=logger
+        )
 
-    branch = merge_claude_md(
-        dest / "CLAUDE.md",
-        (Path(src) / "CLAUDE.md").read_text(encoding="utf-8"),
-        force=force, dry_run=dry_run, backup_root=backup_root,
-    )
-    logger.info("%s: CLAUDE.md", branch)
 
     for rel in BASE_PLAIN_FILES:
         source_path = Path(src) / rel
@@ -205,11 +214,21 @@ class Init(LoggingArgs, Cmd):
     force: bool = False
     "Replace AGENTS.md/CLAUDE.md wholesale (with backup) instead of block-merging."
     ("--force",)
+    
+    agents: "list[str]" = []
+    "List of agents to install for (e.g. claude,gemini). Default: auto-detect + claude."
+    ("--agents",)
 
     def __call__(self) -> int:
         src = _resolve_from(self.from_, BASE_ROOT)
         dest = Path(self.dest).expanduser().resolve()
-        _apply_base(Path(src), dest, self.force, self.dry_run, self._logger_)
+        
+        agent_names = []
+        if self.agents:
+            for a in self.agents:
+                agent_names.extend([x.strip() for x in a.split(",") if x.strip()])
+                
+        _apply_base(Path(src), dest, self.force, self.dry_run, self._logger_, agents=agent_names if agent_names else None)
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
         return 0
@@ -249,13 +268,23 @@ class Install(LoggingArgs, Cmd):
     "Replace AGENTS.md/CLAUDE.md wholesale (with backup) instead of block-merging."
     ("--force",)
 
+    agents: "list[str]" = []
+    "List of agents to install for (e.g. claude,gemini). Default: auto-detect + claude."
+    ("--agents",)
+
     def __call__(self) -> int:
         src = _resolve_from(self.from_, BASE_ROOT)
         dest = Path(self.dest).expanduser().resolve()
+        
+        agent_names = []
+        if self.agents:
+            for a in self.agents:
+                agent_names.extend([x.strip() for x in a.split(",") if x.strip()])
 
         _apply_base(
             Path(src), dest, self.force, self.dry_run, self._logger_,
             overlays=[Path(o) for o in (self.overlays or [])],
+            agents=agent_names if agent_names else None,
         )
 
         if self.overlays:
@@ -468,6 +497,67 @@ class Audit(LoggingArgs, Cmd):
         return rc
 
 
+class Context(LoggingArgs, Cmd):
+    """Assemble the effective context for agents (Plan 04)."""
+
+    _parsername_ = "context"
+
+    format: str = "markdown"
+    "Output format: markdown, system-reminder, or json."
+    ("--format",)
+
+    global_scope: bool = False
+    "Use global scope."
+    ("--global", "-g")
+
+    agents: "list[str]" = []
+    "List of agents to generate context for (e.g. claude,gemini). Default: active agent."
+    ("--agents",)
+
+    out: Optional[str] = None
+    "Output path, or '-' for stdout. Default: agent native config file."
+    ("--out", "-o")
+
+    def __call__(self) -> int:
+        from dotagents import _agents
+        from dotagents import _context
+        import os
+
+        project_root = Path.cwd()
+        agents_dir = Path.home() / ".agents"
+        
+        agent_names = []
+        if self.agents:
+            for a in self.agents:
+                agent_names.extend([x.strip() for x in a.split(",") if x.strip()])
+                
+        if agent_names:
+            active_agents = []
+            for name in agent_names:
+                a = _agents.get_agent(name)
+                if a: active_agents.append(a)
+        else:
+            active_agents = [_agents.resolve_active_agent(os.environ)]
+
+        for agent in active_agents:
+            text = _context.assemble_context(
+                agent, agents_dir, project_root, global_scope=self.global_scope
+            )
+            
+            if self.format == "system-reminder":
+                text = f"<!-- system-reminder: begin -->\n{text}\n<!-- system-reminder: end -->"
+            
+            if self.out == "-":
+                print(f"--- Context for {agent.name} ---\n{text}\n")
+            elif self.out:
+                Path(self.out).write_text(text, encoding="utf-8")
+                self._logger_.info(f"Wrote {agent.name} context to {self.out}")
+            else:
+                agent.write_context(agents_dir, text, force=False, dry_run=False, logger=self._logger_)
+
+        return 0
+
+
 class BuildPyz(LoggingArgs, Cmd):
     """Vendor duho/pathlib_next via pip --target and package a self-contained dotagents.pyz."""
 
@@ -566,7 +656,7 @@ class Dotagents(LoggingArgs, Cli):
     """Umbrella CLI for installing and building the dotagents config."""
 
     _version_ = __version__
-    _subcommands_ = [Init, Install, Link, Sync, Audit, BuildPyz]
+    _subcommands_ = [Init, Install, Link, Sync, Audit, BuildPyz, Context]
 
     def __call__(self) -> int:
         self._logger_.info(
