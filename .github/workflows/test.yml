@@ -82,6 +82,28 @@ jobs:
           export HOME="$(mktemp -d)"
           python install.py install --overlays overlays/flows
           python install.py install --overlays overlays/flows | grep -q "skip (exists)"
+      - name: install --overlays is deprecated (warns, still applies)
+        run: |
+          export HOME="$(mktemp -d)"
+          python install.py install --overlays overlays/flows 2>&1 | grep -qi "deprecated"
+          test -f "$HOME/.agents/flows/PLAN.md"   # still applied for one release
+      - name: overlays add/list/remove into a scope (discover, not track)
+        run: |
+          export HOME="$(mktemp -d)"
+          python install.py init                                   # lay the base AGENTS.md
+          # add by name from the bundled source, into the user scope.
+          python -m dotagents overlays add python --source overlays -g
+          test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"     # installed as a dir
+          test -f "$HOME/.agents/overlays/python/overlay.toml"     # self-describing
+          grep -q "kb/PYTHON.md" "$HOME/.agents/AGENTS.md"         # D59 routing merged
+          # list discovers it by presence (no registry file).
+          python -m dotagents overlays list --source overlays -g | grep -q "python"
+          python -m dotagents overlays list --source overlays -g --json | grep -q '"installed"'
+          # glob-filtered sync is a no-op-safe refresh.
+          python -m dotagents overlays sync 'py*' --source overlays -g
+          # remove deletes the overlay dir (+ warns about the AGENTS.md rules prune).
+          python -m dotagents overlays remove python -g 2>&1 | grep -qi "NOT auto-removed"
+          test ! -e "$HOME/.agents/overlays/python"
       - name: Link a project into the private store, then sync (git bootstrap)
         run: |
           export HOME="$(mktemp -d)"
@@ -154,3 +176,11 @@ jobs:
           python dist/dotagents.pyz init --help | grep -q -- "--agents"
           # context --format json runs and emits parseable JSON (empty HOME -> claude).
           python dist/dotagents.pyz context --format json --agents claude -g | python -c "import sys,json; json.load(sys.stdin)"
+          # overlays add: the `<name>` positional + aliased flags (--source, -g) must
+          # survive the zipapp (duho AST-introspection-in-pyz gotcha). --source must
+          # NOT degrade to --source-, and -g must select the user scope.
+          python dist/dotagents.pyz overlays add --help | grep -q -- "--source"
+          ! python dist/dotagents.pyz overlays add --help | grep -q -- "--source-"
+          python dist/dotagents.pyz init
+          python dist/dotagents.pyz overlays add python --source overlays -g
+          test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"
