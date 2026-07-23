@@ -130,3 +130,78 @@ def apply_overlay(overlay_dir: Path, dest: Path, dry_run: bool):
             shutil.copy2(str(src), str(target))
         copied += 1
     return copied, skipped, lines
+
+
+def install_overlay_dir(overlay_dir: Path, dest_overlay_dir: Path, dry_run: bool):
+    """Install an overlay as a *directory* under `<scope>/overlays/<name>/` (the
+    "install model = overlay-dirs" decision): the overlay is the discoverable unit.
+
+    Copies every file the overlay ships (minus its manifest / caches -- see
+    `overlay_files`) into `dest_overlay_dir`, create-if-absent so re-adding an
+    overlay never clobbers a file the user hand-edited inside the installed copy
+    (additive/no-clobber, mirroring `apply_overlay`). The overlay's own
+    `overlay.toml` is copied too so a later `sync`/`list` can re-read its manifest
+    from the installed copy. Returns (copied, skipped) counts and log lines.
+    """
+    copied = skipped = 0
+    lines = []
+    # Ship the manifest alongside the files so the installed dir is self-describing.
+    sources = list(overlay_files(overlay_dir))
+    manifest = overlay_dir / "overlay.toml"
+    if manifest.is_file():
+        sources.append(manifest)
+    for src in sources:
+        rel = src.relative_to(overlay_dir)
+        target = dest_overlay_dir / rel
+        if target.exists():
+            lines.append("skip (exists): %s" % rel.as_posix())
+            skipped += 1
+            continue
+        lines.append("install: %s" % rel.as_posix())
+        if not dry_run:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src), str(target))
+        copied += 1
+    return copied, skipped, lines
+
+
+def merge_overlay_rules(agents_md: Path, overlay_dir: Path, dry_run: bool, logger):
+    """Fold one overlay's D59 routing + rules into an already-installed AGENTS.md's
+    managed block, in place (additive).
+
+    `install` composes these into the base text *before* first write; an incremental
+    `overlays add` instead re-composes the *existing* installed file's managed block.
+    Extracts the current block (between the dotagents markers), runs the same
+    `_compose_block` fold used at install time over just that block text, and writes
+    the result back between the markers -- content outside the block is never
+    touched. A no-op (returns False) when the overlay contributes nothing, the file
+    is absent, or it carries no managed block.
+    """
+    from dotagents._merge import BEGIN_MARKER, END_MARKER
+    from dotagents.cli import _compose_block
+
+    manifest = read_manifest(overlay_dir)
+    if not manifest["routing"] and not manifest["rules"]:
+        return False
+    if not agents_md.is_file():
+        logger.warning(
+            "no installed AGENTS.md at %s; overlay rules/routing not merged", agents_md
+        )
+        return False
+    existing = agents_md.read_text(encoding="utf-8")
+    if BEGIN_MARKER not in existing or END_MARKER not in existing:
+        logger.warning(
+            "AGENTS.md has no dotagents managed block; overlay rules/routing not "
+            "merged (run `dotagents init` first)"
+        )
+        return False
+    start = existing.index(BEGIN_MARKER)
+    end = existing.index(END_MARKER) + len(END_MARKER)
+    block = existing[start:end]
+    merged = _compose_block(block, [overlay_dir], logger)
+    if merged == block:
+        return False
+    new_text = existing[:start] + merged + existing[end:]
+    if not dry_run:
+        agents_md.write_text(new_text, encoding="utf-8")
+    return True
