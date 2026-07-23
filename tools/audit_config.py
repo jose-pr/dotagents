@@ -45,7 +45,6 @@ EXIST_ONLY = ["tools/audit_config.py", "tools/leak_check.py", "tools/cloud-setup
 # The language/agent overlays -- opt-in at install time, but a repo checkout
 # (--root .) should have every example present. Checked only when overlays/ exists.
 EXAMPLES = [
-    "overlays/agents/antigravity.md",
     "overlays/private-sync/kb/PRIVATE_SYNC.md",
     "overlays/private-sync/hooks/private-sync-start.sh",
     "overlays/private-sync/hooks/private-sync-stop.sh",
