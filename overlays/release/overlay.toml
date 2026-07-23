@@ -1,0 +1,7 @@
+name = "release"
+description = "VCS-host-agnostic release helper: agent-driven commit-plan loop (emit context → apply per-commit) plus tag + CI monitoring across GitHub (gh CLI) and GitLab (gitlabq)."
+requires = []
+routing = [
+  """- Cut a release, build/apply a per-commit plan, or monitor CI after a release
+  tag (GitHub or GitLab) → ~/.agents/kb/RELEASE.md""",
+]
