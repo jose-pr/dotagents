@@ -54,23 +54,44 @@ def _parse_string_array(text: str, key: str) -> "list[str]":
     return [s.strip("\n") for s in items if s.strip()]
 
 
+# Default merge priority for an overlay that declares none (plan 02). Lower sorts
+# earlier. 500 leaves generous headroom on both sides for overlays that want to
+# sort before (0..499) or after (501..) the unprioritized default.
+DEFAULT_PRIORITY = 500
+
+
+def _parse_priority(text: str) -> int:
+    """Read a top-level `priority = <int>` from TOML source (plan 02).
+
+    Same minimal-reader rationale as `_parse_string_array`: no `tomllib` on the
+    3.9 floor. Missing/unparseable -> DEFAULT_PRIORITY."""
+    m = re.search(r"(?m)^priority\s*=\s*(-?\d+)\s*$", text)
+    if m is None:
+        return DEFAULT_PRIORITY
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return DEFAULT_PRIORITY
+
+
 def read_manifest(overlay_dir: Path) -> "dict[str, object]":
-    """Parse `overlay.toml`, returning at least name/routing/rules.
+    """Parse `overlay.toml`, returning at least name/routing/rules/priority.
 
     A missing or unreadable manifest yields empty contributions -- an overlay is
     allowed to be just a directory of files."""
     path = overlay_dir / "overlay.toml"
     if not path.is_file():
-        return {"name": overlay_dir.name, "routing": [], "rules": []}
+        return {"name": overlay_dir.name, "routing": [], "rules": [], "priority": DEFAULT_PRIORITY}
     try:
         raw = _strip_comments(path.read_text(encoding="utf-8"))
     except OSError:
-        return {"name": overlay_dir.name, "routing": [], "rules": []}
+        return {"name": overlay_dir.name, "routing": [], "rules": [], "priority": DEFAULT_PRIORITY}
     name = re.search(r'(?m)^name\s*=\s*"([^"]*)"', raw)
     return {
         "name": name.group(1) if name else overlay_dir.name,
         "routing": _parse_string_array(raw, "routing"),
         "rules": _parse_string_array(raw, "rules"),
+        "priority": _parse_priority(raw),
     }
 
 

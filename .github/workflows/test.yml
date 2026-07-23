@@ -56,6 +56,10 @@ jobs:
           python-version: "3.12"
       - name: Install the dotagents CLI package
         run: python -m pip install -e .
+      - name: Unit tests (agent registry + context generator, plans 00/04)
+        run: |
+          python -m pip install pytest
+          python -m pytest tests/ -q
       - name: Dry run (minimal base overlay via init)
         run: python install.py init --dry-run
       - name: Init lays down the base overlay only
@@ -141,3 +145,12 @@ jobs:
           proj="$(mktemp -d)"; printf '.agents/\n' > "$proj/.gitignore"
           python dist/dotagents.pyz link "$proj"
           test -L "$proj/.agents"
+          # The context command's flags (list --agents, --format) must survive the
+          # zipapp AST-introspection degradation, and its help text must be present.
+          python dist/dotagents.pyz context --help | grep -q -- "--format FORMAT"
+          python dist/dotagents.pyz context --help | grep -q -- "--agents"
+          python dist/dotagents.pyz context --help | grep -q -- "Output format: markdown"
+          # init's --agents list flag must not degrade to a name-derived form.
+          python dist/dotagents.pyz init --help | grep -q -- "--agents"
+          # context --format json runs and emits parseable JSON (empty HOME -> claude).
+          python dist/dotagents.pyz context --format json --agents claude -g | python -c "import sys,json; json.load(sys.stdin)"
