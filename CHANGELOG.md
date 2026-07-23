@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   link — and exits 1 on any hit. The trailer is auto-added by the agent harness and
   exposes a session id in public history if it slips through; the pre-existing tracked-file
   scan didn't cover commit messages. `flows/REPO.md` release discipline documents the check
-  and the `git filter-branch --msg-filter` remediation for one that already landed. See D41.
+  and the `git filter-branch --msg-filter` remediation for one that already landed.
 - feat: `tools/cloud-setup.sh` step 5 wires `hooks/settings.snippet.json` into the
   user-level `~/.claude/settings.json` (idempotent JSON merge, preserves existing
   settings/hooks). A fresh cloud container has no settings file and nothing else
@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   sync's `git add -A` would push as a bare gitlink (and `sync`'s copy-back had the same
   swallow, with `overwrite=True`). Both paths now log a skip and leave the checkout in
   place; `link --force` keeps an escape hatch that backs the checkout up to
-  `.agents.bak*` (git state intact) and links the store. See D43.
+  `.agents.bak*` (git state intact) and links the store.
 
 - fix: `dotagents sync` now authenticates the private repo directly against github.com
   when `DOTAGENTS_AGENTS_TOKEN` is set — and on a hosted runner that rewrites github
@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   now ports that logic: a per-command `-c` credential helper in a normal environment, or
   an isolated `GIT_CONFIG_GLOBAL` (identity + CA bundle preserved) that skips the rewrite
   when one is active. The token is still read from the environment at auth time and never
-  written to `.git/config`. See D40.
+  written to `.git/config`.
 - fix: `tools/cloud-setup.sh` no longer lets a single container-start clone failure
   permanently disable the environment. The clone often loses a race with egress/proxy
   readiness; previously it `exit 0`'d on the first failure, skipping the hook-wiring
@@ -53,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   nothing ever recovered. Now the clone retries with backoff (5 attempts), and if it
   still fails the script persists a copy of itself and wires a SessionStart **recovery
   hook** that re-runs the bootstrap next session (egress is up by then); the first
-  successful run merges the private-sync hooks and removes the recovery hook. See D39.
+  successful run merges the private-sync hooks and removes the recovery hook.
 - fix: `tools/cloud-setup.sh` also wires that recovery hook when
   `DOTAGENTS_AGENTS_REMOTE` is **unset at setup time**, not only on clone failure.
   Hosted runners often expose the remote/token secrets to session processes but not
@@ -63,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   banner + `skipping` line, ~154 bytes, no clone). The branch now persists the recovery
   hook like the exhausted-clone path, so the next session — where the secret is present
   — clones and self-removes the hook. A genuinely remote-less environment just re-skips
-  each session (idempotent; the hook never duplicates). See D42. (Durable fix is still
+  each session (idempotent; the hook never duplicates). (Durable fix is still
   to expose the secrets to the Setup Script phase so the first container succeeds.)
 - fix: `.gitignore` templates and `dotagents link` now use a slashless `.agents`
   instead of `.agents/`. `link` creates `.agents` as a *symlink*, which git treats
