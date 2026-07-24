@@ -137,7 +137,7 @@ jobs:
           export HOME="$(mktemp -d)"
           git config --global user.email ci@example.invalid
           git config --global user.name CI
-          python install.py install
+          python install.py init
           proj="$(mktemp -d)"; printf '.agents\n' > "$proj/.gitignore"
           git init -q "$proj/.agents"
           echo "checkout" > "$proj/.agents/AGENTS.md"
@@ -156,7 +156,7 @@ jobs:
           export HOME="$(mktemp -d)"
           git config --global user.email ci@example.invalid
           git config --global user.name CI
-          python install.py install
+          python install.py init
           proj="$(mktemp -d)"; printf '.agents/\n' > "$proj/.gitignore"
           python -m dotagents link "$proj" --copy
           test -d "$proj/.agents" && test ! -L "$proj/.agents"  # real dir, not a symlink

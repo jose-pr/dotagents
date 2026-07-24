@@ -27,14 +27,15 @@ and discovered from the store's command dir — they behave like any other subco
 Additional user command modules are discovered from each scope's command dir,
 `$DOTAGENTS_CMDS_PATH` entries, and `--cmdspath`.
 
-## init / install
+## init
 
 See [Install](install.md) for the full walkthrough. In brief:
 
 ```bash
-dotagents init                 # base config into ~/.agents
+dotagents init                          # base config into <cwd>/.agents (project scope)
+dotagents init -g                       # ...into ~/.agents (user scope)
+dotagents init --bin-dir ~/.local/bin   # also write a `dotagents` command on PATH
 dotagents init --dry-run
-dotagents install --bin-dir ~/.local/bin   # base + a `dotagents` command
 ```
 
 ## overlays
