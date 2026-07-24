@@ -178,6 +178,9 @@ jobs:
           # NOT degrade to --source-, and -g must select the user scope.
           python dist/dotagents.pyz overlays add --help | grep -q -- "--source"
           ! python dist/dotagents.pyz overlays add --help | grep -q -- "--source-"
+          # --no-setup (the setup-runner escape hatch) must survive the zipapp too.
+          python dist/dotagents.pyz overlays add --help | grep -q -- "--no-setup"
+          ! python dist/dotagents.pyz overlays add --help | grep -q -- "--no-setup-"
           python dist/dotagents.pyz init
           python dist/dotagents.pyz overlays add python --source overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"
