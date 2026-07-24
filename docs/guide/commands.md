@@ -74,8 +74,12 @@ python -m dotagents env --format export -g     # shell-eval'able `export KEY="va
 python -m dotagents env --diff --format json   # only vars that differ from the caller's env
 ```
 
-- `--format export|json|ini|yaml` — `export` is the default a SessionStart hook
-  sources.
+- `--format` — output syntax. Default `auto` detects the calling shell (via the
+  parent-process chain) and emits sourceable output for it. Shell forms:
+  `export` (aliases `posix`/`sh`/`bash`, `export KEY="value"`), `dotenv` (`env`,
+  bare `KEY=value`), `powershell` (`pwsh`/`ps`, `$env:KEY = 'value'`), `cmd`
+  (`bat`/`batch`, `set "KEY=value"`), `fish` (`set -gx KEY value`). Data forms:
+  `json`, `ini`, `yaml`. An explicit `--format` always wins.
 - `--diff` — emit only the change set vs. the caller's environment.
 - `-g` / `--global` — user scope.
 

@@ -202,11 +202,17 @@ jobs:
           # zipapp AST-introspection degradation.
           python dist/dotagents.pyz env --help | grep -q -- "--format FORMAT"
           python dist/dotagents.pyz env --help | grep -q -- "--diff"
-          python dist/dotagents.pyz env --help | grep -q -- "Output format: export"
+          python dist/dotagents.pyz env --help | grep -q -- "Output format. Default 'auto'"
           # env --format json runs and emits parseable JSON (identity vars stamped).
           python dist/dotagents.pyz env --diff --format json -g | python -c "import sys,json; json.load(sys.stdin)"
           # env --format export dispatches and prints export lines.
           python dist/dotagents.pyz env --format export -g | grep -q -- "export AGENT="
+          # Per-shell formats (D83): each emits its own syntax through the zipapp.
+          python dist/dotagents.pyz env --format powershell -g | grep -q -- "\$env:AGENT = '"
+          python dist/dotagents.pyz env --format cmd -g | grep -q -- 'set "AGENT='
+          python dist/dotagents.pyz env --format dotenv -g | grep -q -- "^AGENT="
+          # auto (the default) resolves to a concrete format and prints SOMETHING.
+          python dist/dotagents.pyz env -g | grep -q -- "AGENT"
           # overlays add: the `<name>` positional + aliased flags (--source, -g) must
           # survive the zipapp (duho AST-introspection-in-pyz gotcha). --source must
           # NOT degrade to --source-, and -g must select the user scope.
