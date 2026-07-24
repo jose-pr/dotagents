@@ -95,7 +95,12 @@ class Context(LoggingArgs, Cmd):
             if self.write_agent:
                 agent.write_context(agents_dir, text, force=False, dry_run=False, logger=self._logger_)
             elif self.out == "-":
-                print(f"--- Context for {agent.name} ---\n{text}\n")
+                # Just the context on stdout. A per-agent delimiter is emitted ONLY when
+                # more than one agent is generated, so a single-agent run (the default)
+                # is clean, pipeable output with no decoration to strip.
+                if len(active_agents) > 1:
+                    print("# --- %s ---" % agent.name)
+                print(text)
             else:
                 Path(self.out).write_text(text, encoding="utf-8")
                 self._logger_.info(f"Wrote {agent.name} context to {self.out}")
