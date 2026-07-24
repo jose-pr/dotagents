@@ -6,8 +6,9 @@
 
 Like dotfiles, but for AI coding agents: a portable, token-budgeted `~/.agents`
 configuration that works across agent runners (Claude Code, Antigravity, Copilot,
-Codex, ...) and records your engineering standards once — repo structure, CI/release
-discipline, planning/execution/review workflows — instead of restating them every
+Codex, ...). dotagents is the **mechanism** — install a neutral base, then layer in
+opt-in **overlays** that carry your standards (repo structure, CI/release discipline,
+whatever workflows you want) — so you record them once instead of restating them every
 session.
 
 ## Design
@@ -18,16 +19,17 @@ session.
   what you use.
 - **A neutral base + opt-in overlays.** `init` lays down a minimal, opinion-free
   **base overlay** (just the `AGENTS.md` scaffolding + design-log convention).
-  Everything opinionated — planning/execution/review flows, language `kb/` files,
-  repo templates, tools — lives in composable example **overlays** you layer in
-  explicitly (`dotagents overlays add <name>`). Additive-only: overlays never overwrite
-  something you've already customized.
-- **Architect/executor split.** `flows/PLAN.md` makes a strong model write precise,
-  autonomous plans; `flows/EXEC.md` makes a cheaper model execute them without
-  re-deriving context; `flows/REVIEW.md` runs file-threaded multi-agent plan review.
-- **Every rule earned its place.** The flows encode failure modes actually hit in
-  practice (executors improvising installs, skipped tests read as passing, plans
-  leaking into public changelogs, a symlink wiping the config...).
+  Everything opinionated — workflows, language `kb/` files, repo templates, tools —
+  lives in composable **overlays** you layer in explicitly
+  (`dotagents overlays add <name>`), each contributing its own routing lines, rules,
+  skills, and commands. Additive-only: overlays never overwrite something you've
+  already customized.
+- **Overlays carry the opinions, not the tool.** dotagents is the mechanism
+  (install, compose, discover); *what* your agents should do is an overlay concern.
+  The example overlays in this repo are a starting point — a planning/execution/review
+  workflow set, language conventions, a release helper — but they're payloads riding on
+  dotagents, swappable for your own. See the [docs](https://jose-pr.github.io/dotagents/)
+  for what each ships.
 
 ## Layout
 
