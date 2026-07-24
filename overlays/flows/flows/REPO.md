@@ -24,17 +24,24 @@ file restates the other.
   ecosystem supports it (language doc names the generator, and whether a deploy step is
   even needed).
 
-## CI — two workflow files covering three concerns (test, release, docs)
-Why two: a release must never be the first time a config is exercised, and testing must
-never require cutting a release.
+## CI — three workflow files, one per concern (test, release, docs)
+Why three: a release must never be the first time a config is exercised, testing must
+never require cutting a release, and the docs site must be redeployable without a
+release (so it stays current between them).
 - **Test workflow**: `workflow_dispatch` (with a `ref` input) + throwaway `ci-*` tag
   trigger; not necessarily every push/PR. Agents may push `ci-*` tags without asking —
   use unique names (`ci-<topic>-<timestamp>`), poll the run to completion, report the
   result, then delete the tag local + remote. Never leave `ci-*` tags behind.
 - **Release workflow** (`v*` tag): test gate → build → publish, in dependency order,
-  plus a docs build+deploy job gated on the same build (the docs site is a required
-  deliverable even if nothing else needs it). Prefer the registry's OIDC / trusted
-  publishing over stored long-lived token secrets.
+  plus a **docs-gate** job that runs the docs build strictly but does **not** deploy
+  (a broken docs site must block the release without the release owning deployment).
+  Publish steps are re-run-safe (e.g. `skip-existing` on the registry upload).
+  Prefer the registry's OIDC / trusted publishing over stored long-lived token secrets.
+- **Docs workflow**: builds + deploys the docs site on its own trigger (push to the
+  default branch touching docs sources, plus `workflow_dispatch`), so the published
+  site tracks the branch and can be redeployed without a release. The docs site is a
+  required deliverable even if nothing else needs it. Ecosystems that host API docs
+  externally (e.g. Rust/docs.rs) only need this workflow for a narrative guide.
 - **Changelog-derived release notes**: repos without a PR flow get thin auto-generated
   "What's Changed" notes on every release — scrape the pushed tag's `CHANGELOG.md`
   section into the release body instead (keep the platform's auto compare-link

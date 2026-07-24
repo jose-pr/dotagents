@@ -55,10 +55,13 @@ EXAMPLES = [
     "overlays/rust/references/Cargo.toml", "overlays/python/references/mkdocs.yml",
     "overlays/python/references/workflows/python/test.yml",
     "overlays/python/references/workflows/python/release.yml",
+    "overlays/python/references/workflows/python/docs.yml",
     "overlays/node/references/workflows/node/test.yaml",
     "overlays/node/references/workflows/node/release.yaml",
+    "overlays/node/references/workflows/node/docs.yaml",
     "overlays/rust/references/workflows/rust/test.yaml",
     "overlays/rust/references/workflows/rust/release.yaml",
+    "overlays/rust/references/workflows/rust/docs.yaml",
     "overlays/net/kb/NET.md",
     "overlays/net/bin/curl.py", "overlays/net/bin/curl.cmd",
     "overlays/net/lib/certifi/__init__.py", "overlays/net/lib/certifi/__main__.py",
@@ -113,9 +116,13 @@ PERSONAL_PATTERNS = _DEFAULT_PERSONAL + list(_LOCAL.get("personal", []))
 PUBLIC_ALLOWLIST = list(_LOCAL.get("public_allowlist", []))
 REF_PATTERNS = BASE_PATTERNS + _DEFAULT_PERSONAL + list(_LOCAL.get("refs", []))
 
+# REPO.md is deliberately larger than the single-topic flow files: it covers
+# layout + CI + six meta files + versioning where PLAN/EXEC/REVIEW each cover
+# one topic (D71 — re-base, not split; a further trim would delete rules, not
+# prose). Its budget is set from the tool's own measured size with headroom.
 BUDGETS = {"src/dotagents/_overlay/AGENTS.md": 2500,
            "overlays/flows/flows/PLAN.md": 3000, "overlays/flows/flows/EXEC.md": 3000,
-           "overlays/flows/flows/REVIEW.md": 3000, "overlays/flows/flows/REPO.md": 3000}
+           "overlays/flows/flows/REVIEW.md": 3000, "overlays/flows/flows/REPO.md": 7000}
 
 SUBST = {"<project_name>": "demopkg", "<gh_org>": "demoorg",
          "<package_name>": "demopkg", "<year>": "2026",
