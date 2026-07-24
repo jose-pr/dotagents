@@ -83,6 +83,204 @@ def _spawn_env(child_env: "dict[str, str]") -> "dict[str, str]":
 
 
 # --------------------------------------------------------------------------- #
+# Output-format aliases + calling-shell detection (plan 07, D83).
+# --------------------------------------------------------------------------- #
+
+#: Alias -> canonical output format. `_format_env` normalizes through this so the
+#: renderer only ever sees a canonical name. `auto` is resolved earlier (by the
+#: caller, via :func:`detect_shell_format`) and is NOT a renderer format.
+FORMAT_ALIASES = {
+    "export": "export",
+    "posix": "export",
+    "sh": "export",
+    "bash": "export",
+    "dotenv": "dotenv",
+    "env": "dotenv",
+    "powershell": "powershell",
+    "pwsh": "powershell",
+    "ps": "powershell",
+    "cmd": "cmd",
+    "bat": "cmd",
+    "batch": "cmd",
+    "fish": "fish",
+    "json": "json",
+    "ini": "ini",
+    "yaml": "yaml",
+}
+
+#: Every value `--format` accepts on the CLI (aliases + `auto`).
+KNOWN_FORMATS = tuple(sorted(set(FORMAT_ALIASES) | {"auto"}))
+
+#: Shell-exe basename (lowercased, no extension) -> canonical output format.
+_SHELL_EXE_FORMAT = {
+    "powershell": "powershell",
+    "pwsh": "powershell",
+    "cmd": "cmd",
+    "bash": "export",
+    "sh": "export",
+    "zsh": "export",
+    "dash": "export",
+    "ksh": "export",
+    "fish": "fish",
+}
+
+
+def _win_ppid_exe_map():  # pragma: no cover - exercised only on win32
+    """pid -> (parent_pid, exe_basename_lower_noext) via a Toolhelp snapshot.
+
+    Pure stdlib ctypes against kernel32. Any failure returns ``{}`` so the caller
+    degrades to the OS default rather than raising. Reads only process names.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    TH32CS_SNAPPROCESS = 0x00000002
+    MAX_PATH = 260
+
+    class PROCESSENTRY32(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", ctypes.c_char * MAX_PATH),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    INVALID = wintypes.HANDLE(-1).value
+    snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if not snap or snap == INVALID:
+        return {}
+    try:
+        entry = PROCESSENTRY32()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32)
+        result = {}
+        ok = kernel32.Process32First(snap, ctypes.byref(entry))
+        while ok:
+            name = entry.szExeFile.decode("ascii", "replace").lower()
+            if name.endswith(".exe"):
+                name = name[:-4]
+            result[int(entry.th32ProcessID)] = (
+                int(entry.th32ParentProcessID),
+                name,
+            )
+            ok = kernel32.Process32Next(snap, ctypes.byref(entry))
+        return result
+    finally:
+        kernel32.CloseHandle(snap)
+
+
+def _detect_shell_format_win():  # pragma: no cover - exercised only on win32
+    """Walk the parent-process chain on Windows; first shell exe wins.
+
+    Returns a canonical format, defaulting to ``"powershell"`` when no shell is
+    found in the chain (the common Windows case). Never raises.
+    """
+    try:
+        pmap = _win_ppid_exe_map()
+        if not pmap:
+            return "powershell"
+        pid = os.getpid()
+        for _ in range(10):
+            entry = pmap.get(pid)
+            if entry is None:
+                break
+            parent_pid, name = entry
+            fmt = _SHELL_EXE_FORMAT.get(name)
+            if fmt is not None:
+                return fmt
+            if parent_pid == pid or parent_pid == 0:
+                break
+            pid = parent_pid
+    except Exception:  # noqa: BLE001 - detection must never crash
+        return "powershell"
+    return "powershell"
+
+
+def _posix_parent_comm(ppid: int) -> str:
+    """Parent-process command name on POSIX, via layered fallbacks.
+
+    ``/proc`` is Linux-only (absent on macOS/OpenBSD), so this tries in order and
+    each layer is guarded so a failure falls through to the next, never raising:
+
+      1. ``/proc/<ppid>/comm`` -- Linux/WSL, fast.
+      2. ``ps -o comm= -p <ppid>`` -- POSIX-standard; works on macOS, OpenBSD,
+         and Linux. Basename of the output is taken.
+      3. ``$SHELL`` basename -- last resort.
+
+    Returns a lowercased basename with any ``.exe`` suffix stripped, or ``""``.
+    """
+    # 1. Linux /proc
+    try:
+        with open("/proc/%d/comm" % ppid, "r", encoding="ascii", errors="replace") as fh:
+            comm = fh.read().strip()
+        if comm:
+            return _norm_comm(comm)
+    except Exception:  # noqa: BLE001 - fall through to the next layer
+        pass
+    # 2. POSIX `ps -o comm=` (macOS / OpenBSD / any POSIX)
+    try:
+        import subprocess as _sp
+
+        out = _sp.run(
+            ["ps", "-o", "comm=", "-p", str(ppid)],
+            capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        if out:
+            return _norm_comm(out)
+    except Exception:  # noqa: BLE001 - fall through to $SHELL
+        pass
+    # 3. $SHELL basename
+    try:
+        shell = os.environ.get("SHELL", "")
+        if shell:
+            return _norm_comm(shell)
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def _norm_comm(name: str) -> str:
+    """Lowercase basename of a command/path, ``.exe`` suffix stripped."""
+    base = os.path.basename(name.strip()).lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    return base
+
+
+def _detect_shell_format_posix():
+    """Detect the calling shell on POSIX; default ``"export"``. Never raises.
+
+    Uses :func:`_posix_parent_comm` (layered ``/proc`` -> ``ps -o comm=`` ->
+    ``$SHELL``) so it works on Linux/WSL, macOS, and OpenBSD alike.
+    """
+    try:
+        comm = _posix_parent_comm(os.getppid())
+        return _SHELL_EXE_FORMAT.get(comm, "export")
+    except Exception:  # noqa: BLE001 - detection must never crash
+        return "export"
+
+
+def detect_shell_format() -> str:
+    """Best-effort detection of the calling shell's output format.
+
+    Walks the parent-process chain (Windows: a stdlib-ctypes Toolhelp snapshot;
+    POSIX: ``/proc/<ppid>/comm`` else ``$SHELL``) and returns the canonical
+    format for the first shell found. Any failure degrades to the OS default
+    (``"powershell"`` on win32, ``"export"`` elsewhere) and NEVER raises. Reads
+    process names only -- no environment values.
+    """
+    if sys.platform == "win32":
+        return _detect_shell_format_win()
+    return _detect_shell_format_posix()
+
+
+# --------------------------------------------------------------------------- #
 # File evaluators (ported from the precursor helpers.py -- keep the protocols).
 # --------------------------------------------------------------------------- #
 
