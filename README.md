@@ -62,29 +62,22 @@ manifest read by the `dotagents overlays` subcommand, which manages overlays by 
 
 ## Install
 
-The `dotagents` CLI has two install modes, plus a self-contained downloadable
-`.pyz` that needs no `pip install` at all.
+**`dotagents init`** lays down the neutral base config; a self-contained downloadable
+`.pyz` needs no `pip install` at all.
 
-**`dotagents init`** — a minimal, neutral starter. Explains the `.agents/`
-hierarchy, the per-agent `<CLAUDE|ANTIGRAVITY|...>.md → @AGENTS.md` pattern, and
-the `findings/` capture mechanism, but imposes none of this repo's own opinions
-(no PLAN/EXEC/REVIEW flows, no model-routing). Its `AGENTS.md`/`CLAUDE.md` are
-merged in as a marker-delimited managed block, so re-running `init` never
-clobbers anything you've added around it:
-
-```bash
-dotagents init                 # writes ~/.agents/{AGENTS.md,CLAUDE.md,...}
-dotagents init --dry-run        # show what would happen
-dotagents init --force          # replace AGENTS.md/CLAUDE.md wholesale (backed up) instead of block-merging
-```
-
-**`dotagents install`** — lays down the base overlay (like `init`), plus optional
-wrapper-script install:
+`init` writes the `.agents/` scaffolding — the `AGENTS.md` managed block, the per-agent
+`<CLAUDE|ANTIGRAVITY|...>.md → @AGENTS.md` pattern, the design-log convention — but
+imposes no opinions (those come from `overlays add`). Its `AGENTS.md`/`CLAUDE.md` are a
+marker-delimited managed block, so re-running `init` never clobbers what you've added
+around it. **Scope**: project by default (`<cwd>/.agents`), or the user store with
+`-g`/`--global` (`~/.agents`).
 
 ```bash
-dotagents install                                    # base only (like init)
-dotagents install --bin-dir ~/.local/bin            # base + a `dotagents` command
-dotagents install --dry-run
+dotagents init                          # project: <cwd>/.agents
+dotagents init -g                       # user store: ~/.agents
+dotagents init --bin-dir ~/.local/bin   # also write a `dotagents` command on PATH
+dotagents init --dry-run                # show what would happen
+dotagents init --force                  # replace AGENTS.md/CLAUDE.md wholesale (backed up)
 ```
 
 `--from <path-or-uri>` selects the *base* source for a `pip install`-only environment
@@ -169,7 +162,7 @@ link never lands in the public repo). `<name>` defaults to the project's basenam
 local `~/code/app` and a cloud `/home/user/app` resolve to the same store.
 
 ```bash
-dotagents install                                    # base
+dotagents init                                       # base
 dotagents overlays add private-sync --source <overlays-checkout> # kb + cloud hooks
 dotagents link .        # symlink this project's .agents into the private repo
                         #   (an existing .agents/ is adopted in on the first link;

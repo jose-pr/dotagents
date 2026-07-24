@@ -1,17 +1,19 @@
-"""dotagents CLI: init / install / audit / leak-check / context / env / overlays /
+"""dotagents CLI: init / audit / leak-check / context / env / overlays /
 build-pyz built-in subcommands, plus link / sync and any user command modules
 discovered from a `cmds` directory (D76).
 
-The per-command classes live in sibling modules (`cli/init.py`, `cli/install.py`,
+The per-command classes live in sibling modules (`cli/init.py`, `cli/audit.py`,
 ...); this package base holds the shared helpers (in `cli/_common.py`, re-exported
 here), the `Dotagents(LoggingArgs, Cli)` umbrella, `main()` (the `install.py` shim +
 `python -m dotagents` entrypoint), `_discover` (command-source resolution), and
-`_repoint_zipapp_sources` (the zipapp source-extraction shim).
+`_repoint_zipapp_sources` (the zipapp source-extraction shim). (`install.py` at the
+repo root is the entrypoint shim, unrelated to the removed `install` subcommand --
+`init` now lays down the base + optional `--bin-dir` wrappers, D82.)
 
 Dispatch (D76): `main()` routes through `duho.app`, not `duho.main`, so command
 discovery runs. `link`/`sync` are no longer compiled built-ins -- they ship as
-command MODULES in the bundled `_overlay/dotagents/cmds/` dir (`init`/`install`
-lay them into `<store>/dotagents/cmds/`), discovered from there and from a
+command MODULES in the bundled `_overlay/dotagents/cmds/` dir (`init`
+lays them into `<store>/dotagents/cmds/`), discovered from there and from a
 per-scope `cmds` dir. `app`'s DEFAULT dispatch is used (dotagents has no fan-out):
 a plain `(LoggingArgs, Cmd)` class command dispatches through `app` exactly as it
 did through `main` -- `app` calls the class's `__call__`.
@@ -55,7 +57,6 @@ from dotagents.cli.build_pyz import BuildPyz
 from dotagents.cli.context import Context
 from dotagents.cli.env import Env
 from dotagents.cli.init import Init
-from dotagents.cli.install import Install
 from dotagents.cli.leak_check import LeakCheck
 from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
     OverlayAdd,
@@ -72,7 +73,6 @@ _LOGGER = logging.getLogger("dotagents")
 # layers discovered commands over them (later source wins on a name clash).
 _BUILTIN_COMMANDS = [
     Init,
-    Install,
     Audit,
     LeakCheck,
     BuildPyz,
@@ -89,7 +89,6 @@ _BUILTIN_COMMANDS = [
 # no repoint needed -- see `_bundled_cmds_dir`).
 _COMMAND_MODULES = (
     "dotagents.cli.init",
-    "dotagents.cli.install",
     "dotagents.cli.audit",
     "dotagents.cli.leak_check",
     "dotagents.cli.context",
@@ -131,7 +130,7 @@ class Dotagents(LoggingArgs, Cli):
 
     def __call__(self) -> int:
         self._logger_.info(
-            "pick a subcommand, e.g. `init`, `install`, `overlays`, `link`, `sync`, "
+            "pick a subcommand, e.g. `init`, `overlays`, `link`, `sync`, "
             "`audit`, `build-pyz`"
         )
         return 0

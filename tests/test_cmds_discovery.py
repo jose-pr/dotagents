@@ -85,7 +85,7 @@ def test_discover_includes_builtins_and_bundled_link_sync(monkeypatch, tmp_path)
 
     names = _names(cli._discover([]))
     # Built-ins survive the app switch.
-    for builtin in ("init", "install", "audit", "leak-check", "build-pyz",
+    for builtin in ("init", "audit", "leak-check", "build-pyz",
                     "context", "env", "overlays"):
         assert builtin in names
     # link/sync come from the bundled cmds dir, not `_subcommands_`.

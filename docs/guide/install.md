@@ -1,35 +1,27 @@
 # Install
 
-The `dotagents` CLI has two install modes, plus a self-contained downloadable
-`.pyz` that needs no `pip install` at all. All three lay down the same neutral
-**base overlay**; opinionated content is added afterwards with
+`dotagents init` lays down the neutral **base config**; a self-contained downloadable
+`.pyz` needs no `pip install` at all. Opinionated content is added afterwards with
 [`overlays add`](overlays.md).
 
-## `dotagents init` — the minimal, neutral starter
+## `dotagents init` — lay down the base config
 
-`init` explains the `.agents/` hierarchy, the per-agent
-`<CLAUDE|ANTIGRAVITY|…>.md → @AGENTS.md` pattern, and the findings-capture
-mechanism, but imposes none of this project's own opinions (no planning/execution/
-review flows, no model-routing). Its `AGENTS.md`/`CLAUDE.md` are merged in as a
-marker-delimited **managed block**, so re-running `init` never clobbers anything you
-added around it.
+`init` writes the `.agents/` scaffolding: the `AGENTS.md` managed block, the per-agent
+`<CLAUDE|ANTIGRAVITY|…>.md → @AGENTS.md` pattern, and the design-log/findings
+convention — imposing no opinions (those come from overlays). Its `AGENTS.md`/`CLAUDE.md`
+are a marker-delimited **managed block**, so re-running `init` never clobbers anything
+you added around it.
 
-```bash
-dotagents init                 # writes ~/.agents/{AGENTS.md,CLAUDE.md,…}
-dotagents init --dry-run       # show what would happen
-dotagents init --force         # replace AGENTS.md/CLAUDE.md wholesale (backed up)
-                                        #   instead of block-merging
-```
-
-## `dotagents install` — base overlay plus wrapper scripts
-
-`install` lays down the base overlay (like `init`), and can additionally install a
-`dotagents` wrapper command onto your PATH.
+**Scope**: project by default (`<cwd>/.agents`), or the user store with `-g`/`--global`
+(`~/.agents`). `--dest` overrides explicitly. `--bin-dir` additionally writes a
+`dotagents` wrapper command onto your PATH (meaningful when running from a built `.pyz`).
 
 ```bash
-dotagents install                             # base only (like init)
-dotagents install --bin-dir ~/.local/bin      # base + a `dotagents` command
-dotagents install --dry-run
+dotagents init                          # project: <cwd>/.agents
+dotagents init -g                       # user store: ~/.agents
+dotagents init --bin-dir ~/.local/bin   # also write a `dotagents` command on PATH
+dotagents init --dry-run                # show what would happen
+dotagents init --force                  # replace AGENTS.md/CLAUDE.md wholesale (backed up)
 ```
 
 `--from <path-or-uri>` selects the *base* source for a plain `pip install`

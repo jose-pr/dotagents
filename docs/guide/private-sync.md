@@ -20,7 +20,7 @@ entry.
 ## Commands
 
 ```bash
-dotagents install                                            # base config
+dotagents init                                            # base config
 dotagents overlays add private-sync --source <overlays-checkout>  # kb + cloud hooks
 
 python -m dotagents link .          # symlink this project's .agents into its store
