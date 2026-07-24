@@ -18,33 +18,11 @@ from pathlib import Path
 _extracted_dirs_cache: "dict[str, Path]" = {}
 
 
-def _resolve_required_tool(name: str, root: "Path | None" = None) -> "Path | None":
-    """Locate one of the dotagents-required tool scripts (`tools/<name>`).
-
-    Resolution order (first hit wins) -- `dotagents audit` uses this to find the
-    single standalone `audit_config.py` implementation whether run from a checkout,
-    a `pip install`, or a `.pyz`:
-
-      1. `<root>/tools/<name>` -- an installed dest or repo payload that ships
-         the tooling (only when `root` is given);
-      2. the copy bundled with this package as data `_tools/<name>` (a `.pyz`
-         or `pip install` carries the required tooling here);
-      3. a repo checkout's top-level `tools/<name>` (dev use -- this module is
-         `src/dotagents/cli/_common.py`, so the repo root is parents[3]).
-
-    Returns the first existing path, or None if the tool is nowhere found.
-    """
-    if root is not None:
-        candidate = Path(root) / "tools" / name
-        if candidate.exists():
-            return candidate
-    bundled_tools = _package_data_dir("_tools")
-    if bundled_tools is not None and (bundled_tools / name).exists():
-        return bundled_tools / name
-    repo_tool = Path(__file__).resolve().parents[3] / "tools" / name
-    if repo_tool.exists():
-        return repo_tool
-    return None
+# NOTE: `_resolve_required_tool` was removed. It existed so a compiled `audit` /
+# `leak-check` wrapper could locate a standalone script under `tools/`. Neither
+# wrapper exists now: `audit` is CI tooling for THIS repo (`tools/audit.py`, not a
+# dotagents command, not shipped), and `leak-check` is a personal command module in
+# the user's private `.agents/`. Nothing in the package shells out to `tools/`.
 
 
 def _package_data_dir(name: str) -> "Path | None":

@@ -1,34 +1,40 @@
 #!/usr/bin/env python3
-"""Audit dotagents-config STRUCTURE. Default mode runs on Python 3.9+.
+"""Audit THIS REPO's structure. CI tooling -- not a shipped dotagents feature.
 
-Checks the dotagents config's own structural integrity: manifest existence, the
-generic forbidden-pattern scan (`BASE_PATTERNS`), size budgets, overlay-manifest
-`rules` paths, and (3.11+) template instantiation. It is a generic validator any
-fork needs -- it carries NO personal data.
+Every path this checks is a path in the dotagents SOURCE REPO
+(`src/dotagents/_overlay/...`, `tools/...`) and the size budget sizes a repo file.
+It validates that this repo still ships what it is supposed to ship. It is **not**
+a validator for an installed `~/.agents` config -- run against one, everything in
+the manifest would be "missing", because an installed config has no `src/` tree.
 
-Personal-leak / hygiene scanning (personal machine paths, usernames, private repo
-names) is NOT audit's job (D84). That is a separate, personal concern handled by
-the `leak-check` tool, run locally before a push -- it lives in the user's private
-`.agents/`, not here.
+So it deliberately lives in `tools/` (repo CI tooling, like `cloud-setup.sh`) and
+is **not** a `dotagents` subcommand, not bundled in the package, and not shipped in
+the `.pyz`: a user of dotagents has no use for it.
 
-Modes:
-  (default)              existence + forbidden-pattern (BASE_PATTERNS) scan + sizes
-  --root <path>          audit this tree instead of ~/.agents (e.g. a checkout: .)
-  --probe <path>         add one extra file to the scan manifest (negative tests)
-  --check-templates      instantiate references/ templates in a temp dir and
-                         parse-check them (requires Python 3.11+ for tomllib)
+Personal-leak / hygiene scanning (machine paths, usernames, private repo names) is
+NOT this tool's job (D84) -- that is `leak-check`, a personal command in the user's
+private `.agents/`, run locally before a push.
+
+Usage (what CI runs):
+  python tools/audit.py --root .                    existence + forbidden-pattern
+                                                    (BASE_PATTERNS) scan + sizes
+  python tools/audit.py --check-templates --root .  instantiate + parse-check the
+                                                    reference templates (3.11+)
+  python tools/audit.py --probe <path> --root .     add one file to the manifest
+                                                    (negative tests)
 
 Exit 1 on missing manifest files, forbidden patterns, or failed template checks.
-Size budgets only warn. Scope is a closed manifest -- never a tree walk (the tree
-also holds harness state, backups, and private plans that legitimately contain
-the forbidden strings).
+Size budgets only warn. Scope is a closed manifest -- never a tree walk.
 """
 import re
 import sys
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_ROOT = Path.home() / ".agents"
+# This audits the REPO, so the default root is the repo (this file is tools/audit.py,
+# so parents[1] is the checkout root) -- not `~/.agents`, which has no `src/` tree and
+# would report every manifest entry missing.
+DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 
 # Manifest paths are relative to a repo checkout root (--root .). The config is
 # now a base overlay (src/dotagents/_overlay) plus opt-in example overlays; the
@@ -52,7 +58,7 @@ REFS = []
 # directly) and the `dotagents audit` command, so there is no separate
 # tools/audit_config.py. leak_check.py is personal (D84) and not shipped here.
 EXIST_ONLY = [
-    "src/dotagents/_overlay/dotagents/cmds/audit.py",
+    "tools/audit.py",
     "tools/cloud-setup.sh",
 ]
 # Example-overlay files live on the `overlays` branch, not in main's tree, so the
