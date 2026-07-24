@@ -1,6 +1,7 @@
 # dotagents
 
 [![Test](https://img.shields.io/github/actions/workflow/status/jose-pr/dotagents/test.yml?branch=main&label=tests)](https://github.com/jose-pr/dotagents/actions/workflows/test.yml)
+[![PyPI](https://img.shields.io/pypi/v/dotagents-cli.svg)](https://pypi.org/project/dotagents-cli/)
 [![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://jose-pr.github.io/dotagents/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/jose-pr/dotagents/blob/main/LICENSE)
 
@@ -62,8 +63,13 @@ manifest read by the `dotagents overlays` subcommand, which manages overlays by 
 
 ## Install
 
-**`dotagents init`** lays down the neutral base config; a self-contained downloadable
-`.pyz` needs no `pip install` at all.
+```bash
+pip install dotagents-cli   # gives you `import dotagents` and the `dotagents` command
+```
+
+Or skip `pip` entirely with the self-contained downloadable `.pyz` (see below).
+
+**`dotagents init`** lays down the neutral base config.
 
 `init` writes the `.agents/` scaffolding — the `AGENTS.md` managed block, the per-agent
 `<CLAUDE|ANTIGRAVITY|...>.md → @AGENTS.md` pattern, the design-log convention — and
