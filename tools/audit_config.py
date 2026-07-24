@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-"""Audit agent-config integrity. Default mode runs on Python 3.9+.
+"""Audit dotagents-config STRUCTURE. Default mode runs on Python 3.9+.
+
+Checks the dotagents config's own structural integrity: manifest existence, the
+generic forbidden-pattern scan (`BASE_PATTERNS`), size budgets, overlay-manifest
+`rules` paths, and (3.11+) template instantiation. It is a generic validator any
+fork needs -- it carries NO personal data.
+
+Personal-leak / hygiene scanning (personal machine paths, usernames, private repo
+names) is NOT audit's job (D84). That is a separate, personal concern handled by
+the `leak-check` tool, run locally before a push -- it lives in the user's private
+`.agents/`, not here.
 
 Modes:
-  (default)              existence + forbidden-pattern scan + size table
+  (default)              existence + forbidden-pattern (BASE_PATTERNS) scan + sizes
   --root <path>          audit this tree instead of ~/.agents (e.g. a checkout: .)
   --probe <path>         add one extra file to the scan manifest (negative tests)
   --check-templates      instantiate references/ templates in a temp dir and
                          parse-check them (requires Python 3.11+ for tomllib)
-  --repo-hygiene <repo>  scan every git-tracked file in <repo> for personal
-                         leftovers (user accounts, machine paths, private repo
-                         names) — for repos that intentionally track agent config
 
 Exit 1 on missing manifest files, forbidden patterns, or failed template checks.
 Size budgets only warn. Scope is a closed manifest -- never a tree walk (the tree
@@ -36,55 +43,21 @@ SCAN = [
     "src/dotagents/_overlay/dotagents/DECISIONS.md",
 ]
 REFS = []
-EXIST_ONLY = ["tools/audit_config.py", "tools/leak_check.py", "tools/cloud-setup.sh"]
+# leak_check.py is no longer a required tool of main: it moved to the opt-in
+# `leak-check` overlay as a command module (D84), so main's tree no longer ships
+# it and it is not in this manifest.
+EXIST_ONLY = ["tools/audit_config.py", "tools/cloud-setup.sh"]  # leak_check.py is personal (D84), not shipped here
 # Example-overlay files live on the `overlays` branch, not in main's tree, so the
 # repo checkout (--root .) has no overlays/ dir to enumerate. Kept empty here and
 # guarded below (checked only when an overlays/ dir is present -- e.g. a CI job
 # that checks the overlays branch out into ./overlays for integration testing).
 EXAMPLES = []
 
+# Generic, structural forbidden patterns only (D84). No personal/machine markers
+# live here -- that is leak-check's concern, run locally, from the user's private
+# `.agents/`. `file:///~` is a broken tilde-in-file-URI that should never ship.
 BASE_PATTERNS = ["file:///" + "~"]
-
-# Machine-path patterns are universal; who you are is not. Personal markers
-# (usernames, real names, un-published project names) belong to the person
-# running this, not to a public repo's tooling -- so they load from
-# `~/.agents/audit_patterns.local.json` (override with $DOTAGENTS_AUDIT_PATTERNS),
-# which `*.local.*` already keeps out of every repo.
-#
-# Shape -- every key optional, each a list of strings:
-#   {"personal": ["..."], "public_allowlist": ["..."], "refs": ["..."]}
-#
-# `public_allowlist` entries are blanked before matching, so a published org name
-# in a URL does not trip a bare-username pattern while a real user-profile path
-# still does. Published package names are NOT personal leftovers and must not be
-# listed -- they legitimately appear in tracked docs.
-# Deliberately NOT "/home/": generic docs legitimately use `/home/user/...` as an
-# example path, so it flags prose rather than leaks.
-_DEFAULT_PERSONAL = ["C:\\" + "Users", "C:/" + "Users", "~/" + "devel/"]
-
-
-def _load_local_patterns():
-    """Read the machine-local pattern file, if any. Never fails the run."""
-    import json
-    import os
-
-    raw = os.environ.get("DOTAGENTS_AUDIT_PATTERNS")
-    path = Path(raw) if raw else Path.home() / ".agents" / "audit_patterns.local.json"
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (ValueError, OSError) as exc:
-        sys.stderr.write("warning: could not read %s (%s); "
-                         "using built-in patterns only\n" % (path, exc))
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-_LOCAL = _load_local_patterns()
-PERSONAL_PATTERNS = _DEFAULT_PERSONAL + list(_LOCAL.get("personal", []))
-PUBLIC_ALLOWLIST = list(_LOCAL.get("public_allowlist", []))
-REF_PATTERNS = BASE_PATTERNS + _DEFAULT_PERSONAL + list(_LOCAL.get("refs", []))
+REF_PATTERNS = BASE_PATTERNS
 
 # The base overlay's AGENTS.md is the only always-loaded file main ships, so it
 # is the one with a size budget here. The flow files (PLAN/EXEC/REVIEW/REPO) and
@@ -218,29 +191,6 @@ def check_templates(root):
     return failures
 
 
-def repo_hygiene(repo):
-    import subprocess
-    out = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],
-                         capture_output=True, check=True)
-    tracked = [f for f in out.stdout.decode("utf-8").split("\0") if f]
-    print("repo: %s (%d tracked files)" % (repo, len(tracked)))
-    failures = []
-    for rel in tracked:
-        path = repo / rel
-        if not path.is_file():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        for allowed in PUBLIC_ALLOWLIST:
-            text = text.replace(allowed, "")
-        for pat in PERSONAL_PATTERNS:
-            if pat in text:
-                failures.append("PERSONAL %r in %s" % (pat, rel))
-    return failures
-
-
 def main(argv):
     root = DEFAULT_ROOT
     if "--root" in argv:
@@ -248,10 +198,7 @@ def main(argv):
     probe = None
     if "--probe" in argv:
         probe = Path(argv[argv.index("--probe") + 1])
-    if "--repo-hygiene" in argv:
-        failures = repo_hygiene(
-            Path(argv[argv.index("--repo-hygiene") + 1]).resolve())
-    elif "--check-templates" in argv:
+    if "--check-templates" in argv:
         failures = check_templates(root)
     else:
         failures = audit(root, probe)
