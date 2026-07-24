@@ -45,13 +45,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `hooks.json` rather than touching your `config.toml` for hooks.
 
   Codex's env arrives differently: it has no `$CLAUDE_ENV_FILE` equivalent, reads no
-  `.env` files, and has no event that fires before config load, so `init` writes a
-  `# dotagents:begin/end` managed block containing `[shell_environment_policy].set`
-  into `config.toml`. The block is appended and refreshed in place — everything
-  outside the markers is untouched — and `set` merges rather than replaces. **These
-  values are a static snapshot: re-run `init` after changing your env layers.** `PATH`
-  and the identity vars are excluded on purpose (identity reflects whichever harness
-  ran `init`, and a baked-in `PATH` would replace the inherited one).
+  `.env` files, and has no event that fires before config load, so
+  `dotagents init --agents codex` writes a `# dotagents:begin/end` managed block
+  containing `[shell_environment_policy].set` into `config.toml`. **Only on an
+  explicit `--agents`** — this edits your main config with values that go stale, so
+  auto-detection never triggers it. The block is appended and refreshed in place
+  (everything outside the markers is untouched) and `set` merges rather than
+  replaces. **The values are a static snapshot: re-run `init` after changing your env
+  layers.** Identity vars describe the target agent, so initializing from Claude still
+  writes `AGENT = "codex"`; `PATH` is excluded, since `set` overrides per subprocess
+  and a baked-in `PATH` would replace the inherited one.
 
   The merge is additive and idempotent: unrelated keys and hooks you wrote yourself
   survive verbatim, malformed entries are dropped rather than raising, and re-running

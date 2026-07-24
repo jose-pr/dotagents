@@ -85,16 +85,27 @@ We target `hooks.json` rather than `config.toml` so your main config is never re
 for hooks — if you keep inline `[hooks]` in `config.toml`, Codex warns about the split,
 so use `--no-hooks` and add the hook there yourself.
 
-**Env is a static snapshot, not a hook.** Codex has no `$CLAUDE_ENV_FILE` equivalent,
-does not read `.env` files, and has no event that fires before config load (hooks are
-defined *in* the config, and its earliest event is `SessionStart`). The only mechanism
-is `shell_environment_policy.set`, so `init` writes a marker-delimited managed block
-into `config.toml`:
+**Env is a static snapshot, not a hook**, and it is written **only when you name the
+agent explicitly**:
+
+```bash
+dotagents init --agents codex          # writes the env block
+dotagents init                         # never writes it, even if Codex is detected
+```
+
+This edits your main `config.toml` with values that go stale, so it has to be asked
+for — being detected is not consent.
+
+Codex has no `$CLAUDE_ENV_FILE` equivalent, does not read `.env` files, and has no
+event that fires before config load (hooks are defined *in* the config, and its
+earliest event is `SessionStart`). The only mechanism is
+`shell_environment_policy.set`, so `init --agents codex` writes a marker-delimited
+managed block into `config.toml`:
 
 ```toml
 # dotagents:begin
 [shell_environment_policy]
-set = {AGENTS_HOME = "...", AGENTS_PROJECT_ROOT = "..."}
+set = {AGENT = "codex", AGENTS_HARNESS = "codex", AGENTS_VENDOR = "openai", AGENTS_HOME = "...", AGENTS_PROJECT_ROOT = "..."}
 # dotagents:end
 ```
 
@@ -106,11 +117,12 @@ Consequences worth knowing:
   rest of your config — is never touched. Add your own settings outside the markers.
 - `set` **merges** on top of what `inherit` admits, so your existing environment is
   unaffected.
-- `PATH` and the identity vars (`AGENT`, `AGENTS_HARNESS`, `AGENTS_VENDOR`,
-  `AGENTS_MODEL`) are deliberately **excluded**: identity is stamped from whichever
-  harness ran `init` (writing it would tell Codex it is Claude), and `PATH` is a
-  machine-specific absolute list that would replace the inherited `PATH` of every
-  subprocess Codex spawns.
+- The identity vars describe **the agent the file is for**, not whoever ran the
+  command: `dotagents init --agents codex` from a Claude session still writes
+  `AGENT = "codex"`.
+- `PATH` is deliberately **excluded** — a machine-specific absolute list that, since
+  `set` overrides per subprocess, would replace the inherited `PATH` of everything
+  Codex spawns.
 
 Other agents (Gemini, Cursor, Copilot) are not wired: without a verified hook schema,
 inventing one is how a silently-broken hook gets shipped.

@@ -319,20 +319,17 @@ class CodexAgent(Agent):
     ENV_BLOCK_BEGIN = "# dotagents:begin"
     ENV_BLOCK_END = "# dotagents:end"
 
-    # Not everything `dotagents env` computes belongs in a STATIC file:
+    # PATH is excluded: a ~2KB machine-specific absolute list that leaks local
+    # layout into a config file, is wrong on any other machine, and -- because
+    # `set` overrides per subprocess -- would REPLACE the inherited PATH of
+    # everything Codex spawns.
     #
-    #   * identity vars (AGENT/AGENTS_HARNESS/AGENTS_VENDOR/AGENTS_MODEL) are
-    #     stamped from the harness that happened to run `init`. Writing them into
-    #     Codex's config would tell Codex it is Claude. Codex stamps its own.
-    #   * PATH is a ~2KB machine-specific absolute list. Baking it in leaks local
-    #     layout into a config file and is wrong on any other machine; worse, it
-    #     would *replace* the inherited PATH for every subprocess Codex spawns.
-    #
-    # Everything else (AGENTS_HOME, AGENTS_PROJECT_ROOT, proxies, overlay vars)
-    # is stable configuration and is exactly what this block is for.
-    ENV_BLOCK_SKIP = frozenset(
-        {"PATH", "AGENT", "AGENTS_HARNESS", "AGENTS_VENDOR", "AGENTS_MODEL"}
-    )
+    # Identity vars (AGENT/AGENTS_HARNESS/AGENTS_VENDOR) are deliberately KEPT.
+    # They are computed for *this adapter* (`get_environment(explicit=<name>)`),
+    # not for whichever harness ran `init`, so Codex's config correctly says
+    # AGENT=codex even when initialized from Claude. That is the whole point of a
+    # per-agent file.
+    ENV_BLOCK_SKIP = frozenset({"PATH"})
 
     def _config_root(self, config_root: "Optional[Path]" = None) -> Path:
         import os

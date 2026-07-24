@@ -11,6 +11,7 @@ Run: ``PYTHONPATH=src python -m pytest tests/test_wire_hooks.py``
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -289,34 +290,43 @@ class TestCodexEnvBlock:
         assert parsed["model"] == "gpt-5"
         assert parsed["mcp_servers"]["docs"]["command"] == "docs-mcp"
 
-    def test_skips_identity_and_path(self, tmp_path):
-        """A static file must not carry values that are wrong the moment it's read.
+    def test_keeps_identity_but_skips_path(self, tmp_path):
+        """Identity belongs in a per-agent file; PATH never does.
 
-        Identity vars are stamped from whichever harness ran `init` -- writing them
-        would tell Codex it is Claude. PATH is a machine-specific absolute list that
-        would also replace the inherited PATH of every subprocess Codex spawns.
+        `set` overrides per subprocess, so a baked-in PATH would replace the
+        inherited one for everything Codex spawns (and is machine-specific).
         """
         root = tmp_path / "codex"
         env = {
             "AGENTS_HOME": "/home/u/.agents",
-            "AGENT": "claude-code",
-            "AGENTS_HARNESS": "claude-code",
-            "AGENTS_VENDOR": "anthropic",
-            "AGENTS_MODEL": "opus",
+            "AGENT": "codex",
+            "AGENTS_HARNESS": "codex",
+            "AGENTS_VENDOR": "openai",
             "PATH": "/a:/b:/c",
         }
         CodexAgent().write_env_block(env, dry_run=False, logger=None, config_root=root)
 
-        written = _toml_load((root / "config.toml").read_text(encoding="utf-8"))
-        assert written["shell_environment_policy"]["set"] == {"AGENTS_HOME": "/home/u/.agents"}
+        written = _toml_load((root / "config.toml").read_text(encoding="utf-8"))["shell_environment_policy"]["set"]
+        assert written["AGENT"] == "codex"
+        assert written["AGENTS_VENDOR"] == "openai"
+        assert "PATH" not in written
 
     def test_only_skipped_vars_writes_nothing(self, tmp_path):
         root = tmp_path / "codex"
         CodexAgent().write_env_block(
-            {"PATH": "/a:/b", "AGENT": "claude-code"},
-            dry_run=False, logger=None, config_root=root,
+            {"PATH": "/a:/b"}, dry_run=False, logger=None, config_root=root,
         )
         assert not (root / "config.toml").exists()
+
+    def test_identity_describes_codex_not_the_running_harness(self, tmp_path):
+        """The end-to-end property: initialized FROM Claude, Codex's config must
+        still say AGENT=codex. `_resolved_env` passes the adapter name as
+        `explicit`, so identity is computed for the target agent."""
+        from dotagents.cli._common import _resolved_env
+
+        env = _resolved_env(tmp_path / "agents", logging.getLogger("t"), "codex")
+        assert env.get("AGENT") == "codex"
+        assert env.get("AGENTS_VENDOR") == "openai"
 
     def test_empty_env_writes_nothing(self, tmp_path):
         root = tmp_path / "codex"
@@ -327,6 +337,33 @@ class TestCodexEnvBlock:
         root = tmp_path / "codex"
         CodexAgent().write_env_block(self.ENV, dry_run=True, logger=None, config_root=root)
         assert not (root / "config.toml").exists()
+
+    def test_only_written_for_an_explicitly_named_agent(self, tmp_path, monkeypatch):
+        """This edits the user's main config with values that go stale, so it must
+        be asked for -- never triggered because Codex happened to be detected."""
+        from dotagents.cli import _common
+        from dotagents.cli._common import BASE_ROOT
+
+        # The real base overlay: its AGENTS.md is marker-wrapped, which
+        # `write_base_config` requires.
+        src, dest = BASE_ROOT, tmp_path / "agents"
+        codex_home = tmp_path / "codexhome"
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+        # Pretend Codex is the running harness, so auto-detection would pick it up.
+        monkeypatch.setenv("CODEX_SANDBOX", "1")
+
+        _common._apply_base(
+            src, dest, False, False, logging.getLogger("t"), agents=None, wire_hooks=True,
+        )
+        assert not (codex_home / "config.toml").exists(), (
+            "auto-detection must not rewrite the user's config.toml"
+        )
+
+        _common._apply_base(
+            src, dest, False, False, logging.getLogger("t"),
+            agents=["codex"], wire_hooks=True,
+        )
+        assert (codex_home / "config.toml").is_file(), "--agents codex should write it"
 
 
 def test_unsupported_adapters_are_noops(tmp_path):
