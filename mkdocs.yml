@@ -44,6 +44,7 @@ nav:
       - Environment: api/env.md
       - Resolution: api/resolve.md
       - Merge: api/merge.md
+      - Hooks: api/hooks.md
       - Skills: api/skills.md
       - Sync: api/sync.md
   - Changelog: changelog.md

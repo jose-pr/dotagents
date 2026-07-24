@@ -16,7 +16,9 @@ form its API. Generated from docstrings, organized by module:
 - **[Resolution](resolve.md)** — the precedence walk / filename resolution
   (Contract A).
 - **[Merge](merge.md)** — the managed-block merge for `init`'s `AGENTS.md` /
-  `CLAUDE.md`.
-- **[Linking](link.md)** — per-project `.agents` linking and the sync hand-off.
+  `CLAUDE.md`, and for other comment syntaxes (e.g. TOML) via `begin_marker`/
+  `end_marker`/`append`.
+- **[Hooks](hooks.md)** — additive, idempotent merge of dotagents' hooks into an
+  agent's own settings/config file.
 - **[Skills](skills.md)** — publishing an overlay's skills into a scope's shared dir.
 - **[Sync](sync.md)** — the `PathSyncer` backup/copy wrapper for `install`.

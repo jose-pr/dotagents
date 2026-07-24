@@ -25,7 +25,7 @@ worth knowing:
 
 - `link-project` / `sync-project` (the per-project private-store workflow) come from
   the opt-in **`private-sync` overlay**, which ships the commands and their logic
-  together — install it and they appear (see [link-project / sync-project](#link-project--sync-project)).
+  together — install it and they appear (see [link-project / sync-project](#link-project-sync-project)).
 - `leak-check` is a personal command module you drop into your private
   `<scope>/dotagents/cmds/`, where it is discovered like any other.
 
