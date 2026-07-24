@@ -15,12 +15,14 @@ BEGIN_MARKER = "<!-- dotagents:begin -->"
 END_MARKER = "<!-- dotagents:end -->"
 
 
-def _extract_block(text: str) -> str:
+def _extract_block(
+    text: str, begin_marker: str = BEGIN_MARKER, end_marker: str = END_MARKER
+) -> str:
     """Return the managed block's inner text (without the marker lines) from
     a skeleton/template file that is itself fully marker-wrapped."""
-    start = text.index(BEGIN_MARKER)
-    end = text.index(END_MARKER)
-    return text[start : end + len(END_MARKER)]
+    start = text.index(begin_marker)
+    end = text.index(end_marker)
+    return text[start : end + len(end_marker)]
 
 
 def _backup(target: Path, backup_root: Path) -> None:
@@ -35,6 +37,9 @@ def merge_block(
     force: bool = False,
     dry_run: bool = False,
     backup_root: "Path | None" = None,
+    begin_marker: str = BEGIN_MARKER,
+    end_marker: str = END_MARKER,
+    append: bool = False,
 ) -> str:
     """Merge `block_source_text` (a fully marker-wrapped skeleton file's
     contents) into `target`, returning the branch taken:
@@ -43,8 +48,16 @@ def merge_block(
     Never overwrites content outside the markers unless `force` is True (then
     the whole file is replaced, after being backed up to `backup_root` if the
     target pre-exists).
+
+    `begin_marker`/`end_marker` default to the Markdown/HTML comment pair; pass a
+    different pair for other comment syntaxes (e.g. `#`-prefixed markers for TOML).
+
+    `append` puts the block at the END of an existing file rather than the start.
+    Required for TOML: a `[table]` header captures every key line that follows it,
+    so prepending a table would silently swallow the user's existing top-level keys
+    into our table.
     """
-    block = _extract_block(block_source_text)
+    block = _extract_block(block_source_text, begin_marker, end_marker)
 
     if force:
         existed = target.exists()
@@ -64,9 +77,9 @@ def merge_block(
 
     existing = target.read_text(encoding="utf-8")
 
-    if BEGIN_MARKER in existing and END_MARKER in existing:
-        start = existing.index(BEGIN_MARKER)
-        end = existing.index(END_MARKER) + len(END_MARKER)
+    if begin_marker in existing and end_marker in existing:
+        start = existing.index(begin_marker)
+        end = existing.index(end_marker) + len(end_marker)
         new_text = existing[:start] + block + existing[end:]
         if new_text == existing:
             return "skipped (present)"
@@ -74,7 +87,11 @@ def merge_block(
             target.write_text(new_text, encoding="utf-8")
         return "block-refreshed"
 
-    new_text = block + "\n\n" + existing
+    if append:
+        sep = "" if existing.endswith("\n") else "\n"
+        new_text = existing + sep + "\n" + block + "\n"
+    else:
+        new_text = block + "\n\n" + existing
     if not dry_run:
         target.write_text(new_text, encoding="utf-8")
     return "block-inserted"

@@ -300,19 +300,108 @@ class CodexAgent(Agent):
     # should pass --no-hooks.
     SESSION_START_COMMAND = "dotagents context"
 
+    # Codex has NO per-session env mechanism: no CLAUDE_ENV_FILE equivalent, no
+    # `.env` loading anywhere (confirmed across its full docs set), and no hook that
+    # can run before config load -- hooks are *defined in* the config layers, and
+    # Codex's earliest event is SessionStart (it has no `Setup` event). So the only
+    # way to give Codex our env is `shell_environment_policy.set` in config.toml:
+    # "explicit environment overrides injected into every subprocess".
+    #
+    # That is STATIC -- read once at startup, not recomputed per session. The values
+    # therefore go stale when an overlay's env changes, and `dotagents init` is the
+    # refresh. `set` MERGES on top of whatever `inherit` admits rather than replacing
+    # it, so writing only our AGENTS_* keys leaves the user's environment alone.
+    #
+    # This is the user's main config (provider/auth settings live here), so the write
+    # is a marker-delimited managed block appended to the end -- never a rewrite. It
+    # must APPEND: a TOML `[table]` header captures every following key line, so
+    # prepending our table would silently swallow the user's top-level keys into it.
+    ENV_BLOCK_BEGIN = "# dotagents:begin"
+    ENV_BLOCK_END = "# dotagents:end"
+
+    # Not everything `dotagents env` computes belongs in a STATIC file:
+    #
+    #   * identity vars (AGENT/AGENTS_HARNESS/AGENTS_VENDOR/AGENTS_MODEL) are
+    #     stamped from the harness that happened to run `init`. Writing them into
+    #     Codex's config would tell Codex it is Claude. Codex stamps its own.
+    #   * PATH is a ~2KB machine-specific absolute list. Baking it in leaks local
+    #     layout into a config file and is wrong on any other machine; worse, it
+    #     would *replace* the inherited PATH for every subprocess Codex spawns.
+    #
+    # Everything else (AGENTS_HOME, AGENTS_PROJECT_ROOT, proxies, overlay vars)
+    # is stable configuration and is exactly what this block is for.
+    ENV_BLOCK_SKIP = frozenset(
+        {"PATH", "AGENT", "AGENTS_HARNESS", "AGENTS_VENDOR", "AGENTS_MODEL"}
+    )
+
+    def _config_root(self, config_root: "Optional[Path]" = None) -> Path:
+        import os
+
+        if config_root:
+            return Path(config_root)
+        # CODEX_HOME is Codex's own documented state-dir override.
+        return Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
+
+    @staticmethod
+    def _toml_escape(value: str) -> str:
+        """Escape a TOML basic-string value (backslash first, then quote)."""
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    def write_env_block(
+        self,
+        env: "dict[str, str]",
+        *,
+        dry_run: bool,
+        logger,
+        config_root: "Optional[Path]" = None,
+    ) -> None:
+        """Write `env` into a managed `[shell_environment_policy]` block in
+        `config.toml`, so Codex injects those vars into every subprocess."""
+        from dotagents._merge import merge_block
+
+        env = {k: v for k, v in env.items() if k not in self.ENV_BLOCK_SKIP}
+        if not env:
+            if logger:
+                logger.info("no env vars to write for codex")
+            return
+
+        root = self._config_root(config_root)
+        lines = [
+            self.ENV_BLOCK_BEGIN,
+            "# Managed by dotagents -- edits inside this block are overwritten by",
+            "# `dotagents init`. Values are a snapshot: re-run init after changing",
+            "# your env layers. Add your own settings OUTSIDE the markers.",
+            "[shell_environment_policy]",
+            "set = {%s}"
+            % ", ".join(
+                '%s = "%s"' % (key, self._toml_escape(env[key])) for key in sorted(env)
+            ),
+            self.ENV_BLOCK_END,
+        ]
+        block = "\n".join(lines) + "\n"
+
+        config_path = root / "config.toml"
+        if not dry_run:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+        branch = merge_block(
+            config_path,
+            block,
+            dry_run=dry_run,
+            begin_marker=self.ENV_BLOCK_BEGIN,
+            end_marker=self.ENV_BLOCK_END,
+            append=True,
+        )
+        if logger:
+            verb = "would write" if dry_run else branch
+            logger.info("%s: %s (%d vars)", verb, config_path, len(env))
+
     def wire_hooks(
         self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
     ) -> None:
         """Merge our SessionStart hook into `<codex-home>/hooks.json`."""
-        import os
-
         from dotagents import _hooks
 
-        if config_root:
-            root = Path(config_root)
-        else:
-            # CODEX_HOME is Codex's own documented state-dir override.
-            root = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
+        root = self._config_root(config_root)
 
         hooks_path = root / "hooks.json"
         data = _hooks.load_settings(hooks_path)

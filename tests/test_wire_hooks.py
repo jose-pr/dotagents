@@ -14,9 +14,27 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from dotagents._agents import ClaudeAgent, CodexAgent  # noqa: E402
+
+
+def _toml_load(text):
+    """Parse TOML, skipping the test where no parser is available.
+
+    `tomllib` is stdlib only on 3.11+; this package's floor is 3.9, so on older
+    interpreters the parse-back assertions skip rather than fail.
+    """
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover -- 3.9/3.10 without tomli
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            pytest.skip("no TOML parser available (needs Python 3.11+ or tomli)")
+    return tomllib.loads(text)
 
 
 def _scope_with_skills(tmp_path):
@@ -195,6 +213,120 @@ class TestCodexHooks:
         dest.mkdir()
         CodexAgent().wire_hooks(dest, dry_run=True, logger=None, config_root=root)
         assert not (root / "hooks.json").exists()
+
+
+class TestCodexEnvBlock:
+    """Codex has no per-session env mechanism, so the env is a static managed
+    block in `config.toml` (`shell_environment_policy.set`), refreshed by `init`."""
+
+    ENV = {"AGENTS_HOME": "/home/u/.agents", "AGENTS_PROJECT_ROOT": "/repo"}
+
+    def test_writes_shell_environment_policy(self, tmp_path):
+        root = tmp_path / "codex"
+        CodexAgent().write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
+
+        text = (root / "config.toml").read_text(encoding="utf-8")
+        assert "[shell_environment_policy]" in text
+        assert 'AGENTS_HOME = "/home/u/.agents"' in text
+        assert "# dotagents:begin" in text and "# dotagents:end" in text
+
+    def test_appends_so_toml_tables_do_not_swallow_user_keys(self, tmp_path):
+        """The hazard that dictates append-not-prepend: a `[table]` header captures
+        every key line after it, so a prepended block would pull the user's
+        top-level keys into `[shell_environment_policy]`."""
+        root = tmp_path / "codex"
+        root.mkdir()
+        cfg = root / "config.toml"
+        cfg.write_text('model = "gpt-5"\napproval_policy = "on-request"\n', encoding="utf-8")
+
+        CodexAgent().write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
+
+        text = cfg.read_text(encoding="utf-8")
+        assert text.index('model = "gpt-5"') < text.index("[shell_environment_policy]"), (
+            "user's top-level keys must precede our table header"
+        )
+        parsed = _toml_load(text)
+        assert parsed["model"] == "gpt-5", "user key must stay top-level, not be swallowed"
+        assert parsed["shell_environment_policy"]["set"]["AGENTS_HOME"] == "/home/u/.agents"
+
+    def test_output_is_valid_toml(self, tmp_path):
+        root = tmp_path / "codex"
+        CodexAgent().write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
+        parsed = _toml_load((root / "config.toml").read_text(encoding="utf-8"))
+        assert parsed["shell_environment_policy"]["set"] == self.ENV
+
+    def test_values_with_quotes_and_backslashes_are_escaped(self, tmp_path):
+        """Windows paths are full of backslashes; an unescaped one is invalid TOML."""
+        root = tmp_path / "codex"
+        env = {"AGENTS_HOME": r"C:\Users\jose\.agents", "ODD": 'a"b'}
+        CodexAgent().write_env_block(env, dry_run=False, logger=None, config_root=root)
+        parsed = _toml_load((root / "config.toml").read_text(encoding="utf-8"))
+        assert parsed["shell_environment_policy"]["set"] == env
+
+    def test_refresh_replaces_block_and_is_idempotent(self, tmp_path):
+        root = tmp_path / "codex"
+        agent = CodexAgent()
+        agent.write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
+        agent.write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
+        text = (root / "config.toml").read_text(encoding="utf-8")
+        assert text.count("[shell_environment_policy]") == 1, "must refresh, not append twice"
+
+        agent.write_env_block({"AGENTS_HOME": "/new"}, dry_run=False, logger=None, config_root=root)
+        parsed = _toml_load((root / "config.toml").read_text(encoding="utf-8"))
+        assert parsed["shell_environment_policy"]["set"] == {"AGENTS_HOME": "/new"}
+
+    def test_preserves_user_content_outside_the_block(self, tmp_path):
+        root = tmp_path / "codex"
+        root.mkdir()
+        cfg = root / "config.toml"
+        cfg.write_text('model = "gpt-5"\n\n[mcp_servers.docs]\ncommand = "docs-mcp"\n', encoding="utf-8")
+
+        agent = CodexAgent()
+        agent.write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
+        agent.write_env_block({"AGENTS_HOME": "/changed"}, dry_run=False, logger=None, config_root=root)
+
+        parsed = _toml_load(cfg.read_text(encoding="utf-8"))
+        assert parsed["model"] == "gpt-5"
+        assert parsed["mcp_servers"]["docs"]["command"] == "docs-mcp"
+
+    def test_skips_identity_and_path(self, tmp_path):
+        """A static file must not carry values that are wrong the moment it's read.
+
+        Identity vars are stamped from whichever harness ran `init` -- writing them
+        would tell Codex it is Claude. PATH is a machine-specific absolute list that
+        would also replace the inherited PATH of every subprocess Codex spawns.
+        """
+        root = tmp_path / "codex"
+        env = {
+            "AGENTS_HOME": "/home/u/.agents",
+            "AGENT": "claude-code",
+            "AGENTS_HARNESS": "claude-code",
+            "AGENTS_VENDOR": "anthropic",
+            "AGENTS_MODEL": "opus",
+            "PATH": "/a:/b:/c",
+        }
+        CodexAgent().write_env_block(env, dry_run=False, logger=None, config_root=root)
+
+        written = _toml_load((root / "config.toml").read_text(encoding="utf-8"))
+        assert written["shell_environment_policy"]["set"] == {"AGENTS_HOME": "/home/u/.agents"}
+
+    def test_only_skipped_vars_writes_nothing(self, tmp_path):
+        root = tmp_path / "codex"
+        CodexAgent().write_env_block(
+            {"PATH": "/a:/b", "AGENT": "claude-code"},
+            dry_run=False, logger=None, config_root=root,
+        )
+        assert not (root / "config.toml").exists()
+
+    def test_empty_env_writes_nothing(self, tmp_path):
+        root = tmp_path / "codex"
+        CodexAgent().write_env_block({}, dry_run=False, logger=None, config_root=root)
+        assert not (root / "config.toml").exists()
+
+    def test_dry_run_writes_nothing(self, tmp_path):
+        root = tmp_path / "codex"
+        CodexAgent().write_env_block(self.ENV, dry_run=True, logger=None, config_root=root)
+        assert not (root / "config.toml").exists()
 
 
 def test_unsupported_adapters_are_noops(tmp_path):

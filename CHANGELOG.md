@@ -41,9 +41,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   unset variable, both as the hooks docs require.
 
   **Codex** (`~/.codex/hooks.json`, or `$CODEX_HOME`) gets `SessionStart` running
-  `dotagents context`; its hook JSON is structurally identical to Claude's. Context
-  half only — Codex has no `CLAUDE_ENV_FILE` equivalent. We write `hooks.json` rather
-  than touching your `config.toml`.
+  `dotagents context`; its hook JSON is structurally identical to Claude's. We write
+  `hooks.json` rather than touching your `config.toml` for hooks.
+
+  Codex's env arrives differently: it has no `$CLAUDE_ENV_FILE` equivalent, reads no
+  `.env` files, and has no event that fires before config load, so `init` writes a
+  `# dotagents:begin/end` managed block containing `[shell_environment_policy].set`
+  into `config.toml`. The block is appended and refreshed in place — everything
+  outside the markers is untouched — and `set` merges rather than replaces. **These
+  values are a static snapshot: re-run `init` after changing your env layers.** `PATH`
+  and the identity vars are excluded on purpose (identity reflects whichever harness
+  ran `init`, and a baked-in `PATH` would replace the inherited one).
 
   The merge is additive and idempotent: unrelated keys and hooks you wrote yourself
   survive verbatim, malformed entries are dropped rather than raising, and re-running

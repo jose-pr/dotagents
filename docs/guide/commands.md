@@ -81,10 +81,36 @@ structurally identical to Claude's, so the same merge applies. `init` writes a
 `$CODEX_HOME/hooks.json`) — Codex adds a SessionStart hook's plain stdout as extra
 developer context.
 
-Only the context half: Codex has no `CLAUDE_ENV_FILE` equivalent, so there is nothing
-to write env exports to. We target `hooks.json` rather than `config.toml` so your main
-config is never rewritten — if you keep inline `[hooks]` in `config.toml`, Codex warns
-about the split, so use `--no-hooks` and add the hook there yourself.
+We target `hooks.json` rather than `config.toml` so your main config is never rewritten
+for hooks — if you keep inline `[hooks]` in `config.toml`, Codex warns about the split,
+so use `--no-hooks` and add the hook there yourself.
+
+**Env is a static snapshot, not a hook.** Codex has no `$CLAUDE_ENV_FILE` equivalent,
+does not read `.env` files, and has no event that fires before config load (hooks are
+defined *in* the config, and its earliest event is `SessionStart`). The only mechanism
+is `shell_environment_policy.set`, so `init` writes a marker-delimited managed block
+into `config.toml`:
+
+```toml
+# dotagents:begin
+[shell_environment_policy]
+set = {AGENTS_HOME = "...", AGENTS_PROJECT_ROOT = "..."}
+# dotagents:end
+```
+
+Consequences worth knowing:
+
+- **The values are frozen at `init` time.** Change your env layers and Codex keeps the
+  old values until you re-run `dotagents init`. There is no way around this.
+- The block is **appended** and refreshed in place; content outside the markers — the
+  rest of your config — is never touched. Add your own settings outside the markers.
+- `set` **merges** on top of what `inherit` admits, so your existing environment is
+  unaffected.
+- `PATH` and the identity vars (`AGENT`, `AGENTS_HARNESS`, `AGENTS_VENDOR`,
+  `AGENTS_MODEL`) are deliberately **excluded**: identity is stamped from whichever
+  harness ran `init` (writing it would tell Codex it is Claude), and `PATH` is a
+  machine-specific absolute list that would replace the inherited `PATH` of every
+  subprocess Codex spawns.
 
 Other agents (Gemini, Cursor, Copilot) are not wired: without a verified hook schema,
 inventing one is how a silently-broken hook gets shipped.

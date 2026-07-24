@@ -47,7 +47,11 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   include_missing=False)`: the Contract-A precedence walk / filename resolution.
 - `_merge` — managed-block merge for `init`'s `AGENTS.md` / `CLAUDE.md`, delimited by
   `<!-- dotagents:begin -->` / `<!-- dotagents:end -->`. Detection is by marker
-  presence only, so it survives user reformatting.
+  presence only, so it survives user reformatting. `begin_marker`/`end_marker`
+  override the pair for other comment syntaxes (`#` for TOML), and `append=True`
+  puts a first-time block at the END of the file — required for TOML, where a
+  `[table]` header captures every key line after it and a prepended block would
+  swallow the user's top-level keys.
 - `_skills` — publish an overlay's `skills/<name>/` into a scope's shared skills dir
   (symlink-preferred, copy fallback); unpublish removes only what the overlay
   published, then sweeps broken symlinks. Pure stdlib.

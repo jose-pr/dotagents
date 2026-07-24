@@ -9,6 +9,7 @@ them as `dotagents.cli._compose_block` / `dotagents.cli._package_data_dir`.
 """
 
 import importlib.resources
+import os
 import re
 import shutil
 import tempfile
@@ -167,6 +168,27 @@ def _installed_overlay_dirs(scope, source, *, adding=None, dry_run=False) -> "li
     return dirs
 
 
+def _resolved_env(dest: Path, logger) -> "dict[str, str]":
+    """The env CHANGES dotagents contributes, for agents that need a static
+    snapshot rather than a per-session hook.
+
+    Assembling this executes overlay `env.py` files, so a broken overlay must not
+    take `init` down with it -- failure degrades to an empty set with a warning.
+    """
+    from dotagents import _env, _scope
+
+    try:
+        return _env.get_environment(
+            agents_dir=Path(dest),
+            project_root=_scope.project_root_default(),
+            base_env=dict(os.environ),
+            logger=logger,
+        )
+    except Exception as exc:  # noqa: BLE001 -- never let one overlay break init
+        logger.warning("could not assemble env for the static env block: %s", exc)
+        return {}
+
+
 def _apply_base(
     src: Path, dest: Path, force: bool, dry_run: bool, logger,
     agents: "list[str] | None" = None,
@@ -205,6 +227,13 @@ def _apply_base(
         )
         if wire_hooks:
             agent.wire_hooks(dest, dry_run=dry_run, logger=logger)
+            # Agents with no per-session env mechanism (Codex) take a static
+            # snapshot of the resolved env instead. Resolved lazily: only these
+            # adapters need it, and assembling it runs overlay `env.py` files.
+            if hasattr(agent, "write_env_block"):
+                agent.write_env_block(
+                    _resolved_env(dest, logger), dry_run=dry_run, logger=logger
+                )
 
     for rel in BASE_PLAIN_FILES:
         source_path = Path(src) / rel
