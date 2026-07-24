@@ -7,7 +7,7 @@ from typing import Optional
 
 from duho import Cmd, LoggingArgs
 
-from dotagents.cli._common import _package_data_dir
+from dotagents.cli._common import _resolve_required_tool
 
 
 class Audit(LoggingArgs, Cmd):
@@ -28,21 +28,11 @@ class Audit(LoggingArgs, Cmd):
     ("--repo-hygiene",)
 
     def __call__(self) -> int:
-        auditor_path = Path(self.root) / "tools" / "audit_config.py"
-        if not auditor_path.exists():
-            # Fall back to the auditor bundled with this package (required
-            # tooling, shipped as package data `_tools`), then to a repo
-            # checkout's top-level tools/ (dev use).
-            bundled_tools = _package_data_dir("_tools")
-            if bundled_tools is not None and (bundled_tools / "audit_config.py").exists():
-                auditor_path = bundled_tools / "audit_config.py"
-            else:
-                # This module lives at src/dotagents/cli/audit.py, so the repo
-                # root is parents[3] (cli -> dotagents -> src -> repo).
-                repo_tool = Path(__file__).resolve().parents[3] / "tools" / "audit_config.py"
-                if repo_tool.exists():
-                    auditor_path = repo_tool
-        if not auditor_path.exists():
+        # Front-end onto the single standalone implementation, tools/audit_config.py
+        # (D70): resolve the same script the payload installs and some rules
+        # reference by path, then shell to it with the requested flags.
+        auditor_path = _resolve_required_tool("audit_config.py", root=self.root)
+        if auditor_path is None:
             raise SystemExit("error: could not find audit_config.py under %s" % self.root)
 
         rc = 0
