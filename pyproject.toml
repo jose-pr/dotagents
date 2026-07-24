@@ -2,13 +2,14 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# Distribution name is `dotagents-cli` (the `dotagents` name on PyPI is taken /
-# reserved for the namespace). The import package stays `dotagents` (see
+# Distribution name is `dotagents-cli`; the import package stays `dotagents` (see
 # tool.hatch...packages) and the console script stays `dotagents` (project.scripts),
-# so `pip install dotagents-cli` gives you `import dotagents` and a `dotagents` command.
+# so `pip install dotagents-cli` gives you `import dotagents` and a `dotagents`
+# command. The bare `dotagents` name is unclaimed on PyPI -- worth registering as a
+# redirect/placeholder before someone else does, but the CLI ships under -cli.
 [project]
 name = "dotagents-cli"
-version = "0.2.0"
+version = "0.3.0"
 authors = [{ name = "Jose A." }]
 description = "The dotagents CLI: install and manage a portable ~/.agents config for AI coding agents"
 readme = "README.md"

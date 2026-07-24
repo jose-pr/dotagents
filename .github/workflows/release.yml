@@ -7,7 +7,8 @@ name: Release
 # gates on a strict docs build, then creates the GitHub Release and attaches
 # the artifacts (including `dotagents.pyz`, so
 # https://github.com/jose-pr/dotagents/releases/latest/download/dotagents.pyz
-# always resolves to the newest release's pyz). No PyPI publish yet.
+# always resolves to the newest release's pyz). Finally it publishes the sdist
+# and wheel to PyPI as `dotagents-cli`, for final (non pre-release) tags only.
 on:
   push:
     tags:
@@ -46,8 +47,17 @@ jobs:
           python-version: "3.x"
       - name: Install build tooling
         run: python -m pip install --upgrade build
+      # NOT `python -m build` from the repo root: our own `build.py` (the pyz
+      # helper) shadows the PyPA `build` module there, so that command silently
+      # builds a pyz and produces NO sdist/wheel. Run it from another directory
+      # with an explicit source path so the real module wins.
       - name: Build sdist and wheel
-        run: python -m build
+        run: cd "$RUNNER_TEMP" && python -m build --outdir "$GITHUB_WORKSPACE/dist" "$GITHUB_WORKSPACE"
+      - name: Verify sdist and wheel exist
+        run: |
+          ls -l dist/*.tar.gz dist/*.whl
+          python -m pip install --upgrade twine
+          python -m twine check dist/*.tar.gz dist/*.whl
       # The pyz is a first-class release artifact -- the no-pip install path.
       # `build-pyz` bundles duho/pathlib_next and the required tools/, so it
       # needs the package importable (editable install) to run the command.
@@ -133,3 +143,37 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: release_notes.md
+
+  # PyPI publish runs AFTER the GitHub release, and only for a final (non
+  # pre-release) tag. Ordering matters: a PyPI upload is IRREVERSIBLE -- a
+  # version number can never be reused, even after `yank` -- while a GitHub
+  # release can be deleted and recreated. Doing the recoverable step first means
+  # a failure here never leaves a published version with no release to match.
+  #
+  # Auth is PyPI Trusted Publishing (OIDC): no API token is stored anywhere. It
+  # requires a one-time setup on PyPI for this repo + workflow + environment,
+  # under the project's "Publishing" settings.
+  pypi-publish:
+    name: Publish to PyPI
+    needs: [build, github-release]
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dotagents-cli
+    permissions:
+      id-token: write   # required for Trusted Publishing; nothing else is needed
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      # The pyz is a GitHub-release artifact only -- PyPI takes the sdist and
+      # wheel, and `upload` rejects anything it does not recognize.
+      - name: Keep only sdist + wheel
+        run: |
+          find dist -maxdepth 1 -type f ! -name '*.tar.gz' ! -name '*.whl' -delete
+          ls -l dist/
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1

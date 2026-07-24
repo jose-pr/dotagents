@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-24
+
 ### Changed
 
 - **BREAKING** — `dotagents link` / `dotagents sync` are gone from the CLI. They are
