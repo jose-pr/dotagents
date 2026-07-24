@@ -37,7 +37,7 @@ subcommands — `init`/`install` never touch a project directory.
 
 ## Commands
 
-- `dotagents link [PATH]` — symlink `PATH/.agents` (default: current dir) to its
+- `dotagents link-project [PATH]` — symlink `PATH/.agents` (default: current dir) to its
   store. An existing real `.agents/` is **adopted** into an empty store on the first
   link (its content moves into the private repo, then the symlink replaces it), so you
   can run it in a project that already has `.agents/`. Re-running is idempotent.
@@ -45,7 +45,7 @@ subcommands — `init`/`install` never touch a project directory.
     any no-symlink environment; a symlink failure auto-falls back to this).
   - `--force` backs up a conflicting real `.agents/` (both project and store carry
     content) or replaces a stale symlink.
-- `dotagents sync` — reconcile a copy-mode project, then move the store.
+- `dotagents sync-project` — reconcile a copy-mode project, then move the store.
   - `--project PATH` first copies a **copy-mode** project's `.agents` back into its
     store (symlinked projects need no copy-back — their `.agents` *is* the store).
     This is the only part dotagents genuinely owns: it repairs the divergence its
@@ -65,16 +65,16 @@ subcommands — `init`/`install` never touch a project directory.
 # 1. Lay down the per-user base (and any overlays you want) into ~/.agents.
 python install.py install --overlays overlays/flows --overlays overlays/private-sync
 # 2. Make ~/.agents a git repo pointing at your private remote, and push.
-dotagents sync --remote git@github.com:<you>/.agents.git -m "init: agents repo"
+dotagents sync-project --remote git@github.com:<you>/.agents.git -m "init: agents repo"
 git -C ~/.agents push -u origin HEAD
 # 3. In any project, link its .agents into the private repo, then sync.
 cd ~/code/some-project
-dotagents link .
-dotagents sync -m "link some-project"
+dotagents link-project .
+dotagents sync-project -m "link some-project"
 ```
 
 On a second machine: `git clone git@github.com:<you>/.agents.git ~/.agents`, then
-`dotagents link .` inside each project you check out.
+`dotagents link-project .` inside each project you check out.
 
 ## Cloud sessions
 
@@ -82,8 +82,8 @@ Cloud containers start from a fresh clone with no `~/.agents`. Two hooks (instal
 this overlay to `~/.agents/hooks/`) make a cloud session identical to local:
 
 - `private-sync-start.sh` (SessionStart): clones the private repo to `~/.agents` on
-  first run (or `git pull --rebase` if present), then `dotagents link`s the project.
-- `private-sync-stop.sh` (Stop): `dotagents sync --project` to push the session's
+  first run (or `git pull --rebase` if present), then `dotagents link-project`s the project.
+- `private-sync-stop.sh` (Stop): `dotagents sync-project --project` to push the session's
   changes back.
 
 Wire them into your runner. For Claude Code, register them in **`~/.claude/settings.json`**
@@ -148,13 +148,13 @@ to configure beyond `DOTAGENTS_AGENTS_TOKEN`.
 ## Gotchas
 
 - **`.gitignore` must exclude `.agents/`** in every project, or the symlink/copy can be
-  committed to the (public) project. `dotagents link` warns when it's missing; the base
+  committed to the (public) project. `dotagents link-project` warns when it's missing; the base
   overlay's Leakage rule already requires it.
-- **Copy mode is two-way**: run `dotagents sync --project .` to push local edits back
-  *before* re-running `dotagents link --copy` to pull global changes, or a refresh can
+- **Copy mode is two-way**: run `dotagents sync-project --project .` to push local edits back
+  *before* re-running `dotagents link-project --copy` to pull global changes, or a refresh can
   overwrite unsynced local edits. Symlink mode has no such hazard — prefer it.
 - **A `.agents.bak` dir** appears when `--force` backs up a conflicting real `.agents/`;
   reconcile and delete it.
 - **The store is the source of truth** once linked: edit `<project>/.agents/...`
   transparently through the symlink; those writes land in `~/.agents/projects/<name>/`
-  and sync with `dotagents sync`.
+  and sync with `dotagents sync-project`.

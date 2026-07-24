@@ -50,7 +50,7 @@ else
 fi
 
 # 2. Link this project's .agents to its per-project store.
-dotagents_cmd link "$PROJECT_DIR" --agents-dir "$AGENTS_DIR" \
+dotagents_cmd link-project "$PROJECT_DIR" --agents-dir "$AGENTS_DIR" \
     || echo "dotagents: link failed"
 
 exit 0

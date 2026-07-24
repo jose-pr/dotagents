@@ -11,7 +11,7 @@
 #     directly against the real github.com.
 #
 # When a bypass is needed it exports GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM into
-# the caller's environment, so a subsequent `git clone` / `dotagents sync`
+# the caller's environment, so a subsequent `git clone` / `dotagents sync-project`
 # (whose git subprocesses inherit them) reaches github.com instead of the proxy.
 # A no-op when no token is set.
 
