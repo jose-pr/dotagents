@@ -178,6 +178,35 @@ def read_manifest(overlay_dir: Path) -> "dict[str, object]":
     }
 
 
+def overlay_sort_key(overlay_dir: Path) -> "tuple[int, str]":
+    """The `(priority, name)` merge-order key for one overlay (plan 02 / D68).
+
+    Lower `priority` (default `DEFAULT_PRIORITY`, 500) sorts earlier; a numerically
+    higher-priority overlay therefore lands *later* in the merged AGENTS.md block and
+    wins on conflict -- the same "lower sorts earlier / higher wins" convention
+    `_context.py` uses for its own priority ordering. `name` is the stable tiebreaker
+    for equal-priority overlays, keyed off the manifest `name` (falling back to the
+    directory name) so output is deterministic regardless of input order."""
+    manifest = read_manifest(overlay_dir)
+    try:
+        priority = int(manifest.get("priority", DEFAULT_PRIORITY))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        priority = DEFAULT_PRIORITY
+    name = str(manifest.get("name", overlay_dir.name))
+    return (priority, name)
+
+
+def sort_overlays_by_priority(overlay_dirs: "list[Path]") -> "list[Path]":
+    """Return `overlay_dirs` sorted by `(priority, name)` (plan 02 / D68).
+
+    Deterministic regardless of the caller's order: `install`/`overlays add` pass
+    overlays in add-invocation order and `overlays sync` in alphabetical discovery
+    order, but the *merged* block must not depend on either -- a high-priority
+    overlay's lines must always land last. See `overlay_sort_key` for the convention.
+    """
+    return sorted(overlay_dirs, key=overlay_sort_key)
+
+
 def rule_blocks(overlay_dir: Path, rel_paths: "list[str]") -> "tuple[list[str], list[str]]":
     """Extract `- **…` bullet blocks from each referenced markdown file.
 
@@ -304,6 +333,63 @@ def merge_overlay_rules(agents_md: Path, overlay_dir: Path, dry_run: bool, logge
     block = existing[start:end]
     merged = _compose_block(block, [overlay_dir], logger)
     if merged == block:
+        return False
+    new_text = existing[:start] + merged + existing[end:]
+    if not dry_run:
+        agents_md.write_text(new_text, encoding="utf-8")
+    return True
+
+
+def recompose_overlay_block(
+    agents_md: Path,
+    base_block: str,
+    overlay_dirs: "list[Path]",
+    dry_run: bool,
+    logger,
+) -> bool:
+    """Rebuild AGENTS.md's managed block from the *pristine* base over ALL installed
+    overlays in `(priority, name)` order (plan 02 / D68), in place.
+
+    This is what makes single-`overlays add` positioning correct: a lone `add` merges
+    one overlay, but its rules must land in the right slot *relative to overlays
+    already present in the block*. Incremental append (`merge_overlay_rules`) can only
+    tack the newcomer on at the end, so a high-priority overlay added *after* a
+    low-priority one would wrongly sort last. Recomposing from the base each time
+    sidesteps that: `base_block` is the freshly-read base overlay's managed block (no
+    overlay content), `overlay_dirs` is every installed overlay in the scope, and
+    `_compose_block` folds them in sorted order -- so the block is a pure function of
+    *which* overlays are installed, never *when* each was added.
+
+    Only the managed block (between the dotagents markers) is rewritten; content
+    outside the markers is untouched. Returns True if the file changed, False on a
+    no-op (nothing to merge, file/markers absent, or block already correct).
+    """
+    from dotagents._merge import BEGIN_MARKER, END_MARKER
+    from dotagents.cli import _compose_block
+
+    if not agents_md.is_file():
+        logger.warning(
+            "no installed AGENTS.md at %s; overlay rules/routing not merged", agents_md
+        )
+        return False
+    existing = agents_md.read_text(encoding="utf-8")
+    if BEGIN_MARKER not in existing or END_MARKER not in existing:
+        logger.warning(
+            "AGENTS.md has no dotagents managed block; overlay rules/routing not "
+            "merged (run `dotagents init` first)"
+        )
+        return False
+
+    # Compose over the pristine base block, not the current (already-merged) one, so
+    # every install of the same overlay set yields identical output.
+    b_start = base_block.index(BEGIN_MARKER)
+    b_end = base_block.index(END_MARKER) + len(END_MARKER)
+    pristine = base_block[b_start:b_end]
+    merged = _compose_block(pristine, overlay_dirs, logger)
+
+    start = existing.index(BEGIN_MARKER)
+    end = existing.index(END_MARKER) + len(END_MARKER)
+    if existing[start:end] == merged:
         return False
     new_text = existing[:start] + merged + existing[end:]
     if not dry_run:

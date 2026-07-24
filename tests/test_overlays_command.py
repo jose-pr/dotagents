@@ -446,3 +446,120 @@ def test_setup_runs_on_sync(tmp_path):
     assert (scope.agents_root / "RUNS").read_text(encoding="utf-8") == "xx"
 
 
+
+
+# --------------------------------------------------------------------------- #
+# Priority-ordered merge (plan 02 / D68)
+# --------------------------------------------------------------------------- #
+
+def _make_rules_overlay(src_root: Path, name: str, marker: str, priority=None):
+    """An overlay contributing one always-on rule (`- **<marker>...`) and one
+    routing line, each carrying `marker` so merged order is observable. `priority`
+    is omitted from the manifest when None (exercises the DEFAULT_PRIORITY path)."""
+    ov = src_root / name
+    ov.mkdir(parents=True, exist_ok=True)
+    (ov / "rules.md").write_text(
+        "- **%s rule**: contributed by %s.\n" % (marker, name), encoding="utf-8"
+    )
+    toml = 'name = "%s"\n' % name
+    if priority is not None:
+        toml += "priority = %d\n" % priority
+    toml += 'rules = ["rules.md"]\n'
+    toml += 'routing = ["""- %s route -> ~/.agents/kb/%s.md"""]\n' % (marker, marker)
+    (ov / "overlay.toml").write_text(toml, encoding="utf-8")
+    return ov
+
+
+def test_overlay_sort_key_default_priority_when_absent(tmp_path):
+    ov = _make_rules_overlay(tmp_path, "no-prio", "NP")  # no priority key
+    prio, name = _overlays.overlay_sort_key(ov)
+    assert prio == _overlays.DEFAULT_PRIORITY
+    assert name == "no-prio"
+
+
+def test_sort_overlays_by_priority_orders_low_first_regardless_of_input(tmp_path):
+    hi = _make_rules_overlay(tmp_path, "zeta", "HI", priority=900)   # sorts last
+    lo = _make_rules_overlay(tmp_path, "alpha", "LO", priority=100)  # sorts first
+    mid = _make_rules_overlay(tmp_path, "mid", "MID")               # default 500
+    # Feed in a deliberately unsorted order.
+    ordered = _overlays.sort_overlays_by_priority([hi, mid, lo])
+    assert [p.name for p in ordered] == ["alpha", "mid", "zeta"]
+
+
+def test_sort_overlays_name_tiebreaker_on_equal_priority(tmp_path):
+    b = _make_rules_overlay(tmp_path, "bravo", "B", priority=300)
+    a = _make_rules_overlay(tmp_path, "alfa", "A", priority=300)
+    ordered = _overlays.sort_overlays_by_priority([b, a])
+    assert [p.name for p in ordered] == ["alfa", "bravo"]
+
+
+def test_compose_block_orders_multiple_overlays_by_priority(tmp_path):
+    from dotagents.cli import _compose_block
+
+    hi = _make_rules_overlay(tmp_path, "zeta", "HI", priority=900)
+    lo = _make_rules_overlay(tmp_path, "alpha", "LO", priority=100)
+    mid = _make_rules_overlay(tmp_path, "mid", "MID")  # default 500
+
+    # Regardless of input order, low priority lands earlier, high later.
+    for order in ([hi, lo, mid], [mid, hi, lo], [lo, mid, hi]):
+        out = _compose_block(BASE_AGENTS, order, logger())
+        # Rules: the LO rule must precede MID which must precede HI.
+        assert out.index("LO rule") < out.index("MID rule") < out.index("HI rule")
+        # Routing likewise.
+        assert out.index("LO route") < out.index("MID route") < out.index("HI route")
+        # Base's own rule still leads the always-on section.
+        assert out.index("Base rule") < out.index("LO rule")
+
+
+def test_recompose_block_positions_high_priority_last_across_adds(tmp_path):
+    """Single-`add` positioning: add LO first, then HI. HI (priority 900) must land
+    AFTER LO (priority 100) in the block even though it was added later -- recompose
+    reorders by (priority, name), never mere append order."""
+    from dotagents.cli import OverlayAdd
+
+    src = tmp_path / "src_overlays"
+    _make_rules_overlay(src, "alpha", "LO", priority=100)
+    _make_rules_overlay(src, "zeta", "HI", priority=900)
+    scope = make_scope(tmp_path)
+
+    _run(OverlayAdd, name=["alpha"], source=str(src), global_scope=True,
+         agents_dir=scope.agents_root, copy=True, dry_run=False)
+    _run(OverlayAdd, name=["zeta"], source=str(src), global_scope=True,
+         agents_dir=scope.agents_root, copy=True, dry_run=False)
+
+    text = (scope.agents_root / "AGENTS.md").read_text(encoding="utf-8")
+    assert text.index("LO rule") < text.index("HI rule")
+    assert text.index("LO route") < text.index("HI route")
+    assert text.count(END) == 1
+
+
+def test_recompose_block_high_priority_added_first_still_sorts_last(tmp_path):
+    """The reverse order: add HI first, then LO. LO must still precede HI."""
+    from dotagents.cli import OverlayAdd
+
+    src = tmp_path / "src_overlays"
+    _make_rules_overlay(src, "alpha", "LO", priority=100)
+    _make_rules_overlay(src, "zeta", "HI", priority=900)
+    scope = make_scope(tmp_path)
+
+    _run(OverlayAdd, name=["zeta"], source=str(src), global_scope=True,
+         agents_dir=scope.agents_root, copy=True, dry_run=False)
+    _run(OverlayAdd, name=["alpha"], source=str(src), global_scope=True,
+         agents_dir=scope.agents_root, copy=True, dry_run=False)
+
+    text = (scope.agents_root / "AGENTS.md").read_text(encoding="utf-8")
+    assert text.index("LO rule") < text.index("HI rule")
+    assert text.index("LO route") < text.index("HI route")
+
+
+def test_existing_bundled_overlay_manifests_still_parse(tmp_path):
+    """Every shipped overlay.toml parses unchanged and reports default priority
+    (none declares `priority` today) -- the field is optional and backward-compatible."""
+    repo_overlays = Path(__file__).resolve().parents[1] / "overlays"
+    manifests = sorted(repo_overlays.glob("*/overlay.toml"))
+    assert manifests, "expected bundled overlays to exist"
+    for manifest in manifests:
+        parsed = _overlays.read_manifest(manifest.parent)
+        assert isinstance(parsed["priority"], int)
+        # None of the shipped overlays sets priority yet -> all default.
+        assert parsed["priority"] == _overlays.DEFAULT_PRIORITY
