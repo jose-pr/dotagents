@@ -50,17 +50,21 @@ dotagents overlays remove python           # delete the overlay dir + unpublish 
 
 ## context
 
-Assembles the effective context an agent should load and writes it to the agent's
-native config file (or stdout).
+Assembles the effective context an agent should load and prints it to **stdout** by
+default (POSIX convention); pass a path to write a file, or `--write-agent` to write each
+agent's native config file.
 
 ```bash
-python -m dotagents context --agents claude          # write claude's native context
-python -m dotagents context --format json --agents claude -o -   # emit JSON to stdout
+dotagents context                              # print the active agent's context to stdout
+dotagents context out.md                       # write it to out.md (positional path)
+dotagents context --format json --agents claude   # JSON to stdout
+dotagents context --write-agent                # write each agent's native config file
 ```
 
+- `[output]` — positional destination. Default `-` (stdout); a path writes that file.
+- `--write-agent` — write each agent's native config file instead of `[output]`.
 - `--agents <a,b>` — which agents to generate for (default: the active agent).
 - `--format markdown|system-reminder|json` — output shape.
-- `--out <path>|-` — destination (default: the agent's native config file).
 - `-g` / `--global` — user scope.
 
 ## env
