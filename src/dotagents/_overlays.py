@@ -20,15 +20,22 @@ import subprocess
 from pathlib import Path
 
 
-#: The name of an overlay's optional idempotent setup script, tried in order.
-#: An extensionless ``setup`` (a shell/POSIX script) or a ``setup.py`` at the
-#: overlay root. Presence of one file = opt-in; absence = nothing to run.
-SETUP_SCRIPT_NAMES = ("setup", "setup.py")
+#: An overlay's optional idempotent setup script, tried in preference order.
+#: ``setup.py`` is the **recommended, OS-agnostic** form: it runs under the same
+#: interpreter that runs dotagents, so it works on every platform (the ``net``
+#: overlay uses it). The extensionless ``setup`` (a POSIX shell script) is a
+#: **legacy fallback**, kept for existing overlays but discouraged -- a shell
+#: script isn't portable to Windows without a shell. When an overlay ships both,
+#: ``setup.py`` wins (it is first in this tuple). Presence of one file = opt-in;
+#: absence = nothing to run.
+SETUP_SCRIPT_NAMES = ("setup.py", "setup")
 
 
 def find_setup_script(overlay_dir: Path) -> "Path | None":
-    """Return the overlay's setup script (``setup`` or ``setup.py`` at its root),
-    or ``None`` if it ships none.
+    """Return the overlay's setup script, or ``None`` if it ships none.
+
+    Prefers the OS-agnostic ``setup.py`` over the legacy extensionless ``setup``
+    when an overlay ships both (``SETUP_SCRIPT_NAMES`` is in preference order).
 
     The *installed* overlay dir is what should be handed in: setup runs against
     the copy under ``<scope>/overlays/<name>/`` with that as its cwd, so a script
@@ -51,9 +58,10 @@ def run_overlay_setup(
     """Run an overlay's idempotent ``setup`` script if it ships one.
 
     Returns the script's exit code, or ``None`` when the overlay has no setup
-    script (nothing to run -- not an error). Presence of ``setup``/``setup.py`` at
-    the overlay root is the opt-in; the runner never second-guesses a script the
-    user chose to install (see the overlay-authoring contract).
+    script (nothing to run -- not an error). Presence of ``setup.py`` (preferred,
+    OS-agnostic) or the legacy ``setup`` at the overlay root is the opt-in; the
+    runner never second-guesses a script the user chose to install (see the
+    overlay-authoring contract).
 
     **Idempotency is the overlay author's contract**: the script must be safe to
     run on every ``add``/``sync`` (check-then-act). The runner only invokes it.

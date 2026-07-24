@@ -1,6 +1,0 @@
-name = "recovery"
-description = "Recover a lost/corrupted ~/.agents from transcripts and caches."
-requires = []
-routing = [
-  """- Reconstruct a lost or corrupted ~/.agents / agent-authored file → ~/.agents/kb/RECOVERY.md""",
-]

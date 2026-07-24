@@ -87,13 +87,15 @@ def test_source_resolution_env(tmp_path, monkeypatch):
     assert "py-demo" in source.available()
 
 
-def test_source_resolution_bundled_default(tmp_path, monkeypatch):
-    # No explicit source, no env -> the bundled overlays/ (repo checkout).
+def test_source_resolution_no_bundled_errors(tmp_path, monkeypatch):
+    # main ships no bundled overlays/ (they live on the `overlays` branch, D77),
+    # and this test env packages none. With no --source and no env, resolve_source
+    # must fail with a clear "no overlay source" error, not silently pick nothing.
     monkeypatch.delenv(_scope.SOURCE_ENV, raising=False)
-    source = _scope.resolve_source(None)
-    # The repo's real overlays include these names.
-    avail = source.available()
-    assert "python" in avail and "flows" in avail
+    if _scope.bundled_overlays_root() is not None:
+        pytest.skip("this build/checkout bundles overlays; default-source error N/A")
+    with pytest.raises(SystemExit, match="no overlay source"):
+        _scope.resolve_source(None)
 
 
 def test_source_unknown_name_errors(tmp_path):
@@ -554,8 +556,15 @@ def test_recompose_block_high_priority_added_first_still_sorts_last(tmp_path):
 
 def test_existing_bundled_overlay_manifests_still_parse(tmp_path):
     """Every shipped overlay.toml parses unchanged and reports default priority
-    (none declares `priority` today) -- the field is optional and backward-compatible."""
+    (none declares `priority` today) -- the field is optional and backward-compatible.
+
+    The example overlays moved to the `overlays` branch (D77), so a plain main
+    checkout has none to parse here; skip when the dir is absent. This still guards
+    the manifests on the overlays branch (or any checkout that has an overlays/ dir),
+    while the tmp-fixture tests above cover read_manifest's parsing on main."""
     repo_overlays = Path(__file__).resolve().parents[1] / "overlays"
+    if not repo_overlays.is_dir():
+        pytest.skip("no bundled overlays/ (they live on the `overlays` branch, D77)")
     manifests = sorted(repo_overlays.glob("*/overlay.toml"))
     assert manifests, "expected bundled overlays to exist"
     for manifest in manifests:

@@ -23,55 +23,25 @@ from pathlib import Path
 DEFAULT_ROOT = Path.home() / ".agents"
 
 # Manifest paths are relative to a repo checkout root (--root .). The config is
-# now a base overlay (src/dotagents/_overlay) plus opt-in overlays/<name>/; the
+# now a base overlay (src/dotagents/_overlay) plus opt-in example overlays; the
 # required tooling lives at top-level tools/.
+#
+# The example overlays themselves moved to a separate `overlays` orphan branch
+# (origin/overlays) -- main's tree is overlays-free (see D77). So the manifest
+# here scopes to what main actually ships: the base overlay + required tooling.
+# The overlays branch carries its own copy of the example content and its tests;
+# validating that content is the overlays branch's concern, not main's.
 SCAN = [
     "src/dotagents/_overlay/AGENTS.md", "src/dotagents/_overlay/CLAUDE.md",
     "src/dotagents/_overlay/dotagents/DECISIONS.md",
-    "overlays/flows/flows/PLAN.md", "overlays/flows/flows/EXEC.md",
-    "overlays/flows/flows/REVIEW.md", "overlays/flows/flows/REPO.md",
-    "overlays/flows/MODELS.md",
-    "overlays/recovery/kb/RECOVERY.md",
 ]
-REFS = [
-    "overlays/references/references/README.md",
-    "overlays/references/references/CHANGELOG.md",
-    "overlays/references/references/LICENSE",
-    "overlays/references/references/.gitignore",
-    "overlays/references/references/docs-index.md",
-    "overlays/references/references/master_refactoring_plan.md",
-]
+REFS = []
 EXIST_ONLY = ["tools/audit_config.py", "tools/leak_check.py", "tools/cloud-setup.sh"]
-# The language/agent overlays -- opt-in at install time, but a repo checkout
-# (--root .) should have every example present. Checked only when overlays/ exists.
-EXAMPLES = [
-    "overlays/private-sync/kb/PRIVATE_SYNC.md",
-    "overlays/private-sync/hooks/private-sync-start.sh",
-    "overlays/private-sync/hooks/private-sync-stop.sh",
-    "overlays/private-sync/hooks/_agents-git-auth.sh",
-    "overlays/private-sync/hooks/settings.snippet.json",
-    "overlays/python/kb/PYTHON.md", "overlays/node/kb/NODE.md", "overlays/rust/kb/RUST.md",
-    "overlays/node/references/package.json", "overlays/python/references/pyproject.toml",
-    "overlays/rust/references/Cargo.toml", "overlays/python/references/mkdocs.yml",
-    "overlays/python/references/workflows/python/test.yml",
-    "overlays/python/references/workflows/python/release.yml",
-    "overlays/python/references/workflows/python/docs.yml",
-    "overlays/node/references/workflows/node/test.yaml",
-    "overlays/node/references/workflows/node/release.yaml",
-    "overlays/node/references/workflows/node/docs.yaml",
-    "overlays/rust/references/workflows/rust/test.yaml",
-    "overlays/rust/references/workflows/rust/release.yaml",
-    "overlays/rust/references/workflows/rust/docs.yaml",
-    "overlays/net/kb/NET.md",
-    "overlays/net/bin/curl.py", "overlays/net/bin/curl.cmd",
-    "overlays/net/lib/certifi/__init__.py", "overlays/net/lib/certifi/__main__.py",
-    "overlays/net/lib/VENDORED.md",
-    "overlays/net/lib/httplib/__init__.py", "overlays/net/lib/httplib/proxy.py",
-    "overlays/net/lib/httplib/jar.py", "overlays/net/lib/httplib/cookies.py",
-    "overlays/net/lib/httplib/auth.py", "overlays/net/lib/httplib/warnings.py",
-    "overlays/net/lib/httplib/session.py", "overlays/net/lib/httplib/fetch.py",
-    "overlays/net/setup.py",
-]
+# Example-overlay files live on the `overlays` branch, not in main's tree, so the
+# repo checkout (--root .) has no overlays/ dir to enumerate. Kept empty here and
+# guarded below (checked only when an overlays/ dir is present -- e.g. a CI job
+# that checks the overlays branch out into ./overlays for integration testing).
+EXAMPLES = []
 
 BASE_PATTERNS = ["file:///" + "~"]
 
@@ -116,13 +86,10 @@ PERSONAL_PATTERNS = _DEFAULT_PERSONAL + list(_LOCAL.get("personal", []))
 PUBLIC_ALLOWLIST = list(_LOCAL.get("public_allowlist", []))
 REF_PATTERNS = BASE_PATTERNS + _DEFAULT_PERSONAL + list(_LOCAL.get("refs", []))
 
-# REPO.md is deliberately larger than the single-topic flow files: it covers
-# layout + CI + six meta files + versioning where PLAN/EXEC/REVIEW each cover
-# one topic (D71 — re-base, not split; a further trim would delete rules, not
-# prose). Its budget is set from the tool's own measured size with headroom.
-BUDGETS = {"src/dotagents/_overlay/AGENTS.md": 2500,
-           "overlays/flows/flows/PLAN.md": 3000, "overlays/flows/flows/EXEC.md": 3000,
-           "overlays/flows/flows/REVIEW.md": 3000, "overlays/flows/flows/REPO.md": 7000}
+# The base overlay's AGENTS.md is the only always-loaded file main ships, so it
+# is the one with a size budget here. The flow files (PLAN/EXEC/REVIEW/REPO) and
+# their budgets live with the overlay content on the `overlays` branch (D77).
+BUDGETS = {"src/dotagents/_overlay/AGENTS.md": 2500}
 
 SUBST = {"<project_name>": "demopkg", "<gh_org>": "demoorg",
          "<package_name>": "demopkg", "<year>": "2026",
@@ -190,6 +157,14 @@ def check_templates(root):
     import shutil
     import tempfile
     import tomllib
+    # The reference/language templates moved to the `overlays` branch (D77), so a
+    # plain main checkout has no overlays/ dir to instantiate. Skip cleanly rather
+    # than fail -- CI checks the templates on the overlays branch (or after checking
+    # it out into ./overlays), where the source files actually live.
+    if not (root / "overlays").is_dir():
+        print("SKIP --check-templates: no overlays/ dir "
+              "(templates live on the `overlays` branch)")
+        return []
     failures = []
     tmp = Path(tempfile.mkdtemp(prefix="agents_tpl_"))
     try:

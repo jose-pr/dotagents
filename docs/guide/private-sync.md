@@ -20,8 +20,8 @@ entry.
 ## Commands
 
 ```bash
-python install.py install                                    # base config
-python install.py overlays add private-sync --source overlays  # kb + cloud hooks
+dotagents install                                            # base config
+dotagents overlays add private-sync --source <overlays-checkout>  # kb + cloud hooks
 
 python -m dotagents link .          # symlink this project's .agents into its store
                                     #   (an existing real .agents/ is adopted on the

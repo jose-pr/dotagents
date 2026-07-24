@@ -8,19 +8,21 @@ opinionated ships as a named overlay you add explicitly.
 
 An overlay is a directory (optionally carrying an `overlay.toml` manifest) whose files
 install to the same relative path in the destination scope. `dotagents overlays`
-resolves each overlay **by name** against a source (the bundled overlay set by default;
-override with `--source <dir>` or `$DOTAGENTS_OVERLAYS_SRC`), and installs it into the
-scope's overlays directory. There is **no registry file**: installed overlays are
-*discovered* by their presence there.
+resolves each overlay **by name** against a source directory you point it at with
+`--source <dir>` (or `$DOTAGENTS_OVERLAYS_SRC`), and installs it into the scope's
+overlays directory. There is **no registry file**: installed overlays are *discovered*
+by their presence there.
 
 Overlays are **additive**. `add` / `sync` never clobber a file you hand-edited inside
 an installed overlay — an already-present file is skipped.
 
-## Bundled example overlays
+## Example overlays
 
-These ship in this repo as a starting point. They are **payloads riding on dotagents**,
-not part of the tool — swap them for your own. Install any with
-`dotagents overlays add <name>`.
+The example overlays below live on this repo's separate
+[`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays), not in `main` —
+they are **payloads riding on dotagents**, not part of the tool, so you swap them for
+your own. Point `--source` at a checkout of that branch to install any with
+`dotagents overlays add <name> --source <overlays-checkout>`.
 
 | Overlay | What it carries |
 | --- | --- |
@@ -37,10 +39,10 @@ not part of the tool — swap them for your own. Install any with
 ## Managing overlays
 
 ```bash
-python install.py overlays add python flows    # install into the scope, publish skills, merge rules/routing
-python install.py overlays list                # installed (discovered) + available (from source)
-python install.py overlays sync 'py*'          # refresh installed overlays matching a glob
-python install.py overlays remove python       # delete the overlay dir + unpublish its skills
+dotagents overlays add python flows    # install into the scope, publish skills, merge rules/routing
+dotagents overlays list                # installed (discovered) + available (from source)
+dotagents overlays sync 'py*'          # refresh installed overlays matching a glob
+dotagents overlays remove python       # delete the overlay dir + unpublish its skills
 ```
 
 Scope is **project** by default, or **user** with `-g` / `--global` (the configurable
@@ -78,11 +80,15 @@ only the skills it published, then sweeps any now-broken symlinks.
 
 ## Setup scripts
 
-An overlay may ship an **idempotent** `setup` (extensionless POSIX script) or
-`setup.py` at its root. After `add` / `sync` copies the overlay in, dotagents runs that
-script automatically — so anything a human would otherwise hand-follow (PATH/lib
-wiring, self-registration) is one script the tool runs, not a doc. Presence of the
-script is the opt-in; skip it with `--no-setup`. The author contract:
+An overlay may ship an **idempotent** `setup.py` at its root — the recommended,
+OS-agnostic form: it runs under the same Python that runs dotagents, so it works on
+every platform (the bundled `net` overlay uses exactly this). An extensionless `setup`
+(a POSIX shell script) is still honored as a **legacy fallback**, but discouraged — a
+shell script isn't portable to Windows without a shell. When both are present, `setup.py`
+wins. After `add` / `sync` copies the overlay in, dotagents runs the script
+automatically — so anything a human would otherwise hand-follow (PATH/lib wiring,
+self-registration) is one script the tool runs, not a doc. Presence of a script is the
+opt-in; skip it with `--no-setup`. The author contract:
 
 - **Idempotent** — safe on every `add` / `sync`; check-then-act, never blindly append.
 - **cwd** is the installed overlay dir, so reference your own files by relative path.

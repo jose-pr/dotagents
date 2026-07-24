@@ -1,7 +1,0 @@
-name = "net"
-description = "Dependency-free HTTP tooling: a drop-in curl shim (real curl first, pure-stdlib fallback), an OS-trust-store certifi shim, and an httplib session toolkit reading AGENTS_PROXY. Self-wires PATH/PYTHONPATH via its setup script."
-requires = []
-routing = [
-  """- Fetch a URL without network setup, use the bundled curl shim / httplib session
-  toolkit, or point tools at the OS trust store → ~/.agents/kb/NET.md""",
-]
