@@ -9,12 +9,24 @@ from dotagents.cli._common import BASE_ROOT, _apply_base, _resolve_from
 
 
 class Init(LoggingArgs, Cmd):
-    """Install the minimal neutral base overlay (never the full opinionated payload)."""
+    """Install the minimal neutral base overlay (never the full opinionated payload).
+
+    Scope: **project** by default (``<cwd>/.agents``), or the **user** store with
+    ``-g/--global`` (``~/.agents``). ``--dest`` overrides the resolved location.
+    """
 
     _parsername_ = "init"
 
-    dest: Path = Path.home() / ".agents"
-    "Destination directory for the installed config."
+    global_scope: bool = False
+    "Init the user store (~/.agents) instead of this project's <cwd>/.agents."
+    ("--global", "-g")
+
+    agents_dir: Optional[Path] = None
+    "User store location for -g (default ~/.agents; configurable via $DOTAGENTS_STORE_DIR)."
+    ("--agents-dir",)
+
+    dest: Optional[Path] = None
+    "Explicit destination, overriding the resolved scope (project/user)."
     ("--dest",)
 
     from_: Optional[str] = None
@@ -35,7 +47,14 @@ class Init(LoggingArgs, Cmd):
 
     def __call__(self) -> int:
         src = _resolve_from(self.from_, BASE_ROOT)
-        dest = Path(self.dest).expanduser().resolve()
+        if self.dest is not None:
+            dest = Path(self.dest).expanduser().resolve()
+        else:
+            from dotagents import _scope
+
+            scope = _scope.resolve_scope(self.global_scope, agents_dir=self.agents_dir)
+            dest = Path(scope.agents_root).expanduser().resolve()
+            self._logger_.info("scope: %s (%s)", scope.level, dest)
 
         agent_names = []
         if self.agents:

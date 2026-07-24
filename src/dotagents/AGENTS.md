@@ -64,7 +64,11 @@ Read, **never printed** (they may hold secrets — the code only ever names them
 
 Emitted by the identity/env layer (safe to branch on in env files):
 `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENTS_MODEL`, `AGENTS_AGENT` / `AGENT`,
-`AGENTS_CODE_SESSION_ID`, `AGENTS_PROXY`, `AGENTS_WEBFETCH_PROXY_URL`.
+`AGENTS_CODE_SESSION_ID`, `AGENTS_PROXY`, `AGENTS_WEBFETCH_PROXY_URL`, plus the two
+scope roots — `AGENTS_HOME` (the user store, `agents_dir`/`~/.agents`) and
+`AGENTS_PROJECT_ROOT` (this project's root). Both are seeded only if unset, so a
+harness/env can pin them. `resolve_scope` READS `AGENTS_PROJECT_ROOT` (then the
+agent-native `CLAUDE_PROJECT_DIR`, then cwd) for the project scope's root.
 
 ## Gotchas
 
