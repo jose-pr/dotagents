@@ -80,16 +80,21 @@ BASE_PLAIN_FILES = [
 def _compose_block(base_text: str, overlays: "list[Path]", logger) -> str:
     """Fold each overlay's `rules`/`routing` contributions into the base block.
 
-    Rules append to "Always-on rules" and routing to "Load on demand", in overlay
-    order, after the base's own -- the base carries the mechanism (D57) and should
-    read first, and overlay order is already the user's stated preference via
-    repeated `--overlays`. Returns `base_text` unchanged when nothing contributes,
-    so `init` (which takes no overlays) is completely unaffected."""
-    from dotagents._overlays import read_manifest, rule_blocks
+    Rules append to "Always-on rules" and routing to "Load on demand", after the
+    base's own -- the base carries the mechanism (D57) and should read first. The
+    overlays fold in **`(priority, name)` order** (plan 02 / D68), NOT the caller's
+    list order: lower `priority` (default `DEFAULT_PRIORITY`, 500) sorts earlier, so
+    a numerically higher-priority overlay lands *last* and wins on conflict -- the
+    same "lower sorts earlier / higher wins" convention `_context.py` uses. `name`
+    is the tiebreaker, so equal-priority overlays produce a stable, deterministic
+    block regardless of add-invocation or discovery order. Returns `base_text`
+    unchanged when nothing contributes, so `init` (which takes no overlays) is
+    completely unaffected."""
+    from dotagents._overlays import read_manifest, rule_blocks, sort_overlays_by_priority
 
     rules: "list[str]" = []
     routing: "list[str]" = []
-    for overlay_dir in overlays:
+    for overlay_dir in sort_overlays_by_priority(overlays):
         manifest = read_manifest(overlay_dir)
         blocks, warnings = rule_blocks(overlay_dir, manifest["rules"])  # type: ignore[arg-type]
         for warning in warnings:
@@ -120,6 +125,38 @@ def _compose_block(base_text: str, overlays: "list[Path]", logger) -> str:
         insert_at = end.start() if end else len(text)
         text = text[:insert_at] + "\n".join(routing) + "\n" + text[insert_at:]
     return text
+
+
+def _installed_overlay_dirs(scope, source, *, adding=None, dry_run=False) -> "list[Path]":
+    """The overlay dirs to recompose the managed block over (plan 02 / D68).
+
+    Every overlay installed in `scope` contributes to the block, so the recompose is
+    a pure function of *which* overlays are present -- not of add-invocation order.
+    Each installed overlay ships its own `overlay.toml` + rules files (see
+    `install_overlay_dir`), so the installed dir is self-describing and used directly.
+
+    `adding` is the names being added/synced this call; on a `--dry-run` `add` they
+    are not yet on disk in the scope, so their **source** dir stands in so the dry-run
+    preview reflects what a real run would produce. A real (non-dry-run) run reads them
+    from the scope like any other installed overlay. Order here is irrelevant --
+    `_compose_block` sorts by `(priority, name)`.
+    """
+    from dotagents import _scope
+
+    adding = list(adding or [])
+    installed = set(_scope.discover_overlays(scope))
+    names = sorted(installed | set(adding))
+    dirs: "list[Path]" = []
+    for name in names:
+        if dry_run and name in adding and name not in installed:
+            # Not on disk yet (dry-run add): describe it from the source instead.
+            try:
+                dirs.append(source.overlay_dir(name))
+            except SystemExit:
+                pass
+        else:
+            dirs.append(scope.overlay_dir(name))
+    return dirs
 
 
 def _apply_base(
@@ -849,8 +886,6 @@ class OverlayAdd(LoggingArgs, Cmd):
                 "overlay %s: %d file(s) installed, %d skipped%s",
                 name, copied, skipped, " [dry-run]" if self.dry_run else "",
             )
-            if _overlays.merge_overlay_rules(agents_md, overlay_src, self.dry_run, self._logger_):
-                self._logger_.info("merged %s rules/routing into AGENTS.md", name)
             if not self.dry_run:
                 published = _skills.publish_overlay_skills(
                     overlay_src, scope.shared_skills_dir, copy=self.copy,
@@ -866,6 +901,19 @@ class OverlayAdd(LoggingArgs, Cmd):
                 raise SystemExit(
                     "error: setup for overlay %r failed (exit %d)" % (name, rc)
                 )
+
+        # Recompose the whole managed block from the pristine base over ALL installed
+        # overlays in (priority, name) order (plan 02 / D68), so a high-priority overlay
+        # lands last regardless of when it was added -- not merely appended after
+        # whatever was already in the block.
+        overlay_dirs = _installed_overlay_dirs(
+            scope, source, adding=self.name, dry_run=self.dry_run
+        )
+        base_block = (BASE_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        if _overlays.recompose_overlay_block(
+            agents_md, base_block, overlay_dirs, self.dry_run, self._logger_
+        ):
+            self._logger_.info("recomposed overlay rules/routing in AGENTS.md")
 
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
@@ -1069,7 +1117,6 @@ class OverlaySync(LoggingArgs, Cmd):
                 "synced %s: %d new file(s), %d unchanged%s",
                 name, copied, skipped, " [dry-run]" if self.dry_run else "",
             )
-            _overlays.merge_overlay_rules(agents_md, overlay_src, self.dry_run, self._logger_)
             if not self.dry_run:
                 _skills.resync_overlay_skills(
                     overlay_src, scope.shared_skills_dir, logger=self._logger_
@@ -1082,6 +1129,16 @@ class OverlaySync(LoggingArgs, Cmd):
                 raise SystemExit(
                     "error: setup for overlay %r failed (exit %d)" % (name, rc)
                 )
+
+        # Recompose the managed block over ALL installed overlays in (priority, name)
+        # order (plan 02 / D68) -- not just the pattern-matched subset synced above, so
+        # priority ordering holds across the full installed set.
+        overlay_dirs = _installed_overlay_dirs(scope, source, dry_run=self.dry_run)
+        base_block = (BASE_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        if _overlays.recompose_overlay_block(
+            agents_md, base_block, overlay_dirs, self.dry_run, self._logger_
+        ):
+            self._logger_.info("recomposed overlay rules/routing in AGENTS.md")
 
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
