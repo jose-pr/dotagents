@@ -189,11 +189,23 @@ def _resolve_and_filter_sources(
 
     sources.sort(key=_sort_key)
 
-    # Subtract harness loads (no double-send).
+    # Subtract harness loads (no double-send). A relative entry (e.g. Codex's
+    # "AGENTS.md") means "the harness reads this path relative to the PROJECT
+    # ROOT" -- resolved against `project_root`, exactly like the `~/`/`/`
+    # absolute forms are resolved against home/root. Previously this was a bare
+    # `path.name == hl` filename match with no directory check at all, so ANY
+    # source file merely named "AGENTS.md" was suppressed -- including
+    # `~/.agents/AGENTS.md` (the user-store file, which Codex's harness never
+    # reads) getting wrongly matched against Codex's project-root
+    # "AGENTS.md" entry purely because the basenames happened to coincide.
+    # Confirmed live: `dotagents context --agents codex` emitted an empty
+    # `sources: []` even with `~/.agents/AGENTS.md` present and non-empty.
     harness_loads_resolved = []
     for hl in agent.harness_loads:
         if hl.startswith("~/") or hl.startswith("/"):
             harness_loads_resolved.append(Path(hl).expanduser().resolve())
+        else:
+            harness_loads_resolved.append((project_root / hl).resolve())
 
     filtered = []
     for item in sources:
@@ -204,11 +216,6 @@ def _resolve_and_filter_sources(
                 skip = True
         except OSError:
             pass
-        if not skip:
-            for hl in agent.harness_loads:
-                if not (hl.startswith("~/") or hl.startswith("/")) and path.name == hl:
-                    skip = True
-                    break
         if not skip:
             filtered.append(item)
     return filtered

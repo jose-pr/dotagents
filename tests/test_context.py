@@ -8,6 +8,8 @@ Run from the repo root: ``python -m pytest tests/``.
 """
 
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -68,16 +70,82 @@ def layout(tmp_path):
 # Harness-loads subtraction (no double-send)
 # --------------------------------------------------------------------------
 
-def test_harness_loads_subtracts_user_agents_md(layout):
+def test_harness_loads_subtracts_user_agents_md(layout, monkeypatch):
+    """Claude's harness_loads has TWO entries: the absolute `~/.agents/AGENTS.md`
+    and the relative `AGENTS.md` (meaning "at the project root"). This test
+    covers the absolute form -- `Path.home()` is redirected to the isolated
+    `agents_dir`'s parent so `~/.agents/AGENTS.md` genuinely resolves to the
+    fixture's file, rather than the real machine's `~/.agents/AGENTS.md`
+    (which does not exist in this tmp_path and would silently make the
+    absolute-form branch a no-op, leaving only the relative form to explain a
+    pass -- exactly the bug this test previously masked, see
+    test_relative_harness_load_matches_project_root_only below)."""
     agents_dir, project_root = layout
+    # `~/.agents/AGENTS.md` must resolve to agents_dir/AGENTS.md exactly. No
+    # symlink (this machine can't create one without elevation, confirmed
+    # elsewhere) -- and `agents_dir` must literally be named ".agents" for the
+    # `home() / ".agents"` join in the code under test to land on it. The
+    # `layout` fixture names it "agents", not ".agents", so this test builds
+    # a dotted-name copy of the fixture data instead of reusing `agents_dir`.
+    #
+    # `monkeypatch.setattr(Path, "home", ...)` alone does NOT work here:
+    # `Path.expanduser()` (what `_context.py` calls on `~/.agents/AGENTS.md`)
+    # does not go through `Path.home()` -- both independently call
+    # `self._flavour.gethomedir(...)`, so overriding the `home` classmethod
+    # leaves `expanduser()` still reading the REAL machine home. Confirmed by
+    # direct test: with only `Path.home` patched, `Path("~/.agents/AGENTS.md")
+    # .expanduser()` still resolved to the real `C:\Users\<user>\.agents\...`.
+    # The actual fix is the env var `gethomedir` reads -- USERPROFILE on
+    # Windows, HOME on POSIX.
+    fake_home = agents_dir.parent / "fakehome"
+    dotagents_dir = fake_home / ".agents"
+    dotagents_dir.mkdir(parents=True)
+    for item in agents_dir.iterdir():
+        dest = dotagents_dir / item.name
+        if item.is_dir():
+            shutil.copytree(item, dest)
+        else:
+            shutil.copy2(item, dest)
+    home_var = "USERPROFILE" if os.name == "nt" else "HOME"
+    monkeypatch.setenv(home_var, str(fake_home))
+
     claude = _agents.ClaudeAgent()
-    text = _context.assemble_context(claude, agents_dir, project_root, global_scope=True)
-    # Claude's harness already loads ~/.agents/AGENTS.md and per-dir AGENTS.md, so
-    # the user AGENTS.md at agents_dir must NOT be re-emitted as a source block.
+    text = _context.assemble_context(claude, dotagents_dir, project_root, global_scope=True)
+    # Claude's harness already loads ~/.agents/AGENTS.md, so it must NOT be
+    # re-emitted as a source block.
     assert "# User rules" not in text
     # But the overlays (never loaded by the harness) ARE emitted.
     assert "ALPHA-CONTEXT" in text
     assert "ZETA-CONTEXT" in text
+
+
+def test_relative_harness_load_matches_project_root_only(layout):
+    """Regression: a RELATIVE harness_loads entry (e.g. Codex's "AGENTS.md")
+    must resolve against project_root and match by full path, not by bare
+    filename anywhere in the source list. The old code did `path.name == hl`
+    with no directory check, so Codex's "AGENTS.md" entry wrongly suppressed
+    `~/.agents/AGENTS.md` (a user-store file Codex's harness never reads) purely
+    because both files happened to be named "AGENTS.md" -- confirmed live:
+    `dotagents context --agents codex` emitted an empty `sources: []` even with
+    a real, non-empty ~/.agents/AGENTS.md present.
+
+    Here, agents_dir/AGENTS.md ("# User rules") is NOT at project_root, so a
+    relative harness_loads entry must NOT suppress it.
+    """
+    agents_dir, project_root = layout
+    codex = _agents.CodexAgent()
+    assert codex.harness_loads == ["AGENTS.md"]  # relative, no ~/ or / prefix
+
+    text = _context.assemble_context(codex, agents_dir, project_root, global_scope=True)
+    assert "# User rules" in text, (
+        "a same-named file OUTSIDE project_root must not be wrongly suppressed"
+    )
+
+    # Now put a real AGENTS.md AT project_root -- THAT one must be suppressed.
+    (project_root / "AGENTS.md").write_text("# Project root rules\n", encoding="utf-8")
+    text2 = _context.assemble_context(codex, agents_dir, project_root, global_scope=True)
+    assert "# Project root rules" not in text2, "the actual project-root file IS the harness load"
+    assert "# User rules" in text2, "the unrelated same-named file is still not suppressed"
 
 
 def test_non_claude_agent_keeps_agents_md(layout):

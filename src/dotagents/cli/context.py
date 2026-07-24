@@ -97,7 +97,12 @@ class Context(LoggingArgs, Cmd):
                 Path(self.out).write_text(blob, encoding="utf-8")
                 self._logger_.info("Wrote JSON context to %s", self.out)
             else:
-                print(blob)  # default '-' -> stdout (json never writes native configs)
+                # default '-' -> stdout (json never writes native configs). Same
+                # cp1252-crash risk as the markdown path below -- a bare print()
+                # encodes with the console codepage and dies on any character
+                # outside Latin-1 (confirmed live: a `≥` in real assembled
+                # context crashed this exact line before the fix).
+                _write_stdout(blob + "\n")
             return 0
 
         # --- markdown / system-reminder text paths ---
