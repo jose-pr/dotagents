@@ -35,18 +35,26 @@ def build_hook_entry(
     matcher: "Optional[str]" = None,
     status_message: "Optional[str]" = None,
     shell: "Optional[str]" = None,
+    command_windows: "Optional[str]" = None,
 ) -> "dict[str, Any]":
     """One matcher-object wrapping a single ``type: command`` hook.
 
-    ``matcher``/``statusMessage``/``shell`` are omitted entirely when None rather
-    than written as null -- an absent key is the documented "no matcher" /
-    "default shell" form. ``shell`` selects the interpreter for THIS hook's own
-    ``command`` (``"bash"`` or ``"powershell"``) -- unrelated to which tool the
-    hook is matched against.
+    ``matcher``/``statusMessage``/``shell``/``command_windows`` are omitted
+    entirely when None rather than written as null -- an absent key is the
+    documented "no matcher" / "default shell" form. ``shell`` (Claude) selects
+    the interpreter for THIS hook's own ``command`` (``"bash"`` or
+    ``"powershell"``); ``command_windows`` (Codex, emitted as the camelCase
+    ``commandWindows`` key its docs specify) is a separate Windows-only command
+    OVERRIDE -- Codex runs ``command`` normally and substitutes
+    ``commandWindows`` for it on Windows, rather than picking an interpreter for
+    one shared string. Both are agent-specific vocabulary living in this one
+    shared merge function rather than duplicated per adapter.
     """
     hook: "dict[str, Any]" = {"type": "command", "command": command}
     if shell:
         hook["shell"] = shell
+    if command_windows:
+        hook["commandWindows"] = command_windows
     if status_message:
         hook["statusMessage"] = status_message
     entry: "dict[str, Any]" = {}
@@ -93,6 +101,7 @@ def merge_hook(
     matcher: "Optional[str]" = None,
     status_message: "Optional[str]" = None,
     shell: "Optional[str]" = None,
+    command_windows: "Optional[str]" = None,
 ) -> "tuple[list, bool]":
     """Fold our hook into `existing`, returning ``(normalized_list, changed)``.
 
@@ -118,7 +127,7 @@ def merge_hook(
     if not isinstance(existing, list):
         # None/absent is the common case; a non-list is a malformed file we replace.
         return [
-            build_hook_entry(command, matcher=matcher, status_message=status_message, shell=shell)
+            build_hook_entry(command, matcher=matcher, status_message=status_message, shell=shell, command_windows=command_windows)
         ], True
 
     normalized: list = []
@@ -143,7 +152,7 @@ def merge_hook(
 
     if not seen_ours:
         normalized.append(
-            build_hook_entry(command, matcher=matcher, status_message=status_message, shell=shell)
+            build_hook_entry(command, matcher=matcher, status_message=status_message, shell=shell, command_windows=command_windows)
         )
         changed = True
 

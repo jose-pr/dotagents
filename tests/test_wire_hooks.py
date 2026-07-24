@@ -358,8 +358,12 @@ class TestPowerShellPreToolUse:
 
 class TestCodexHooks:
     """Codex's hook JSON is structurally identical to Claude's, so `_hooks`
-    merges it unchanged. Context half only -- Codex has no CLAUDE_ENV_FILE
-    equivalent, so writing an env hook would mean inventing a mechanism."""
+    merges it unchanged. `SessionStart` is context-only, matching Claude's
+    Codex-side gap -- no CLAUDE_ENV_FILE equivalent exists there. The LIVE env
+    half is covered separately, below, by a `PreToolUse` hook using the same
+    `updatedInput.command` rewrite mechanism Codex's own docs confirm exists
+    (learn.chatgpt.com/docs/hooks, "To rewrite a supported tool call without
+    blocking") -- structurally the same JSON shape as Claude's PowerShell hook."""
 
     def test_wires_session_start_into_hooks_json(self, tmp_path):
         dest, root = tmp_path / "agents", tmp_path / "codex"
@@ -372,12 +376,14 @@ class TestCodexHooks:
         ]
         assert "dotagents context" in CodexAgent.SESSION_START_COMMAND
 
-    def test_no_env_hook(self, tmp_path):
-        """Codex hooks only *receive* env vars; nothing persists exports back."""
+    def test_session_start_has_no_env_write(self, tmp_path):
+        """SessionStart itself still carries no CLAUDE_ENV_FILE-style write --
+        that mechanism does not exist for Codex at any hook event. The env half
+        is PreToolUse's job, checked in TestCodexPreToolUse below."""
         dest, root = tmp_path / "agents", tmp_path / "codex"
         dest.mkdir()
         CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
-        assert "ENV_FILE" not in (root / "hooks.json").read_text(encoding="utf-8")
+        assert "ENV_FILE" not in CodexAgent.SESSION_START_COMMAND
 
     def test_targets_hooks_json_not_config_toml(self, tmp_path):
         """Never rewrite the user's main TOML config."""
@@ -406,6 +412,114 @@ class TestCodexHooks:
         dest.mkdir()
         CodexAgent().wire_hooks(dest, dry_run=True, logger=None, config_root=root)
         assert not (root / "hooks.json").exists()
+        assert not (root / "hooks" / CodexAgent.PRETOOLUSE_HOOK_SCRIPT).exists()
+
+
+class TestCodexPreToolUse:
+    """Codex has NO env-persistence mechanism at any hook event (unlike Claude,
+    which at least has $CLAUDE_ENV_FILE for the Bash tool). Closed via
+    PreToolUse's documented `updatedInput.command` rewrite, matched on
+    `matcher: "Bash"` (Codex's only shell tool -- no separate PowerShell/cmd
+    tool, so unlike Claude's no-matcher hook this one can filter at the
+    settings level instead of checking tool_name at runtime)."""
+
+    def test_deploys_script_and_wires_pretooluse(self, tmp_path):
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
+
+        CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+
+        script = root / "hooks" / CodexAgent.PRETOOLUSE_HOOK_SCRIPT
+        assert script.is_file()
+        from dotagents.cli._common import BASE_ROOT
+        package_script = Path(BASE_ROOT) / "dotagents" / "hooks" / CodexAgent.PRETOOLUSE_HOOK_SCRIPT
+        assert script.read_bytes() == package_script.read_bytes()
+
+        data = json.loads((root / "hooks.json").read_text(encoding="utf-8"))
+        entries = data["hooks"]["PreToolUse"]
+        assert len(entries) == 1
+        assert entries[0]["matcher"] == "Bash"
+        hook = entries[0]["hooks"][0]
+        assert "python3" in hook["command"]
+        assert str(script) in hook["command"] or script.as_posix() in hook["command"]
+        # commandWindows uses `python`, not `python3` -- on Windows `python3` is
+        # commonly a Microsoft Store app-execution-alias stub that silently
+        # no-ops; verified directly on the dev machine (exit code 49, "Python
+        # was not found... install from the Microsoft Store").
+        assert hook["commandWindows"].startswith("python ")
+        assert "python3" not in hook["commandWindows"]
+
+    def test_script_output_is_valid_json_and_rewrites_command(self, tmp_path):
+        """The real end-to-end property: run the deployed script exactly as
+        Codex would invoke it, with real stdin, and check the rewritten
+        command is syntactically sound and carries the env-loader guard."""
+        import subprocess
+        import sys
+
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
+        CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        script = root / "hooks" / CodexAgent.PRETOOLUSE_HOOK_SCRIPT
+
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            input='{"tool_name":"Bash","tool_input":{"command":"echo hi"}}',
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        out = json.loads(proc.stdout)
+        cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
+        assert cmd.endswith("echo hi")
+        assert "AGENTS_RUNTIME_SET" in cmd
+        assert "dotagents env --diff --format export" in cmd
+
+    def test_script_guard_skips_when_already_set(self, tmp_path):
+        import subprocess
+        import sys
+
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
+        CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        script = root / "hooks" / CodexAgent.PRETOOLUSE_HOOK_SCRIPT
+
+        import os
+        env = dict(os.environ)
+        env["AGENTS_RUNTIME_SET"] = "1"
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            input='{"tool_name":"Bash","tool_input":{"command":"echo hi"}}',
+            capture_output=True, text=True, env=env,
+        )
+        assert proc.returncode == 0
+        assert proc.stdout.strip() == "", "guard set -- must emit no output (no decision)"
+
+    def test_script_fails_safe_on_bad_input(self, tmp_path):
+        import subprocess
+        import sys
+
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
+        CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        script = root / "hooks" / CodexAgent.PRETOOLUSE_HOOK_SCRIPT
+
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            input="not json at all",
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, "must never fail the tool call on bad input"
+        assert proc.stdout.strip() == ""
+
+    def test_idempotent_no_script_rewrite_when_unchanged(self, tmp_path):
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
+        agent = CodexAgent()
+        agent.wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        script = root / "hooks" / CodexAgent.PRETOOLUSE_HOOK_SCRIPT
+        first_mtime = script.stat().st_mtime_ns
+
+        agent.wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        assert script.stat().st_mtime_ns == first_mtime, "unchanged script must not be rewritten"
 
 
 class TestCodexEnvBlock:

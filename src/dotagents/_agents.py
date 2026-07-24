@@ -472,6 +472,21 @@ class CodexAgent(Agent):
         'PATH=".agents/bin:$HOME/.agents/bin:$PATH" dotagents context'
     )
 
+    # PreToolUse gives Codex the LIVE env half SessionStart cannot: hooks.md
+    # confirms PreToolUse supports `updatedInput.command` (learn.chatgpt.com/
+    # docs/hooks, "To rewrite a supported tool call without blocking"), the same
+    # mechanism and JSON shape as Claude Code's. `matcher: "Bash"` targets
+    # Codex's one shell-execution tool -- no separate PowerShell/cmd tool the
+    # way Claude has, so (unlike the Claude hook) no runtime tool_name check is
+    # needed inside the script itself.
+    #
+    # Shipped as a FILE (`~/.codex/hooks/pretooluse_codex_env.py`, `python3
+    # <path>`), not inlined: hooks.md shows every example hook as a file
+    # (`python3 ~/.codex/hooks/*.py`), and a Python script carries none of
+    # PowerShell's execution-policy/signing concern -- that constraint was
+    # PowerShell-specific, not general to file-based hooks.
+    PRETOOLUSE_HOOK_SCRIPT = "pretooluse_codex_env.py"
+
     # Codex has NO per-session env mechanism: no CLAUDE_ENV_FILE equivalent, no
     # `.env` loading anywhere (confirmed across its full docs set), and no hook that
     # can run before config load -- hooks are *defined in* the config layers, and
@@ -567,10 +582,13 @@ class CodexAgent(Agent):
     def wire_hooks(
         self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
     ) -> None:
-        """Merge our SessionStart hook into `<codex-home>/hooks.json`."""
+        """Merge SessionStart + PreToolUse into `<codex-home>/hooks.json`, and
+        deploy the PreToolUse env-loader script alongside it."""
         from dotagents import _hooks
 
         root = self._config_root(config_root)
+
+        script_changed = self._deploy_pretooluse_script(root, dry_run=dry_run, logger=logger)
 
         hooks_path = root / "hooks.json"
         data = _hooks.load_settings(hooks_path)
@@ -578,14 +596,40 @@ class CodexAgent(Agent):
         if not isinstance(hooks, dict):
             hooks = {}
 
-        session_start, changed = _hooks.merge_hook(
+        session_start, ss_changed = _hooks.merge_hook(
             hooks.get("SessionStart"),
             self.SESSION_START_COMMAND,
             status_message="Loading agent context",
         )
         hooks["SessionStart"] = session_start
 
-        if not changed:
+        # Absolute path, quoted for a possible space (e.g. under a Windows
+        # %USERPROFILE% containing one). Not `$HOME`-relative like the Bash
+        # SessionStart commands: those are portable shell snippets meant to
+        # read the same on any machine, but this hooks.json is itself
+        # machine-local config generated fresh by THIS `wire_hooks` call, on
+        # the machine it will run on -- there is no portability requirement.
+        #
+        # `commandWindows` uses `python`, not `python3`: on Windows `python3`
+        # is commonly a Microsoft Store app-execution-alias stub that can
+        # silently no-op (this session's own dev box has exactly that --
+        # `python3` resolves to the Store alias, `python` to the real
+        # interpreter). Codex's docs only ever show `python3`, presumably
+        # written for POSIX hosts; `commandWindows` is the documented
+        # Windows-only override, same mechanism as Claude's dual-shell hooks.
+        script_path = (root / "hooks" / self.PRETOOLUSE_HOOK_SCRIPT).resolve()
+        pretooluse_command = 'python3 "%s"' % script_path.as_posix()
+        pretooluse_command_windows = 'python "%s"' % str(script_path)
+        pretooluse, pt_changed = _hooks.merge_hook(
+            hooks.get("PreToolUse"),
+            pretooluse_command,
+            matcher="Bash",
+            status_message="Loading agent env",
+            command_windows=pretooluse_command_windows,
+        )
+        hooks["PreToolUse"] = pretooluse
+
+        if not (ss_changed or pt_changed or script_changed):
             if logger:
                 logger.info("hooks already wired: %s", hooks_path)
             return
@@ -593,11 +637,36 @@ class CodexAgent(Agent):
         data["hooks"] = hooks
         if dry_run:
             if logger:
-                logger.info("would wire SessionStart hook: %s", hooks_path)
+                logger.info("would wire SessionStart + PreToolUse hooks: %s", hooks_path)
             return
         _hooks.write_settings(hooks_path, data)
         if logger:
-            logger.info("wired SessionStart hook: %s", hooks_path)
+            logger.info("wired SessionStart + PreToolUse hooks: %s", hooks_path)
+
+    def _deploy_pretooluse_script(self, root: Path, *, dry_run: bool, logger) -> bool:
+        """Copies `pretooluse_codex_env.py` to `<codex-home>/hooks/`
+        (create-or-refresh -- this script has no user-editable region, same
+        contract as the base overlay's other bundled files). Returns whether
+        it changed."""
+        import shutil
+
+        from dotagents.cli._common import BASE_ROOT
+
+        src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / self.PRETOOLUSE_HOOK_SCRIPT
+        if not src_script.is_file():
+            if logger:
+                logger.warning("Codex PreToolUse script missing from package: %s", src_script)
+            return False
+
+        dest_dir = root / "hooks"
+        dest_script = dest_dir / self.PRETOOLUSE_HOOK_SCRIPT
+        changed = not dest_script.is_file() or (
+            dest_script.read_bytes() != src_script.read_bytes()
+        )
+        if changed and not dry_run:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src_script), str(dest_script))
+        return changed
 
     def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
         target = dest / "AGENTS.md"

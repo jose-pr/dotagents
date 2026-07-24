@@ -59,13 +59,25 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `hooks.<Event>` is a **list of matcher-objects** each holding its own `hooks` list,
   not a flat command list. Foreign hooks are preserved verbatim, malformed entries
   are dropped rather than raising, and invalid JSON raises `SystemExit` instead of
-  silently overwriting the user's file. Pure stdlib. Consumed by
+  silently overwriting the user's file. `shell` (Claude: `"bash"`/`"powershell"`,
+  picks the interpreter for the hook's own command) and `command_windows`
+  (Codex: emitted as `commandWindows`, a separate Windows-only command OVERRIDE,
+  not an interpreter choice) are both supported. Pure stdlib. Consumed by
   `ClaudeAgent.wire_hooks` (`~/.claude/settings.json`: env via `$CLAUDE_ENV_FILE`
-  + context via stdout, plus `CwdChanged`) and `CodexAgent.wire_hooks`
-  (`<CODEX_HOME|~/.codex>/hooks.json`: context only — no env-file equivalent — and
-  never `config.toml`). Codex's hook JSON is structurally identical to Claude's, so
-  the same merge serves both. Gemini/Cursor/Copilot keep the base no-op: no
-  published schema to target.
+  + context via stdout, plus `CwdChanged`, plus a `PreToolUse` env-loader for the
+  PowerShell tool) and `CodexAgent.wire_hooks` (`<CODEX_HOME|~/.codex>/hooks.json`,
+  never `config.toml`: `SessionStart` context-only, plus a `PreToolUse` env-loader
+  matched on `matcher: "Bash"`). Codex's hook JSON is structurally identical to
+  Claude's, including the SAME `updatedInput.command` rewrite mechanism on
+  `PreToolUse` — confirmed directly against Codex's own docs
+  (learn.chatgpt.com/docs/hooks), not assumed from Claude parity.
+  Gemini/Cursor/Copilot keep the base no-op — for Gemini/Antigravity this is now a
+  RESEARCHED conclusion, not an unexamined default: Antigravity's hooks
+  (antigravity.google/docs/hooks) have no SessionStart-equivalent (`PreInvocation`
+  is per-turn), no stdout-to-context injection (`injectSteps` is structured
+  trajectory annotation, not free text), no env-persistence mechanism, and
+  `PreToolUse` is allow/deny/ask only — no `updatedInput`, so no command-rewrite
+  path exists to hang an env-loader on. Revisit if that framework changes.
 - **`SessionStart`/`CwdChanged` register TWO handlers each**, bash-syntax
   (default shell) and a PowerShell-native equivalent (`shell: "powershell"`).
   hooks.md: `shell` "Defaults to bash, or to powershell on Windows when Git Bash
@@ -96,6 +108,19 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   command constant must be a raw string — a bare `\b` in a normal Python string
   literal silently becomes a backspace character, corrupting the emitted path;
   caught once by testing a draft through a real PowerShell spawn.
+- **`CodexAgent._deploy_pretooluse_script`** covers the same env gap for Codex,
+  which has NO env-persistence mechanism at any hook event (not Bash-only like
+  Claude — none). Ships `pretooluse_codex_env.py` (`_overlay/dotagents/hooks/`),
+  deployed to `<codex-home>/hooks/` (create-or-refresh), wired as `PreToolUse`
+  with `matcher: "Bash"` — Codex's one shell tool, so (unlike Claude's
+  no-matcher hook) filtering happens at the settings level, no runtime
+  `tool_name` check needed in the script. A FILE, not inlined like Claude's:
+  Codex's docs show every hook example as `python3 <path>`, and a `.py` file
+  has no execution-policy/signing concern (PowerShell-specific). Sets
+  `commandWindows` to `python "<path>"` (not `python3`) — verified directly
+  that `python3` resolves to the Microsoft Store app-execution-alias stub and
+  fails outright on this dev machine (exit 49), the same trap noted elsewhere
+  for `py`/venv creation.
 - `_sync` — `PathSyncer` wrapper reproducing `install`'s backup/copy/report; requires
   `pathlib_next.Path` instances (not plain `pathlib.Path`) and a pre-created parent dir.
 
