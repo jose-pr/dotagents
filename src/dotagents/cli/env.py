@@ -51,26 +51,38 @@ def _looks_like_path_list(key: str, value: str) -> bool:
 
 
 _DRIVE_LETTER_RE = re.compile(r"^([A-Za-z]):[/\\]")
+_UNC_RE = re.compile(r"^[/\\]{2}")
 
 
 def _to_posix_path(segment: str) -> str:
-    """One path segment: backslashes to slashes, then a leading drive letter
-    (``C:/...``) to its MSYS mount point (``/c/...``).
+    """One path segment, converted to a form MSYS2/Cygwin bash can actually
+    resolve a PATH lookup through -- not just cosmetically POSIX-shaped.
 
-    Slash direction alone is NOT sufficient: MSYS2/Cygwin bash resolves PATH
-    lookups through its own mount table, and a `C:/...`-form segment (right
-    separator, wrong root) fails command lookup exactly like a backslash one
-    does -- verified directly (`command -v grep` empty for `C:/Program
-    Files/Git/usr/bin`, populated for `/c/Program Files/Git/usr/bin`, same
-    directory). Only a genuine `X:/` or `X:\\` prefix is rewritten, so an
-    already-POSIX or relative segment (`.agents/bin`, `/etc/agents/bin`) is
-    left untouched.
+    ``Path(segment).as_posix()`` alone is NOT sufficient: it fixes slash
+    direction but leaves a drive letter as ``C:/...``, which fails PATH lookup
+    identically to the backslash form -- verified directly (``command -v
+    grep`` empty for ``C:/Program Files/Git/usr/bin``, populated for
+    ``/c/Program Files/Git/usr/bin``, same directory). So after
+    ``as_posix()``, a genuine drive-letter prefix is additionally rewritten to
+    its MSYS mount point (``C:/...`` -> ``/c/...``).
+
+    A UNC segment (``\\\\server\\share\\...``) needs the opposite correction:
+    both ``as_posix()`` and a bare backslash-to-slash replace COLLAPSE the
+    leading ``//`` to a single ``/`` (``//server/share`` -> ``/server/share``),
+    which is wrong -- MSYS keeps UNC paths double-slash-rooted. Restored
+    explicitly since neither conversion preserves it on its own.
+
+    An already-POSIX or relative segment (``.agents/bin``, ``/etc/agents/bin``)
+    matches neither pattern and passes through ``as_posix()`` unchanged.
     """
-    segment = segment.replace("\\", "/")
-    m = _DRIVE_LETTER_RE.match(segment)
+    is_unc = bool(_UNC_RE.match(segment))
+    posix = Path(segment).as_posix()
+    m = _DRIVE_LETTER_RE.match(posix)
     if m:
-        segment = "/%s%s" % (m.group(1).lower(), segment[2:])
-    return segment
+        return "/%s%s" % (m.group(1).lower(), posix[2:])
+    if is_unc and not posix.startswith("//"):
+        return "/" + posix.lstrip("/")
+    return posix
 
 
 def _to_posix_path_list(value: str) -> str:

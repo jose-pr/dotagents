@@ -261,6 +261,19 @@ def test_export_converts_windows_path_to_posix():
     )
 
 
+def test_unc_path_keeps_double_slash_root():
+    """`\\\\server\\share` -> `//server/share`, NOT `/server/share`.
+
+    Both `Path.as_posix()` and a bare backslash-to-slash replace collapse a
+    UNC path's leading `\\\\` to a single `/`, which MSYS does not accept as
+    the UNC root -- caught by independent verification of this fix, which
+    found the collapsed form was untested.
+    """
+    from dotagents.cli.env import _to_posix_path
+
+    assert _to_posix_path("\\\\server\\share\\bin") == "//server/share/bin"
+
+
 def test_export_drops_pathext():
     """PATHEXT has no POSIX meaning; dropped rather than emitted as garbage."""
     out = _format_env(WINDOWS_PATH, "export")
