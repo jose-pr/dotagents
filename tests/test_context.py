@@ -94,7 +94,7 @@ def test_harness_loads_subtracts_user_agents_md(layout, monkeypatch):
     # `self._flavour.gethomedir(...)`, so overriding the `home` classmethod
     # leaves `expanduser()` still reading the REAL machine home. Confirmed by
     # direct test: with only `Path.home` patched, `Path("~/.agents/AGENTS.md")
-    # .expanduser()` still resolved to the real `C:\Users\<user>\.agents\...`.
+    # .expanduser()` still resolved to the real machine home, not the patched one.
     # The actual fix is the env var `gethomedir` reads -- USERPROFILE on
     # Windows, HOME on POSIX.
     fake_home = agents_dir.parent / "fakehome"
