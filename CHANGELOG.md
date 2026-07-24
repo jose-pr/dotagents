@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- fix: **`dotagents env --format export`/`dotenv`/`fish` now emit a POSIX PATH on
+  Windows**, instead of the OS-native `C:\...;C:\...` form. This is the exact
+  command the Claude `SessionStart` hook appends into `$CLAUDE_ENV_FILE`, which
+  Claude sources before *every* subsequent Bash tool call in the session — an
+  unconverted PATH broke command lookup (`git`, `grep`, `head`, `python`, ...) for
+  the rest of the session once poisoned, not just once. PATH-shaped values are
+  now converted per segment: backslash to forward-slash, `;` to `:`, and a drive
+  letter to its MSYS mount point (`C:/...` -> `/c/...` — required for PATH
+  *lookups* specifically; slash direction alone does not work in MSYS2/Cygwin
+  bash). `PATHEXT` is dropped (no POSIX meaning). A handful of real Windows env
+  vars with parentheses in their names (`ProgramFiles(x86)`) are also dropped for
+  these formats — `export FOO(X86)=...` is a bash syntax error, not a bad value,
+  and aborts sourcing the rest of the file. `powershell`/`cmd`/`json`/`ini`/`yaml`
+  are unaffected.
+
 ## [0.3.0] - 2026-07-24
 
 ### Changed

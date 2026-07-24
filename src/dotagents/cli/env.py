@@ -7,9 +7,16 @@ DOTAGENTS_*/AGENTS_* VALUES -- output goes to stdout for the caller to consume;
 the logger only ever names vars (Leakage rule).
 """
 
+import re
 from pathlib import Path
 
 from duho import Cmd, LoggingArgs
+
+# POSIX shell variable names: a leading letter/underscore, then letters/digits/
+# underscores only (IEEE Std 1003.1 "Name"). Windows env vars like
+# `ProgramFiles(x86)` don't qualify -- `(`/`)` make `export NAME=...` a syntax
+# error in bash, not just an unset/misinterpreted var.
+_POSIX_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _dotenv_value(v: str) -> str:
@@ -25,6 +32,57 @@ def _dotenv_value(v: str) -> str:
         esc = v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
         return '"%s"' % esc
     return v
+
+
+def _looks_like_path_list(key: str, value: str) -> bool:
+    """True if `key`/`value` is a PATH-shaped var that needs POSIX conversion
+    for a shell-sourceable format.
+
+    Matches `PATH` exactly and any `*_PATH`/`*PATH` suffix an overlay's env.py
+    might emit (e.g. `PYTHONPATH`, `AGENTS_LIB_PATH`) -- the same convention
+    `get_bin_paths`/contract B use for path-list vars. Requires the value to
+    actually look like an OS-native path list (contains a backslash, or the
+    Windows `;` separator) so an ordinary single POSIX path or an unrelated
+    string is never touched.
+    """
+    if not key.endswith("PATH"):
+        return False
+    return "\\" in value or ";" in value
+
+
+_DRIVE_LETTER_RE = re.compile(r"^([A-Za-z]):[/\\]")
+
+
+def _to_posix_path(segment: str) -> str:
+    """One path segment: backslashes to slashes, then a leading drive letter
+    (``C:/...``) to its MSYS mount point (``/c/...``).
+
+    Slash direction alone is NOT sufficient: MSYS2/Cygwin bash resolves PATH
+    lookups through its own mount table, and a `C:/...`-form segment (right
+    separator, wrong root) fails command lookup exactly like a backslash one
+    does -- verified directly (`command -v grep` empty for `C:/Program
+    Files/Git/usr/bin`, populated for `/c/Program Files/Git/usr/bin`, same
+    directory). Only a genuine `X:/` or `X:\\` prefix is rewritten, so an
+    already-POSIX or relative segment (`.agents/bin`, `/etc/agents/bin`) is
+    left untouched.
+    """
+    segment = segment.replace("\\", "/")
+    m = _DRIVE_LETTER_RE.match(segment)
+    if m:
+        segment = "/%s%s" % (m.group(1).lower(), segment[2:])
+    return segment
+
+
+def _to_posix_path_list(value: str) -> str:
+    """Convert an OS-native (Windows) `;`-joined path list to a POSIX
+    `:`-joined one, for a shell-sourceable target format.
+
+    Empty segments are dropped (a stray leading/trailing `;` must not become a
+    bare `:` -- POSIX treats an empty PATH segment as `.`, the cwd, which is
+    both wrong and a real security footgun).
+    """
+    segments = [_to_posix_path(s) for s in value.split(";") if s]
+    return ":".join(segments)
 
 
 def _format_env(env: "dict[str, str]", output_format: str) -> str:
@@ -60,6 +118,37 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
     from dotagents._env import FORMAT_ALIASES
 
     fmt = FORMAT_ALIASES.get(output_format, output_format)
+
+    # `get_environment` assembles PATH using the HOST OS's own convention
+    # (os.pathsep + native Path separators -- `;` and `\` on Windows), because
+    # that is what a Windows subprocess (cmd/PowerShell, or `dotagents` itself
+    # spawning a child) needs. Shell-sourceable POSIX formats need the opposite:
+    # bash/fish always use `:` and `/`, regardless of host OS. Left unconverted
+    # on Windows, `export PATH="C:\...;C:\..."` sourced into a POSIX shell (this
+    # is exactly what the SessionStart hook writes into $CLAUDE_ENV_FILE) hands
+    # bash a PATH it cannot parse -- every `;`-joined, backslash-laden segment
+    # becomes one broken entry, and EVERY bare-name command lookup breaks for
+    # the rest of that session. This is not cosmetic: it can take down `git`,
+    # `grep`, `python` -- anything resolved via PATH -- for the shell that
+    # sources it. Convert PATH-shaped values only, for POSIX target formats
+    # only; every other var (and every other format) is untouched.
+    if fmt in ("export", "dotenv", "fish"):
+        # PATHEXT is a Windows-only concept (extensionless exec resolution) with
+        # no POSIX meaning; dropped rather than emitted as noise.
+        #
+        # A handful of Windows-native var names (`ProgramFiles(x86)`,
+        # `CommonProgramFiles(Arm)`, inherited from os.environ into base_env)
+        # contain parentheses -- not a legal POSIX shell identifier. `export
+        # FOO(X86)=...` is a hard bash SYNTAX ERROR, not a bad value: sourcing
+        # it aborts the rest of the file, so every var after the first offender
+        # in iteration order never gets set either. Worse than the PATH bug,
+        # same root cause (unfiltered OS-native env reaching a POSIX target).
+        env = {
+            k: (_to_posix_path_list(v) if _looks_like_path_list(k, v) else v)
+            for k, v in env.items()
+            if k != "PATHEXT" and _POSIX_IDENTIFIER_RE.match(k)
+        }
+
     keys = sorted(env)
 
     if fmt == "json":

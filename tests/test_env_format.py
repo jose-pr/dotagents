@@ -8,6 +8,7 @@ these tests only exercise pure rendering + a process-name walk.
 Run from repo root: ``python -m pytest tests/``.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -228,3 +229,123 @@ def test_auto_resolves_to_concrete_format():
     assert resolved in _env.FORMAT_ALIASES
     # And the resolved format renders.
     assert isinstance(_format_env(SAMPLE, resolved), str)
+
+
+# --------------------------------------------------------------------------- #
+# PATH conversion for POSIX target formats (export/dotenv/fish).
+#
+# `get_environment` assembles PATH using the HOST OS's own convention -- on
+# Windows, `os.pathsep` (`;`) and backslash `Path` separators, because that is
+# what a Windows subprocess needs. A POSIX shell-sourceable format needs `:`
+# and `/`, plus MSYS2/Cygwin's drive-letter-to-mount-point form (`C:/...` ->
+# `/c/...`) for PATH LOOKUPS specifically -- slash direction alone is not
+# enough; verified live that `command -v grep` resolves through `/c/Program
+# Files/Git/usr/bin` but not `C:/Program Files/Git/usr/bin`, the same
+# directory. Left unconverted, this is exactly what the Claude SessionStart
+# hook writes into $CLAUDE_ENV_FILE -- sourcing it breaks PATH-based command
+# lookup (git, grep, python, ...) for the rest of that session.
+# --------------------------------------------------------------------------- #
+
+WINDOWS_PATH = {
+    "PATH": r"C:\Users\jose\.agents\bin;C:\Program Files\Git\usr\bin;.agents\bin",
+    "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+    "AGENTS_HOME": r"C:\Users\jose\.agents",  # single path, NOT a list -- untouched
+}
+
+
+def test_export_converts_windows_path_to_posix():
+    out = _format_env(WINDOWS_PATH, "export")
+    assert (
+        'export PATH="/c/Users/jose/.agents/bin:/c/Program Files/Git/usr/bin:'
+        '.agents/bin"' in out
+    )
+
+
+def test_export_drops_pathext():
+    """PATHEXT has no POSIX meaning; dropped rather than emitted as garbage."""
+    out = _format_env(WINDOWS_PATH, "export")
+    assert "PATHEXT" not in out
+
+
+def test_export_leaves_single_path_values_untouched():
+    """Only PATH-LIST vars (name ends in PATH, value looks OS-native) convert --
+    a plain single-path value must not be mangled."""
+    out = _format_env(WINDOWS_PATH, "export")
+    # export JSON-quotes values, so a literal backslash is doubled on the wire;
+    # this is exactly what json.dumps(WINDOWS_PATH["AGENTS_HOME"]) produces.
+    assert json.dumps(WINDOWS_PATH["AGENTS_HOME"]) in out
+
+
+def test_dotenv_and_fish_also_convert_path():
+    for fmt in ("dotenv", "fish"):
+        out = _format_env(WINDOWS_PATH, fmt)
+        assert "/c/Program Files/Git/usr/bin" in out
+        path_line = next(l for l in out.split("\n") if l.startswith(("PATH=", "set -gx PATH")))
+        assert "\\" not in path_line
+
+
+def test_powershell_and_cmd_keep_native_path():
+    """Non-POSIX formats must NOT be touched by the conversion -- Windows
+    subprocesses need the native form, PATHEXT included."""
+    for fmt in ("powershell", "cmd"):
+        out = _format_env(WINDOWS_PATH, fmt)
+        assert r"C:\Users\jose\.agents\bin" in out
+        assert "PATHEXT" in out
+
+
+def test_json_and_yaml_keep_native_path():
+    """Data formats are for machine consumption of the RAW assembled env, not
+    for sourcing -- must not silently rewrite values."""
+    import json
+
+    out = json.loads(_format_env(WINDOWS_PATH, "json"))
+    assert out["PATH"] == WINDOWS_PATH["PATH"]
+    assert "PATHEXT" in out
+
+
+ILLEGAL_NAME_ENV = {
+    "PATH": "/usr/bin",
+    "ProgramFiles(x86)": r"C:\Program Files (x86)",
+    "CommonProgramFiles(Arm)": r"C:\Program Files (Arm)\Common Files",
+    "NORMAL_VAR": "ok",
+}
+
+
+def test_export_drops_posix_illegal_var_names():
+    """`export FOO(X86)=...` is a bash SYNTAX ERROR, not a bad value -- it
+    aborts the rest of the sourced file. A handful of real Windows env vars
+    (ProgramFiles(x86), inherited via os.environ into base_env) have this
+    shape; they must never reach a POSIX-targeted format."""
+    out = _format_env(ILLEGAL_NAME_ENV, "export")
+    assert "(" not in out
+    assert ")" not in out
+    assert "NORMAL_VAR" in out
+
+
+def test_dotenv_and_fish_also_drop_illegal_names():
+    for fmt in ("dotenv", "fish"):
+        out = _format_env(ILLEGAL_NAME_ENV, fmt)
+        assert "ProgramFiles" not in out
+        assert "NORMAL_VAR" in out
+
+
+def test_powershell_and_cmd_keep_illegal_named_vars():
+    """Non-POSIX formats have no such restriction -- must not lose data."""
+    for fmt in ("powershell", "cmd"):
+        out = _format_env(ILLEGAL_NAME_ENV, fmt)
+        assert "ProgramFiles(x86)" in out
+
+
+def test_export_output_actually_sources_in_real_bash(tmp_path):
+    """The end-to-end property that matters: the rendered output must be
+    syntactically valid POSIX shell, sourceable with no error."""
+    import subprocess
+
+    script = tmp_path / "env.sh"
+    script.write_text(_format_env(ILLEGAL_NAME_ENV, "export") + "\n", encoding="utf-8")
+    proc = subprocess.run(
+        ["sh", "-c", ". %s && echo OK" % json.dumps(str(script))],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "OK" in proc.stdout
