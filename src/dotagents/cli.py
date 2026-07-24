@@ -124,19 +124,14 @@ def _compose_block(base_text: str, overlays: "list[Path]", logger) -> str:
 
 def _apply_base(
     src: Path, dest: Path, force: bool, dry_run: bool, logger,
-    overlays: "list[Path] | None" = None,
     agents: "list[str] | None" = None,
 ) -> None:
     """Lay down the base overlay: managed-block merge AGENTS.md/CLAUDE.md,
-    create-if-absent the plain files. Shared by `init` and `install`.
-
-    `overlays` (install only) contribute rules/routing into the managed block."""
+    create-if-absent the plain files. Shared by `init` and `install`."""
     from dotagents import _agents
     import os
-    
+
     base_agents = (Path(src) / "AGENTS.md").read_text(encoding="utf-8")
-    if overlays:
-        base_agents = _compose_block(base_agents, overlays, logger)
 
     active_agents = []
     if agents:
@@ -235,12 +230,11 @@ class Init(LoggingArgs, Cmd):
 
 
 class Install(LoggingArgs, Cmd):
-    """Install the base config, plus any opt-in overlays given with --overlays.
+    """Install the neutral base config.
 
-    The installer bundles only the neutral base overlay. Overlays beyond the
-    base (flows, language kbs, tools, ...) are opt-in examples: point --overlays
-    at one or more overlay directories (e.g. this repo's overlays/flows) to layer
-    them in. A future `dotagents overlays` subcommand will manage them by name."""
+    The installer lays down only the base overlay. Overlays beyond the base
+    (flows, language kbs, tools, ...) are managed by name with the
+    `dotagents overlays add <name>` command."""
 
     _parsername_ = "install"
 
@@ -251,10 +245,6 @@ class Install(LoggingArgs, Cmd):
     from_: Optional[str] = None
     "Source directory/URI for the base overlay (default: bundled base)."
     ("--from",)
-
-    overlays: "list[str]" = []
-    "Overlay directory to apply on top of the base (repeatable); an opt-in example path."
-    ("--overlays",)
 
     bin_dir: Optional[Path] = None
     "Directory to write dotagents/dotagents.cmd wrapper scripts into."
@@ -283,36 +273,8 @@ class Install(LoggingArgs, Cmd):
 
         _apply_base(
             Path(src), dest, self.force, self.dry_run, self._logger_,
-            overlays=[Path(o) for o in (self.overlays or [])],
             agents=agent_names if agent_names else None,
         )
-
-        if self.overlays:
-            # DEPRECATED (one-release shim): `--overlays` is superseded by the
-            # `dotagents overlays add` command (install-model shift to overlay
-            # dirs + skills sync). It still applies the overlays via the legacy
-            # flat-copy so existing scripts don't hard-break, but warns.
-            self._logger_.warning(
-                "`install --overlays` is deprecated and will be removed; use "
-                "`dotagents overlays add <name>` (installs into "
-                "<scope>/.agents/overlays/ and publishes skills)."
-            )
-            from dotagents._overlays import apply_overlay
-
-            total_copied = total_skipped = 0
-            for ov in self.overlays:
-                ov_dir = Path(ov).expanduser()
-                if not ov_dir.is_dir():
-                    raise SystemExit("error: overlay path is not a directory: %s" % ov)
-                copied, skipped, lines = apply_overlay(ov_dir, dest, self.dry_run)
-                for line in lines:
-                    self._logger_.info(line)
-                total_copied += copied
-                total_skipped += skipped
-            self._logger_.info(
-                "%d overlay file(s) copied, %d skipped (already present)%s",
-                total_copied, total_skipped, " [dry-run]" if self.dry_run else "",
-            )
 
         if self.bin_dir is not None and not self.dry_run:
             from dotagents._wrappers import check_path_warning, write_wrappers

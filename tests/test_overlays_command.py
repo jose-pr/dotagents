@@ -319,29 +319,3 @@ def test_cmd_sync_glob_filter(tmp_path):
     assert rc == 0
 
 
-# --------------------------------------------------------------------------- #
-# Deprecation shim: `install --overlays` warns + still applies.
-# --------------------------------------------------------------------------- #
-
-def test_install_overlays_deprecation_warns_and_applies(tmp_path, caplog):
-    from dotagents.cli import Install
-
-    # A minimal base overlay to install from.
-    base = tmp_path / "base"
-    base.mkdir()
-    (base / "AGENTS.md").write_text(BASE_AGENTS, encoding="utf-8")
-    src = make_source(tmp_path)
-    dest = tmp_path / "dest"
-
-    cmd = Install()
-    cmd.from_ = str(base)
-    cmd.dest = dest
-    cmd.overlays = [str(src / "plain")]
-    cmd.dry_run = False
-    # duho's `_logger_` resolves to logging.getLogger(cmd._parsername_) == "install".
-    with caplog.at_level(logging.WARNING, logger="install"):
-        rc = cmd()
-    assert rc == 0
-    assert any("deprecated" in r.message.lower() for r in caplog.records)
-    # The overlay's file still landed (flat-copy legacy behavior preserved).
-    assert (dest / "note.md").is_file()

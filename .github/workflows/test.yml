@@ -69,24 +69,20 @@ jobs:
           test -f "$HOME/.agents/AGENTS.md"
           test -f "$HOME/.agents/dotagents/DECISIONS.md"
           test ! -e "$HOME/.agents/flows"        # base imposes no flows
-      - name: Install base + opt-in overlays (copy, layered)
+      - name: Install base + opt-in overlays by name (overlay dirs)
         run: |
           export HOME="$(mktemp -d)"
-          python install.py install --overlays overlays/flows --overlays overlays/references --overlays overlays/python
+          python install.py init
+          python -m dotagents overlays add flows references python --source overlays -g
           test -f "$HOME/.agents/AGENTS.md"
-          test -f "$HOME/.agents/flows/PLAN.md"
-          test -f "$HOME/.agents/MODELS.md"
-          test -f "$HOME/.agents/kb/PYTHON.md"
-      - name: Re-applying overlays is idempotent (skips present files)
+          test -f "$HOME/.agents/overlays/flows/flows/PLAN.md"
+          test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"
+      - name: Re-adding an overlay is idempotent (skips present files)
         run: |
           export HOME="$(mktemp -d)"
-          python install.py install --overlays overlays/flows
-          python install.py install --overlays overlays/flows | grep -q "skip (exists)"
-      - name: install --overlays is deprecated (warns, still applies)
-        run: |
-          export HOME="$(mktemp -d)"
-          python install.py install --overlays overlays/flows 2>&1 | grep -qi "deprecated"
-          test -f "$HOME/.agents/flows/PLAN.md"   # still applied for one release
+          python install.py init
+          python -m dotagents overlays add flows --source overlays -g
+          python -m dotagents overlays add flows --source overlays -g | grep -q "skip (exists)"
       - name: overlays add/list/remove into a scope (discover, not track)
         run: |
           export HOME="$(mktemp -d)"
@@ -109,9 +105,10 @@ jobs:
           export HOME="$(mktemp -d)"
           git config --global user.email ci@example.invalid
           git config --global user.name CI
-          python install.py install --overlays overlays/private-sync
-          test -f "$HOME/.agents/kb/PRIVATE_SYNC.md"
-          test -f "$HOME/.agents/hooks/private-sync-start.sh"
+          python install.py init
+          python -m dotagents overlays add private-sync --source overlays -g
+          test -f "$HOME/.agents/overlays/private-sync/kb/PRIVATE_SYNC.md"
+          test -f "$HOME/.agents/overlays/private-sync/hooks/private-sync-start.sh"
           # A project with an existing .agents is adopted into the store and symlinked.
           proj="$(mktemp -d)"
           mkdir -p "$proj/.agents/plans"

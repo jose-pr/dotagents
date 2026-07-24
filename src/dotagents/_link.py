@@ -438,13 +438,24 @@ SYNC_HOOK_NAMES = ("sync", "sync.sh", "sync.cmd", "sync.bat")
 
 
 def _find_sync_hook(agents_dir: Path) -> "Path | None":
-    hooks = agents_dir / "hooks"
-    if not hooks.is_dir():
-        return None
-    for name in SYNC_HOOK_NAMES:
-        cand = hooks / name
-        if cand.is_file():
-            return cand
+    """Locate a ``hooks/sync`` script. A user's own ``<agents_dir>/hooks/`` wins;
+    otherwise an installed overlay may provide one at
+    ``<agents_dir>/overlays/<name>/hooks/`` (e.g. private-sync). This keeps hook
+    discovery working now that overlays install into ``overlays/<name>/`` dirs
+    rather than flat-copying into ``<agents_dir>/``."""
+    search_dirs = [agents_dir / "hooks"]
+    overlays_root = agents_dir / "overlays"
+    if overlays_root.is_dir():
+        search_dirs.extend(
+            sorted(d / "hooks" for d in overlays_root.iterdir() if d.is_dir())
+        )
+    for hooks in search_dirs:
+        if not hooks.is_dir():
+            continue
+        for name in SYNC_HOOK_NAMES:
+            cand = hooks / name
+            if cand.is_file():
+                return cand
     return None
 
 
