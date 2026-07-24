@@ -21,9 +21,9 @@ _extracted_dirs_cache: "dict[str, Path]" = {}
 def _resolve_required_tool(name: str, root: "Path | None" = None) -> "Path | None":
     """Locate one of the dotagents-required tool scripts (`tools/<name>`).
 
-    Resolution order (first hit wins), shared by `dotagents audit` and
-    `dotagents leak-check` so both front-ends find the same single
-    implementation:
+    Resolution order (first hit wins) -- `dotagents audit` uses this to find the
+    single standalone `audit_config.py` implementation whether run from a checkout,
+    a `pip install`, or a `.pyz`:
 
       1. `<root>/tools/<name>` -- an installed dest or repo payload that ships
          the tooling (only when `root` is given);

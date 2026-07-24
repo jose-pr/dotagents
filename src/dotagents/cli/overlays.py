@@ -66,12 +66,25 @@ class OverlayAdd(LoggingArgs, Cmd):
         if not self.name:
             self._logger_.warning("no overlay name given; nothing to add")
             return 0
+        # Validate + normalize each requested name with the shared overlay-name
+        # rule (D84), so `add My_Overlay` and `add my-overlay` resolve the same
+        # overlay and a bad name (`.git`, `README.md`, `2fast`) is rejected up
+        # front rather than creating a junk dir under overlays/.
+        names = []
+        for raw in self.name:
+            if not _scope.is_valid_overlay_name(raw):
+                raise SystemExit(
+                    "error: %r is not a valid overlay name (must start with a "
+                    "letter, then letters/digits/_/-)" % raw
+                )
+            names.append(_scope.normalize_overlay_name(raw))
+
         source = _scope.resolve_source(self.source)
         scope = _scope.resolve_scope(self.global_scope, agents_dir=self.agents_dir)
         self._logger_.info("scope: %s (%s)", scope.level, scope.agents_root)
         agents_md = scope.agents_root / "AGENTS.md"
 
-        for name in self.name:
+        for name in names:
             overlay_src = source.overlay_dir(name)
             dest_dir = scope.overlay_dir(name)
             copied, skipped, lines = _overlays.install_overlay_dir(
@@ -104,7 +117,7 @@ class OverlayAdd(LoggingArgs, Cmd):
         # lands last regardless of when it was added -- not merely appended after
         # whatever was already in the block.
         overlay_dirs = _installed_overlay_dirs(
-            scope, source, adding=self.name, dry_run=self.dry_run
+            scope, source, adding=names, dry_run=self.dry_run
         )
         base_block = (BASE_ROOT / "AGENTS.md").read_text(encoding="utf-8")
         if _overlays.recompose_overlay_block(

@@ -35,9 +35,39 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from dotagents import _env  # noqa: E402
+from dotagents import _resolve  # noqa: E402
 
 
 HAVE_BASH = shutil.which("bash") is not None
+
+
+# --------------------------------------------------------------------------
+# get_file_paths overlay tier: presence-by-directory, no manifest required (D84).
+# --------------------------------------------------------------------------
+
+def test_get_file_paths_resolves_bare_overlay_dir(tmp_path):
+    """A BARE overlay dir (no CONTEXT.md, no overlay.toml) with a bin/ subdir is
+    resolved by get_file_paths -- the old CONTEXT.md gate (a precursor leftover)
+    silently excluded every real dotagents overlay from the Contract-A walk."""
+    agents_dir = tmp_path / "agents"
+    project_root = tmp_path / "proj"
+    bare = agents_dir / "overlays" / "bare"
+    (bare / "bin").mkdir(parents=True)
+    # Invalid-named dirs are skipped (matches discover_overlays' valid-name rule).
+    (agents_dir / "overlays" / ".git" / "bin").mkdir(parents=True)
+    (agents_dir / "overlays" / "__pycache__" / "bin").mkdir(parents=True)
+
+    resolved = _resolve.get_file_paths(
+        {"default": "bin", "project-root": ""},
+        agents_dir=agents_dir,
+        project_root=project_root,
+        global_scope=False,
+        include_missing=True,
+    )
+    paths = [p for _lvl, p, _root in resolved]
+    assert bare / "bin" in paths
+    assert agents_dir / "overlays" / ".git" / "bin" not in paths
+    assert agents_dir / "overlays" / "__pycache__" / "bin" not in paths
 
 
 # --------------------------------------------------------------------------
@@ -72,13 +102,13 @@ def tree(tmp_path):
     project_root = tmp_path / "proj"
     (project_root / ".agents").mkdir(parents=True)
 
-    # Two overlays (discovered by CONTEXT.md, per _resolve.py). Overlays sort
-    # by name: "aa" before "bb".
+    # Two overlays. An overlay is ANY directory under overlays/ (presence-by-
+    # directory, matching discover_overlays; no manifest required -- D84). Overlays
+    # sort by name: "aa" before "bb".
     overlays = agents_dir / "overlays"
     for ov in ("aa", "bb"):
         d = overlays / ov
         d.mkdir(parents=True)
-        (d / "CONTEXT.md").write_text("ctx", encoding="utf-8")
         (d / "bin").mkdir()
 
     (agents_dir / "bin").mkdir(parents=True)

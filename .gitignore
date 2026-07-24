@@ -27,3 +27,4 @@ site/
 Thumbs.db
 .idea/
 .vscode/
+_staging/
