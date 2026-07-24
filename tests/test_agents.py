@@ -181,4 +181,4 @@ def test_harness_ids_are_distinct_from_short_names():
 
 def test_registry_covers_all_builtin_names():
     names = {a.name for a in _agents.get_all_agents()}
-    assert names == {"claude", "gemini", "codex", "cursor", "copilot"}
+    assert names == {"claude", "gemini", "antigravity", "codex", "cursor", "copilot"}

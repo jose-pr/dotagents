@@ -12,6 +12,7 @@ Run: ``PYTHONPATH=src python -m pytest tests/test_wire_hooks.py``
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -19,7 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from dotagents._agents import ClaudeAgent, CodexAgent  # noqa: E402
+from dotagents._agents import AntigravityAgent, ClaudeAgent, CodexAgent  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -719,3 +720,158 @@ def test_never_touches_real_home(tmp_path, monkeypatch):
 
     after_settings = real_settings.read_text(encoding="utf-8") if real_settings.is_file() else None
     assert after_settings == before_settings, "the real ~/.claude/settings.json was modified"
+
+
+class TestAntigravityHooks:
+    """Antigravity has no SessionStart-equivalent (five events only:
+    PreToolUse/PostToolUse/PreInvocation/PostInvocation/Stop -- confirmed
+    against antigravity.google/docs/hooks). PreInvocation fires every model
+    turn (has invocationNum), so the hook script itself gates on
+    invocationNum == 0 to behave like a real SessionStart. No env mechanism
+    exists at all -- PreToolUse is allow/deny/ask only, no updatedInput
+    rewrite capability (confirmed against two independent sources), so this
+    is context-only, unlike Claude's and Codex's PreToolUse hooks."""
+
+    def test_no_detection_marker_explicit_only(self):
+        """No documented env-var marker exists for Antigravity (checked
+        hooks/rules-workflows/getting-started/plugins docs, none found) --
+        past sessions already invented and had to walk back false markers
+        for other agents. detect_env_vars stays empty so detect_env() always
+        returns False; --agents antigravity is required explicitly."""
+        agent = AntigravityAgent()
+        assert agent.detect_env_vars == []
+        assert agent.detect_env({"ANYTHING": "1", "PATH": "/usr/bin"}) is False
+
+    def test_wires_preinvocation_into_gemini_config_hooks_json(self, tmp_path):
+        dest, root = tmp_path / "agents", tmp_path / "gemini_config"
+        dest.mkdir()
+
+        AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+
+        data = json.loads((root / "hooks.json").read_text(encoding="utf-8"))
+        # Documented shape is {"<name>": {"PreInvocation": [...]}}, NOT a bare
+        # top-level "hooks" key the way Claude/Codex's schema works.
+        assert "dotagents" in data
+        entries = data["dotagents"]["PreInvocation"]
+        assert len(entries) == 1
+        hook = entries[0]["hooks"][0]
+        assert "python" in hook["command"]
+        assert AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT in hook["command"]
+        # PreInvocation's matcher is documented as ignored -- no matcher key.
+        assert "matcher" not in entries[0]
+
+    def test_deploys_script(self, tmp_path):
+        dest, root = tmp_path / "agents", tmp_path / "gemini_config"
+        dest.mkdir()
+
+        AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+
+        script = root / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT
+        assert script.is_file()
+        from dotagents.cli._common import BASE_ROOT
+        package_script = Path(BASE_ROOT) / "dotagents" / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT
+        assert script.read_bytes() == package_script.read_bytes()
+
+    def test_idempotent(self, tmp_path):
+        dest, root = tmp_path / "agents", tmp_path / "gemini_config"
+        dest.mkdir()
+        agent = AntigravityAgent()
+        agent.wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        first = (root / "hooks.json").read_text(encoding="utf-8")
+        agent.wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        assert (root / "hooks.json").read_text(encoding="utf-8") == first
+
+    def test_dry_run_writes_nothing(self, tmp_path):
+        dest, root = tmp_path / "agents", tmp_path / "gemini_config"
+        dest.mkdir()
+        AntigravityAgent().wire_hooks(dest, dry_run=True, logger=None, config_root=root)
+        assert not (root / "hooks.json").exists()
+        assert not (root / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT).exists()
+
+    def test_script_only_injects_on_first_invocation(self, tmp_path):
+        """The real property that makes this behave like SessionStart at all:
+        gate on invocationNum == 0, run for real via subprocess."""
+        import subprocess
+        import sys
+
+        dest, root = tmp_path / "agents", tmp_path / "gemini_config"
+        dest.mkdir()
+        AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        script = root / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT
+
+        first = subprocess.run(
+            [sys.executable, str(script)],
+            input='{"invocationNum": 0}', capture_output=True, text=True,
+        )
+        second = subprocess.run(
+            [sys.executable, str(script)],
+            input='{"invocationNum": 1}', capture_output=True, text=True,
+        )
+        third = subprocess.run(
+            [sys.executable, str(script)],
+            input='{"invocationNum": 5}', capture_output=True, text=True,
+        )
+        assert second.returncode == 0 and second.stdout.strip() == "", (
+            "invocationNum != 0 must produce no output (no-op every later turn)"
+        )
+        assert third.returncode == 0 and third.stdout.strip() == ""
+        # first (invocationNum 0) may or may not find a real dotagents on
+        # PATH in this test environment -- only assert it never crashes.
+        assert first.returncode == 0, first.stderr
+
+    def test_script_output_shape_when_it_fires(self, tmp_path, monkeypatch):
+        """When it DOES have something to inject, the output must be the bare
+        `{"injectSteps": [{"ephemeralMessage": ...}]}` shape -- no
+        `hookSpecificOutput` wrapper, unlike Claude/Codex's PreToolUse."""
+        import subprocess
+        import sys
+
+        dest, root = tmp_path / "agents", tmp_path / "gemini_config"
+        dest.mkdir()
+        AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        script = root / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT
+
+        # Stub `dotagents` at `<cwd>/.agents/bin/`, the FIRST location
+        # `_find_dotagents()` checks -- it deliberately wins over any real
+        # installation on PATH or in the real ~/.agents/bin, so this must be
+        # where the stub lives for the test to observe it rather than the
+        # real install.
+        stub_dir = tmp_path / ".agents" / "bin"
+        stub_dir.mkdir(parents=True)
+        stub_name = "dotagents.cmd" if os.name == "nt" else "dotagents"
+        stub = stub_dir / stub_name
+        if os.name == "nt":
+            stub.write_text('@echo off\r\necho STUB-CONTEXT-EM\xe2\x80\x94DASH\r\n', encoding="utf-8")
+        else:
+            stub.write_text("#!/bin/sh\necho 'STUB-CONTEXT-EM\xe2\x80\x94DASH'\n", encoding="utf-8")
+            stub.chmod(0o755)
+
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            input='{"invocationNum": 0}', capture_output=True, text=True,
+            cwd=str(tmp_path),
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip(), "expected the stub's output to be injected"
+        out = json.loads(proc.stdout)
+        assert "injectSteps" in out
+        assert "hookSpecificOutput" not in out
+        step = out["injectSteps"][0]
+        assert set(step.keys()) == {"ephemeralMessage"}
+        assert "STUB-CONTEXT-EM" in step["ephemeralMessage"]
+
+    def test_script_fails_safe_on_bad_input(self, tmp_path):
+        import subprocess
+        import sys
+
+        dest, root = tmp_path / "agents", tmp_path / "gemini_config"
+        dest.mkdir()
+        AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        script = root / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT
+
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            input="not json", capture_output=True, text=True,
+        )
+        assert proc.returncode == 0
+        assert proc.stdout.strip() == ""

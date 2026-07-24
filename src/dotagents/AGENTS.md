@@ -71,13 +71,31 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   Claude's, including the SAME `updatedInput.command` rewrite mechanism on
   `PreToolUse` — confirmed directly against Codex's own docs
   (learn.chatgpt.com/docs/hooks), not assumed from Claude parity.
-  Gemini/Cursor/Copilot keep the base no-op — for Gemini/Antigravity this is now a
-  RESEARCHED conclusion, not an unexamined default: Antigravity's hooks
-  (antigravity.google/docs/hooks) have no SessionStart-equivalent (`PreInvocation`
-  is per-turn), no stdout-to-context injection (`injectSteps` is structured
-  trajectory annotation, not free text), no env-persistence mechanism, and
-  `PreToolUse` is allow/deny/ask only — no `updatedInput`, so no command-rewrite
-  path exists to hang an env-loader on. Revisit if that framework changes.
+  Gemini/Cursor/Copilot keep the base no-op — Gemini CLI proper has no hook
+  mechanism documented at all (checked directly). **Antigravity is a separate
+  product** from Gemini CLI (Antigravity CLI/IDE/SDK family, shares only the
+  `~/.gemini/` namespace for some files) and DOES wire a hook: see
+  `AntigravityAgent.wire_hooks` below. `PreToolUse` there is still allow/deny/ask
+  only — no `updatedInput`, so no command-rewrite/env-loader path exists to hang
+  on it, unlike Claude/Codex. Revisit both conclusions if either framework changes.
+- **`AntigravityAgent.wire_hooks`** (`<AGENTS_HOME_ANTIGRAVITY|~/.gemini/config>/hooks.json`,
+  keyed under a `"dotagents"` name per the docs' own example shape — a named-entry
+  object, not Claude/Codex's flat `hooks.<Event>`): wires a single `PreInvocation`
+  entry, context-only, no env mechanism. Antigravity's hooks
+  (antigravity.google/docs/hooks) have exactly five events — `PreToolUse`,
+  `PostToolUse`, `PreInvocation`, `PostInvocation`, `Stop` — no SessionStart
+  equivalent. `PreInvocation` fires every model turn (`invocationNum`, 0-indexed),
+  so the deployed script (`preinvocation_antigravity_context.py`,
+  `_overlay/dotagents/hooks/`) gates on `invocationNum == 0` to behave like a
+  one-shot SessionStart rather than resending context every turn. Output shape is
+  a bare `{"injectSteps": [{"ephemeralMessage": "..."}]}`, no `hookSpecificOutput`
+  wrapper — confirmed against the primary docs after an earlier pass here wrongly
+  concluded no useful injection was possible; `ephemeralMessage` is the one of the
+  three step types meant for free text (`toolCall` executes a tool,
+  `userMessage` impersonates the user). No detection marker exists anywhere in
+  Antigravity's docs, so `detect_env_vars = []` — explicit `--agents antigravity`
+  only, same posture as Codex's env-block precedent (writes touching an agent's
+  own live config are opt-in, never inferred).
 - **`SessionStart`/`CwdChanged` register TWO handlers each**, bash-syntax
   (default shell) and a PowerShell-native equivalent (`shell: "powershell"`).
   hooks.md: `shell` "Defaults to bash, or to powershell on Windows when Git Bash

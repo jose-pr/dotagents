@@ -417,6 +417,153 @@ class GeminiAgent(Agent):
         if logger: logger.info("wrote context to %s", target)
 
 
+class AntigravityAgent(Agent):
+    name = "antigravity"
+    # Documented convention (antigravity.google/docs/rules-workflows): a
+    # project-level rules FOLDER, ".agents/rules/" ("Antigravity now defaults
+    # to .agents/rules, but still maintains backward support for .agent/rules"),
+    # not a single root file the way Claude/Codex/Gemini use. `write_context`
+    # below places dotagents' own file inside that folder.
+    context_files = [".agents/rules/dotagents.md"]
+    # Global rules load from "~/.gemini/GEMINI.md" ("applying across all
+    # workspaces") -- shared with GeminiAgent's own file, by the docs'
+    # own account, not a separate Antigravity-only global file.
+    harness_loads = ["~/.gemini/GEMINI.md", ".agents/rules/dotagents.md"]
+    # NO env-var detection marker is documented anywhere (checked hooks,
+    # rules-workflows, getting-started, plugins pages) -- unlike Claude
+    # (CLAUDECODE=1), Codex (CODEX_HOME), Gemini CLI (GEMINI_CLI=1). Past
+    # sessions already invented and had to walk back false markers for other
+    # agents (GEMINI_SESSION, CODEX_SESSION) -- not repeating that here.
+    # detect_env_vars stays empty, so the base Agent.detect_env
+    # (`any(var in environ for var in self.detect_env_vars)`) always returns
+    # False: Antigravity is explicit-`--agents antigravity`-only, matching
+    # the precedent already set for Codex's env-block (D87/D90 -- writes that
+    # touch an agent's own config must be asked for, not auto-triggered).
+    detect_env_vars = []
+    harness_id = "antigravity"
+    vendor = "google"
+    # No documented model-source env var found either; left empty rather than
+    # guessed (GEMINI_MODEL is GeminiAgent's, a different product's var).
+    model_source_vars = []
+
+    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
+        from dotagents._merge import merge_block, timestamped_backup_root
+        backup_root = timestamped_backup_root(dest) if force else None
+        branch = merge_block(
+            dest / "AGENTS.md",
+            base_agents_text,
+            force=force, dry_run=dry_run, backup_root=backup_root,
+        )
+        if logger: logger.info("%s: AGENTS.md (Antigravity)", branch)
+
+    def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
+        target = dest / ".agents" / "rules" / "dotagents.md"
+        if not dry_run:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(effective_context, encoding="utf-8")
+        if logger: logger.info("wrote context to %s", target)
+
+    # --- hooks ---------------------------------------------------------
+    #
+    # Antigravity has no SessionStart-equivalent event at all -- confirmed
+    # against antigravity.google/docs/hooks: exactly five events exist
+    # (PreToolUse, PostToolUse, PreInvocation, PostInvocation, Stop).
+    # PreInvocation ("fires before the model is called") is the closest
+    # analog, but its own `invocationNum` input field ("the current model
+    # invocation... the first invocation is 0") confirms it fires on EVERY
+    # turn, not once per session. The hook script gates on invocationNum == 0
+    # itself (see preinvocation_antigravity_context.py) so this behaves like
+    # a real SessionStart: full context once, a cheap no-op every later turn.
+    #
+    # Output shape is genuinely different from Claude/Codex's PreToolUse: no
+    # `hookSpecificOutput` wrapper -- PreInvocation's documented output is a
+    # bare `{"injectSteps": [...]}`. `ephemeralMessage` ("a transient system
+    # message") is the field actually meant for injected text; `toolCall` and
+    # `userMessage` are for different purposes (executing a tool / impersonating
+    # the user).
+    #
+    # CONTEXT ONLY -- no env half exists for Antigravity. Confirmed twice, from
+    # two independent sources (the primary docs AND a third-party article that
+    # otherwise contained inaccuracies elsewhere): PreToolUse is allow/deny/ask
+    # only, no `updatedInput`-equivalent rewrite mechanism, so there is no way
+    # to inject env into a `run_command` tool call the way the Claude/Codex
+    # PreToolUse hooks do.
+    #
+    # No `shell`/`commandWindows`-equivalent field is documented for Antigravity
+    # hook commands at all (checked directly, absent) -- the emitted command
+    # must therefore work via a bare interpreter invocation with no shell
+    # assumptions, `python "<path>"` exactly as Codex's does, no dual-platform
+    # variant possible/needed here since nothing platform-specific is offered.
+    PRETOOLUSE_HOOK_SCRIPT = "preinvocation_antigravity_context.py"
+
+    def wire_hooks(
+        self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
+    ) -> None:
+        """Deploys the context-injection script and wires it as a
+        `PreInvocation` handler in `<config_root|~/.gemini/config>/hooks.json`.
+
+        Global scope only (`~/.gemini/config/hooks.json`), like the plugin
+        directory it mirrors (`~/.gemini/config/plugins/`) -- Antigravity's
+        docs describe this as making a plugin/hook "active across all
+        workspaces", and PreInvocation carries no per-project matcher to
+        scope it more narrowly (confirmed: PreInvocation's matcher is
+        documented as ignored).
+        """
+        import shutil
+
+        from dotagents import _hooks
+        from dotagents.cli._common import BASE_ROOT
+
+        root = Path(config_root) if config_root else (Path.home() / ".gemini" / "config")
+
+        src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / self.PRETOOLUSE_HOOK_SCRIPT
+        if not src_script.is_file():
+            if logger:
+                logger.warning("Antigravity hook script missing from package: %s", src_script)
+            return
+
+        dest_dir = root / "hooks"
+        dest_script = dest_dir / self.PRETOOLUSE_HOOK_SCRIPT
+        script_changed = not dest_script.is_file() or (
+            dest_script.read_bytes() != src_script.read_bytes()
+        )
+        if script_changed and not dry_run:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src_script), str(dest_script))
+
+        hooks_path = root / "hooks.json"
+        data = _hooks.load_settings(hooks_path)
+        # dotagents' own top-level key, matching the docs' example shape
+        # (`{"reminder": {"PreInvocation": [...]}}` -- named entries, not a
+        # bare top-level "hooks" object the way Claude/Codex's schema is).
+        entry = data.get("dotagents")
+        if not isinstance(entry, dict):
+            entry = {}
+
+        script_path = dest_script.resolve()
+        command = 'python "%s"' % script_path.as_posix()
+        preinvocation, pi_changed = _hooks.merge_hook(
+            entry.get("PreInvocation"),
+            command,
+            status_message="Loading agent context",
+        )
+        entry["PreInvocation"] = preinvocation
+        data["dotagents"] = entry
+
+        if not (script_changed or pi_changed):
+            if logger:
+                logger.info("hooks already wired: %s", hooks_path)
+            return
+
+        if dry_run:
+            if logger:
+                logger.info("would wire PreInvocation hook: %s", hooks_path)
+            return
+        _hooks.write_settings(hooks_path, data)
+        if logger:
+            logger.info("wired PreInvocation hook: %s", hooks_path)
+
+
 class CodexAgent(Agent):
     name = "codex"
     context_files = ["AGENTS.md"]
@@ -744,6 +891,7 @@ class CopilotAgent(Agent):
 _REGISTRY: dict[str, type[Agent]] = {
     "claude": ClaudeAgent,
     "gemini": GeminiAgent,
+    "antigravity": AntigravityAgent,
     "codex": CodexAgent,
     "cursor": CursorAgent,
     "copilot": CopilotAgent,
