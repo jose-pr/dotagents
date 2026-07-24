@@ -352,9 +352,21 @@ def get_env_from_file(
     """
     quoted = json.dumps(str(env_file))
     spawn = _spawn_env(base_env)
+
+    # Resolve `bash` against the REAL environment's PATH, not `spawn`'s (which is
+    # `base_env`, the chain's ACCUMULATED PATH so far -- contract B step 1 prepends
+    # overlay bin dirs onto it, so by design it need not contain bash's actual
+    # install location, e.g. `/usr/local/bin` on macOS or Git's `bin` on Windows,
+    # where it is never `/usr/bin`). Passing a bare "bash" left resolution to the
+    # child process's own PATH (`spawn`'s), which only found it by coincidence
+    # where the OS happens to install bash under a directory contract B's PATH
+    # already contains -- true on Ubuntu's runner image, false on macOS/Windows.
+    import shutil
+
+    bash = shutil.which("bash", path=os.environ.get("PATH")) or "bash"
     try:
         proc = subprocess.run(
-            ["bash", "-c", "set -a; source %s >/dev/null 2>&1; env -0" % quoted],
+            [bash, "-c", "set -a; source %s >/dev/null 2>&1; env -0" % quoted],
             capture_output=True,
             text=False,
             check=False,

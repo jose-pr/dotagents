@@ -275,6 +275,12 @@ def test_py_nonzero_is_skipped_not_fatal(tree):
 def test_plain_env_file_sourced(tree):
     agents_dir, project_root = tree
     (agents_dir / "env").write_text("export SOURCED=hello\n", encoding="utf-8")
+    # `PATH="/usr/bin"` is deliberately NOT where bash necessarily lives on this
+    # machine (macOS: /bin, Windows: Git's bin dir; only Ubuntu's runner image
+    # happens to install it under /usr/bin). Regression: get_env_from_file used to
+    # resolve `bash` against this constructed PATH via the child process's own
+    # lookup, so the plain-.env feature silently did nothing everywhere except
+    # Ubuntu. It must resolve bash from the REAL environment instead.
     env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
     assert env.get("SOURCED") == "hello"
 
