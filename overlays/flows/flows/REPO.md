@@ -37,11 +37,13 @@ release (so it stays current between them).
   (a broken docs site must block the release without the release owning deployment).
   Publish steps are re-run-safe (e.g. `skip-existing` on the registry upload).
   Prefer the registry's OIDC / trusted publishing over stored long-lived token secrets.
-- **Docs workflow**: builds + deploys the docs site on its own trigger (push to the
-  default branch touching docs sources, plus `workflow_dispatch`), so the published
-  site tracks the branch and can be redeployed without a release. The docs site is a
-  required deliverable even if nothing else needs it. Ecosystems that host API docs
-  externally (e.g. Rust/docs.rs) only need this workflow for a narrative guide.
+- **Docs workflow** owns **all** Pages deploys, on three triggers: `release:
+  published` (a `v*` release ships its matching docs — the release workflow only gates
+  on a strict docs build, then its published release fires this deploy), push to the
+  default branch touching docs sources (main = latest, between releases), and
+  `workflow_dispatch` (manual redeploy of any ref). It self-enables Pages every run. The
+  docs site is a required deliverable even if nothing else needs it. Ecosystems that
+  host API docs externally (e.g. Rust/docs.rs) only need this workflow for a narrative guide.
 - **Changelog-derived release notes**: repos without a PR flow get thin auto-generated
   "What's Changed" notes on every release — scrape the pushed tag's `CHANGELOG.md`
   section into the release body instead (keep the platform's auto compare-link

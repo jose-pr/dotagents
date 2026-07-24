@@ -1,0 +1,68 @@
+site_name: dotagents
+site_description: Dotfiles for AI coding agents — a portable, token-budgeted ~/.agents config with a base overlay plus opt-in overlays, installed and managed by the dotagents CLI.
+site_url: https://jose-pr.github.io/dotagents/
+repo_url: https://github.com/jose-pr/dotagents
+repo_name: jose-pr/dotagents
+edit_uri: edit/main/docs/
+
+# Constrain the scan to docs/ so pymdownx.snippets + strict nav don't trip on
+# repo-level markdown (see kb/PYTHON.md Known Difficulties).
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Guide:
+      - Install: guide/install.md
+      - Commands: guide/commands.md
+      - Overlays: guide/overlays.md
+      - Private sync: guide/private-sync.md
+      - Authoring an overlay: guide/authoring.md
+  - API Reference:
+      - Overview: api/reference.md
+      - CLI: api/cli.md
+      - Agents: api/agents.md
+      - Overlays: api/overlays.md
+      - Scope: api/scope.md
+      - Context: api/context.md
+      - Environment: api/env.md
+      - Resolution: api/resolve.md
+      - Merge: api/merge.md
+      - Linking: api/link.md
+      - Skills: api/skills.md
+      - Sync: api/sync.md
+  - Changelog: changelog.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            merge_init_into_class: true
+            show_if_no_docstring: true
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.snippets:
+      base_path: ["."]
+  - pymdownx.superfences
