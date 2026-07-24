@@ -37,13 +37,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Audit config structure
-        run: python src/dotagents/_overlay/dotagents/cmds/audit.py --root .
+        run: python tools/audit.py --root .
       # Personal-leak / hygiene scanning is NOT in CI (D84): it moved to `leak-check`,
       # a personal tool the user runs locally before a push -- CI has no personal
       # patterns to scan for and audit is structural-only now.
       - name: Template instantiation checks (3.11+ only)
         if: matrix.python-version != '3.9'
-        run: python src/dotagents/_overlay/dotagents/cmds/audit.py --check-templates --root .
+        run: python tools/audit.py --check-templates --root .
 
   install:
     name: Install into scratch HOME
@@ -225,19 +225,13 @@ jobs:
           # --no-setup (the setup-runner escape hatch) must survive the zipapp too.
           python dist/dotagents.pyz overlays add --help | grep -q -- "--no-setup"
           ! python dist/dotagents.pyz overlays add --help | grep -q -- "--no-setup-"
-          # audit (D70): a compiled built-in that shells to the bundled
-          # _tools/audit_config.py. Its flags/help must survive the zipapp
-          # degradation and it must actually dispatch from inside the .pyz. audit is
-          # STRUCTURAL-only (D84): no --repo-hygiene mode (that moved to leak-check,
-          # a personal local tool), and leak-check is not on the pyz surface at all.
-          python dist/dotagents.pyz audit --help | grep -q -- "--root ROOT"
-          ! python dist/dotagents.pyz audit --help | grep -q -- "--root-"
-          ! python dist/dotagents.pyz audit --help | grep -q -- "--repo-hygiene"
-          # audit dispatches to the bundled audit_config.py: a fresh init'd store
-          # runs the structural audit from inside the .pyz.
-          adest="$(mktemp -d)"
-          AGENTS_HOME="$adest" python dist/dotagents.pyz init --dest "$adest"
-          python dist/dotagents.pyz audit --root "$adest" | grep -q -- "root:"
+          # `audit` is NOT a dotagents command and NOT in the .pyz (D84 follow-up):
+          # tools/audit.py validates THIS REPO's layout (src/dotagents/_overlay/...,
+          # tools/...), so it is CI tooling, not a user-facing feature. Same for
+          # leak-check (personal, in the user's private .agents/). Assert both are
+          # absent from the shipped surface.
+          ! python dist/dotagents.pyz --help | grep -q -- "audit"
+          ! python dist/dotagents.pyz --help | grep -q -- "leak-check"
           python dist/dotagents.pyz init
           python dist/dotagents.pyz overlays add python --source overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"

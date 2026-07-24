@@ -15,7 +15,6 @@ by default (the `<cwd>/.agents` store, when run inside a project) or **user** wi
 | `overlays` | Manage opt-in overlays by name: `add` / `remove` / `list` / `sync`. |
 | `context` | Assemble the effective context for one or more agents. |
 | `env` | Assemble the chained env-file layers + identity vars, in a chosen format. |
-| `audit` | Validate a config tree (manifest, forbidden patterns, size budgets). |
 | `link` | Symlink (or copy) a project's `.agents` into its store. |
 | `sync` | Reconcile a copy-mode project and hand off to the store's sync path. |
 | `build-pyz` | Build the self-contained `dotagents.pyz` zipapp. |
@@ -93,17 +92,13 @@ python -m dotagents env --diff --format json   # only vars that differ from the 
     output as secret. The command itself never logs `DOTAGENTS_*` / `AGENTS_*`
     values (Leakage rule).
 
-## audit
+## audit — not a dotagents command
 
-`audit` validates config **structure** only — manifest existence, generic forbidden
-patterns, size budgets, overlay-manifest rules, and (3.11+) templates. It carries no
-personal data and IS the auditor: one standalone file that also runs directly (`python .../cmds/audit.py`) and in
-CI. Personal-leak / hygiene scanning is **not** audit's job (see leak-check below).
-
-```bash
-python -m dotagents audit --root .              # validate a checkout's structure
-python -m dotagents audit --check-templates --root .   # + template checks (3.11+)
-```
+There is no `dotagents audit`. The dotagents source repo has its own
+`tools/audit.py`, but every path it checks is a path in *that repo*
+(`src/dotagents/_overlay/…`, `tools/…`), so it validates the repo's layout in CI —
+it is not a validator for an installed `~/.agents` and is deliberately not shipped
+in the package or the `.pyz`.
 
 ### leak-check (personal, not in this repo)
 

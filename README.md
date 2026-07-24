@@ -38,8 +38,8 @@ them. Everything else is repo infrastructure.
 
 | Path | What |
 | --- | --- |
-| `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`, plus the bundled command modules `link`/`sync`/`audit`) |
-| `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index), and the bundled `dotagents/cmds/` command modules (`link`/`sync`/`audit`). Neutral — imposes no flows |
+| `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`, plus the bundled command modules `link`/`sync`) |
+| `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index), and the bundled `dotagents/cmds/` command modules (`link`/`sync`). Neutral — imposes no flows |
 | `tools/` | Required tooling (not an overlay): `cloud-setup.sh` (`leak-check` moved to the opt-in `leak-check` overlay, D84) |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
 
@@ -194,9 +194,8 @@ walkthrough: `~/.agents/kb/PRIVATE_SYNC.md`.
 ## Validate
 
 ```bash
-python tools/audit_config.py --root .                  # validate this checkout
-python tools/audit_config.py                           # validate the installed ~/.agents
-python tools/audit_config.py --check-templates --root .  # needs 3.11+
+python tools/audit.py --root .                  # validate THIS REPO's layout (CI tooling)
+python tools/audit.py --check-templates --root .  # + template checks (needs 3.11+)
 python tools/audit_config.py --repo-hygiene .          # no personal leftovers tracked
 ```
 
