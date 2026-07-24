@@ -40,15 +40,15 @@ them. Everything else is repo infrastructure.
 | --- | --- |
 | `src/dotagents/` | The installable `dotagents` CLI (`init`/`install`/`overlays`/`context`/`env`/`audit`/`leak-check`/`link`/`sync`/`build-pyz`) |
 | `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index). Neutral — imposes no flows |
-| `overlays/flows/` | PLAN / EXEC / REVIEW / REPO task flows + `MODELS.md` (executor selection) |
-| `overlays/recovery/` | `kb/RECOVERY.md` — config-recovery playbook |
-| `overlays/references/` | Language-neutral repo templates (README, CHANGELOG, LICENSE, .gitignore, plan-shape example) |
-| `overlays/python`, `node`, `rust` | Per-language `kb/` + manifests + CI workflows |
-| `overlays/release/` | Host-agnostic release helper: agent-driven commit-plan loop + tag/CI monitoring across GitHub (`gh`) and GitLab (`gitlabq`) |
-| `overlays/private-sync/` | `kb/PRIVATE_SYNC.md` + cloud `hooks/` for the one-private-repo, per-project `.agents` model (`dotagents link`/`sync`) |
-| `overlays/tools/` | Helper tools you opt into: `summarize_run.py`, `compare_bench.py` |
 | `tools/` | Required tooling (not an overlay): `audit_config.py`, `leak_check.py`, `cloud-setup.sh` |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
+
+The **example overlays** — the `flows` workflow set, per-language `kb/` + templates,
+`references`, `release`, `private-sync`, `net`, `recovery`, `tools` — live on a separate
+[`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays), not in `main`'s
+tree: they are swappable payloads, not part of the tool. `dotagents overlays add <name>`
+resolves them from there (or from any `--source`). See the
+[docs](https://jose-pr.github.io/dotagents/) for what each ships.
 
 Named-agent directives aren't a shipped overlay — a named agent (Claude, Antigravity,
 …) just reads its own `~/.agents/<agent>.md` on top of the shared `AGENTS.md`, which the
@@ -56,7 +56,7 @@ base overlay's routing already states. This config's own design log lives **priv
 under its untracked `.agents/dotagents/` (`DECISIONS.md` + one file per decision) — like
 every project, `.agents/` is never tracked or pushed.
 
-Each `overlays/<name>/overlay.toml` carries a `name`/`description`/`requires`/`routing`
+Each overlay's `<name>/overlay.toml` carries a `name`/`description`/`requires`/`routing`
 manifest read by the `dotagents overlays` subcommand, which manages overlays by name
 (`add`/`remove`/`list`/`sync`) — see [Managing overlays](#managing-overlays) below.
 
@@ -73,18 +73,18 @@ merged in as a marker-delimited managed block, so re-running `init` never
 clobbers anything you've added around it:
 
 ```bash
-python install.py init                 # writes ~/.agents/{AGENTS.md,CLAUDE.md,...}
-python install.py init --dry-run        # show what would happen
-python install.py init --force          # replace AGENTS.md/CLAUDE.md wholesale (backed up) instead of block-merging
+dotagents init                 # writes ~/.agents/{AGENTS.md,CLAUDE.md,...}
+dotagents init --dry-run        # show what would happen
+dotagents init --force          # replace AGENTS.md/CLAUDE.md wholesale (backed up) instead of block-merging
 ```
 
 **`dotagents install`** — lays down the base overlay (like `init`), plus optional
 wrapper-script install:
 
 ```bash
-python install.py install                                    # base only (like init)
-python install.py install --bin-dir ~/.local/bin            # base + a `dotagents` command
-python install.py install --dry-run
+dotagents install                                    # base only (like init)
+dotagents install --bin-dir ~/.local/bin            # base + a `dotagents` command
+dotagents install --dry-run
 ```
 
 `--from <path-or-uri>` selects the *base* source for a `pip install`-only environment
@@ -99,15 +99,16 @@ overlay's skills into the shared skills dir. See below.
 ### Managing overlays
 
 `dotagents overlays` manages opt-in overlays **by name**, resolving each name against a
-source (the bundled `overlays/` by default; override with `--source <dir>` or
-`$DOTAGENTS_OVERLAYS_SRC`). Installed overlays are *discovered* by their presence under
-`<scope>/.agents/overlays/` — there is no registry file.
+source directory of overlays — point `--source <dir>` (or `$DOTAGENTS_OVERLAYS_SRC`) at
+one, e.g. a checkout of the [`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays)
+where the example overlays live. Installed overlays are *discovered* by their presence
+under `<scope>/.agents/overlays/` — there is no registry file.
 
 ```bash
-python install.py overlays add python flows        # install into the scope, publish skills, merge D59 rules/routing
-python install.py overlays list                    # installed (discovered) + available (from source)
-python install.py overlays sync 'py*'              # refresh installed overlays matching a glob, resync their skills
-python install.py overlays remove python           # delete the overlay dir + unpublish its skills
+dotagents overlays add python flows        # install into the scope, publish skills, merge D59 rules/routing
+dotagents overlays list                    # installed (discovered) + available (from source)
+dotagents overlays sync 'py*'              # refresh installed overlays matching a glob, resync their skills
+dotagents overlays remove python           # delete the overlay dir + unpublish its skills
 ```
 
 Scope is **project** by default (`<project>/.agents/`, when run inside one) or **user**
@@ -120,11 +121,15 @@ overlay. Removing an overlay deletes only its dir and unpublishes only the skill
 published; its lines in `AGENTS.md`'s managed block are not auto-pruned (a warning points
 at the manual edit, or re-run `install`).
 
-**Overlay `setup` scripts.** An overlay may ship an **idempotent** `setup` (extensionless
-POSIX script) or `setup.py` at its root. After `add`/`sync` copies the overlay in,
-dotagents runs that script automatically — so anything a human would otherwise hand-follow
-(PATH/lib wiring, self-registration) is one script the tool runs, not a doc. Presence of
-the script is the opt-in; skip it with `--no-setup`. The contract for authors:
+**Overlay setup scripts.** An overlay may ship an **idempotent** `setup.py` at its root
+(the recommended form: it runs under the same Python that runs dotagents, so it works on
+every OS — the bundled `net` overlay is the model). An extensionless `setup` (a POSIX
+shell script) is still honored as a legacy fallback, but it is discouraged: a shell
+script isn't portable to Windows without a shell. After `add`/`sync` copies the overlay
+in, dotagents runs the script automatically — so anything a human would otherwise
+hand-follow (PATH/lib wiring, self-registration) is one script the tool runs, not a doc.
+When both are present, `setup.py` wins. Presence of a script is the opt-in; skip it with
+`--no-setup`. The contract for authors:
 
 - **Idempotent** — safe to run on every `add`/`sync`; check-then-act, never blindly append.
 - **cwd** is the installed overlay dir (`<scope>/.agents/overlays/<name>/`), so reference
@@ -164,8 +169,8 @@ link never lands in the public repo). `<name>` defaults to the project's basenam
 local `~/code/app` and a cloud `/home/user/app` resolve to the same store.
 
 ```bash
-python install.py install                                    # base
-python install.py overlays add private-sync --source overlays # kb + cloud hooks
+dotagents install                                    # base
+dotagents overlays add private-sync --source <overlays-checkout> # kb + cloud hooks
 dotagents link .        # symlink this project's .agents into the private repo
                         #   (an existing .agents/ is adopted in on the first link;
                         #    --copy mirrors it as a real dir for no-symlink systems)

@@ -36,13 +36,13 @@ carry the opinions.
 
 ```bash
 # Lay down the neutral base config into ~/.agents (block-merges AGENTS.md/CLAUDE.md):
-python install.py init
+dotagents init
 
 # Layer in opinionated overlays by name, into the user scope:
-python install.py overlays add flows python -g
+dotagents overlays add flows python -g
 
 # See what's installed vs. available:
-python install.py overlays list -g
+dotagents overlays list -g
 ```
 
 Then wire your agent runner to it — for Claude Code, `~/.claude/CLAUDE.md` just needs

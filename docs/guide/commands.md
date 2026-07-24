@@ -2,7 +2,8 @@
 
 The `dotagents` CLI is an umbrella of subcommands. Run it as the installed
 `dotagents` wrapper, as `python -m dotagents`, via the `python install.py <cmd>`
-shim, or from a built `dotagents.pyz`. Most commands take a scope flag: **project**
+dev shim (from a source checkout), or from a built `dotagents.pyz`. Most commands
+take a scope flag: **project**
 by default (the `<cwd>/.agents` store, when run inside a project) or **user** with
 `-g` / `--global` (the `~/.agents` store, configurable).
 
@@ -31,9 +32,9 @@ Additional user command modules are discovered from each scope's command dir,
 See [Install](install.md) for the full walkthrough. In brief:
 
 ```bash
-python install.py init                 # base config into ~/.agents
-python install.py init --dry-run
-python install.py install --bin-dir ~/.local/bin   # base + a `dotagents` command
+dotagents init                 # base config into ~/.agents
+dotagents init --dry-run
+dotagents install --bin-dir ~/.local/bin   # base + a `dotagents` command
 ```
 
 ## overlays
@@ -41,10 +42,10 @@ python install.py install --bin-dir ~/.local/bin   # base + a `dotagents` comman
 Manages opt-in overlays **by name**. See [Overlays](overlays.md) for the full model.
 
 ```bash
-python install.py overlays add python flows        # install into the scope, publish skills
-python install.py overlays list                    # installed (discovered) + available
-python install.py overlays sync 'py*'              # refresh installed overlays matching a glob
-python install.py overlays remove python           # delete the overlay dir + unpublish its skills
+dotagents overlays add python flows        # install into the scope, publish skills
+dotagents overlays list                    # installed (discovered) + available
+dotagents overlays sync 'py*'              # refresh installed overlays matching a glob
+dotagents overlays remove python           # delete the overlay dir + unpublish its skills
 ```
 
 ## context

@@ -52,8 +52,12 @@ matters.
 
 ## Setup scripts
 
-Ship an idempotent `setup` (extensionless POSIX script) or `setup.py` at the overlay
-root to run install-time wiring automatically. See the contract in
+Ship an idempotent `setup.py` at the overlay root to run install-time wiring
+automatically — the recommended, OS-agnostic form (it runs under the same Python as
+dotagents, so it works on every platform; the bundled `net` overlay is the model). An
+extensionless `setup` (a POSIX shell script) still works as a legacy fallback but is
+discouraged — it needs a shell, so it isn't portable to Windows. When both are present,
+`setup.py` wins. See the contract in
 [Overlays → Setup scripts](overlays.md#setup-scripts). The essentials:
 
 - idempotent, check-then-act;
