@@ -59,6 +59,15 @@ EXAMPLES = [
     "overlays/node/references/workflows/node/release.yaml",
     "overlays/rust/references/workflows/rust/test.yaml",
     "overlays/rust/references/workflows/rust/release.yaml",
+    "overlays/net/kb/NET.md",
+    "overlays/net/bin/curl.py", "overlays/net/bin/curl.cmd",
+    "overlays/net/lib/certifi/__init__.py", "overlays/net/lib/certifi/__main__.py",
+    "overlays/net/lib/VENDORED.md",
+    "overlays/net/lib/httplib/__init__.py", "overlays/net/lib/httplib/proxy.py",
+    "overlays/net/lib/httplib/jar.py", "overlays/net/lib/httplib/cookies.py",
+    "overlays/net/lib/httplib/auth.py", "overlays/net/lib/httplib/warnings.py",
+    "overlays/net/lib/httplib/session.py", "overlays/net/lib/httplib/fetch.py",
+    "overlays/net/setup.py",
 ]
 
 BASE_PATTERNS = ["file:///" + "~"]
