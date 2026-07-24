@@ -170,9 +170,15 @@ def _installed_overlay_dirs(scope, source, *, adding=None, dry_run=False) -> "li
 def _apply_base(
     src: Path, dest: Path, force: bool, dry_run: bool, logger,
     agents: "list[str] | None" = None,
+    wire_hooks: bool = False,
 ) -> None:
     """Lay down the base overlay: managed-block merge AGENTS.md/CLAUDE.md,
-    create-if-absent the plain files. Shared by `init` and `install`."""
+    create-if-absent the plain files. Shared by `init` and `install`.
+
+    With `wire_hooks`, each active agent also gets its hooks merged and the shared
+    skills dir linked into its config dir (a no-op for adapters that don't
+    implement it). Done here because this is where the active-agent list is
+    already resolved."""
     from dotagents import _agents
     import os
 
@@ -197,6 +203,8 @@ def _apply_base(
         agent.write_base_config(
             dest, src, base_agents, force=force, dry_run=dry_run, logger=logger
         )
+        if wire_hooks:
+            agent.wire_hooks(dest, dry_run=dry_run, logger=logger)
 
     for rel in BASE_PLAIN_FILES:
         source_path = Path(src) / rel

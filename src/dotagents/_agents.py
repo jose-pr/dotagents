@@ -52,8 +52,16 @@ class Agent:
         """Write the assembled context file for this agent (used by context generator)."""
         pass
 
-    def wire_hooks(self, dest: Path, *, dry_run: bool, logger) -> None:
-        """Wire up hooks in the agent's settings if supported."""
+    def wire_hooks(
+        self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
+    ) -> None:
+        """Wire up hooks in the agent's settings, if this adapter supports it.
+
+        A no-op on the base class: the hook schema is harness-specific, so only
+        adapters with a *verified* schema override this. `config_root` overrides
+        the agent's own config dir (e.g. `~/.claude`) and exists so tests can
+        redirect writes away from the real one.
+        """
         pass
 
     def detect(self, root: Path) -> bool:
@@ -93,6 +101,101 @@ class ClaudeAgent(Agent):
                 force=force, dry_run=dry_run, backup_root=backup_root,
             )
             if logger: logger.info("%s: CLAUDE.md", branch)
+
+    # --- hooks ---------------------------------------------------------
+    #
+    # SessionStart runs `dotagents context`; Claude injects a SessionStart hook's
+    # **stdout into the session context**, which is the entire point -- it is how
+    # the assembled context reaches the model without the user remembering to run
+    # anything.
+    #
+    # There is deliberately NO env-injection hook. The precursor ran
+    # `agents env --diff --format export > $CLAUDE_ENV_FILE`, but CLAUDE_ENV_FILE
+    # does not exist in current Claude Code (absent from the docs AND from a live
+    # session's environment, verified 2026-07-24) -- that redirect would write to a
+    # file named "" and silently set nothing. The documented alternative, the static
+    # `env` key in settings.json, cannot carry computed per-session values. So the
+    # env half stays unshipped until a supported mechanism exists; `dotagents env`
+    # remains available for shell use.
+    SESSION_START_COMMAND = "dotagents context"
+    CWD_CHANGED_COMMAND = "[ -f AGENTS.md ] && cat AGENTS.md || true"
+
+    def wire_hooks(
+        self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
+    ) -> None:
+        """Link the shared skills dir into `~/.claude` and merge our two hooks.
+
+        Additive and idempotent: unrelated settings keys and foreign hooks survive,
+        and a second run writes nothing.
+        """
+        from dotagents import _hooks, _skills
+
+        root = Path(config_root) if config_root else Path.home() / ".claude"
+
+        # 1. Skills last mile. Publishing into `<scope>/skills/` only helps if the
+        #    agent reads that dir; without this link it never does.
+        shared_skills = Path(dest) / "skills"
+        if not shared_skills.is_dir():
+            if logger:
+                logger.info("no skills to link (%s absent)", shared_skills)
+        elif dry_run:
+            if logger:
+                logger.info("would link skills: %s -> %s", shared_skills, root / "skills")
+        else:
+            result = _skills.sync_path(shared_skills, root / "skills", prefer_symlink=True)
+            if not result.success:
+                if logger:
+                    logger.warning("skills not linked: %s", result.message)
+            else:
+                if logger:
+                    logger.info("skills (%s): %s", result.mode, result.message)
+                if result.mode == "copy" and logger:
+                    logger.warning(
+                        "skills were COPIED, not symlinked (no symlink support here): "
+                        "the copy is a point-in-time snapshot and goes stale when overlay "
+                        "skills change -- re-run `dotagents init` to refresh it"
+                    )
+
+        # 2. Hooks.
+        settings_path = root / "settings.json"
+        settings = _hooks.load_settings(settings_path)
+        hooks = settings.get("hooks")
+        if not isinstance(hooks, dict):
+            hooks = {}
+        changed = False
+
+        # Legacy lowercase key from the precursor -- fold it in, then drop it.
+        legacy = hooks.pop("session_start", None)
+        if legacy is not None:
+            changed = True
+
+        session_start, ss_changed = _hooks.merge_hook(
+            hooks.get("SessionStart", legacy),
+            self.SESSION_START_COMMAND,
+            status_message="Loading agent context",
+        )
+        hooks["SessionStart"] = session_start
+
+        cwd_changed, cc_changed = _hooks.merge_hook(
+            hooks.get("CwdChanged"),
+            self.CWD_CHANGED_COMMAND,
+            status_message="Checking for AGENTS.md",
+        )
+        hooks["CwdChanged"] = cwd_changed
+
+        if not (changed or ss_changed or cc_changed):
+            if logger:
+                logger.info("hooks already wired: %s", settings_path)
+            return
+
+        settings["hooks"] = hooks
+        if dry_run:
+            if logger:
+                logger.info("would wire SessionStart + CwdChanged hooks: %s", settings_path)
+            return
+        _hooks.write_settings(settings_path, settings)
+        if logger:
+            logger.info("wired SessionStart + CwdChanged hooks: %s", settings_path)
 
     def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
         target = dest / "CONTEXT.md"

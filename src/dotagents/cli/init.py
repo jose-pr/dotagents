@@ -53,6 +53,10 @@ class Init(LoggingArgs, Cmd):
     "List of agents to install for (e.g. claude,gemini). Default: auto-detect + claude."
     ("--agents",)
 
+    no_hooks: bool = False
+    "Skip wiring agent hooks and the shared skills link into the agent's config dir."
+    ("--no-hooks",)
+
     def __call__(self) -> int:
         src = _resolve_from(self.from_, BASE_ROOT)
         if self.dest is not None:
@@ -69,7 +73,11 @@ class Init(LoggingArgs, Cmd):
             for a in self.agents:
                 agent_names.extend([x.strip() for x in a.split(",") if x.strip()])
 
-        _apply_base(Path(src), dest, self.force, self.dry_run, self._logger_, agents=agent_names if agent_names else None)
+        _apply_base(
+            Path(src), dest, self.force, self.dry_run, self._logger_,
+            agents=agent_names if agent_names else None,
+            wire_hooks=not self.no_hooks,
+        )
 
         if self.bin_dir is not None and not self.dry_run:
             from dotagents._wrappers import check_path_warning, write_wrappers
