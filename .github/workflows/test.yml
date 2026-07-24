@@ -173,6 +173,15 @@ jobs:
           python dist/dotagents.pyz init --help | grep -q -- "--agents"
           # context --format json runs and emits parseable JSON (empty HOME -> claude).
           python dist/dotagents.pyz context --format json --agents claude -g | python -c "import sys,json; json.load(sys.stdin)"
+          # env command (plan 07): --format/--diff/-g flags + help must survive the
+          # zipapp AST-introspection degradation.
+          python dist/dotagents.pyz env --help | grep -q -- "--format FORMAT"
+          python dist/dotagents.pyz env --help | grep -q -- "--diff"
+          python dist/dotagents.pyz env --help | grep -q -- "Output format: export"
+          # env --format json runs and emits parseable JSON (identity vars stamped).
+          python dist/dotagents.pyz env --diff --format json -g | python -c "import sys,json; json.load(sys.stdin)"
+          # env --format export dispatches and prints export lines.
+          python dist/dotagents.pyz env --format export -g | grep -q -- "export AGENT="
           # overlays add: the `<name>` positional + aliased flags (--source, -g) must
           # survive the zipapp (duho AST-introspection-in-pyz gotcha). --source must
           # NOT degrade to --source-, and -g must select the user scope.
