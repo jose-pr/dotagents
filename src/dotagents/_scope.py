@@ -78,17 +78,44 @@ def resolve_scope(
     """Pick the install scope.
 
     ``-g/--global`` forces the **user** scope (``agents_dir``, default ``~/.agents``).
-    Otherwise the scope is **project** when a project is in play (an explicit
-    ``project_root`` or -- for a real invocation -- the current directory), which is
-    where ``<project>/.agents/`` overlays belong. The store location is configurable
-    (D58): ``agents_dir`` comes from the caller (``--agents-dir``) or defaults to
-    ``~/.agents``; it is never hardcoded past this default.
+    Otherwise the scope is **project**, rooted at (in precedence order): an explicit
+    ``project_root`` argument, else ``$AGENTS_PROJECT_ROOT`` if set, else the current
+    directory. ``$AGENTS_PROJECT_ROOT`` lets a harness (or ``dotagents env``) pin the
+    project root once so every command agrees on it regardless of the cwd a subprocess
+    happens to run in; ``<root>/.agents/`` is where this project's overlays live. The
+    store location is configurable (D58): ``agents_dir`` comes from the caller
+    (``--agents-dir``) or defaults to ``~/.agents``; never hardcoded past that default.
     """
     root = Path(agents_dir).expanduser() if agents_dir else (Path.home() / ".agents")
     if global_scope:
         return Scope("user", root)
-    proj = Path(project_root).expanduser() if project_root else Path.cwd()
+    proj = Path(project_root).expanduser() if project_root else project_root_default()
     return Scope("project", proj / ".agents")
+
+
+#: Agent-native project-root vars, consulted (in order) as a fallback for
+#: ``AGENTS_PROJECT_ROOT``. A harness that already exposes its workspace root lets
+#: dotagents pick it up without the user setting anything. As of 2026-07, Claude
+#: Code's ``CLAUDE_PROJECT_DIR`` is the ONLY one any major harness sets (and only in
+#: hook / stdio-MCP / plugin-LSP contexts, not its Bash tool) -- Gemini/Codex/Cursor/
+#: Copilot/aider all rely on cwd + internal git-root detection and export nothing.
+#: Extend this tuple as other harnesses adopt one.
+_HARNESS_PROJECT_ROOT_VARS = ("CLAUDE_PROJECT_DIR",)
+
+
+def project_root_default() -> Path:
+    """The project root when none is passed explicitly, in precedence order:
+    ``$AGENTS_PROJECT_ROOT`` (dotagents' canonical var) -> a known agent-native var
+    (:data:`_HARNESS_PROJECT_ROOT_VARS`, e.g. Claude Code's ``CLAUDE_PROJECT_DIR``)
+    -> the current working directory.
+
+    Emitting ``AGENTS_PROJECT_ROOT`` (see ``dotagents env``) lets every command and
+    subprocess agree on one root regardless of the cwd it happens to run in."""
+    for var in ("AGENTS_PROJECT_ROOT", *_HARNESS_PROJECT_ROOT_VARS):
+        value = os.environ.get(var)
+        if value:
+            return Path(value).expanduser()
+    return Path.cwd()
 
 
 def discover_overlays(scope: Scope) -> "list[str]":

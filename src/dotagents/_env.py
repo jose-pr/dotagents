@@ -327,6 +327,14 @@ def get_environment(
     # --- Identity seed (plan 08) --- before the file chain so files can override.
     _apply(stamp_identity(osenv, explicit=explicit, root=project_root))
 
+    # --- Scope roots --- pin the two scope roots so every command/subprocess agrees:
+    # AGENTS_HOME = the user store (agents_dir, ~/.agents by default); AGENTS_PROJECT_ROOT
+    # = this project's root (resolve_scope reads it). Respect any already set upstream.
+    if not osenv.get("AGENTS_HOME"):
+        _apply({"AGENTS_HOME": str(agents_dir)})
+    if not osenv.get("AGENTS_PROJECT_ROOT"):
+        _apply({"AGENTS_PROJECT_ROOT": str(project_root)})
+
     # --- Contract B step 1: bins onto PATH FIRST. ---
     bin_paths = [str(p) for p in get_bin_paths(
         agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
