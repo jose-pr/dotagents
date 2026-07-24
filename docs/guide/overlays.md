@@ -9,7 +9,7 @@ opinionated ships as a named overlay you add explicitly.
 An overlay is a directory (optionally carrying an `overlay.toml` manifest) whose files
 install to the same relative path in the destination scope. `dotagents overlays`
 resolves each overlay **by name** against a source directory you point it at with
-`--source <dir>` (or `$DOTAGENTS_OVERLAYS_SRC`), and installs it into the scope's
+`--source <dir>` (or `$AGENTS_OVERLAYS_SRC`), and installs it into the scope's
 overlays directory. There is **no registry file**: installed overlays are *discovered*
 by their presence there.
 

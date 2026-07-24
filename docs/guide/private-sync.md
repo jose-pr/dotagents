@@ -65,6 +65,6 @@ curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-se
 
 The bootstrap authenticates (bypassing a hosted-runner `github.com` → proxy git
 rewrite), clones/pulls the store, installs the CLI, and links the project — driven by
-`DOTAGENTS_AGENTS_REMOTE` / `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL`
+`AGENTS_REMOTE` / `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL`
 environment variables (the token is never committed). The full walkthrough ships with
 the `private-sync` overlay.

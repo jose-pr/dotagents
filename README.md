@@ -92,7 +92,7 @@ overlay's skills into the shared skills dir. See below.
 ### Managing overlays
 
 `dotagents overlays` manages opt-in overlays **by name**, resolving each name against a
-source directory of overlays — point `--source <dir>` (or `$DOTAGENTS_OVERLAYS_SRC`) at
+source directory of overlays — point `--source <dir>` (or `$AGENTS_OVERLAYS_SRC`) at
 one, e.g. a checkout of the [`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays)
 where the example overlays live. Installed overlays are *discovered* by their presence
 under `<scope>/.agents/overlays/` — there is no registry file.
@@ -127,8 +127,8 @@ When both are present, `setup.py` wins. Presence of a script is the opt-in; skip
 - **Idempotent** — safe to run on every `add`/`sync`; check-then-act, never blindly append.
 - **cwd** is the installed overlay dir (`<scope>/.agents/overlays/<name>/`), so reference
   your own files by relative path.
-- **Env** carries `DOTAGENTS_AGENTS_DIR` (the resolved store path — never hardcode
-  `~/.agents`) and `DOTAGENTS_OVERLAY_DIR` (your own installed dir).
+- **Env** carries `AGENTS_HOME` (the resolved store path — never hardcode
+  `~/.agents`) and `AGENTS_OVERLAY_DIR` (your own installed dir).
 - A **non-zero exit fails the install** with a clear error (not a silent skip). For any
   outward or irreversible action the *script* must confirm first — the runner invokes a
   script you chose to install; it does not second-guess it.
@@ -187,7 +187,7 @@ code is `sh`'s (0 on empty stdin), so a failed fetch is silently logged as succe
 propagates the curl failure instead.
 
 It authenticates (bypassing a hosted-runner `github.com`→proxy git rewrite), clones/pulls
-`~/.agents`, installs the CLI, and links the project — driven by `DOTAGENTS_AGENTS_REMOTE`
+`~/.agents`, installs the CLI, and links the project — driven by `AGENTS_REMOTE`
 / `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL` env vars (token never committed). Full
 walkthrough: `~/.agents/kb/PRIVATE_SYNC.md`.
 
