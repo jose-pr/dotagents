@@ -23,7 +23,7 @@ class BuildPyz(LoggingArgs, Cmd):
     "Shebang line to embed in the pyz."
     ("--python",)
 
-    duho_version: str = "0.3.3"
+    duho_version: str = "0.4.0"
     "Pinned duho version to vendor."
     ("--duho-version",)
 

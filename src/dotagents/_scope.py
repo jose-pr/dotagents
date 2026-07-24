@@ -51,6 +51,17 @@ class Scope:
     def shared_skills_dir(self) -> Path:
         return self.agents_root / "skills"
 
+    @property
+    def cmds_dir(self) -> Path:
+        """Directory of discovered command modules for this scope (D76).
+
+        ``<agents_root>/dotagents/cmds`` -- a seam alongside ``overlays``/``skills``.
+        ``init``/``install`` lay the bundled command modules here, and
+        ``dotagents.cli._discover`` runs ``duho.discover_commands`` over it (per
+        scope, user + project) so a user's own ``*.py`` command modules dropped
+        beside them are picked up with zero config."""
+        return self.agents_root / "dotagents" / "cmds"
+
     def overlay_dir(self, name: str) -> Path:
         return self.overlay_root / name
 
