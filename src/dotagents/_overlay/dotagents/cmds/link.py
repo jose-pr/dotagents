@@ -35,7 +35,7 @@ class Link(LoggingArgs, Cmd):
 
     store_dir: Optional[str] = None
     ("Where stores live: relative to --agents-dir, or absolute to put them "
-     "elsewhere entirely (default: projects, or $DOTAGENTS_STORE_DIR).")
+     "elsewhere entirely (default: projects, or $AGENTS_STORE_DIR).")
     ("--store-dir",)
 
     name: Optional[str] = None

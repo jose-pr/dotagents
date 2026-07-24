@@ -17,7 +17,7 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   command modules (D76), shipped in the bundled `_overlay/dotagents/cmds/` dir, not
   compiled built-ins.
 - Command discovery layers sources, later wins: built-ins < bundled `cmds` < scope
-  `cmds` dirs (user + project) < `$DOTAGENTS_CMDS_PATH` < `--cmdspath`.
+  `cmds` dirs (user + project) < `$AGENTS_CMDS_PATH` < `--cmdspath`.
 
 ## Helper modules (public surface)
 
@@ -52,15 +52,34 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
 
 ## Environment variables
 
-Read, **never printed** (they may hold secrets — the code only ever names them):
+The prefix split (D80): **`AGENTS_*`** names everything about the `.agents` / agent
+world (paths, scope, overlays, sync) — non-secret, safe to emit; **`DOTAGENTS_*`** is
+reserved for genuinely tool-internal config and secrets, so the "never print
+`DOTAGENTS_*` values" leak guard (D48) stays a simple blanket ban over exactly the
+sensitive set.
 
-- `DOTAGENTS_AGENTS_DIR` — the configurable user-scope store path (default `~/.agents`).
-- `DOTAGENTS_STORE_DIR` — per-project store location (absolute paths allowed).
-- `DOTAGENTS_OVERLAYS_SRC` — default overlay source dir for `overlays`.
-- `DOTAGENTS_CMDS_PATH` — extra command-module search paths (os.pathsep-split).
-- `DOTAGENTS_OVERLAY_DIR` — set for an overlay's setup script (its own installed dir).
-- `DOTAGENTS_AGENTS_REMOTE` / `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_SYNC_MESSAGE` —
-  private-store sync (remote URL / auth token / commit message).
+Config / path / sync vars (`AGENTS_*`, non-secret — read, and some emitted):
+
+- `AGENTS_HOME` — the configurable user-scope store path (default `~/.agents`). Also
+  **emitted** by `dotagents env` (D79) and set for overlay setup scripts / sync hooks.
+- `AGENTS_STORE_DIR` — per-project store location (absolute paths allowed).
+- `AGENTS_OVERLAYS_SRC` — default overlay source dir for `overlays`.
+- `AGENTS_CMDS_PATH` — extra command-module search paths (os.pathsep-split).
+- `AGENTS_OVERLAY_DIR` — set for an overlay's setup script (its own installed dir).
+- `AGENTS_REMOTE` / `AGENTS_SYNC_MESSAGE` — private-store sync (tokenless remote URL /
+  commit message).
+
+Every reader above prefers the `AGENTS_*` name and falls back to the old
+`DOTAGENTS_*` name (`DOTAGENTS_AGENTS_DIR`, `DOTAGENTS_STORE_DIR`,
+`DOTAGENTS_OVERLAYS_SRC`, `DOTAGENTS_CMDS_PATH`, `DOTAGENTS_OVERLAY_DIR`,
+`DOTAGENTS_AGENTS_REMOTE`, `DOTAGENTS_SYNC_MESSAGE`) for one release — deprecated,
+removable next. Setters emit both names this release.
+
+Tool-internal / secret vars (`DOTAGENTS_*` — kept; read, **never printed**):
+
+- `DOTAGENTS_AGENTS_TOKEN` — **secret** (fine-grained PAT) for private-store auth.
+- `DOTAGENTS_CLI_INSTALL` — pip spec to install the CLI itself (tool-specific).
+- `DOTAGENTS_AUDIT_PATTERNS` — path to the machine-local audit-pattern file (tooling).
 
 Emitted by the identity/env layer (safe to branch on in env files):
 `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENTS_MODEL`, `AGENTS_AGENT` / `AGENT`,

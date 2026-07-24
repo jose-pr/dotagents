@@ -69,9 +69,12 @@ def run_overlay_setup(
     Invocation, matching ``_link.py``'s hook style (pure stdlib subprocess):
 
     * **cwd** = the installed overlay dir, so the script sees its own files.
-    * **env** carries ``DOTAGENTS_AGENTS_DIR`` = the resolved store path (D58
+    * **env** carries ``AGENTS_HOME`` = the resolved store path (D58
       configurable store), so the script never hardcodes ``~/.agents``. It also
-      gets ``DOTAGENTS_OVERLAY_DIR`` = its own installed dir for convenience.
+      gets ``AGENTS_OVERLAY_DIR`` = its own installed dir for convenience. The
+      old ``DOTAGENTS_AGENTS_DIR`` / ``DOTAGENTS_OVERLAY_DIR`` are also set for
+      back-compat this release (removable next), so existing setup scripts keep
+      working.
     * a ``.py`` script runs under the current interpreter; an extensionless
       ``setup`` runs directly, or via ``sh`` on Windows where it isn't executable.
 
@@ -87,6 +90,9 @@ def run_overlay_setup(
         return 0
 
     env = dict(os.environ)
+    env["AGENTS_HOME"] = str(agents_dir)
+    env["AGENTS_OVERLAY_DIR"] = str(overlay_dir)
+    # back-compat: DOTAGENTS_* is deprecated, removable next release.
     env["DOTAGENTS_AGENTS_DIR"] = str(agents_dir)
     env["DOTAGENTS_OVERLAY_DIR"] = str(overlay_dir)
 
