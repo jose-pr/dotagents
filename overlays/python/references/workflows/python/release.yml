@@ -51,6 +51,9 @@ jobs:
   # Docs are DEPLOYED by docs.yml (D52 -- three workflow files). This job only
   # GATES the release on a strict docs build: a release must never ship if the
   # docs site is broken, but the release path never deploys Pages itself.
+  # Ordering: this workflow builds + gates + creates the release object; that
+  # release's `published` event then triggers docs.yml, which deploys the docs
+  # for the version just shipped.
   docs-gate:
     name: Docs build gate (strict, no deploy)
     needs: test
