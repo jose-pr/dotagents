@@ -198,6 +198,9 @@ jobs:
           python dist/dotagents.pyz init --help | grep -q -- "--agents"
           # context --format json runs and emits parseable JSON (empty HOME -> claude).
           python dist/dotagents.pyz context --format json --agents claude -g | python -c "import sys,json; json.load(sys.stdin)"
+          # context defaults to STDOUT (positional out defaults to '-'), never writing a file.
+          python dist/dotagents.pyz context --help | grep -q -- "out"
+          test -n "$(python dist/dotagents.pyz context -g 2>/dev/null)"   # bare context prints to stdout
           # env command (plan 07): --format/--diff/-g flags + help must survive the
           # zipapp AST-introspection degradation.
           python dist/dotagents.pyz env --help | grep -q -- "--format FORMAT"

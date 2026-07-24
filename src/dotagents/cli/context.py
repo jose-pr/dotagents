@@ -23,9 +23,14 @@ class Context(LoggingArgs, Cmd):
     "List of agents to generate context for (e.g. claude,gemini). Default: active agent."
     ("--agents",)
 
-    out: Optional[str] = None
-    "Output path, or '-' for stdout. Default: agent native config file."
-    ("--out", "-o")
+    out: str = "-"
+    "Output path (positional). Default '-' = stdout; a path writes that file; use "
+    "--write-agent to write each agent's native config file instead."
+    ("out",)
+
+    write_agent: bool = False
+    "Write each agent's native config file (e.g. Claude's CONTEXT.md) instead of a path."
+    ("--write-agent",)
 
     def __call__(self) -> int:
         from dotagents import _agents
@@ -71,7 +76,7 @@ class Context(LoggingArgs, Cmd):
                 Path(self.out).write_text(blob, encoding="utf-8")
                 self._logger_.info("Wrote JSON context to %s", self.out)
             else:
-                print(blob)
+                print(blob)  # default '-' -> stdout (json never writes native configs)
             return 0
 
         # --- markdown / system-reminder text paths ---
@@ -87,12 +92,12 @@ class Context(LoggingArgs, Cmd):
                     + "\n<!-- system-reminder: end -->"
                 )
 
-            if self.out == "-":
+            if self.write_agent:
+                agent.write_context(agents_dir, text, force=False, dry_run=False, logger=self._logger_)
+            elif self.out == "-":
                 print(f"--- Context for {agent.name} ---\n{text}\n")
-            elif self.out:
+            else:
                 Path(self.out).write_text(text, encoding="utf-8")
                 self._logger_.info(f"Wrote {agent.name} context to {self.out}")
-            else:
-                agent.write_context(agents_dir, text, force=False, dry_run=False, logger=self._logger_)
 
         return 0
