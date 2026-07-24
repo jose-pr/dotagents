@@ -51,8 +51,10 @@ Then wire your agent runner to it — for Claude Code, `~/.claude/CLAUDE.md` jus
 Continue with the [Install](guide/install.md) guide, or jump to
 [Commands](guide/commands.md) for the full CLI surface.
 
-## Not on PyPI yet
+## Distribution
 
-dotagents is currently distributed from source (a checkout, or a self-contained
-`dotagents.pyz` zipapp) — there is no `pip install dotagents` from PyPI yet. The
-[Install](guide/install.md) guide covers all three modes.
+The PyPI distribution is named **`dotagents-cli`** (the import package stays `dotagents`
+and the command stays `dotagents`, so `pip install dotagents-cli` gives you both). It is
+**not published to PyPI yet** — for now dotagents is distributed from source (a checkout,
+or a self-contained `dotagents.pyz` zipapp attached to each GitHub release). The
+[Install](guide/install.md) guide covers every mode.

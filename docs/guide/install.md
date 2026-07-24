@@ -34,7 +34,7 @@ dotagents install --dry-run
 
 `--from <path-or-uri>` selects the *base* source for a plain `pip install`
 environment (a git-checkout dir, or a `file:` / `http(s):` / `zip:` / `sftp:` / `s3:`
-URI via `pip install "dotagents[uri]"`). `init`'s base ships inside the package, so it
+URI via `pip install "dotagents-cli[uri]"`). `init`'s base ships inside the package, so it
 needs no `--from`.
 
 ## Downloadable `dotagents.pyz`

@@ -89,7 +89,7 @@ dotagents install --dry-run
 
 `--from <path-or-uri>` selects the *base* source for a `pip install`-only environment
 (a git checkout dir, `file:`, `http(s):`, `zip:`, `sftp:`, or `s3:` URI via
-`pip install "dotagents[uri]"`); `init`'s base ships inside the package, so it needs no
+`pip install "dotagents-cli[uri]"`); `init`'s base ships inside the package, so it needs no
 `--from`.
 
 Overlays beyond the base are managed by name with `dotagents overlays add <name>` — it
