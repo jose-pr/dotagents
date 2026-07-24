@@ -153,13 +153,28 @@ jobs:
           echo "edit" > "$proj/.agents/plans/local.md"
           python -m dotagents sync --project "$proj" --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "sync"
           test -f "$HOME/.agents/projects/$(basename "$proj")/plans/local.md"  # copied back
-      - name: Built .pyz keeps flags/help/positional under duho 0.3.x (zipapp shim)
+      - name: Built .pyz keeps flags/help/positional under duho 0.4.x (zipapp shim)
         run: |
           export HOME="$(mktemp -d)"
           python -m dotagents build-pyz --out dist/dotagents.pyz
           # A declared flag must NOT degrade to a name-derived one (--from, not --from-).
           python dist/dotagents.pyz init --help | grep -q -- "--from FROM"
           ! python dist/dotagents.pyz init --help | grep -q -- "--from-"
+          # link/sync are DISCOVERED command modules (D76), shipped in the bundled
+          # cmds dir and discovered even with an empty HOME (no install run here).
+          # They must be listed AND keep their flags/help/positional through the
+          # zipapp: the bundled cmds are extracted to real files before duho's AST
+          # introspection reads them, so they survive without the repoint shim.
+          python dist/dotagents.pyz --help | grep -q -- "link"
+          python dist/dotagents.pyz --help | grep -q -- "sync"
+          python dist/dotagents.pyz link --help | grep -q -- "--copy"
+          ! python dist/dotagents.pyz link --help | grep -q -- "--copy-"
+          python dist/dotagents.pyz link --help | grep -q -- "--store-dir STORE_DIR"
+          python dist/dotagents.pyz link --help | grep -qi "Project directory to link"
+          python dist/dotagents.pyz sync --help | grep -q -- "--project PROJECT"
+          python dist/dotagents.pyz sync --help | grep -q -- "--no-pull"
+          ! python dist/dotagents.pyz sync --help | grep -q -- "--no-pull-"
+          python dist/dotagents.pyz sync --help | grep -q -- "--remote REMOTE"
           # The `link` positional must be accepted (not "unrecognized arguments").
           proj="$(mktemp -d)"; printf '.agents/\n' > "$proj/.gitignore"
           python dist/dotagents.pyz link "$proj"

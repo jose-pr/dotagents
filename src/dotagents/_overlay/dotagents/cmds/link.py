@@ -1,4 +1,12 @@
-"""`dotagents link` -- point a project's .agents at a store outside the repo."""
+"""`dotagents link` -- point a project's .agents at a store outside the repo.
+
+Discovered command module (D76): shipped in the bundled `dotagents/cmds/` dir
+and laid down into `<store>/dotagents/cmds/link.py` by `init`/`install`, so
+`dotagents link` resolves through command discovery (`duho.app` + a cmds dir on
+the scope walk) rather than as a compiled built-in. The class shape is unchanged
+from the old `dotagents.cli.link.Link`; only its home moved. All logic still
+lives in `dotagents._link` (unchanged) -- this module is just the arg surface.
+"""
 
 from pathlib import Path
 from typing import Optional

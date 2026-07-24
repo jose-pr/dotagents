@@ -233,6 +233,26 @@ def _apply_base(
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(source_path), str(target_path))
 
+    # Lay down the bundled command modules (D76: link/sync + any other bundled
+    # cmd) into `<dest>/dotagents/cmds/` so `dotagents link`/`sync` are discovered
+    # after a fresh install. Create-if-absent per file, exactly like the plain
+    # files -- a user's own edits to an installed command module are never
+    # clobbered on a reinstall.
+    cmds_src = Path(src) / "dotagents" / "cmds"
+    if cmds_src.is_dir():
+        for source_path in sorted(cmds_src.glob("*.py")):
+            if source_path.name.startswith("_"):
+                continue
+            rel = "dotagents/cmds/%s" % source_path.name
+            target_path = dest / "dotagents" / "cmds" / source_path.name
+            if target_path.exists():
+                logger.info("skipped (present): %s", rel)
+                continue
+            logger.info("created: %s", rel)
+            if not dry_run:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(source_path), str(target_path))
+
 
 def _resolve_from(from_arg: "str | None", default: Path) -> Path:
     """Resolve --from to a local directory Path. A bare local path/dir is used
