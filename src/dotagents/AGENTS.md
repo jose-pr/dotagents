@@ -56,7 +56,12 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   not a flat command list. Foreign hooks are preserved verbatim, malformed entries
   are dropped rather than raising, and invalid JSON raises `SystemExit` instead of
   silently overwriting the user's file. Pure stdlib. Consumed by
-  `ClaudeAgent.wire_hooks` (the only adapter with a verified hook schema).
+  `ClaudeAgent.wire_hooks` (`~/.claude/settings.json`: env via `$CLAUDE_ENV_FILE`
+  + context via stdout, plus `CwdChanged`) and `CodexAgent.wire_hooks`
+  (`<CODEX_HOME|~/.codex>/hooks.json`: context only — no env-file equivalent — and
+  never `config.toml`). Codex's hook JSON is structurally identical to Claude's, so
+  the same merge serves both. Gemini/Cursor/Copilot keep the base no-op: no
+  published schema to target.
 - `_sync` — `PathSyncer` wrapper reproducing `install`'s backup/copy/report; requires
   `pathlib_next.Path` instances (not plain `pathlib.Path`) and a pre-created parent dir.
 

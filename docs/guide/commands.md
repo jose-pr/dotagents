@@ -53,8 +53,16 @@ agent's config dir. Pass `--no-hooks` to skip both.
 
 | Hook | Command | Why |
 | --- | --- | --- |
-| `SessionStart` | `dotagents context` | Claude injects a SessionStart hook's **stdout into the session context** — this is how the assembled context reaches the model without you running anything. |
+| `SessionStart` | appends `dotagents env --diff --format export` to `$CLAUDE_ENV_FILE`, then runs `dotagents context` | Claude sources `$CLAUDE_ENV_FILE` before each Bash command, so the env layers reach every command in the session; and it injects the hook's **stdout into the session context**, which is how the assembled context reaches the model. |
 | `CwdChanged` | `[ -f AGENTS.md ] && cat AGENTS.md \|\| true` | Surfaces a directory's `AGENTS.md` when the agent changes into it. |
+
+The env half **appends** (`>>`) and is guarded by `[ -n "$CLAUDE_ENV_FILE" ]`, both
+per the [hooks docs](https://code.claude.com/docs/en/hooks#persist-environment-variables):
+other hooks write to the same file, so `>` would discard their variables, and an
+unguarded redirect would create a file literally named `""` where the variable is
+unset. `$CLAUDE_ENV_FILE` exists only inside SessionStart/Setup/CwdChanged/FileChanged
+hook processes — it is absent from the session's own shell, so checking for it with
+`env | grep` proves nothing.
 
 The merge is additive and idempotent: unrelated settings keys and hooks you wrote
 yourself are preserved verbatim, and re-running `init` writes nothing.
@@ -65,11 +73,21 @@ the OS permits one and a **copy** otherwise (notably Windows without Developer M
 A copy is a point-in-time snapshot: re-run `dotagents init` to refresh it after
 overlay skills change.
 
-!!! note
-    No environment-variable hook is written. The `CLAUDE_ENV_FILE` variable a
-    SessionStart hook would need no longer exists in Claude Code, and the documented
-    alternative — the static `env` key in `settings.json` — cannot carry computed
-    values. Use `dotagents env` from your shell instead.
+### Codex
+
+Codex ships a [hooks framework](https://learn.chatgpt.com/docs/hooks) whose JSON is
+structurally identical to Claude's, so the same merge applies. `init` writes a
+`SessionStart` hook running `dotagents context` into `~/.codex/hooks.json` (or
+`$CODEX_HOME/hooks.json`) — Codex adds a SessionStart hook's plain stdout as extra
+developer context.
+
+Only the context half: Codex has no `CLAUDE_ENV_FILE` equivalent, so there is nothing
+to write env exports to. We target `hooks.json` rather than `config.toml` so your main
+config is never rewritten — if you keep inline `[hooks]` in `config.toml`, Codex warns
+about the split, so use `--no-hooks` and add the hook there yourself.
+
+Other agents (Gemini, Cursor, Copilot) are not wired: without a verified hook schema,
+inventing one is how a silently-broken hook gets shipped.
 
 ## overlays
 
