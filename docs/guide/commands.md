@@ -11,8 +11,7 @@ by default (the `<cwd>/.agents` store, when run inside a project) or **user** wi
 
 | Command | What it does |
 | --- | --- |
-| `init` | Lay down the neutral base overlay; block-merge `AGENTS.md`/`CLAUDE.md`. |
-| `install` | Base overlay + optional PATH wrapper script (`--bin-dir`). |
+| `init` | Lay down the neutral base config; block-merge `AGENTS.md`/`CLAUDE.md`; `--bin-dir` also writes a PATH wrapper. |
 | `overlays` | Manage opt-in overlays by name: `add` / `remove` / `list` / `sync`. |
 | `context` | Assemble the effective context for one or more agents. |
 | `env` | Assemble the chained env-file layers + identity vars, in a chosen format. |
@@ -25,7 +24,7 @@ by default (the `<cwd>/.agents` store, when run inside a project) or **user** wi
 `link` and `sync` are **discovered** command modules (D76), shipped in the package
 and discovered from the store's command dir — they behave like any other subcommand.
 Additional user command modules are discovered from each scope's command dir,
-`$DOTAGENTS_CMDS_PATH` entries, and `--cmdspath`.
+`$AGENTS_CMDS_PATH` entries, and `--cmdspath`.
 
 ## init
 
