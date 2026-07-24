@@ -1,0 +1,112 @@
+name: Release
+
+# Runs when a version tag (e.g. v1.0.0, v1.0.0-rc.1) is pushed. Not wired to
+# push/PR events on branches -- this is a release gate, not general CI.
+#
+# NOTE: docs.rs builds + hosts API docs automatically on publish -- no docs
+# workflow is needed for that part. Enable the companion docs.yaml (D52 -- the
+# three-workflow standard) only if the project ships a narrative mdBook guide
+# beyond bare API docs (see kb/RUST.md); the release path never deploys Pages.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.toolchain }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        toolchain: [stable, "<msrv>"] # stable + Cargo.toml's rust-version
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-features
+
+  build:
+    name: Package crate
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Package (validates the publishable crate)
+        run: cargo package --all-features
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: target/package/*.crate
+
+  github-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      # Identical Python inline scraper as the python template -- ubuntu-latest
+      # runners bundle Python 3 regardless of project language; never
+      # reimplement this per language (see flows/REPO.md).
+      - name: Extract CHANGELOG.md section for this tag
+        shell: python
+        run: |
+          import pathlib
+          import re
+          import sys
+
+          tag = "${{ github.ref_name }}"
+          version = tag[1:] if tag.startswith("v") else tag  # v1.0.0-rc.1 -> 1.0.0-rc.1
+
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # Stop before the next "## [version]" heading, or before the
+          # trailing "[version]: https://..." reference-link block at the
+          # end of the file (only relevant when this tag is the oldest
+          # tracked release, so there's no next heading to stop at).
+          match = re.search(
+              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|^\[[^\]]+\]:\s|\Z)",
+              changelog,
+              re.DOTALL | re.MULTILINE,
+          )
+          if not match:
+              sys.exit(f"No CHANGELOG.md section found for version {version!r}")
+          pathlib.Path("release_notes.md").write_text(match.group(1).strip() + "\n", encoding="utf-8")
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body_path: release_notes.md
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: github-release
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/<project_name>
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # crates.io has been rolling out OIDC Trusted Publishing -- verify the
+      # current recommended setup at release time before assuming the stored
+      # token is the only option (see kb/RUST.md).
+      - name: Publish
+        run: cargo publish --all-features --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

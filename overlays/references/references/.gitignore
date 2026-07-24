@@ -1,0 +1,24 @@
+# Private agent config (always excluded — see ~/.agents/flows/REPO.md).
+# No trailing slash on purpose: `dotagents link` makes .agents a symlink, which git
+# treats as a file, so a directory-only `.agents/` would NOT ignore it.
+# *.local.md is the unshared override (machine- or user-specific) — it takes
+# precedence over its non-local sibling and must never be committed.
+.agents
+*.local.md
+CLAUDE*
+.claude
+
+# Build/dist output and generated docs site
+build/
+dist/
+site/
+
+# <!-- EXECUTOR: replace with the language block from kb/<LANG>.md; delete other languages. -->
+# Language-specific
+<language build/dependency output patterns>
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

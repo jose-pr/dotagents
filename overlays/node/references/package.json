@@ -1,0 +1,36 @@
+{
+  "name": "<project_name>",
+  "version": "0.1.0",
+  "description": "<one-line description>",
+  "license": "MIT",
+  "author": "<copyright_holder>",
+  "repository": "github:<gh_org>/<project_name>",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "docs": "typedoc --out docs/api src/index.ts"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "typedoc": "^0.26.0",
+    "vitest": "^3.0.0"
+  }
+}

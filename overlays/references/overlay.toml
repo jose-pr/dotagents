@@ -1,0 +1,4 @@
+name = "references"
+description = "Language-neutral repo templates: README, CHANGELOG, LICENSE, .gitignore, docs-index, plan-shape example."
+requires = []
+routing = []

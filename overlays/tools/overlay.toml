@@ -1,0 +1,4 @@
+name = "tools"
+description = "User-overlay helper tools: summarize_run (wrap a command → verdict), compare_bench (diff benchmark JSONs)."
+requires = []
+routing = []
