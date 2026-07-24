@@ -2,17 +2,29 @@
 
 import os
 import stat
+import sys
 from pathlib import Path
 
-POSIX_TEMPLATE = '#!/bin/sh\nexec python3 "{pyz}" "$@"\n'
-CMD_TEMPLATE = '@echo off\r\npython "{pyz}" %*\r\n'
+POSIX_TEMPLATE = '#!/bin/sh\nexec "{python}" "{pyz}" "$@"\n'
+CMD_TEMPLATE = '@echo off\r\n"{python}" "{pyz}" %*\r\n'
 
 
-def write_wrappers(bin_dir: Path, pyz_path: Path) -> "list[Path]":
-    """Write both wrapper scripts into `bin_dir`, returning the paths written."""
+def write_wrappers(
+    bin_dir: Path, pyz_path: Path, python: "str | None" = None
+) -> "list[Path]":
+    """Write both wrapper scripts into `bin_dir`, returning the paths written.
+
+    `python` defaults to the interpreter running this code (`sys.executable`),
+    embedded as an absolute path. A bare `python`/`python3` is NOT usable: on
+    Windows it resolves to the Microsoft Store alias stub ("Python was not
+    found...") for anyone who has not installed the Store package, so a wrapper
+    calling it exits 0 having done nothing -- which then silently breaks any hook
+    that shells out to `dotagents`.
+    """
     bin_dir = Path(bin_dir)
     bin_dir.mkdir(parents=True, exist_ok=True)
     pyz_path = Path(pyz_path).resolve()
+    python = python or sys.executable
 
     written = []
 
@@ -21,7 +33,11 @@ def write_wrappers(bin_dir: Path, pyz_path: Path) -> "list[Path]":
     # unchanged on every Python 3.9+ platform.
     sh_path = bin_dir / "dotagents"
     with open(sh_path, "w", encoding="utf-8", newline="") as f:
-        f.write(POSIX_TEMPLATE.format(pyz=pyz_path.as_posix()))
+        f.write(
+            POSIX_TEMPLATE.format(
+                python=Path(python).as_posix(), pyz=pyz_path.as_posix()
+            )
+        )
     if os.name != "nt":
         mode = sh_path.stat().st_mode
         sh_path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -29,7 +45,7 @@ def write_wrappers(bin_dir: Path, pyz_path: Path) -> "list[Path]":
 
     cmd_path = bin_dir / "dotagents.cmd"
     with open(cmd_path, "w", encoding="utf-8", newline="") as f:
-        f.write(CMD_TEMPLATE.format(pyz=str(pyz_path)))
+        f.write(CMD_TEMPLATE.format(python=str(python), pyz=str(pyz_path)))
     written.append(cmd_path)
 
     return written

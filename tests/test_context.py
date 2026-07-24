@@ -170,3 +170,29 @@ def test_json_context_excludes_skills_listing(layout):
     # The skills listing markdown heading is NOT baked into the context field
     # (skills are a separate structured field in JSON).
     assert "Available Skills (Opt-in)" not in data["context"]
+
+
+def test_stdout_survives_a_cp1252_console(tmp_path, monkeypatch):
+    """Regression: `dotagents context` died with UnicodeEncodeError on Windows.
+
+    A bare `print()` encodes with the console codepage (cp1252 by default), so one
+    character outside Latin-1 -- here U+2194, which really appeared in a live
+    context -- aborted the command with no output. This is the SessionStart hook's
+    payload, so the failure was silent and total.
+    """
+    import io
+    import sys
+
+    from dotagents.cli.context import _write_stdout
+
+    raw = io.BytesIO()
+
+    class Cp1252Stdout(io.TextIOWrapper):
+        pass
+
+    monkeypatch.setattr(
+        sys, "stdout", Cp1252Stdout(raw, encoding="cp1252", errors="strict")
+    )
+    _write_stdout("arrows \u2194 and an emoji \U0001f600\n")
+
+    assert "\u2194" in raw.getvalue().decode("utf-8")

@@ -1,9 +1,30 @@
 """`dotagents context` -- assemble the effective context for agents (Plan 04)."""
 
+import sys
 from pathlib import Path
 from typing import Optional
 
 from duho import Cmd, LoggingArgs
+
+
+def _write_stdout(text: str) -> None:
+    """Write to stdout as UTF-8, whatever the console's encoding claims to be.
+
+    A bare `print()` encodes with the console codepage -- cp1252 on a default
+    Windows shell -- so a single character outside Latin-1 (an arrow, a box-drawing
+    rule, a curly quote, any emoji) raises UnicodeEncodeError and the command dies
+    having emitted nothing. Context files routinely contain such characters, and
+    this is the SessionStart hook's payload, so the failure is both likely and
+    silent. Write bytes through the underlying buffer instead, replacing anything
+    even UTF-8 cannot represent rather than aborting.
+    """
+    data = text.encode("utf-8", errors="replace")
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:  # pragma: no cover -- captured/replaced stdout in tests
+        sys.stdout.write(text)
+        return
+    buffer.write(data)
+    buffer.flush()
 
 
 class Context(LoggingArgs, Cmd):
@@ -99,8 +120,8 @@ class Context(LoggingArgs, Cmd):
                 # more than one agent is generated, so a single-agent run (the default)
                 # is clean, pipeable output with no decoration to strip.
                 if len(active_agents) > 1:
-                    print("# --- %s ---" % agent.name)
-                print(text)
+                    _write_stdout("# --- %s ---\n" % agent.name)
+                _write_stdout(text + "\n")
             else:
                 Path(self.out).write_text(text, encoding="utf-8")
                 self._logger_.info(f"Wrote {agent.name} context to {self.out}")
