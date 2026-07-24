@@ -55,13 +55,16 @@ def test_dotenv_exact():
 
 
 def test_powershell_exact():
-    # single-quoted; ' escaped as ''.
+    # ${env:NAME} curly-brace form (not bare $env:NAME -- a real Windows env
+    # var name can contain parens, e.g. ProgramFiles(x86), which is a
+    # PowerShell parse error in the bare sigil form). Single-quoted; '
+    # escaped as ''.
     assert _format_env(SAMPLE, "powershell") == "\n".join([
-        "$env:DQUOTE = 'a\"b'",
-        "$env:EMPTY = ''",
-        "$env:PLAIN = 'abc'",
-        "$env:SPACED = 'a b'",
-        "$env:SQUOTE = 'a''b'",
+        "${env:DQUOTE} = 'a\"b'",
+        "${env:EMPTY} = ''",
+        "${env:PLAIN} = 'abc'",
+        "${env:SPACED} = 'a b'",
+        "${env:SQUOTE} = 'a''b'",
     ])
 
 
@@ -108,7 +111,18 @@ def test_dotenv_hash_and_newline_quoted():
 
 def test_powershell_multiple_single_quotes():
     # 3 inner quotes each doubled = 6, plus the 2 wrapping quotes = 8 total.
-    assert _format_env({"K": "'''"}, "powershell") == "$env:K = ''''''''"
+    assert _format_env({"K": "'''"}, "powershell") == "${env:K} = ''''''''"
+
+
+def test_powershell_handles_parenthesized_var_names():
+    """A real Windows env var (ProgramFiles(x86), CommonProgramFiles(Arm),
+    inherited via os.environ) has parens in its name. `$env:FOO(X86) = ...`
+    is a PowerShell parse error ("Unexpected token '('") -- verified live.
+    The curly-brace `${env:FOO(X86)}` form is valid and was confirmed to
+    both parse AND execute correctly for this exact name shape.
+    """
+    out = _format_env({"PROGRAMFILES(X86)": r"C:\Program Files (x86)"}, "powershell")
+    assert out == "${env:PROGRAMFILES(X86)} = 'C:\\Program Files (x86)'"
 
 
 @pytest.mark.parametrize("alias,canonical", [

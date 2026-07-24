@@ -184,8 +184,17 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
     if fmt == "dotenv":
         return "\n".join("%s=%s" % (k, _dotenv_value(env[k])) for k in keys)
     if fmt == "powershell":
+        # `${env:NAME}` (curly-brace form), not the bare `$env:NAME` sigil form.
+        # A handful of real Windows env vars have parens in their names
+        # (`ProgramFiles(x86)`, `CommonProgramFiles(Arm)`, inherited via
+        # os.environ) -- `$env:FOO(X86) = ...` is a PowerShell parse error
+        # ("Unexpected token '('"), the same class of bug D90 fixed for the
+        # export/dotenv/fish formats. The curly-brace form accepts ANY
+        # character in the name and is valid for every var, not just the
+        # special-cased ones, so it is used unconditionally rather than only
+        # for names that need it.
         return "\n".join(
-            "$env:%s = '%s'" % (k, env[k].replace("'", "''")) for k in keys
+            "${env:%s} = '%s'" % (k, env[k].replace("'", "''")) for k in keys
         )
     if fmt == "cmd":
         return "\n".join(
