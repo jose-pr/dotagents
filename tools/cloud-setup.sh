@@ -16,9 +16,11 @@
 #
 # It: (1) authenticates with a token and bypasses a github.com -> in-session-proxy
 # rewrite when present, (2) clones (with retry/backoff) or pulls the private repo
-# into ~/.agents, (3) ensures the dotagents CLI is installed, (4) links the current
-# project's .agents into the repo, (5) wires the private-sync hooks into
-# ~/.claude/settings.json so per-session pull/sync-back actually runs.
+# into ~/.agents, (3) ensures the dotagents CLI is installed, (4) installs the
+# private-sync OVERLAY (which supplies `link-project`/`sync-project` -- they are not
+# dotagents commands), (5) links the current project's .agents into the repo,
+# (6) wires the private-sync hooks into ~/.claude/settings.json so per-session
+# pull/sync-back actually runs.
 # Safe to run at every container start; never fails hard.
 #
 # Self-heal: the container-start clone often loses a race with egress/proxy
@@ -27,7 +29,7 @@
 # fails, we persist a copy of THIS script and wire a SessionStart *recovery* hook
 # that re-runs it next session -- when egress is up, the clone (and steps 3-5)
 # succeed, and that same run removes the recovery hook. Without (b) the private-sync
-# hooks -- which can themselves re-clone -- would never get registered, since step 5
+# hooks -- which can themselves re-clone -- would never get registered, since step 6
 # is what registers them. (b) also fires when AGENTS_REMOTE is unset at
 # setup time: hosted runners often expose secrets to the session but not to the
 # setup-script phase, so the very first bootstrap has no remote to clone -- the
@@ -41,6 +43,11 @@
 #   DOTAGENTS_CLI_INSTALL    pip spec for the CLI if not already installed
 #                            (default: "dotagents"; e.g. a git URL if unpublished)
 #   CLAUDE_PROJECT_DIR       project to link (default: current directory)
+#   AGENTS_OVERLAYS_SRC      local overlay source dir; set it to skip the overlays-
+#                            branch fetch in step 4 entirely
+#   DOTAGENTS_OVERLAYS_REMOTE / DOTAGENTS_OVERLAYS_REF
+#                            where to fetch the private-sync overlay from
+#                            (default: this repo, branch `overlays`)
 #
 # back-compat: the old names DOTAGENTS_AGENTS_REMOTE / DOTAGENTS_AGENTS_DIR are
 # still honored this release (removable next); the AGENTS_* names win when both set.
@@ -215,12 +222,60 @@ if ! command -v dotagents >/dev/null 2>&1 && ! python -m dotagents --version >/d
 fi
 dg_cli() { if command -v dotagents >/dev/null 2>&1; then dotagents "$@"; else python -m dotagents "$@"; fi; }
 
-# --- 4. Link the current project's .agents into the repo. ---------------------
-if [ -d "$PROJECT_DIR" ]; then
-    dg_cli link "$PROJECT_DIR" --agents-dir "$AGENTS_DIR" || echo "dotagents: link failed"
+# --- 4. Install the private-sync overlay (it SUPPLIES link-project). ----------
+# Ordering matters: `link-project` is not a dotagents command -- the private-sync
+# overlay ships it (with `sync-project` and their logic). This bootstrap IS the
+# private-sync bootstrap, so the overlay must be installed BEFORE step 5 links.
+# Skipped when already installed (and when the store already provides the command,
+# e.g. a user's own cmds module), so the common path costs nothing.
+#
+# The example overlays live on the dotagents repo's `overlays` BRANCH, not in
+# main's tree, and `overlays add --source` takes a local directory -- so fetch that
+# branch shallowly into a temp dir and point --source at its overlays/ dir.
+# AGENTS_OVERLAYS_SRC (or a pre-populated <store>/overlays/private-sync) short-
+# circuits the fetch entirely, for an air-gapped or pinned setup.
+DOTAGENTS_OVERLAYS_REMOTE="${DOTAGENTS_OVERLAYS_REMOTE:-https://github.com/jose-pr/dotagents.git}"
+DOTAGENTS_OVERLAYS_REF="${DOTAGENTS_OVERLAYS_REF:-overlays}"
+
+_dg_have_link_project() {
+    dg_cli --help 2>/dev/null | grep -q -- "link-project"
+}
+
+if [ -d "$AGENTS_DIR/overlays/private-sync" ]; then
+    echo "dotagents: private-sync overlay already installed"
+elif [ -n "${AGENTS_OVERLAYS_SRC:-}" ]; then
+    echo "dotagents: installing the private-sync overlay from AGENTS_OVERLAYS_SRC"
+    dg_cli overlays add private-sync --agents-dir "$AGENTS_DIR" -g \
+        || echo "dotagents: private-sync overlay install failed (AGENTS_OVERLAYS_SRC)"
+else
+    _dg_ovl_tmp="$(mktemp -d 2>/dev/null || echo /tmp/dg-overlays.$$)"
+    echo "dotagents: fetching the overlays branch ($DOTAGENTS_OVERLAYS_REF) for private-sync"
+    if dg_git clone --quiet --depth 1 --branch "$DOTAGENTS_OVERLAYS_REF" \
+        "$DOTAGENTS_OVERLAYS_REMOTE" "$_dg_ovl_tmp/src" 2>/dev/null; then
+        dg_cli overlays add private-sync --source "$_dg_ovl_tmp/src/overlays" \
+            --agents-dir "$AGENTS_DIR" -g \
+            || echo "dotagents: private-sync overlay install failed"
+    else
+        echo "dotagents: could not fetch the overlays branch; private-sync commands unavailable"
+    fi
+    rm -rf "$_dg_ovl_tmp" 2>/dev/null
 fi
 
-# --- 5. Wire the private-sync hooks into ~/.claude/settings.json. --------------
+# --- 5. Link the current project's .agents into the repo. ---------------------
+# `link-project` (renamed from the old bare `link`) comes from the overlay added
+# in step 4. Fail with a CLEAR message if it is missing rather than letting the
+# CLI's "unknown subcommand" error scroll past -- the cause is always step 4.
+if [ -d "$PROJECT_DIR" ]; then
+    if _dg_have_link_project; then
+        dg_cli link-project "$PROJECT_DIR" --agents-dir "$AGENTS_DIR" \
+            || echo "dotagents: link-project failed"
+    else
+        echo "dotagents: link-project unavailable -- the private-sync overlay is not installed"
+        echo "dotagents: install it, then re-run: dotagents overlays add private-sync --source <overlays-checkout>"
+    fi
+fi
+
+# --- 6. Wire the private-sync hooks into ~/.claude/settings.json. --------------
 # The hooks (SessionStart pull/link, Stop sync-back) live in the private repo and
 # do nothing until registered in the USER-level settings file. A fresh container
 # has no ~/.claude/settings.json, and nothing else creates one -- without this

@@ -1,7 +1,7 @@
 """Scope and overlay-source resolution for ``dotagents overlays``.
 
 Two orthogonal axes the ``overlays`` command needs, kept out of ``cli.py`` (which
-only wires args) to match ``_overlays.py`` / ``_skills.py`` / ``_link.py``:
+only wires args) to match ``_overlays.py`` / ``_skills.py`` / ``_sync.py``:
 
 * **Scope** -- *where installed overlays live*. ``user`` is ``<agents_dir>/`` (the
   configurable store, default ``~/.agents``); ``project`` is ``<project>/.agents/``.

@@ -211,18 +211,25 @@ def _apply_base(
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(source_path), str(target_path))
 
-    # Lay down the bundled command modules (D76: link/sync + any other bundled
-    # cmd) into `<dest>/dotagents/cmds/` so `dotagents link`/`sync` are discovered
-    # after a fresh install. Create-if-absent per file, exactly like the plain
-    # files -- a user's own edits to an installed command module are never
-    # clobbered on a reinstall.
+    # Create `<dest>/dotagents/cmds/` and lay down whatever the base overlay
+    # bundles for it. dotagents itself now bundles NO command module (D85:
+    # link/sync moved to the private-sync overlay as link-project/sync-project,
+    # with their logic) -- but the DIR is still created unconditionally, because
+    # it is the documented user extension point: a `*.py` command module dropped
+    # here is discovered with zero config (see the README laid down beside it).
+    # Create-if-absent per file, exactly like the plain files -- a user's own
+    # edits to an installed command module are never clobbered on a reinstall.
     cmds_src = Path(src) / "dotagents" / "cmds"
+    cmds_dest = dest / "dotagents" / "cmds"
+    if not dry_run:
+        cmds_dest.mkdir(parents=True, exist_ok=True)
     if cmds_src.is_dir():
-        for source_path in sorted(cmds_src.glob("*.py")):
+        sources = sorted(cmds_src.glob("*.py")) + sorted(cmds_src.glob("*.md"))
+        for source_path in sources:
             if source_path.name.startswith("_"):
                 continue
             rel = "dotagents/cmds/%s" % source_path.name
-            target_path = dest / "dotagents" / "cmds" / source_path.name
+            target_path = cmds_dest / source_path.name
             if target_path.exists():
                 logger.info("skipped (present): %s", rel)
                 continue

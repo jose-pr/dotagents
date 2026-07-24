@@ -1,6 +1,11 @@
-"""Tests for command discovery (D76): `dotagents.cli._discover` resolving the
-built-in commands plus command modules from the bundled cmds dir, the per-scope
-cmds dirs (user + project), `$AGENTS_CMDS_PATH`, and `--cmdspath`.
+"""Tests for command discovery (D76/D84): `dotagents.cli._discover` resolving the
+built-in commands plus command modules from the bundled cmds dir, each installed
+overlay's `cmds/`, the per-scope cmds dirs (user + project), `$AGENTS_CMDS_PATH`,
+and `--cmdspath`.
+
+Since D85 dotagents bundles NO command module: `link`/`sync` became the
+private-sync overlay's `link-project`/`sync-project`, so the baseline surface is
+built-ins only and an OVERLAY's cmds dir is what adds a private-sync command.
 
 Filesystem-only (tmp_path); no network. NEVER exports HOME/USERPROFILE -- the
 user scope is redirected via `$AGENTS_HOME` and the project scope via
@@ -40,18 +45,19 @@ class Toy(LoggingArgs, Cmd):
         return 0
 '''
 
-# A command module that shadows the discovered `link` command, to prove
-# later-source-wins dedup by _parsername_.
-SHADOW_LINK = '''\
-"""A command module claiming the `link` name (shadow test)."""
+# A command module that shadows the built-in `init` command, to prove
+# later-source-wins dedup by _parsername_. (It used to shadow the bundled `link`;
+# dotagents bundles no command module since D85, so a built-in is the target.)
+SHADOW_INIT = '''\
+"""A command module claiming the `init` name (shadow test)."""
 
 from duho import Cmd, LoggingArgs
 
 
-class ShadowLink(LoggingArgs, Cmd):
-    """Shadow link."""
+class ShadowInit(LoggingArgs, Cmd):
+    """Shadow init."""
 
-    _parsername_ = "link"
+    _parsername_ = "init"
 
     def __call__(self) -> int:
         return 0
@@ -73,29 +79,55 @@ def _write(path: Path, text: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Baseline: built-ins + bundled link/sync
+# Baseline: built-ins only -- dotagents bundles no command module (D85)
 # --------------------------------------------------------------------------- #
 
 
-def test_discover_includes_builtins_and_bundled_link_sync(monkeypatch, tmp_path):
+def test_discover_includes_builtins_only(monkeypatch, tmp_path):
     # Point both scopes at empty dirs so only built-ins + bundled cmds contribute.
     monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
     monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
     monkeypatch.chdir(tmp_path)
 
     names = _names(cli._discover([]))
-    # Compiled built-ins survive the app switch (audit stays a built-in, D84).
+    # The compiled built-ins survive the app switch.
     for builtin in ("init", "build-pyz", "context", "env", "overlays"):
         assert builtin in names
-    # link/sync come from the bundled cmds dir, not `_subcommands_`.
-    assert "link" in names
-    assert "sync" in names
+    # D85: link/sync left the package. They are `link-project`/`sync-project`,
+    # shipped by the opt-in private-sync overlay together with their logic, so a
+    # plain dotagents (no overlay installed) offers no private-sync command.
+    for gone in ("link", "sync", "link-project", "sync-project"):
+        assert gone not in names
     # leak-check is GONE from the repo entirely (D84): it is a personal command
     # module the user drops into their private `.agents/cmds/`, discovered only
     # when present -- never a default of a fresh install.
     assert "leak-check" not in names
-    # link/sync are no longer compiled built-ins.
+    # Built-ins are handed to `duho.app` via `commands=`, never `_subcommands_`.
     assert cli.Dotagents._subcommands_ == []
+
+
+def test_bundled_cmds_dir_ships_no_command_module(monkeypatch, tmp_path):
+    # The bundled cmds DIR still exists (it stays a discovery source and `init`
+    # lays it down as the user's drop-in point) but ships no *.py command.
+    bundled = cli._bundled_cmds_dir()
+    assert bundled is not None and bundled.is_dir()
+    assert [p.name for p in bundled.glob("*.py") if not p.name.startswith("_")] == []
+
+
+def test_overlay_supplies_link_project(monkeypatch, tmp_path):
+    # The acceptance shape of D85: an installed overlay's cmds/ is what makes
+    # `link-project` exist. (The real modules live on the overlays branch; this
+    # asserts the discovery seam they plug into, with a stand-in module.)
+    user_root = tmp_path / "user" / ".agents"
+    _write(
+        user_root / "overlays" / "private-sync" / "cmds" / "link_project.py",
+        TOY.replace('_parsername_ = "toy"', '_parsername_ = "link-project"'),
+    )
+    monkeypatch.setenv("AGENTS_HOME", str(user_root))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    assert "link-project" in _names(cli._discover([]))
 
 
 def test_installed_overlay_cmds_are_discovered(monkeypatch, tmp_path):
@@ -213,21 +245,22 @@ def test_bad_source_is_skipped_not_fatal(monkeypatch, tmp_path):
 
 
 def test_later_source_wins_dedup(monkeypatch, tmp_path):
-    # The bundled cmds provide `link`; an env-var source shadows it. Later wins.
+    # `init` is a compiled built-in (the earliest source); an env-var source
+    # claims the same name. Later wins.
     shadow = tmp_path / "shadow"
-    _write(shadow / "shadowlink.py", SHADOW_LINK)
+    _write(shadow / "shadowinit.py", SHADOW_INIT)
     monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
     monkeypatch.setenv("AGENTS_CMDS_PATH", str(shadow))
     monkeypatch.chdir(tmp_path)
 
     commands = cli._discover([])
-    link_cmds = [
+    init_cmds = [
         c for c in commands
-        if (getattr(c, "_parsername_", None) or getattr(c, "__name__", None)) == "link"
+        if (getattr(c, "_parsername_", None) or getattr(c, "__name__", None)) == "init"
     ]
-    # Exactly one `link` in the resolved set (dedup), and it is the shadow.
-    assert len(link_cmds) == 1
-    assert link_cmds[0].__name__ == "ShadowLink"
+    # Exactly one `init` in the resolved set (dedup), and it is the shadow.
+    assert len(init_cmds) == 1
+    assert init_cmds[0].__name__ == "ShadowInit"
 
 
 def test_project_overrides_user_scope(monkeypatch, tmp_path):

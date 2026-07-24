@@ -1,14 +1,17 @@
-"""dotagents CLI: init / audit / context / env / overlays / build-pyz built-in
-subcommands, plus link / sync (bundled command modules) and any user or overlay
-command modules discovered from a `cmds` directory (D76/D84).
+"""dotagents CLI: init / context / env / overlays / build-pyz built-in
+subcommands, plus any user or overlay command modules discovered from a `cmds`
+directory (D76/D84).
 
-`audit` STAYS a compiled built-in: once its personal defaults are emptied (D84) it
-is a generic config validator any fork needs, and CI self-validates via the
-the bundled `cmds/audit.py` command module. `leak-check` is no longer in the repo at all:
-it enforces personal plan-naming conventions, so it moves to the user's private
-`.agents/cmds/` as a discovered command module (D84), not the public repo.
+dotagents bundles NO command module of its own (D85). `link`/`sync` used to ship
+in `_overlay/dotagents/cmds/`; they are now `link-project`/`sync-project`,
+shipped -- together with their logic -- by the opt-in **private-sync** overlay,
+so plain dotagents carries no private-sync workflow. The bundled cmds DIR still
+exists and is still laid down by `init`: it is the user's documented drop-in
+point for their own commands. `leak-check` is likewise not in the repo: it
+enforces personal plan-naming conventions, so it lives in the user's private
+`.agents/dotagents/cmds/` as a discovered command module (D84).
 
-The per-command classes live in sibling modules (`cli/init.py`, `cli/audit.py`,
+The per-command classes live in sibling modules (`cli/init.py`, `cli/overlays.py`,
 ...); this package base holds the shared helpers (in `cli/_common.py`, re-exported
 here), the `Dotagents(LoggingArgs, Cli)` umbrella, `main()` (the `install.py` shim +
 `python -m dotagents` entrypoint), `_discover` (command-source resolution), and
@@ -17,11 +20,12 @@ repo root is the entrypoint shim, unrelated to the removed `install` subcommand 
 `init` now lays down the base + optional `--bin-dir` wrappers, D82.)
 
 Dispatch (D76): `main()` routes through `duho.app`, not `duho.main`, so command
-discovery runs. `link`/`sync` are no longer compiled built-ins -- they ship as
-command MODULES in the bundled `_overlay/dotagents/cmds/` dir (`init` lays them
-into `<store>/dotagents/cmds/`), discovered from there, from each installed
-overlay's `<overlay-root>/cmds/`, and from a per-scope `cmds` dir (one
-`get_file_paths` Contract-A walk, `_cmds_dirs`). `app`'s DEFAULT dispatch is used (dotagents has no fan-out):
+discovery runs. Command MODULES are discovered from the bundled
+`_overlay/dotagents/cmds/` dir (empty by default since D85, but still a source),
+from each installed overlay's `<overlay-root>/cmds/` -- this is how the
+private-sync overlay supplies `link-project`/`sync-project` -- and from a
+per-scope `cmds` dir (one `get_file_paths` Contract-A walk, `_cmds_dirs`).
+`app`'s DEFAULT dispatch is used (dotagents has no fan-out):
 a plain `(LoggingArgs, Cmd)` class command dispatches through `app` exactly as it
 did through `main` -- `app` calls the class's `__call__`.
 
@@ -57,8 +61,9 @@ from dotagents.cli._common import (  # noqa: F401
 # Import each built-in command class to register it as a compiled subcommand.
 # Importing the command modules here (never the reverse) keeps the dependency
 # edges one-directional: command modules -> cli._common / dotagents._*, and
-# cli/__init__ -> command modules. link/sync are NOT imported here anymore --
-# they are discovered command modules (see `_discover`).
+# cli/__init__ -> command modules. link/sync are NOT imported here -- they left
+# the package entirely (D85: the private-sync overlay ships link-project/
+# sync-project as discovered command modules; see `_discover`).
 from dotagents.cli.build_pyz import BuildPyz
 from dotagents.cli.context import Context
 from dotagents.cli.env import Env
@@ -73,14 +78,13 @@ from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
 
 _LOGGER = logging.getLogger("dotagents")
 
-# The compiled built-in command classes, in --help order. link/sync are gone
-# (now discovered modules -- they ship in the bundled `_overlay/dotagents/cmds/`
-# dir). audit STAYS a compiled built-in: once its personal defaults are emptied
-# (D84) it is a generic config validator any fork needs, and CI self-validates via
-# the bundled cmds/audit.py command module. leak-check is gone from the repo entirely
-# (personal -- it moves to the user's private `.agents/cmds/`, D84). `_discover`
-# seeds the command set with these, then layers discovered commands over them
-# (later source wins on a name clash).
+# The compiled built-in command classes, in --help order. This is dotagents' WHOLE
+# shipped surface: link/sync left the package with their logic (D85 -- the
+# private-sync overlay supplies link-project/sync-project), leak-check is personal
+# (D84 -- the user's private `.agents/dotagents/cmds/`), and audit is repo CI
+# tooling (`tools/audit.py`), not a command. `_discover` seeds the command set
+# with these, then layers discovered commands over them (later source wins on a
+# name clash).
 _BUILTIN_COMMANDS = [
     Init,
     BuildPyz,
@@ -91,10 +95,10 @@ _BUILTIN_COMMANDS = [
 
 # The cli submodules whose sources duho introspects for flag/help definitions.
 # Every module that defines a field-bearing BUILT-IN command class must be
-# repointed inside a zipapp (see `_repoint_zipapp_sources`). link/sync are no
-# longer here -- they are discovered from the bundled cmds dir, which is
-# extracted to a real temp file before import (so its `__file__` already exists;
-# no repoint needed -- see `_bundled_cmds_dir`).
+# repointed inside a zipapp (see `_repoint_zipapp_sources`). DISCOVERED command
+# modules never need repointing: an overlay's cmds live on the real filesystem,
+# and the bundled cmds dir is extracted to real temp files by `_package_data_dir`
+# before import (so its `__file__` already exists -- see `_bundled_cmds_dir`).
 _COMMAND_MODULES = (
     "dotagents.cli.init",
     "dotagents.cli.context",
@@ -136,8 +140,8 @@ class Dotagents(LoggingArgs, Cli):
 
     def __call__(self) -> int:
         self._logger_.info(
-            "pick a subcommand, e.g. `init`, `overlays`, `link`, `sync`, "
-            "`audit`, `build-pyz`"
+            "pick a subcommand, e.g. `init`, `overlays`, `context`, `env`, "
+            "`build-pyz`"
         )
         return 0
 
@@ -145,8 +149,11 @@ class Dotagents(LoggingArgs, Cli):
 def _bundled_cmds_dir() -> "Path | None":
     """The bundled command-module dir shipped inside the package (D76).
 
-    `<package>/_overlay/dotagents/cmds` holds `link.py`/`sync.py` (and any other
-    bundled command module). Resolved `.pyz`-safe via `_package_data_dir`, which
+    `<package>/_overlay/dotagents/cmds` is that dir. dotagents bundles no command
+    module of its own since D85 (link/sync moved to the private-sync overlay), so
+    it normally holds only its README -- but it stays a discovery source, and
+    `init` still lays it down as the user's drop-in point. Resolved `.pyz`-safe
+    via `_package_data_dir`, which
     extracts a zip-backed `_overlay` to a real temp dir once -- so the modules
     `discover_commands` imports from here always have a real on-disk `__file__`,
     and the zipapp AST-introspection shim (`_repoint_zipapp_sources`) does NOT
@@ -231,8 +238,8 @@ def _discover(argv=None) -> "list":
     dedup by resolved subcommand name):
 
     1. the compiled built-in command classes (`_BUILTIN_COMMANDS`);
-    2. the bundled command modules (`link`/`sync`) in `<package>/_overlay/
-       dotagents/cmds` -- always available, even before an install;
+    2. the bundled command-module dir `<package>/_overlay/dotagents/cmds` --
+       always available, even before an install (empty of commands since D85);
     3. the Contract-A `cmds` dirs (`_cmds_dirs`): each installed overlay's
        `<overlay-root>/cmds`, then system/user/project `<scope>/dotagents/cmds`,
        in Contract-A precedence (overlays < system < user < project). This is what
@@ -252,7 +259,7 @@ def _discover(argv=None) -> "list":
         name = getattr(command, "_parsername_", None) or command.__name__
         by_name[name] = command
 
-    # 2. bundled cmds (link/sync)
+    # 2. bundled cmds dir (ships no command of its own since D85)
     bundled = _bundled_cmds_dir()
     if bundled is not None:
         _discover_dir(bundled, by_name)
@@ -296,10 +303,11 @@ def _repoint_zipapp_sources() -> None:
 
     Each BUILT-IN command class lives in its own `dotagents.cli.<x>` module, so
     EVERY such module is repointed (plus duho's `LoggingArgs` preset,
-    `duho.presets`). The DISCOVERED command modules (`link`/`sync` from the
-    bundled `_overlay/dotagents/cmds`) do NOT need repointing: `_package_data_dir`
-    extracts a zip-backed `_overlay` to real temp files before `discover_commands`
-    imports them, so their `__file__` already exists on disk.
+    `duho.presets`). DISCOVERED command modules do NOT need repointing: an
+    overlay's or a scope's cmds live on the real filesystem, and for the bundled
+    `_overlay/dotagents/cmds` dir `_package_data_dir` extracts a zip-backed
+    `_overlay` to real temp files before `discover_commands` imports from it, so
+    their `__file__` already exists on disk.
 
     Tracked upstream: jose-pr/duho#1 -- drop this shim (and the build-pyz CI
     guard) once duho's getclsdef falls through to inspect.getsource when

@@ -66,7 +66,8 @@ def run_overlay_setup(
     **Idempotency is the overlay author's contract**: the script must be safe to
     run on every ``add``/``sync`` (check-then-act). The runner only invokes it.
 
-    Invocation, matching ``_link.py``'s hook style (pure stdlib subprocess):
+    Invocation (pure stdlib subprocess, the same style the private-sync overlay's
+    sync hook uses):
 
     * **cwd** = the installed overlay dir, so the script sees its own files.
     * **env** carries ``AGENTS_HOME`` = the resolved store path (D58
