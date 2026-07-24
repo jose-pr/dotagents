@@ -114,6 +114,21 @@ overlay. Removing an overlay deletes only its dir and unpublishes only the skill
 published; its lines in `AGENTS.md`'s managed block are not auto-pruned (a warning points
 at the manual edit, or re-run `install`).
 
+**Overlay `setup` scripts.** An overlay may ship an **idempotent** `setup` (extensionless
+POSIX script) or `setup.py` at its root. After `add`/`sync` copies the overlay in,
+dotagents runs that script automatically — so anything a human would otherwise hand-follow
+(PATH/lib wiring, self-registration) is one script the tool runs, not a doc. Presence of
+the script is the opt-in; skip it with `--no-setup`. The contract for authors:
+
+- **Idempotent** — safe to run on every `add`/`sync`; check-then-act, never blindly append.
+- **cwd** is the installed overlay dir (`<scope>/.agents/overlays/<name>/`), so reference
+  your own files by relative path.
+- **Env** carries `DOTAGENTS_AGENTS_DIR` (the resolved store path — never hardcode
+  `~/.agents`) and `DOTAGENTS_OVERLAY_DIR` (your own installed dir).
+- A **non-zero exit fails the install** with a clear error (not a silent skip). For any
+  outward or irreversible action the *script* must confirm first — the runner invokes a
+  script you chose to install; it does not second-guess it.
+
 **Downloadable `dotagents.pyz`** — a self-contained zipapp with `duho`/
 `pathlib_next` and the required `tools/` bundled in, so it needs no `pip install`:
 

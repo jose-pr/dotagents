@@ -319,3 +319,130 @@ def test_cmd_sync_glob_filter(tmp_path):
     assert rc == 0
 
 
+# --------------------------------------------------------------------------- #
+# Overlay setup scripts (plan 06)
+# --------------------------------------------------------------------------- #
+
+def _add_setup_overlay(src: Path, name: str, body: str):
+    """Add an overlay `name` under source `src` shipping a `setup.py` with `body`.
+
+    A `setup.py` runs under the current interpreter cross-platform (no `sh`
+    needed), so these tests are Windows-safe. `body` is Python appended after a
+    small preamble exposing the marker path helpers."""
+    o = src / name
+    o.mkdir(parents=True)
+    (o / "file.md").write_text("f\n", encoding="utf-8")
+    preamble = (
+        "import os, sys\n"
+        "agents = os.environ['DOTAGENTS_AGENTS_DIR']\n"
+        "overlay = os.environ.get('DOTAGENTS_OVERLAY_DIR', os.getcwd())\n"
+    )
+    (o / "setup.py").write_text(preamble + body, encoding="utf-8")
+    return o
+
+
+def test_setup_runs_on_add(tmp_path):
+    from dotagents.cli import OverlayAdd
+
+    src = tmp_path / "src_overlays"
+    # setup writes a marker inside the store, proving it ran with the right env.
+    _add_setup_overlay(
+        src, "with-setup",
+        "open(os.path.join(agents, 'SETUP_RAN'), 'w').write('ok')\n",
+    )
+    scope = make_scope(tmp_path)
+    rc = _run(OverlayAdd, name=["with-setup"], source=str(src), global_scope=True,
+              agents_dir=scope.agents_root, copy=True, dry_run=False)
+    assert rc == 0
+    assert (scope.agents_root / "SETUP_RAN").is_file()
+
+
+def test_setup_cwd_is_installed_overlay_dir(tmp_path):
+    from dotagents.cli import OverlayAdd
+
+    src = tmp_path / "src_overlays"
+    # The marker lands via a *relative* path -> proves cwd is the installed dir,
+    # and its content is DOTAGENTS_OVERLAY_DIR -> proves that env var is set.
+    _add_setup_overlay(
+        src, "cwd-demo",
+        "open('MARKER', 'w').write(overlay)\n",
+    )
+    scope = make_scope(tmp_path)
+    _run(OverlayAdd, name=["cwd-demo"], source=str(src), global_scope=True,
+         agents_dir=scope.agents_root, copy=True, dry_run=False)
+    marker = scope.overlay_root / "cwd-demo" / "MARKER"
+    assert marker.is_file()
+    assert marker.read_text(encoding="utf-8") == str(scope.overlay_root / "cwd-demo")
+
+
+def test_add_without_setup_is_fine(tmp_path):
+    from dotagents.cli import OverlayAdd
+
+    src = make_source(tmp_path)  # py-demo / plain ship no setup script
+    scope = make_scope(tmp_path)
+    rc = _run(OverlayAdd, name=["plain"], source=str(src), global_scope=True,
+              agents_dir=scope.agents_root, copy=True, dry_run=False)
+    assert rc == 0
+    assert (scope.overlay_root / "plain" / "note.md").is_file()
+
+
+def test_no_setup_flag_skips(tmp_path):
+    from dotagents.cli import OverlayAdd
+
+    src = tmp_path / "src_overlays"
+    _add_setup_overlay(
+        src, "with-setup",
+        "open(os.path.join(agents, 'SETUP_RAN'), 'w').write('ok')\n",
+    )
+    scope = make_scope(tmp_path)
+    rc = _run(OverlayAdd, name=["with-setup"], source=str(src), global_scope=True,
+              agents_dir=scope.agents_root, copy=True, dry_run=False, no_setup=True)
+    assert rc == 0
+    # Overlay installed, but the setup marker must NOT exist.
+    assert (scope.overlay_root / "with-setup" / "file.md").is_file()
+    assert not (scope.agents_root / "SETUP_RAN").exists()
+
+
+def test_setup_nonzero_exit_surfaces_error(tmp_path):
+    from dotagents.cli import OverlayAdd
+
+    src = tmp_path / "src_overlays"
+    _add_setup_overlay(src, "bad-setup", "sys.exit(3)\n")
+    scope = make_scope(tmp_path)
+    with pytest.raises(SystemExit):
+        _run(OverlayAdd, name=["bad-setup"], source=str(src), global_scope=True,
+             agents_dir=scope.agents_root, copy=True, dry_run=False)
+
+
+def test_setup_dry_run_does_not_run(tmp_path):
+    from dotagents.cli import OverlayAdd
+
+    src = tmp_path / "src_overlays"
+    _add_setup_overlay(
+        src, "with-setup",
+        "open(os.path.join(agents, 'SETUP_RAN'), 'w').write('ok')\n",
+    )
+    scope = make_scope(tmp_path)
+    _run(OverlayAdd, name=["with-setup"], source=str(src), global_scope=True,
+         agents_dir=scope.agents_root, copy=True, dry_run=True)
+    assert not (scope.agents_root / "SETUP_RAN").exists()
+
+
+def test_setup_runs_on_sync(tmp_path):
+    from dotagents.cli import OverlayAdd, OverlaySync
+
+    src = tmp_path / "src_overlays"
+    # Idempotent-style setup: append a line each run so we can count invocations.
+    _add_setup_overlay(
+        src, "with-setup",
+        "open(os.path.join(agents, 'RUNS'), 'a').write('x')\n",
+    )
+    scope = make_scope(tmp_path)
+    _run(OverlayAdd, name=["with-setup"], source=str(src), global_scope=True,
+         agents_dir=scope.agents_root, copy=True, dry_run=False)
+    _run(OverlaySync, pattern="with-setup", source=str(src), global_scope=True,
+         agents_dir=scope.agents_root, copy=True, dry_run=False)
+    # Ran once on add + once on sync.
+    assert (scope.agents_root / "RUNS").read_text(encoding="utf-8") == "xx"
+
+
