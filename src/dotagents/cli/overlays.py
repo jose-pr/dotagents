@@ -23,7 +23,7 @@ class OverlayAdd(LoggingArgs, Cmd):
     """Install overlay(s) by name into a scope, and publish their skills.
 
     Resolves each ``<name>`` against the source (``--source`` /
-    ``$DOTAGENTS_OVERLAYS_SRC``, default the bundled ``overlays/``), copies it into
+    ``$AGENTS_OVERLAYS_SRC``, default the bundled ``overlays/``), copies it into
     ``<scope>/.agents/overlays/<name>/`` (discoverable), merges its D59
     routing/rules into the installed ``AGENTS.md`` managed block (additive), and
     publishes its ``skills/`` into the shared ``<scope>/.agents/skills/`` so every
@@ -37,7 +37,7 @@ class OverlayAdd(LoggingArgs, Cmd):
     ("name",)
 
     source: Optional[str] = None
-    "Overlay source directory (default: $DOTAGENTS_OVERLAYS_SRC or the bundled overlays/)."
+    "Overlay source directory (default: $AGENTS_OVERLAYS_SRC or the bundled overlays/)."
     ("--source",)
 
     global_scope: bool = False
@@ -194,7 +194,7 @@ class OverlayList(LoggingArgs, Cmd):
     _parsername_ = "list"
 
     source: Optional[str] = None
-    "Overlay source directory (default: $DOTAGENTS_OVERLAYS_SRC or the bundled overlays/)."
+    "Overlay source directory (default: $AGENTS_OVERLAYS_SRC or the bundled overlays/)."
     ("--source",)
 
     global_scope: bool = False
@@ -261,7 +261,7 @@ class OverlaySync(LoggingArgs, Cmd):
     ("pattern",)
 
     source: Optional[str] = None
-    "Overlay source directory (default: $DOTAGENTS_OVERLAYS_SRC or the bundled overlays/)."
+    "Overlay source directory (default: $AGENTS_OVERLAYS_SRC or the bundled overlays/)."
     ("--source",)
 
     global_scope: bool = False

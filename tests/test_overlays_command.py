@@ -82,7 +82,27 @@ def test_source_resolution_explicit_path(tmp_path):
 
 def test_source_resolution_env(tmp_path, monkeypatch):
     src = make_source(tmp_path)
+    monkeypatch.delenv(_scope.SOURCE_ENV_LEGACY, raising=False)
     monkeypatch.setenv(_scope.SOURCE_ENV, str(src))
+    source = _scope.resolve_source(None)
+    assert "py-demo" in source.available()
+
+
+def test_source_resolution_env_legacy_fallback(tmp_path, monkeypatch):
+    # D80 back-compat: the old $DOTAGENTS_OVERLAYS_SRC still resolves when the new
+    # $AGENTS_OVERLAYS_SRC is unset.
+    src = make_source(tmp_path)
+    monkeypatch.delenv(_scope.SOURCE_ENV, raising=False)
+    monkeypatch.setenv(_scope.SOURCE_ENV_LEGACY, str(src))
+    source = _scope.resolve_source(None)
+    assert "py-demo" in source.available()
+
+
+def test_source_resolution_env_new_name_wins(tmp_path, monkeypatch):
+    # Both set: the new name wins.
+    src = make_source(tmp_path)
+    monkeypatch.setenv(_scope.SOURCE_ENV, str(src))
+    monkeypatch.setenv(_scope.SOURCE_ENV_LEGACY, str(tmp_path / "nonexistent-legacy"))
     source = _scope.resolve_source(None)
     assert "py-demo" in source.available()
 
@@ -92,6 +112,7 @@ def test_source_resolution_no_bundled_errors(tmp_path, monkeypatch):
     # and this test env packages none. With no --source and no env, resolve_source
     # must fail with a clear "no overlay source" error, not silently pick nothing.
     monkeypatch.delenv(_scope.SOURCE_ENV, raising=False)
+    monkeypatch.delenv(_scope.SOURCE_ENV_LEGACY, raising=False)
     if _scope.bundled_overlays_root() is not None:
         pytest.skip("this build/checkout bundles overlays; default-source error N/A")
     with pytest.raises(SystemExit, match="no overlay source"):
@@ -336,8 +357,8 @@ def _add_setup_overlay(src: Path, name: str, body: str):
     (o / "file.md").write_text("f\n", encoding="utf-8")
     preamble = (
         "import os, sys\n"
-        "agents = os.environ['DOTAGENTS_AGENTS_DIR']\n"
-        "overlay = os.environ.get('DOTAGENTS_OVERLAY_DIR', os.getcwd())\n"
+        "agents = os.environ['AGENTS_HOME']\n"
+        "overlay = os.environ.get('AGENTS_OVERLAY_DIR', os.getcwd())\n"
     )
     (o / "setup.py").write_text(preamble + body, encoding="utf-8")
     return o
@@ -357,6 +378,26 @@ def test_setup_runs_on_add(tmp_path):
               agents_dir=scope.agents_root, copy=True, dry_run=False)
     assert rc == 0
     assert (scope.agents_root / "SETUP_RAN").is_file()
+
+
+def test_setup_env_sets_both_new_and_legacy_names(tmp_path):
+    # D80 dual-SET back-compat: the runner emits the new AGENTS_* names AND the
+    # deprecated DOTAGENTS_* names (removable next release), so existing setup
+    # scripts keep working. The script asserts all four are present and equal.
+    from dotagents.cli import OverlayAdd
+
+    src = tmp_path / "src_overlays"
+    _add_setup_overlay(
+        src, "dual-env",
+        "assert os.environ['AGENTS_HOME'] == os.environ['DOTAGENTS_AGENTS_DIR']\n"
+        "assert os.environ['AGENTS_OVERLAY_DIR'] == os.environ['DOTAGENTS_OVERLAY_DIR']\n"
+        "open(os.path.join(agents, 'DUAL_OK'), 'w').write('ok')\n",
+    )
+    scope = make_scope(tmp_path)
+    rc = _run(OverlayAdd, name=["dual-env"], source=str(src), global_scope=True,
+              agents_dir=scope.agents_root, copy=True, dry_run=False)
+    assert rc == 0
+    assert (scope.agents_root / "DUAL_OK").is_file()
 
 
 def test_setup_cwd_is_installed_overlay_dir(tmp_path):
