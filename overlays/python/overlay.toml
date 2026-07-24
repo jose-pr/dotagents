@@ -1,6 +1,0 @@
-name = "python"
-description = "Python repo conventions: kb, pyproject/mkdocs templates, CI workflows."
-requires = ["references"]
-routing = [
-  """- Python work → ~/.agents/kb/PYTHON.md""",
-]

@@ -1,6 +1,0 @@
-name = "node"
-description = "Node repo conventions: kb, package.json template, CI workflows."
-requires = ["references"]
-routing = [
-  """- Node/JavaScript work → ~/.agents/kb/NODE.md""",
-]
