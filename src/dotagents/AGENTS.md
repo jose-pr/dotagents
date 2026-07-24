@@ -66,6 +66,23 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   never `config.toml`). Codex's hook JSON is structurally identical to Claude's, so
   the same merge serves both. Gemini/Cursor/Copilot keep the base no-op: no
   published schema to target.
+- **Windows only**: `ClaudeAgent._wire_powershell_pretooluse` additionally wires a
+  no-matcher `PreToolUse` hook (fires on every tool call) pointing at
+  `_overlay/dotagents/hooks/pretooluse_powershell_env.ps1`, copied to
+  `<agents_home>/hooks/` (create-or-refresh — this script has no user-editable
+  region). Closes a real gap: `$CLAUDE_ENV_FILE` is Bash-tool-only (every hooks.md
+  mention says "subsequent Bash commands"; confirmed empirically that
+  `$env:CLAUDE_ENV_FILE` is empty inside a live PowerShell tool call), so the
+  SessionStart env half never reaches the PowerShell tool. The script uses
+  `PreToolUse`'s `updatedInput` to prepend a guarded env-loader
+  (`AGENTS_RUNTIME_SET`, matching the precursor's convention) to a `PowerShell`
+  tool call's own command — not by trying to persist state across hook
+  invocations, which are each their own fresh process and cannot. Whether the
+  guard is visible across separate PowerShell tool calls is UNVERIFIED; the
+  script logs every firing to `<agents_home>/hooks/logs/` to test this
+  empirically. Invoking the script MUST use a real spawned process
+  (`powershell -File ...`), never `& script.ps1` — the call operator runs
+  in-process and does not forward piped stdin, verified directly.
 - `_sync` — `PathSyncer` wrapper reproducing `install`'s backup/copy/report; requires
   `pathlib_next.Path` instances (not plain `pathlib.Path`) and a pre-created parent dir.
 

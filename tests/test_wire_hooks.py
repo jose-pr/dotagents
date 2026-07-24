@@ -22,6 +22,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from dotagents._agents import ClaudeAgent, CodexAgent  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path, monkeypatch):
+    """Redirect `Path.home()` for every test in this file to a throwaway dir.
+
+    `_wire_powershell_pretooluse` falls back to `Path.home() / ".agents" / "hooks"`
+    when a test omits `agents_home` -- and on Windows (`os.name == "nt"`, true on
+    the dev machine these tests are usually run on) that branch runs for every
+    `ClaudeAgent().wire_hooks()` call in this file. Passing `agents_home=`
+    explicitly everywhere is the primary defense (`test_never_touches_real_home`
+    checks it), but this autouse fixture is the backstop: any call that forgets it
+    -- present or added later -- still lands in an isolated directory instead of
+    the real `~/.agents/hooks/`, because `Path.home()` itself no longer resolves
+    there for the duration of the test.
+    """
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+
+
 def _toml_load(text):
     """Parse TOML, skipping the test where no parser is available.
 
@@ -195,6 +212,109 @@ def test_absent_skills_dir_is_tolerated(tmp_path):
     ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
     assert not (root / "skills").exists()
     assert _settings(root).is_file(), "hooks still wired without skills"
+
+
+class TestPowerShellPreToolUse:
+    """The $CLAUDE_ENV_FILE mechanism is Bash-tool-only (every hooks.md mention
+    says "subsequent Bash commands"; verified live that $env:CLAUDE_ENV_FILE is
+    empty inside a PowerShell tool call). This closes that gap independently via
+    a PreToolUse hook that injects a guarded env-loader into PowerShell tool
+    calls specifically, using `updatedInput` rather than trying to persist state
+    across the hook's own (separately-spawned, non-persistent) process."""
+
+    def test_windows_only(self, tmp_path):
+        """The gate itself (`os.name == "nt"`) can't safely be monkeypatched --
+        `pathlib.Path()` dispatches on the REAL `os.name` to choose
+        `WindowsPath`/`PosixPath`, so patching it mid-test corrupts every
+        subsequent `Path()` call, pytest's own included. Call the private
+        helper directly instead: it is unconditional (the `os.name` gate lives
+        in the CALLER, `wire_hooks`), so this only proves it produces a
+        `PreToolUse` entry when invoked -- the gate itself is inspected as
+        source, not exercised, since it cannot be safely exercised here.
+        """
+        import inspect
+
+        src = inspect.getsource(ClaudeAgent.wire_hooks)
+        assert 'os.name == "nt"' in src, (
+            "the PowerShell PreToolUse wiring must stay gated to Windows"
+        )
+
+    def test_copies_script_and_wires_pretooluse(self, tmp_path):
+        dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
+        agents_home = tmp_path / "agents_home"
+
+        ClaudeAgent().wire_hooks(
+            dest, dry_run=False, logger=None, config_root=root, agents_home=agents_home,
+        )
+
+        script = agents_home / "hooks" / ClaudeAgent.PRETOOLUSE_HOOK_SCRIPT
+        assert script.is_file()
+        # Byte-identical to the package's copy -- this is a create-or-refresh
+        # deploy, not a template the user edits.
+        from dotagents.cli._common import BASE_ROOT
+        package_script = Path(BASE_ROOT) / "dotagents" / "hooks" / ClaudeAgent.PRETOOLUSE_HOOK_SCRIPT
+        assert script.read_bytes() == package_script.read_bytes()
+
+        hooks = _hooks_of_settings(root)
+        assert "PreToolUse" in hooks
+        cmds = _commands(hooks["PreToolUse"])
+        assert len(cmds) == 1
+        assert "-File" in cmds[0]
+        assert ClaudeAgent.PRETOOLUSE_HOOK_SCRIPT in cmds[0]
+        assert "&" not in cmds[0].split("-File")[0], (
+            "must invoke via a real spawned process (-File), not `&` -- `&` runs "
+            "in-process and does not forward piped stdin to the script, verified "
+            "directly (0 bytes via `&`, correct bytes via `-File`)"
+        )
+
+    def test_idempotent_and_refreshes_a_stale_script(self, tmp_path):
+        dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
+        agents_home = tmp_path / "agents_home"
+        agent = ClaudeAgent()
+
+        agent.wire_hooks(
+            dest, dry_run=False, logger=None, config_root=root, agents_home=agents_home,
+        )
+        script = agents_home / "hooks" / ClaudeAgent.PRETOOLUSE_HOOK_SCRIPT
+        first_settings = _settings(root).read_text(encoding="utf-8")
+
+        # Re-run with an unchanged package script: nothing should change.
+        agent.wire_hooks(
+            dest, dry_run=False, logger=None, config_root=root, agents_home=agents_home,
+        )
+        assert _settings(root).read_text(encoding="utf-8") == first_settings
+        hooks = _hooks_of_settings(root)
+        assert len(hooks["PreToolUse"]) == 1, "must not accumulate duplicate entries"
+
+        # A hand-edited (stale) on-disk script must be refreshed from package data --
+        # this script has no user-editable region, unlike AGENTS.md's managed block.
+        script.write_text("# stale content", encoding="utf-8")
+        agent.wire_hooks(
+            dest, dry_run=False, logger=None, config_root=root, agents_home=agents_home,
+        )
+        assert script.read_text(encoding="utf-8") != "# stale content"
+
+    def test_dry_run_writes_nothing(self, tmp_path):
+        dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
+        agents_home = tmp_path / "agents_home"
+
+        ClaudeAgent().wire_hooks(
+            dest, dry_run=True, logger=None, config_root=root, agents_home=agents_home,
+        )
+
+        assert not (agents_home / "hooks" / ClaudeAgent.PRETOOLUSE_HOOK_SCRIPT).exists()
+        assert not _settings(root).exists()
+
+    def test_defaults_to_real_agents_home_when_unspecified(self, tmp_path):
+        """No `agents_home` passed -- must fall back to `Path.home()`, which
+        this file's autouse fixture has redirected to an isolated tmp_path, not
+        the real ~/.agents. Confirms the fallback path itself works."""
+        dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
+        ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+
+        fake_home = Path.home()  # patched by the autouse fixture
+        script = fake_home / ".agents" / "hooks" / ClaudeAgent.PRETOOLUSE_HOOK_SCRIPT
+        assert script.is_file()
 
 
 class TestCodexHooks:
@@ -419,7 +539,9 @@ def test_project_scope_writes_the_gitignored_local_settings(tmp_path):
     dest = project / ".agents"
     dest.mkdir(parents=True)
 
-    ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None)
+    ClaudeAgent().wire_hooks(
+        dest, dry_run=False, logger=None, agents_home=tmp_path / "agents_home"
+    )
 
     assert (project / ".claude" / "settings.local.json").is_file()
     assert not (project / ".claude" / "settings.json").exists(), (
@@ -427,13 +549,29 @@ def test_project_scope_writes_the_gitignored_local_settings(tmp_path):
     )
 
 
-def test_never_touches_real_home(tmp_path):
-    """Guard: a stray default must never let a test write to the user's ~/.claude."""
-    real = Path.home() / ".claude" / "settings.json"
-    before = real.read_text(encoding="utf-8") if real.is_file() else None
+def test_never_touches_real_home(tmp_path, monkeypatch):
+    """Guard: a stray default must never let a test write to the user's real
+    ~/.claude OR ~/.agents/hooks/ (the PowerShell PreToolUse script's home).
+
+    Undoes the module's autouse `_isolated_home` patch for the DURATION OF THE
+    PRE/POST CHECKS ONLY (via `monkeypatch.undo()`, then re-applied), so
+    `Path.home()` here resolves to the machine's genuine home directory --
+    otherwise this test would compare the fake home's before/after state,
+    which is always equal and proves nothing.
+    """
+    monkeypatch.undo()
+    real_settings = Path.home() / ".claude" / "settings.json"
+    real_hook = Path.home() / ".agents" / "hooks" / ClaudeAgent.PRETOOLUSE_HOOK_SCRIPT
+    before_settings = real_settings.read_text(encoding="utf-8") if real_settings.is_file() else None
+    before_hook = real_hook.stat().st_mtime if real_hook.is_file() else None
 
     dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
-    ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+    ClaudeAgent().wire_hooks(
+        dest, dry_run=False, logger=None, config_root=root,
+        agents_home=tmp_path / "agents_home",
+    )
 
-    after = real.read_text(encoding="utf-8") if real.is_file() else None
-    assert after == before, "the real ~/.claude/settings.json was modified"
+    after_settings = real_settings.read_text(encoding="utf-8") if real_settings.is_file() else None
+    after_hook = real_hook.stat().st_mtime if real_hook.is_file() else None
+    assert after_settings == before_settings, "the real ~/.claude/settings.json was modified"
+    assert after_hook == before_hook, "the real ~/.agents/hooks/ script was modified"

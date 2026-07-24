@@ -143,14 +143,33 @@ class ClaudeAgent(Agent):
     ) % {"path": _HOOK_PATH}
     CWD_CHANGED_COMMAND = "[ -f AGENTS.md ] && cat AGENTS.md || true"
 
+    # PowerShell tool gap (Windows only): $CLAUDE_ENV_FILE is Bash-tool-only --
+    # every hooks.md mention says "subsequent Bash commands", and
+    # $env:CLAUDE_ENV_FILE was observed empty inside a live PowerShell tool call.
+    # So the SessionStart hook above never reaches PowerShell tool calls at all.
+    # Closed independently via a PreToolUse hook (no matcher -- fires for every
+    # tool) that, for a PowerShell call specifically, prepends a guarded env-loader
+    # to that call's OWN command via `updatedInput` -- see the script for the full
+    # design rationale, the `&` vs `-File` stdin gotcha, and what remains
+    # unverified (cross-call guard persistence, the tool_input field name).
+    PRETOOLUSE_HOOK_SCRIPT = "pretooluse_powershell_env.ps1"
+
     def wire_hooks(
-        self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
+        self,
+        dest: Path,
+        *,
+        dry_run: bool,
+        logger,
+        config_root: "Optional[Path]" = None,
+        agents_home: "Optional[Path]" = None,
     ) -> None:
         """Link the shared skills dir into `~/.claude` and merge our two hooks.
 
         Additive and idempotent: unrelated settings keys and foreign hooks survive,
         and a second run writes nothing.
         """
+        import os
+
         from dotagents import _hooks, _skills
 
         # Scope-aware, like the rest of dotagents: a project-scope `init` must not
@@ -219,7 +238,13 @@ class ClaudeAgent(Agent):
         )
         hooks["CwdChanged"] = cwd_changed
 
-        if not (changed or ss_changed or cc_changed):
+        pt_changed = False
+        if os.name == "nt":
+            pt_changed = self._wire_powershell_pretooluse(
+                hooks, dry_run=dry_run, logger=logger, agents_home=agents_home
+            )
+
+        if not (changed or ss_changed or cc_changed or pt_changed):
             if logger:
                 logger.info("hooks already wired: %s", settings_path)
             return
@@ -231,7 +256,72 @@ class ClaudeAgent(Agent):
             return
         _hooks.write_settings(settings_path, settings)
         if logger:
-            logger.info("wired SessionStart + CwdChanged hooks: %s", settings_path)
+            logger.info(
+                "wired SessionStart + CwdChanged%s hooks: %s",
+                " + PreToolUse" if pt_changed else "",
+                settings_path,
+            )
+
+    def _wire_powershell_pretooluse(
+        self,
+        hooks: dict,
+        *,
+        dry_run: bool,
+        logger,
+        agents_home: "Optional[Path]" = None,
+    ) -> bool:
+        """Windows only. Copies the PowerShell env-injection script to
+        `<agents_home>/hooks/` and merges a no-matcher `PreToolUse` entry pointing
+        at it. Returns whether anything changed.
+
+        The script lives in the AGENTS STORE (default `~/.agents/`, overridable via
+        `agents_home` -- tests must pass an isolated one, never the real store),
+        not the caller's Claude-config `dest`/`config_root`: PowerShell tool calls
+        are session-wide, not project-specific, so this always targets the user
+        store, mirroring `$HOME/.agents/bin` in `SESSION_START_COMMAND`. The
+        emitted hook command still hardcodes `$env:USERPROFILE` (the real user
+        store) regardless of `agents_home`, since that command runs in a REAL
+        future session, never in a test.
+
+        Copies from package data every call (create-or-refresh, not
+        create-if-absent): unlike the AGENTS.md/CLAUDE.md managed block, this
+        script has no user-editable region, so silently refreshing it on `init`
+        is correct and expected -- it should always match this dotagents version.
+        """
+        import shutil
+
+        from dotagents import _hooks
+        from dotagents.cli._common import BASE_ROOT
+
+        src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / self.PRETOOLUSE_HOOK_SCRIPT
+        if not src_script.is_file():
+            if logger:
+                logger.warning("PowerShell hook script missing from package: %s", src_script)
+            return False
+
+        home = Path(agents_home) if agents_home else Path.home() / ".agents"
+        dest_dir = home / "hooks"
+        dest_script = dest_dir / self.PRETOOLUSE_HOOK_SCRIPT
+        script_changed = not dest_script.is_file() or (
+            dest_script.read_bytes() != src_script.read_bytes()
+        )
+        if script_changed and not dry_run:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src_script), str(dest_script))
+
+        command = (
+            'powershell -NoProfile -NonInteractive -File '
+            '"$env:USERPROFILE\\.agents\\hooks\\%s"'
+        ) % self.PRETOOLUSE_HOOK_SCRIPT
+
+        pretooluse, pt_hook_changed = _hooks.merge_hook(
+            hooks.get("PreToolUse"),
+            command,
+            status_message="Checking PowerShell env",
+        )
+        hooks["PreToolUse"] = pretooluse
+
+        return script_changed or pt_hook_changed
 
     def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
         target = dest / "CONTEXT.md"
