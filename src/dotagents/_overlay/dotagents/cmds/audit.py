@@ -26,6 +26,7 @@ the forbidden strings).
 import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 DEFAULT_ROOT = Path.home() / ".agents"
 
@@ -46,7 +47,14 @@ REFS = []
 # leak_check.py is no longer a required tool of main: it moved to the opt-in
 # `leak-check` overlay as a command module (D84), so main's tree no longer ships
 # it and it is not in this manifest.
-EXIST_ONLY = ["tools/audit_config.py", "tools/cloud-setup.sh"]  # leak_check.py is personal (D84), not shipped here
+# The auditor itself now ships as the bundled `audit` COMMAND MODULE (this file):
+# `src/dotagents/_overlay/dotagents/cmds/audit.py`. It is both the tool (run it
+# directly) and the `dotagents audit` command, so there is no separate
+# tools/audit_config.py. leak_check.py is personal (D84) and not shipped here.
+EXIST_ONLY = [
+    "src/dotagents/_overlay/dotagents/cmds/audit.py",
+    "tools/cloud-setup.sh",
+]
 # Example-overlay files live on the `overlays` branch, not in main's tree, so the
 # repo checkout (--root .) has no overlays/ dir to enumerate. Kept empty here and
 # guarded below (checked only when an overlays/ dir is present -- e.g. a CI job
@@ -191,25 +199,57 @@ def check_templates(root):
     return failures
 
 
-def main(argv):
-    root = DEFAULT_ROOT
-    if "--root" in argv:
-        root = Path(argv[argv.index("--root") + 1]).resolve()
-    probe = None
-    if "--probe" in argv:
-        probe = Path(argv[argv.index("--probe") + 1])
-    if "--check-templates" in argv:
-        failures = check_templates(root)
-    else:
-        failures = audit(root, probe)
-    if failures:
-        print("FAIL")
-        for f in failures:
-            print("  " + f)
-        return 1
-    print("PASS")
-    return 0
+# --------------------------------------------------------------------------- #
+# Command surface. This module IS the tool AND the `dotagents audit` command:
+# it is a discovered command module (D76/D84) in the bundled `dotagents/cmds/`
+# dir, so `dotagents audit` resolves to the class below -- there is no separate
+# wrapper shelling out to a script. Run it directly too (`python audit.py
+# --root .`): `__main__` dispatches through duho, so BOTH paths share one
+# argument definition, one help text, one implementation.
+#
+# Everything above this line is stdlib-only, so the audit logic itself carries
+# no package/duho dependency; only the command surface does.
+# --------------------------------------------------------------------------- #
+
+from duho import Cmd, LoggingArgs  # noqa: E402
+
+
+class Audit(LoggingArgs, Cmd):
+    """Audit dotagents-config structure (manifest, forbidden patterns, budgets).
+
+    Structural only -- personal-leak/hygiene scanning is `leak-check`'s job (D84).
+    """
+
+    _parsername_ = "audit"
+
+    root: Path = DEFAULT_ROOT
+    "Config tree to audit (default ~/.agents; a checkout: --root .)."
+    ("--root",)
+
+    probe: Optional[Path] = None
+    "Add one extra file to the scan manifest (negative tests)."
+    ("--probe",)
+
+    check_templates_: bool = False
+    "Instantiate references/ templates in a temp dir and parse-check them (3.11+)."
+    ("--check-templates",)
+
+    def __call__(self) -> int:
+        root = Path(self.root).expanduser().resolve()
+        if self.check_templates_:
+            failures = check_templates(root)
+        else:
+            failures = audit(root, Path(self.probe) if self.probe else None)
+        if failures:
+            print("FAIL")
+            for f in failures:
+                print("  " + f)
+            return 1
+        print("PASS")
+        return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    import duho
+
+    sys.exit(duho.main(Audit, sys.argv[1:]))

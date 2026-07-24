@@ -97,7 +97,7 @@ python -m dotagents env --diff --format json   # only vars that differ from the 
 
 `audit` validates config **structure** only — manifest existence, generic forbidden
 patterns, size budgets, overlay-manifest rules, and (3.11+) templates. It carries no
-personal data and shells to `tools/audit_config.py`, which also runs standalone in
+personal data and IS the auditor: one standalone file that also runs directly (`python .../cmds/audit.py`) and in
 CI. Personal-leak / hygiene scanning is **not** audit's job (see leak-check below).
 
 ```bash

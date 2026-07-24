@@ -1,18 +1,17 @@
-"""`dotagents audit` dispatch tests (D70).
+"""`audit` is ONE file that is both the tool and the command (D84).
 
-`audit` is a compiled built-in (`dotagents.cli.audit.Audit`) -- a thin front onto
-the single standalone implementation `tools/audit_config.py`. There is no duplicate
-logic in the CLI. These tests pin that:
+`src/dotagents/_overlay/dotagents/cmds/audit.py` is a bundled discovered command
+module: `dotagents audit` resolves to its `Audit` class, and the same file runs
+directly (`python audit.py --root .`, dispatched through `duho.main`). There is no
+wrapper class and no separate `tools/audit_config.py` -- one file, one argument
+definition, one implementation.
 
-  1. `dotagents audit --root .` dispatches and returns the SAME result as invoking
-     the standalone `tools/audit_config.py --root .` directly (PASS, exit 0, on
-     this repo);
-  2. `dotagents audit --repo-hygiene .` dispatches and PASSES on this repo;
-  3. the shared `_resolve_required_tool` resolver finds the repo-checkout tool.
-
-leak-check was removed from the repo entirely (D84): it enforces personal plan-
-naming conventions, so it moves to the user's private `.agents/cmds/` as a
-discovered command module -- it is no longer built in and no longer tested here.
+Covered here:
+  1. the file runs STANDALONE and PASSes on this repo (what CI invokes);
+  2. running it standalone exposes its flags via duho (--root/--probe/--check-templates);
+  3. it is DISCOVERED as the `audit` subcommand (there is no compiled cli/audit.py);
+  4. `leak-check` is NOT in the repo (personal -- it lives in the user's private
+     `.agents/`, D84).
 
 Run from repo root: ``PYTHONPATH=src python -m pytest tests/test_audit_leak.py``.
 """
@@ -25,58 +24,48 @@ REPO = Path(__file__).resolve().parents[1]
 SRC = REPO / "src"
 sys.path.insert(0, str(SRC))
 
-from dotagents.cli._common import _resolve_required_tool  # noqa: E402
-from dotagents.cli.audit import Audit  # noqa: E402
+AUDIT = SRC / "dotagents" / "_overlay" / "dotagents" / "cmds" / "audit.py"
 
 
-def _standalone(tool: str, *args: str) -> int:
-    return subprocess.call(
-        [sys.executable, str(REPO / "tools" / tool), *args],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+def test_audit_ships_in_the_bundled_cmds_dir():
+    """Its home is what makes it both shipped and discoverable."""
+    assert AUDIT.is_file()
+
+
+def test_audit_runs_standalone_and_passes():
+    """`python audit.py --root <repo>` -- exactly what CI invokes."""
+    proc = subprocess.run(
+        [sys.executable, str(AUDIT), "--root", str(REPO)],
+        capture_output=True,
+        text=True,
     )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "PASS" in proc.stdout
 
 
-# ---------------------------------------------------------------------------
-# Resolver: the shared front-end helper finds the required tool.
-# ---------------------------------------------------------------------------
-
-def test_resolver_finds_repo_tool():
-    resolved = _resolve_required_tool("audit_config.py")
-    assert resolved is not None
-    assert resolved.name == "audit_config.py"
-    assert resolved.exists()
-
-
-def test_resolver_prefers_explicit_root(tmp_path):
-    tools = tmp_path / "tools"
-    tools.mkdir()
-    planted = tools / "audit_config.py"
-    planted.write_text("# planted\n", encoding="utf-8")
-    resolved = _resolve_required_tool("audit_config.py", root=tmp_path)
-    assert resolved == planted
+def test_standalone_help_exposes_flags_via_duho():
+    """__main__ dispatches through duho, so flags/help come from the class."""
+    proc = subprocess.run(
+        [sys.executable, str(AUDIT), "--help"], capture_output=True, text=True
+    )
+    out = proc.stdout + proc.stderr
+    for flag in ("--root", "--probe", "--check-templates"):
+        assert flag in out, "%s missing from standalone help" % flag
 
 
-def test_resolver_missing_tool_returns_none():
-    assert _resolve_required_tool("no_such_tool.py") is None
+def test_audit_is_discovered_not_a_compiled_builtin():
+    """`audit` resolves through command discovery; the old wrapper is gone."""
+    from dotagents import cli
+
+    assert not (SRC / "dotagents" / "cli" / "audit.py").exists()
+    names = set()
+    for command in cli._discover([]):
+        name = getattr(command, "_parsername_", None) or getattr(command, "__name__", "")
+        names.add(str(name))
+    assert "audit" in names
 
 
-# ---------------------------------------------------------------------------
-# `dotagents audit`: dispatches, and matches the standalone script.
-# ---------------------------------------------------------------------------
-
-def test_audit_matches_standalone():
-    standalone_rc = _standalone("audit_config.py", "--root", str(REPO))
-    assert standalone_rc == 0  # baseline: this repo PASSES
-
-    cmd = Audit()
-    cmd.root = REPO
-    assert cmd() == standalone_rc
-
-
-def test_audit_repo_hygiene_dispatches():
-    cmd = Audit()
-    cmd.root = REPO
-    cmd.repo_hygiene = REPO
-    # root audit + repo-hygiene both PASS on this repo -> combined rc 0.
-    assert cmd() == 0
+def test_leak_check_is_not_in_the_repo():
+    """leak-check is personal (D84): the user's private `.agents/`, not here."""
+    assert not (REPO / "tools" / "leak_check.py").exists()
+    assert not (SRC / "dotagents" / "cli" / "leak_check.py").exists()
