@@ -47,8 +47,22 @@ def _scope_with_skills(tmp_path):
     return dest
 
 
+def _settings(root):
+    """The settings file `wire_hooks` writes under `root`.
+
+    An explicit `config_root` is treated as project scope, so it is the gitignored
+    `settings.local.json`; only the real `~/.claude` gets `settings.json`.
+    """
+    return Path(root) / "settings.local.json"
+
+
 def _hooks_of(settings_path):
-    return json.loads(settings_path.read_text(encoding="utf-8"))["hooks"]
+    return json.loads(Path(settings_path).read_text(encoding="utf-8"))["hooks"]
+
+
+def _hooks_of_settings(root):
+    """The `hooks` object from the settings file under `root`."""
+    return _hooks_of(_settings(root))
 
 
 def _commands(hook_list):
@@ -59,7 +73,7 @@ def test_wires_both_hooks(tmp_path):
     dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
     ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
-    hooks = _hooks_of(root / "settings.json")
+    hooks = _hooks_of_settings(root)
     assert ClaudeAgent.SESSION_START_COMMAND in _commands(hooks["SessionStart"])
     assert ClaudeAgent.CWD_CHANGED_COMMAND in _commands(hooks["CwdChanged"])
 
@@ -70,9 +84,25 @@ def test_session_start_persists_env_via_claude_env_file(tmp_path):
     dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
     ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
-    cmd = _commands(_hooks_of(root / "settings.json")["SessionStart"])[0]
+    cmd = _commands(_hooks_of_settings(root)["SessionStart"])[0]
     assert "dotagents env --diff --format export" in cmd
     assert "dotagents context" in cmd
+
+
+def test_hook_prefixes_scope_bin_on_path():
+    """The hook must find `dotagents` without a global install.
+
+    `init` populates `<scope>/bin/`; prefixing it here is what makes the hook
+    self-sufficient. Without it the hook is one `command not found` from silently
+    delivering nothing -- which is exactly what happened on the dev box.
+    """
+    for cmd in (ClaudeAgent.SESSION_START_COMMAND, CodexAgent.SESSION_START_COMMAND):
+        assert ".agents/bin" in cmd
+        assert "$HOME/.agents/bin" in cmd
+        assert "$PATH" in cmd, "must PREPEND, not replace, the inherited PATH"
+        assert cmd.index(".agents/bin") < cmd.index("$HOME/.agents/bin"), (
+            "project scope should win over the user store"
+        )
 
 
 def test_env_hook_appends_and_is_guarded():
@@ -103,12 +133,12 @@ def test_second_run_is_a_noop(tmp_path):
     dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
     agent = ClaudeAgent()
     agent.wire_hooks(dest, dry_run=False, logger=None, config_root=root)
-    first = (root / "settings.json").read_text(encoding="utf-8")
+    first = _settings(root).read_text(encoding="utf-8")
 
     agent.wire_hooks(dest, dry_run=False, logger=None, config_root=root)
-    assert (root / "settings.json").read_text(encoding="utf-8") == first
+    assert _settings(root).read_text(encoding="utf-8") == first
 
-    hooks = _hooks_of(root / "settings.json")
+    hooks = _hooks_of_settings(root)
     assert len(hooks["SessionStart"]) == 1
     assert len(hooks["CwdChanged"]) == 1
 
@@ -117,13 +147,13 @@ def test_preserves_unrelated_keys_and_foreign_hooks(tmp_path):
     dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
     root.mkdir()
     foreign = {"hooks": [{"type": "command", "command": "echo mine"}]}
-    (root / "settings.json").write_text(
+    _settings(root).write_text(
         json.dumps({"model": "opus", "hooks": {"SessionStart": [foreign]}}), encoding="utf-8"
     )
 
     ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
-    data = json.loads((root / "settings.json").read_text(encoding="utf-8"))
+    data = json.loads(_settings(root).read_text(encoding="utf-8"))
     assert data["model"] == "opus", "unrelated settings must survive"
     cmds = _commands(data["hooks"]["SessionStart"])
     assert "echo mine" in cmds, "a hook we did not write must survive"
@@ -133,13 +163,13 @@ def test_preserves_unrelated_keys_and_foreign_hooks(tmp_path):
 def test_migrates_legacy_lowercase_session_start(tmp_path):
     dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
     root.mkdir()
-    (root / "settings.json").write_text(
+    _settings(root).write_text(
         json.dumps({"hooks": {"session_start": []}}), encoding="utf-8"
     )
 
     ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
-    hooks = _hooks_of(root / "settings.json")
+    hooks = _hooks_of_settings(root)
     assert "session_start" not in hooks, "legacy key should be dropped"
     assert ClaudeAgent.SESSION_START_COMMAND in _commands(hooks["SessionStart"])
 
@@ -147,7 +177,7 @@ def test_migrates_legacy_lowercase_session_start(tmp_path):
 def test_dry_run_writes_nothing(tmp_path):
     dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
     ClaudeAgent().wire_hooks(dest, dry_run=True, logger=None, config_root=root)
-    assert not (root / "settings.json").exists()
+    assert not _settings(root).exists()
     assert not (root / "skills").exists()
 
 
@@ -164,7 +194,7 @@ def test_absent_skills_dir_is_tolerated(tmp_path):
     dest.mkdir()
     ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
     assert not (root / "skills").exists()
-    assert (root / "settings.json").is_file(), "hooks still wired without skills"
+    assert _settings(root).is_file(), "hooks still wired without skills"
 
 
 class TestCodexHooks:
@@ -178,7 +208,10 @@ class TestCodexHooks:
         CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
         data = json.loads((root / "hooks.json").read_text(encoding="utf-8"))
-        assert _commands(data["hooks"]["SessionStart"]) == ["dotagents context"]
+        assert _commands(data["hooks"]["SessionStart"]) == [
+            CodexAgent.SESSION_START_COMMAND
+        ]
+        assert "dotagents context" in CodexAgent.SESSION_START_COMMAND
 
     def test_no_env_hook(self, tmp_path):
         """Codex hooks only *receive* env vars; nothing persists exports back."""
@@ -376,6 +409,22 @@ def test_unsupported_adapters_are_noops(tmp_path):
     for agent in (GeminiAgent(), CursorAgent(), CopilotAgent()):
         agent.wire_hooks(dest, dry_run=False, logger=None, config_root=root)
     assert not root.exists(), "a no-op adapter must not create a config dir"
+
+
+def test_project_scope_writes_the_gitignored_local_settings(tmp_path):
+    """A project-scope `init` must not edit the user's GLOBAL settings, and must
+    use `settings.local.json` -- `settings.json` in a repo is checked into source
+    control, and these hooks carry machine-specific paths."""
+    project = tmp_path / "proj"
+    dest = project / ".agents"
+    dest.mkdir(parents=True)
+
+    ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None)
+
+    assert (project / ".claude" / "settings.local.json").is_file()
+    assert not (project / ".claude" / "settings.json").exists(), (
+        "the committed project settings file must not be touched"
+    )
 
 
 def test_never_touches_real_home(tmp_path):

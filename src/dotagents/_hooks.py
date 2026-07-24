@@ -50,6 +50,24 @@ def build_hook_entry(
     return entry
 
 
+def _has_status(entry: Any, status_message: str) -> bool:
+    """True if `entry` carries a hook stamped with our `statusMessage`.
+
+    The status message is a stable label we choose, so it identifies our hook
+    across revisions of the command text -- unlike the command itself, which
+    changes and would leave the old version orphaned beside the new one.
+    """
+    if not isinstance(entry, dict):
+        return False
+    nested = entry.get("hooks")
+    if not isinstance(nested, list):
+        return False
+    return any(
+        isinstance(h, dict) and h.get("statusMessage") == status_message
+        for h in nested
+    )
+
+
 def _is_ours(entry: Any, command: str) -> bool:
     """True if `entry` is a well-formed matcher-object containing our command."""
     if not isinstance(entry, dict):
@@ -81,6 +99,14 @@ def merge_hook(
     * malformed entries (bare strings, dicts without a ``hooks`` list, non-dicts)
       -> dropped, flagged changed. Never raises: a user's hand-edited settings
       file must not make ``init`` explode.
+
+    ``status_message`` doubles as our hook's IDENTITY. An entry carrying the same
+    status message is treated as an older shape of our own hook and replaced, not
+    left beside the new one. Without that, dedup is by exact command string, so
+    revising the command we write silently orphans the previous version and the
+    old (often broken) hook keeps running next to the new one. The status message
+    is a stable label we choose, which makes it a better key than the command text
+    it describes.
     """
     if not isinstance(existing, list):
         # None/absent is the common case; a non-list is a malformed file we replace.
@@ -97,6 +123,9 @@ def merge_hook(
                 continue
             seen_ours = True
             normalized.append(entry)
+            continue
+        if status_message and _has_status(entry, status_message):
+            changed = True  # an older shape of OUR hook -- replace, don't duplicate
             continue
         if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
             changed = True  # malformed -- drop it

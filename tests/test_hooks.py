@@ -120,3 +120,30 @@ def test_write_settings_roundtrip_and_dry_run(tmp_path):
     _hooks.write_settings(path, {"a": 1})
     assert json.loads(path.read_text(encoding="utf-8")) == {"a": 1}
     assert path.read_text(encoding="utf-8").endswith("\n")
+
+
+def test_status_message_identifies_our_hook_across_command_revisions():
+    """Revising the command we write must REPLACE the old hook, not sit beside it.
+
+    Dedup by exact command string orphans the previous version: the old (often
+    broken) hook keeps running alongside the new one. The statusMessage is a stable
+    label we choose, so it survives a command rewrite.
+    """
+    old, _ = _hooks.merge_hook(None, "old-command", status_message="Loading agent context")
+    merged, changed = _hooks.merge_hook(
+        old, "new-command", status_message="Loading agent context"
+    )
+
+    assert changed is True
+    commands = [h["command"] for e in merged for h in e["hooks"]]
+    assert commands == ["new-command"], "the superseded hook must be gone"
+
+
+def test_status_match_does_not_touch_a_foreign_hook():
+    """Only OUR status message supersedes; a user's hook is never dropped."""
+    foreign = {"hooks": [{"type": "command", "command": "mine", "statusMessage": "Mine"}]}
+    merged, _ = _hooks.merge_hook([foreign], CMD, status_message="Loading agent context")
+
+    commands = [h["command"] for e in merged for h in e["hooks"]]
+    assert "mine" in commands
+    assert CMD in commands

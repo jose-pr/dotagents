@@ -79,7 +79,7 @@ class Init(LoggingArgs, Cmd):
             wire_hooks=not self.no_hooks,
         )
 
-        if self.bin_dir is not None and not self.dry_run:
+        if not self.dry_run:
             from dotagents._wrappers import check_path_warning, write_wrappers
 
             pyz_path = Path(sys.argv[0]).resolve()
@@ -87,16 +87,30 @@ class Init(LoggingArgs, Cmd):
                 # Running from a plain install (not a pyz): the wrappers point at
                 # `python -m dotagents` instead of a nonexistent pyz path.
                 pyz_path = None
-            if pyz_path is not None:
-                for w in write_wrappers(Path(self.bin_dir), pyz_path):
-                    self._logger_.info("wrapper: %s", w)
-            else:
-                self._logger_.info(
-                    "skipped wrapper install: not running from a .pyz (use build-pyz first)"
-                )
-            warning = check_path_warning(Path(self.bin_dir))
-            if warning:
-                self._logger_.warning(warning)
+
+            # `<scope>/bin/` is always populated, with a path relative to the scope
+            # so the store stays relocatable. Everything downstream of `init` --
+            # the SessionStart hook, overlay `bin/` PATH entries, an overlay setup
+            # script calling a sibling -- shells out to `dotagents` by name, so a
+            # scope without it is a scope where those silently fail.
+            targets = [(dest / "bin", True)]
+            if self.bin_dir is not None:
+                targets.append((Path(self.bin_dir), False))
+
+            for bin_dir, relative in targets:
+                if pyz_path is not None:
+                    for w in write_wrappers(bin_dir, pyz_path, relative=relative):
+                        self._logger_.info("wrapper: %s", w)
+                else:
+                    self._logger_.info(
+                        "skipped wrapper install in %s: not running from a .pyz "
+                        "(use build-pyz first)", bin_dir,
+                    )
+
+            if self.bin_dir is not None:
+                warning = check_path_warning(Path(self.bin_dir))
+                if warning:
+                    self._logger_.warning(warning)
 
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")

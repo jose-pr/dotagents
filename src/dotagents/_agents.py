@@ -127,12 +127,20 @@ class ClaudeAgent(Agent):
     #
     # Both halves are one `type: command` hook: SessionStart supports only
     # command/mcp_tool hooks, and ordering matters (env first, so context sees it).
+    #
+    # The PATH prefix makes the hook SELF-SUFFICIENT: `init` populates
+    # `<scope>/bin/`, and prefixing it here means the hook finds `dotagents` with no
+    # global install and no PATH edit by the user. Without it the hook is one
+    # `command not found` away from silently delivering nothing -- which is exactly
+    # what happened on this project's own dev box. Project scope comes first so a
+    # project's own wrapper wins over the user store's.
+    _HOOK_PATH = 'PATH=".agents/bin:$HOME/.agents/bin:$PATH"'
     SESSION_START_COMMAND = (
         'if [ -n "$CLAUDE_ENV_FILE" ]; then '
-        "dotagents env --diff --format export >> \"$CLAUDE_ENV_FILE\"; "
+        '%(path)s dotagents env --diff --format export >> "$CLAUDE_ENV_FILE"; '
         "fi; "
-        "dotagents context"
-    )
+        "%(path)s dotagents context"
+    ) % {"path": _HOOK_PATH}
     CWD_CHANGED_COMMAND = "[ -f AGENTS.md ] && cat AGENTS.md || true"
 
     def wire_hooks(
@@ -145,7 +153,15 @@ class ClaudeAgent(Agent):
         """
         from dotagents import _hooks, _skills
 
-        root = Path(config_root) if config_root else Path.home() / ".claude"
+        # Scope-aware, like the rest of dotagents: a project-scope `init` must not
+        # silently edit the user's GLOBAL settings. `dest` is `<scope>/.agents`, so
+        # its parent is the project root in project scope and $HOME in user scope.
+        if config_root:
+            root = Path(config_root)
+        elif Path(dest).expanduser().resolve() == (Path.home() / ".agents").resolve():
+            root = Path.home() / ".claude"
+        else:
+            root = Path(dest).parent / ".claude"
 
         # 1. Skills last mile. Publishing into `<scope>/skills/` only helps if the
         #    agent reads that dir; without this link it never does.
@@ -171,8 +187,13 @@ class ClaudeAgent(Agent):
                         "skills change -- re-run `dotagents init` to refresh it"
                     )
 
-        # 2. Hooks.
-        settings_path = root / "settings.json"
+        # 2. Hooks. In a project, write `settings.local.json` -- the gitignored
+        # personal file. `settings.json` there is checked into source control, and
+        # these hooks carry machine-specific paths that must never be committed.
+        is_user_scope = root == (Path.home() / ".claude")
+        settings_path = root / (
+            "settings.json" if is_user_scope else "settings.local.json"
+        )
         settings = _hooks.load_settings(settings_path)
         hooks = settings.get("hooks")
         if not isinstance(hooks, dict):
@@ -298,7 +319,12 @@ class CodexAgent(Agent):
     # file means we never rewrite (and risk mangling) the user's main TOML config.
     # Codex warns at startup if one layer has both, so a user with inline [hooks]
     # should pass --no-hooks.
-    SESSION_START_COMMAND = "dotagents context"
+    # Same PATH prefix as Claude's hook, for the same reason: `<scope>/bin/` holds
+    # the wrapper `init` wrote, so the hook resolves `dotagents` with no global
+    # install and no PATH edit by the user.
+    SESSION_START_COMMAND = (
+        'PATH=".agents/bin:$HOME/.agents/bin:$PATH" dotagents context'
+    )
 
     # Codex has NO per-session env mechanism: no CLAUDE_ENV_FILE equivalent, no
     # `.env` loading anywhere (confirmed across its full docs set), and no hook that
