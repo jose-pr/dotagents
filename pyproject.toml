@@ -34,6 +34,12 @@ uri = ["pathlib_next[uri]"]
 http = ["pathlib_next[http]"]
 sftp = ["pathlib_next[sftp]"]
 s3 = ["pathlib_next[s3]"]
+dev = ["pytest"]
+docs = [
+    "mkdocs>=1.5",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.24",
+]
 
 [project.scripts]
 dotagents = "dotagents.cli:main"
@@ -41,6 +47,7 @@ dotagents = "dotagents.cli:main"
 [project.urls]
 Homepage = "https://github.com/jose-pr/dotagents/"
 Repository = "https://github.com/jose-pr/dotagents"
+Documentation = "https://jose-pr.github.io/dotagents/"
 
 [tool.hatch.build.targets.sdist]
 exclude = ["/.*", "/dist", "/.venv-test"]
