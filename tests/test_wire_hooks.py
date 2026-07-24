@@ -292,7 +292,7 @@ class TestCodexEnvBlock:
     def test_values_with_quotes_and_backslashes_are_escaped(self, tmp_path):
         """Windows paths are full of backslashes; an unescaped one is invalid TOML."""
         root = tmp_path / "codex"
-        env = {"AGENTS_HOME": r"C:\Users\example\.agents", "ODD": 'a"b'}
+        env = {"AGENTS_HOME": r"D:\workspace\.agents", "ODD": 'a"b'}
         CodexAgent().write_env_block(env, dry_run=False, logger=None, config_root=root)
         parsed = _toml_load((root / "config.toml").read_text(encoding="utf-8"))
         assert parsed["shell_environment_policy"]["set"] == env
