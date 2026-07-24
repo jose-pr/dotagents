@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   these formats — `export FOO(X86)=...` is a bash syntax error, not a bad value,
   and aborts sourcing the rest of the file. `powershell`/`cmd`/`json`/`ini`/`yaml`
   are unaffected.
+- fix: a UNC PATH segment (`\\server\share\...`) no longer collapses to a single
+  leading slash (`/server/share/...`) during the POSIX conversion above — MSYS
+  requires the double-slash UNC root (`//server/share/...`) to resolve it.
+
+## [0.3.1] - 2026-07-24
+
+Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0).
 
 ## [0.3.0] - 2026-07-24
 
