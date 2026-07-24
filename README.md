@@ -40,7 +40,7 @@ them. Everything else is repo infrastructure.
 | --- | --- |
 | `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`, plus the bundled command modules `link`/`sync`/`audit`) |
 | `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index), and the bundled `dotagents/cmds/` command modules (`link`/`sync`/`audit`). Neutral — imposes no flows |
-| `tools/` | Required tooling (not an overlay): `audit_config.py`, `cloud-setup.sh` (`leak-check` moved to the opt-in `leak-check` overlay, D84) |
+| `tools/` | Required tooling (not an overlay): `cloud-setup.sh` (`leak-check` moved to the opt-in `leak-check` overlay, D84) |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
 
 The **example overlays** — the `flows` workflow set, per-language `kb/` + templates,

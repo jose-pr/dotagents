@@ -4,7 +4,7 @@ command modules discovered from a `cmds` directory (D76/D84).
 
 `audit` STAYS a compiled built-in: once its personal defaults are emptied (D84) it
 is a generic config validator any fork needs, and CI self-validates via the
-standalone `tools/audit_config.py`. `leak-check` is no longer in the repo at all:
+the bundled `cmds/audit.py` command module. `leak-check` is no longer in the repo at all:
 it enforces personal plan-naming conventions, so it moves to the user's private
 `.agents/cmds/` as a discovered command module (D84), not the public repo.
 
@@ -59,7 +59,6 @@ from dotagents.cli._common import (  # noqa: F401
 # edges one-directional: command modules -> cli._common / dotagents._*, and
 # cli/__init__ -> command modules. link/sync are NOT imported here anymore --
 # they are discovered command modules (see `_discover`).
-from dotagents.cli.audit import Audit
 from dotagents.cli.build_pyz import BuildPyz
 from dotagents.cli.context import Context
 from dotagents.cli.env import Env
@@ -78,13 +77,12 @@ _LOGGER = logging.getLogger("dotagents")
 # (now discovered modules -- they ship in the bundled `_overlay/dotagents/cmds/`
 # dir). audit STAYS a compiled built-in: once its personal defaults are emptied
 # (D84) it is a generic config validator any fork needs, and CI self-validates via
-# the standalone tools/audit_config.py. leak-check is gone from the repo entirely
+# the bundled cmds/audit.py command module. leak-check is gone from the repo entirely
 # (personal -- it moves to the user's private `.agents/cmds/`, D84). `_discover`
 # seeds the command set with these, then layers discovered commands over them
 # (later source wins on a name clash).
 _BUILTIN_COMMANDS = [
     Init,
-    Audit,
     BuildPyz,
     Context,
     Env,
@@ -99,7 +97,6 @@ _BUILTIN_COMMANDS = [
 # no repoint needed -- see `_bundled_cmds_dir`).
 _COMMAND_MODULES = (
     "dotagents.cli.init",
-    "dotagents.cli.audit",
     "dotagents.cli.context",
     "dotagents.cli.env",
     "dotagents.cli.overlays",

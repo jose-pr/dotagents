@@ -37,13 +37,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Audit config structure
-        run: python tools/audit_config.py --root .
+        run: python src/dotagents/_overlay/dotagents/cmds/audit.py --root .
       # Personal-leak / hygiene scanning is NOT in CI (D84): it moved to `leak-check`,
       # a personal tool the user runs locally before a push -- CI has no personal
       # patterns to scan for and audit is structural-only now.
       - name: Template instantiation checks (3.11+ only)
         if: matrix.python-version != '3.9'
-        run: python tools/audit_config.py --check-templates --root .
+        run: python src/dotagents/_overlay/dotagents/cmds/audit.py --check-templates --root .
 
   install:
     name: Install into scratch HOME
