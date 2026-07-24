@@ -1,10 +1,13 @@
 """Tests for command discovery (D76): `dotagents.cli._discover` resolving the
 built-in commands plus command modules from the bundled cmds dir, the per-scope
-cmds dirs (user + project), `$DOTAGENTS_CMDS_PATH`, and `--cmdspath`.
+cmds dirs (user + project), `$AGENTS_CMDS_PATH`, and `--cmdspath`.
 
 Filesystem-only (tmp_path); no network. NEVER exports HOME/USERPROFILE -- the
-user scope is redirected via `$DOTAGENTS_AGENTS_DIR` and the project scope via
+user scope is redirected via `$AGENTS_HOME` and the project scope via
 `monkeypatch.chdir`, so a real `~/.agents` is never touched.
+
+Env-var prefix (D80): readers prefer the `AGENTS_*` name and fall back to the old
+`DOTAGENTS_*` name for one release; the fallback tests below assert both paths.
 """
 
 import os
@@ -76,8 +79,8 @@ def _write(path: Path, text: str) -> None:
 
 def test_discover_includes_builtins_and_bundled_link_sync(monkeypatch, tmp_path):
     # Point both scopes at empty dirs so only built-ins + bundled cmds contribute.
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(tmp_path / "user" / ".agents"))
-    monkeypatch.delenv("DOTAGENTS_CMDS_PATH", raising=False)
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
     monkeypatch.chdir(tmp_path)
 
     names = _names(cli._discover([]))
@@ -100,8 +103,8 @@ def test_discover_includes_builtins_and_bundled_link_sync(monkeypatch, tmp_path)
 def test_discover_honors_cmds_path_env(monkeypatch, tmp_path):
     cmds = tmp_path / "extra"
     _write(cmds / "toy.py", TOY)
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(tmp_path / "user" / ".agents"))
-    monkeypatch.setenv("DOTAGENTS_CMDS_PATH", str(cmds))
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
+    monkeypatch.setenv("AGENTS_CMDS_PATH", str(cmds))
     monkeypatch.chdir(tmp_path)
 
     names = _names(cli._discover([]))
@@ -111,8 +114,8 @@ def test_discover_honors_cmds_path_env(monkeypatch, tmp_path):
 def test_discover_honors_cmdspath_flag(monkeypatch, tmp_path):
     cmds = tmp_path / "flagcmds"
     _write(cmds / "toy.py", TOY)
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(tmp_path / "user" / ".agents"))
-    monkeypatch.delenv("DOTAGENTS_CMDS_PATH", raising=False)
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
     monkeypatch.chdir(tmp_path)
 
     names = _names(cli._discover(["--cmdspath", str(cmds)]))
@@ -127,8 +130,8 @@ def test_discover_honors_cmdspath_flag(monkeypatch, tmp_path):
 def test_user_scope_contributes(monkeypatch, tmp_path):
     user_root = tmp_path / "user" / ".agents"
     _write(user_root / "dotagents" / "cmds" / "toy.py", TOY)
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(user_root))
-    monkeypatch.delenv("DOTAGENTS_CMDS_PATH", raising=False)
+    monkeypatch.setenv("AGENTS_HOME", str(user_root))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
     monkeypatch.chdir(tmp_path)
 
     names = _names(cli._discover([]))
@@ -138,8 +141,8 @@ def test_user_scope_contributes(monkeypatch, tmp_path):
 def test_project_scope_contributes(monkeypatch, tmp_path):
     proj = tmp_path / "proj"
     _write(proj / ".agents" / "dotagents" / "cmds" / "toy.py", TOY)
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(tmp_path / "user" / ".agents"))
-    monkeypatch.delenv("DOTAGENTS_CMDS_PATH", raising=False)
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
     monkeypatch.chdir(proj)
 
     names = _names(cli._discover([]))
@@ -156,9 +159,9 @@ def test_bad_source_is_skipped_not_fatal(monkeypatch, tmp_path):
     good = tmp_path / "good"
     _write(good / "toy.py", TOY)
     missing = tmp_path / "does-not-exist"
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(tmp_path / "user" / ".agents"))
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
     monkeypatch.setenv(
-        "DOTAGENTS_CMDS_PATH", os.pathsep.join([str(missing), str(good)])
+        "AGENTS_CMDS_PATH", os.pathsep.join([str(missing), str(good)])
     )
     monkeypatch.chdir(tmp_path)
 
@@ -171,8 +174,8 @@ def test_later_source_wins_dedup(monkeypatch, tmp_path):
     # The bundled cmds provide `link`; an env-var source shadows it. Later wins.
     shadow = tmp_path / "shadow"
     _write(shadow / "shadowlink.py", SHADOW_LINK)
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(tmp_path / "user" / ".agents"))
-    monkeypatch.setenv("DOTAGENTS_CMDS_PATH", str(shadow))
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
+    monkeypatch.setenv("AGENTS_CMDS_PATH", str(shadow))
     monkeypatch.chdir(tmp_path)
 
     commands = cli._discover([])
@@ -194,8 +197,8 @@ def test_project_overrides_user_scope(monkeypatch, tmp_path):
         proj / ".agents" / "dotagents" / "cmds" / "toy.py",
         TOY.replace('_parsername_ = "toy"', '_parsername_ = "toy"\n    marker = "project"'),
     )
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(user_root))
-    monkeypatch.delenv("DOTAGENTS_CMDS_PATH", raising=False)
+    monkeypatch.setenv("AGENTS_HOME", str(user_root))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
     monkeypatch.chdir(proj)
 
     commands = cli._discover([])
@@ -205,3 +208,48 @@ def test_project_overrides_user_scope(monkeypatch, tmp_path):
     ]
     assert len(toy) == 1
     assert getattr(toy[0], "marker", None) == "project"
+
+
+# --------------------------------------------------------------------------- #
+# Env-var prefix back-compat (D80): new AGENTS_* preferred, old DOTAGENTS_* falls
+# back for one release.
+# --------------------------------------------------------------------------- #
+
+
+def test_agents_home_fallback_to_legacy_dotagents_agents_dir(monkeypatch, tmp_path):
+    # Only the OLD name set -> the user scope still resolves through it.
+    user_root = tmp_path / "user" / ".agents"
+    _write(user_root / "dotagents" / "cmds" / "toy.py", TOY)
+    monkeypatch.delenv("AGENTS_HOME", raising=False)
+    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(user_root))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
+    monkeypatch.delenv("DOTAGENTS_CMDS_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    assert "toy" in _names(cli._discover([]))
+
+
+def test_agents_home_new_name_wins_over_legacy(monkeypatch, tmp_path):
+    # Both set: the new name wins; the legacy value is ignored.
+    good = tmp_path / "good" / ".agents"
+    _write(good / "dotagents" / "cmds" / "toy.py", TOY)
+    stale = tmp_path / "stale" / ".agents"  # empty; would yield no `toy`
+    monkeypatch.setenv("AGENTS_HOME", str(good))
+    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(stale))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
+    monkeypatch.delenv("DOTAGENTS_CMDS_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    assert "toy" in _names(cli._discover([]))
+
+
+def test_cmds_path_fallback_to_legacy(monkeypatch, tmp_path):
+    # Only the OLD $DOTAGENTS_CMDS_PATH set -> still honored.
+    cmds = tmp_path / "extra"
+    _write(cmds / "toy.py", TOY)
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
+    monkeypatch.setenv("DOTAGENTS_CMDS_PATH", str(cmds))
+    monkeypatch.chdir(tmp_path)
+
+    assert "toy" in _names(cli._discover([]))

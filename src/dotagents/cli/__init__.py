@@ -99,12 +99,17 @@ _COMMAND_MODULES = (
 )
 
 #: Extra env-var command search paths (os.pathsep-split), additive to the scope
-#: walk. Read, never printed (Leakage: DOTAGENTS_* values stay unprinted).
-CMDS_PATH_ENV = "DOTAGENTS_CMDS_PATH"
+#: walk.
+CMDS_PATH_ENV = "AGENTS_CMDS_PATH"
+#: back-compat: DOTAGENTS_CMDS_PATH is deprecated, removable next release.
+CMDS_PATH_ENV_LEGACY = "DOTAGENTS_CMDS_PATH"
 
 #: The configurable user-scope store (D58). Discovery resolves the user scope's
-#: cmds dir through this, not a hardcoded ~/.agents, when set. Read, never printed.
-AGENTS_DIR_ENV = "DOTAGENTS_AGENTS_DIR"
+#: cmds dir through this, not a hardcoded ~/.agents, when set. This is the same
+#: var `dotagents env` emits (D79).
+AGENTS_DIR_ENV = "AGENTS_HOME"
+#: back-compat: DOTAGENTS_AGENTS_DIR is deprecated, removable next release.
+AGENTS_DIR_ENV_LEGACY = "DOTAGENTS_AGENTS_DIR"
 
 
 class Dotagents(LoggingArgs, Cli):
@@ -180,13 +185,17 @@ def _scope_cmds_dirs(argv) -> "list[Path]":
 
     Reuses the existing scope resolution (`_scope.resolve_scope`, Q2) so command
     discovery walks the SAME roots as overlays -- no bolt-on. User scope is the
-    configurable store (`$DOTAGENTS_AGENTS_DIR`, default `~/.agents`; D58);
+    configurable store (`$AGENTS_HOME`, default `~/.agents`; D58/D79);
     project scope is `<cwd>/.agents`. Each contributes `<agents_root>/dotagents/
     cmds` (the `Scope.cmds_dir` seam). Order: user first, then project, so a
     project's command overrides a same-named user command."""
     from dotagents import _scope
 
-    agents_dir = os.environ.get(AGENTS_DIR_ENV) or None
+    agents_dir = (
+        os.environ.get(AGENTS_DIR_ENV)
+        or os.environ.get(AGENTS_DIR_ENV_LEGACY)
+        or None
+    )
     user = _scope.resolve_scope(global_scope=True, agents_dir=agents_dir)
     project = _scope.resolve_scope(global_scope=False)
     return [user.cmds_dir, project.cmds_dir]
@@ -202,7 +211,7 @@ def _discover(argv=None) -> "list":
     2. the bundled command modules (`link`/`sync`) in `<package>/_overlay/
        dotagents/cmds` -- always available, even before an install;
     3. the per-scope `cmds` dirs (user + project, Q2/Q3) via the scope walk;
-    4. `$DOTAGENTS_CMDS_PATH` entries (os.pathsep-split);
+    4. `$AGENTS_CMDS_PATH` entries (os.pathsep-split);
     5. `--cmdspath` entries, read via `duho.parse_globals` before the full parser.
 
     Every directory source is resilient: a missing / bad one is skipped with a
@@ -224,8 +233,8 @@ def _discover(argv=None) -> "list":
     for cmds_dir in _scope_cmds_dirs(argv):
         _discover_dir(cmds_dir, by_name)
 
-    # 4. $DOTAGENTS_CMDS_PATH
-    raw = os.environ.get(CMDS_PATH_ENV)
+    # 4. $AGENTS_CMDS_PATH (back-compat: $DOTAGENTS_CMDS_PATH, removable next release)
+    raw = os.environ.get(CMDS_PATH_ENV) or os.environ.get(CMDS_PATH_ENV_LEGACY)
     if raw:
         for entry in raw.split(os.pathsep):
             if entry:
