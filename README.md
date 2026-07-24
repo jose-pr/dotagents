@@ -38,8 +38,8 @@ them. Everything else is repo infrastructure.
 
 | Path | What |
 | --- | --- |
-| `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`, plus the bundled command modules `link`/`sync`) |
-| `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index), and the bundled `dotagents/cmds/` command modules (`link`/`sync`). Neutral — imposes no flows |
+| `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`) — that is the whole shipped surface; commands beyond it come from overlays or your own `cmds/` modules |
+| `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index), and an empty `dotagents/cmds/` dir — your drop-in point for your own command modules. Neutral — imposes no flows, ships no command |
 | `tools/` | Required tooling (not an overlay): `cloud-setup.sh` (`leak-check` moved to the opt-in `leak-check` overlay, D84) |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
 
@@ -161,14 +161,19 @@ checked-out project, `<project>/.agents` is a **symlink** to `~/.agents/projects
 link never lands in the public repo). `<name>` defaults to the project's basename, so a
 local `~/code/app` and a cloud `/home/user/app` resolve to the same store.
 
+The `link-project` / `sync-project` commands are **supplied by the `private-sync`
+overlay**, not by dotagents itself — installing the overlay is what makes them exist
+(it ships the commands, their logic, the `kb/` walkthrough and the cloud hooks
+together). So `overlays add private-sync` comes first:
+
 ```bash
 dotagents init                                       # base
-dotagents overlays add private-sync --source <overlays-checkout> # kb + cloud hooks
-dotagents link .        # symlink this project's .agents into the private repo
-                        #   (an existing .agents/ is adopted in on the first link;
-                        #    --copy mirrors it as a real dir for no-symlink systems)
-dotagents sync -m msg   # git pull --rebase / commit / push the private repo
-dotagents sync --remote git@github.com:<you>/.agents.git -m init   # one-command bootstrap
+dotagents overlays add private-sync --source <overlays-checkout> # commands + kb + hooks
+dotagents link-project .   # symlink this project's .agents into the private repo
+                           #   (an existing .agents/ is adopted in on the first link;
+                           #    --copy mirrors it as a real dir for no-symlink systems)
+dotagents sync-project -m msg   # git pull --rebase / commit / push the private repo
+dotagents sync-project --remote git@github.com:<you>/.agents.git -m init   # one-command bootstrap
 ```
 
 In cloud sessions, the installed `~/.agents/hooks/private-sync-{start,stop}.sh` clone/pull
@@ -196,7 +201,6 @@ walkthrough: `~/.agents/kb/PRIVATE_SYNC.md`.
 ```bash
 python tools/audit.py --root .                  # validate THIS REPO's layout (CI tooling)
 python tools/audit.py --check-templates --root .  # + template checks (needs 3.11+)
-python tools/audit_config.py --repo-hygiene .          # no personal leftovers tracked
 ```
 
 ## Customize

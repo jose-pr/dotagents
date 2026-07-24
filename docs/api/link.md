@@ -1,3 +1,0 @@
-# Linking
-
-::: dotagents._link

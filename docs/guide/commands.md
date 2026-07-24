@@ -15,17 +15,23 @@ by default (the `<cwd>/.agents` store, when run inside a project) or **user** wi
 | `overlays` | Manage opt-in overlays by name: `add` / `remove` / `list` / `sync`. |
 | `context` | Assemble the effective context for one or more agents. |
 | `env` | Assemble the chained env-file layers + identity vars, in a chosen format. |
-| `link` | Symlink (or copy) a project's `.agents` into its store. |
-| `sync` | Reconcile a copy-mode project and hand off to the store's sync path. |
 | `build-pyz` | Build the self-contained `dotagents.pyz` zipapp. |
 
-`link` and `sync` are **discovered** command modules (D76), shipped in the package's
-bundled command dir — they behave like any other subcommand. Additional command
-modules are discovered from each **installed overlay's** `cmds/` dir, each scope's
-command dir, `$AGENTS_CMDS_PATH` entries, and `--cmdspath` — one Contract-A resolver
-walk covers the overlay + scope tiers (D84). `leak-check` is not built in: it is a
-personal command module you drop into your private `<scope>/dotagents/cmds/`, where
-it is discovered like any other.
+That table is the **whole** shipped surface: dotagents bundles no command module of
+its own. Everything else is **discovered**, from each **installed overlay's** `cmds/`
+dir, each scope's command dir, `$AGENTS_CMDS_PATH` entries, and `--cmdspath` — one
+Contract-A resolver walk covers the overlay + scope tiers (D84). Two consequences
+worth knowing:
+
+- `link-project` / `sync-project` (the per-project private-store workflow) come from
+  the opt-in **`private-sync` overlay**, which ships the commands and their logic
+  together — install it and they appear (see [link-project / sync-project](#link-project--sync-project)).
+- `leak-check` is a personal command module you drop into your private
+  `<scope>/dotagents/cmds/`, where it is discovered like any other.
+
+Your own commands work the same way: drop a `*.py` defining a `duho` command class
+into `<scope>/dotagents/cmds/` (`init` creates that dir) and it becomes a subcommand,
+no registration needed.
 
 ## init
 
@@ -113,17 +119,26 @@ python -m dotagents leak-check .                # tracked files + commit message
 python -m dotagents leak-check --commits-only . # commit messages only
 ```
 
-## link / sync
+## link-project / sync-project
 
-The optional per-project private-store workflow. See
-[Private sync](private-sync.md).
+The optional per-project private-store workflow. These are **not** dotagents
+commands: they are supplied by the `private-sync` overlay, together with the logic
+behind them, so a plain install carries no private-sync workflow at all. Install the
+overlay first and they become available like any other subcommand:
 
 ```bash
-python -m dotagents link .                          # symlink this project's .agents into its store
-python -m dotagents link . --copy                   # real-dir copy (no-symlink systems)
-python -m dotagents sync -m "msg"                   # reconcile + hand off to the store's sync
-python -m dotagents sync --remote <url> -m init     # one-command bootstrap
+python -m dotagents overlays add private-sync --source <overlays-checkout>
+
+python -m dotagents link-project .                       # symlink this project's .agents into its store
+python -m dotagents link-project . --copy                # real-dir copy (no-symlink systems)
+python -m dotagents sync-project -m "msg"                # reconcile + hand off to the store's sync
+python -m dotagents sync-project --remote <url> -m init  # one-command bootstrap
 ```
+
+(They were called `link` / `sync` before; the names now say what they act on — a
+project's `.agents` — and `sync-project` no longer reads like `overlays sync`.)
+
+See [Private sync](private-sync.md) for the full walkthrough.
 
 ## build-pyz
 

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING** — `dotagents link` / `dotagents sync` are gone from the CLI. They are
+  the private-sync workflow's commands, not dotagents' core, so they moved — together
+  with the logic behind them (`src/dotagents/_link.py`) — into the opt-in
+  **`private-sync` overlay**, and were renamed to say what they act on:
+
+      dotagents link-project .            # was: dotagents link .
+      dotagents sync-project -m "msg"     # was: dotagents sync -m "msg"
+
+  Install the overlay to get them back: `dotagents overlays add private-sync --source
+  <overlays-checkout>`. A plain dotagents now ships no private-sync workflow at all;
+  its whole command surface is `init` / `build-pyz` / `context` / `env` / `overlays`,
+  and everything else is discovered from an overlay or from your own `cmds/` modules.
+  `tools/cloud-setup.sh` installs the overlay before linking, so the cloud bootstrap
+  is unaffected.
+- The bundled `dotagents/cmds/` directory now ships no command module of its own, but
+  `init` still creates it: it is the documented drop-in point for your own commands
+  (a `README.md` beside it explains the shape and the precedence rules).
+
 ### Added
 
 - feat: `tools/leak_check.py` now also scans commit messages (current branch history)

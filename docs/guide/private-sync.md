@@ -4,8 +4,11 @@ Keep your global config **and** every project's private working notes (plans, kb
 findings) in a single private git repo — synced across machines and cloud sessions —
 without ever committing any of it into the (often public) project repos.
 
-This workflow is entirely opt-in. `init` / `install` never touch a project directory;
-`link` / `sync` exist only for this model.
+This workflow is entirely opt-in — and it is **not part of dotagents**. `init` never
+touches a project directory, and the two commands this model needs, `link-project` and
+`sync-project`, are shipped by the `private-sync` overlay itself (commands *and* the
+logic behind them). Installing the overlay is what makes them exist; a plain dotagents
+has no private-sync surface at all.
 
 ## The idea
 
@@ -21,14 +24,15 @@ entry.
 
 ```bash
 dotagents init                                            # base config
-dotagents overlays add private-sync --source <overlays-checkout>  # kb + cloud hooks
+dotagents overlays add private-sync --source <overlays-checkout>  # commands + kb + hooks
 
-python -m dotagents link .          # symlink this project's .agents into its store
-                                    #   (an existing real .agents/ is adopted on the
-                                    #    first link; --copy mirrors it as a real dir
-                                    #    for no-symlink systems)
-python -m dotagents sync -m "msg"   # git pull --rebase / commit / push the private repo
-python -m dotagents sync --remote <url> -m init   # one-command bootstrap
+# link-project / sync-project come FROM that overlay -- run `overlays add` first.
+python -m dotagents link-project .   # symlink this project's .agents into its store
+                                     #   (an existing real .agents/ is adopted on the
+                                     #    first link; --copy mirrors it as a real dir
+                                     #    for no-symlink systems)
+python -m dotagents sync-project -m "msg"   # git pull --rebase / commit / push the store
+python -m dotagents sync-project --remote <url> -m init   # one-command bootstrap
 ```
 
 Where the store lives and how it reaches other machines are **conventions, not
@@ -38,10 +42,11 @@ leaves the machine is a perfectly valid setup.
 ## Safety behaviors
 
 - A project whose `.agents` is **itself a git checkout** is never adopted or copied
-  back — `link` / `sync` skip it (with a message) so a nested repo is never swallowed.
-  `link --force` backs the checkout up (git state intact) and links the store instead.
+  back — `link-project` / `sync-project` skip it (with a message) so a nested repo is
+  never swallowed. `link-project --force` backs the checkout up (git state intact) and
+  links the store instead.
 - **Copy mode** (`--copy`) makes `.agents` a real directory rather than a symlink;
-  `sync` copies edits back into the store.
+  `sync-project` copies edits back into the store.
 
 ## Cloud sessions
 

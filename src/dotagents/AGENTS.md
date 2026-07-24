@@ -11,13 +11,15 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `duho.app` with the discovered command set. Also the `dotagents` console script
   (`[project.scripts]`).
 - `dotagents.cli.Dotagents(LoggingArgs, Cli)` — the umbrella CLI class.
-- Compiled command classes live in `dotagents.cli.<name>` (`init`, `audit`,
-  `overlays`, `context`, `env`, `build_pyz`); each is a `class X(LoggingArgs, Cmd)`
-  with a `__call__`. `audit` stays a built-in — a STRUCTURAL config validator (no
-  personal data, D84). `link` / `sync` are **discovered** command modules (D76),
-  shipped in the bundled `_overlay/dotagents/cmds/` dir. `leak-check` is not in the
-  repo at all — it is a personal command module the user keeps in their private
-  `<scope>/dotagents/cmds/` (D84).
+- Compiled command classes live in `dotagents.cli.<name>` (`init`, `overlays`,
+  `context`, `env`, `build_pyz`); each is a `class X(LoggingArgs, Cmd)` with a
+  `__call__`. That is the WHOLE shipped surface — dotagents bundles no command
+  module of its own. `link` / `sync` left the package with their logic (D85): the
+  opt-in **private-sync** overlay ships them, renamed `link-project` /
+  `sync-project`, from its own `cmds/` + `lib/_link.py`. `leak-check` is likewise
+  not in the repo — a personal command module the user keeps in their private
+  `<scope>/dotagents/cmds/` (D84). `audit` is repo CI tooling (`tools/audit.py`),
+  not a command.
 - Command discovery layers sources, later wins: built-ins < bundled `cmds` <
   overlay `cmds` (`<overlay-root>/cmds`) < scope `cmds` dirs (user + project) <
   `$AGENTS_CMDS_PATH` < `--cmdspath`. The overlay + scope tiers come from one
@@ -46,9 +48,6 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
 - `_merge` — managed-block merge for `init`'s `AGENTS.md` / `CLAUDE.md`, delimited by
   `<!-- dotagents:begin -->` / `<!-- dotagents:end -->`. Detection is by marker
   presence only, so it survives user reformatting.
-- `_link` — `link_project(...)`, `sync_agents(...)`, `store_root(agents_dir,
-  store_dir=None)`, `project_store(...)`, `resolve_name(project_dir, name)`. Pure
-  stdlib (no `pathlib_next`) so it works in a plain `pip install` and in the `.pyz`.
 - `_skills` — publish an overlay's `skills/<name>/` into a scope's shared skills dir
   (symlink-preferred, copy fallback); unpublish removes only what the overlay
   published, then sweeps broken symlinks. Pure stdlib.
