@@ -2,11 +2,13 @@
 
 **dotagents** is dotfiles, but for AI coding agents: a portable, token-budgeted
 `~/.agents` configuration that works across agent runners (Claude Code, Antigravity,
-Copilot, Codex, …) and records your engineering standards once — repo structure,
-CI/release discipline, planning/execution/review workflows — instead of restating
-them every session.
+Copilot, Codex, …). dotagents is the **mechanism** — install a neutral base, then layer
+in opt-in **overlays** that carry your standards (repo structure, CI/release discipline,
+whatever workflows you want) — so you record them once instead of restating them every
+session.
 
-The `dotagents` CLI installs and manages that configuration.
+The `dotagents` CLI installs, composes, and manages that configuration; the overlays
+carry the opinions.
 
 ## The mental model
 
@@ -16,10 +18,12 @@ The `dotagents` CLI installs and manages that configuration.
   task matches. You pay context for what you use, not for the whole config.
 - **A neutral base overlay + opt-in overlays.** `dotagents init` lays down a minimal,
   opinion-free **base overlay** — just the `AGENTS.md` scaffolding and the design-log
-  convention. Everything opinionated (planning/execution/review flows, per-language
-  knowledge bases, repo templates, helper tools) lives in composable **overlays** you
-  layer in explicitly with `dotagents overlays add <name>`. Overlays are additive:
-  they never overwrite a file you have already customized.
+  convention. Everything opinionated (workflow sets, per-language knowledge bases, repo
+  templates, helper tools) lives in composable **overlays** you layer in explicitly with
+  `dotagents overlays add <name>`. The overlays in this repo are examples — payloads
+  riding on dotagents, swappable for your own; see [Overlays](guide/overlays.md) for
+  what each ships. Overlays are additive: they never overwrite a file you have already
+  customized.
 - **Two scopes.** Config installs into a **user** store (`~/.agents`, configurable)
   or a **project** store (`<project>/.agents`). Overlays, skills, commands, and env
   files all resolve across the same scope precedence.

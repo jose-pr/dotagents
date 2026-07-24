@@ -16,6 +16,24 @@ scope's overlays directory. There is **no registry file**: installed overlays ar
 Overlays are **additive**. `add` / `sync` never clobber a file you hand-edited inside
 an installed overlay — an already-present file is skipped.
 
+## Bundled example overlays
+
+These ship in this repo as a starting point. They are **payloads riding on dotagents**,
+not part of the tool — swap them for your own. Install any with
+`dotagents overlays add <name>`.
+
+| Overlay | What it carries |
+| --- | --- |
+| `flows` | A planning/execution/review workflow set. `PLAN.md` has a strong model write precise, autonomous plans; `EXEC.md` has a cheaper model execute them without re-deriving context; `REVIEW.md` runs file-threaded multi-agent plan review; `REPO.md` is the repo standard; `MODELS.md` guides executor/model selection. This is one opinionated way to drive agents — the *architect/executor split* — not something dotagents imposes. |
+| `engineering` | Always-on engineering discipline: commit shape, release-tag consent, benchmark-as-evidence, token discipline, draft follow-ups. |
+| `python`, `node`, `rust` | Per-language `kb/` conventions + manifest templates + CI workflow templates. |
+| `references` | Language-neutral repo-file templates (README, CHANGELOG, LICENSE, `.gitignore`, docs-index, a plan-shape example). |
+| `release` | A host-agnostic release helper: an agent-driven commit-plan loop plus tag/CI monitoring across GitHub (`gh`) and GitLab. |
+| `private-sync` | The one-private-repo, per-project `.agents` model (`kb/PRIVATE_SYNC.md` + cloud hooks) — see [Private sync](private-sync.md). |
+| `net` | Dependency-free HTTP tooling (a drop-in `curl` shim, an OS-trust-store `certifi` shim, an `httplib` session toolkit reading `AGENTS_PROXY`). |
+| `recovery` | A config-recovery playbook for reconstructing a lost `~/.agents`. |
+| `tools` | Opt-in helper scripts (`summarize_run`, `compare_bench`). |
+
 ## Managing overlays
 
 ```bash
