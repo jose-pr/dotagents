@@ -43,7 +43,9 @@ Everything from the first `## ` heading down is documentation, not merged.
   claims in a release, changelog, or plan come from CI unless stated otherwise.
 - **Don't pay tokens for what a script can decide**: never dump a whole log into
   context to learn one bit ("did it pass?") — pipe it through something that prints a
-  verdict, keeping the log on disk. Doing the same manual scan twice? Write the script.
+  verdict, keeping the log on disk. `tools/summarize_run.py --log build.log -- <cmd>`
+  does exactly this (the flag is `--log`, not `--log-file`). Doing the same manual scan
+  twice? Write the script.
 - **Draft follow-ups**: adjacent work found mid-execution gets a `Status: draft` plan
   (idea + scope + why) in the project's `.agents/plans/` — never executed in the same
   pass.

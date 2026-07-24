@@ -71,16 +71,37 @@ Python-specific extras/overrides on top of the generic repo standard in
   `__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.hypothesis/`, `.mypy_cache/`,
   `.ruff_cache/`, `.coverage*`, `htmlcov/`, `*.egg-info/`, `.venv/`.
 
-## CI/CD: Implementing the Two-Workflow Split
+## CI/CD: Implementing the Three-Workflow Split
 
-Templates: `~/.agents/references/workflows/python/{test,release}.yml`.
-- Both install `pip install -e ".[dev,<extras-with-tests>]"` and run `pytest -q`.
-- `release.yml`'s docs job gates on `mkdocs build --strict` — verify locally first
-  (`pip install -e ".[docs]"`).
-- PyPI publish uses Trusted Publishing (OIDC, `id-token: write`), never a stored
-  token. PyPI Trusted-Publishing registration and GitHub Pages "Source: GitHub
-  Actions" are one-time, owner-only setup on the real repo — confirm they're
-  registered before assuming `publish-pypi`/`docs-deploy` will work.
+Templates: `~/.agents/references/workflows/python/{test,release,docs}.yml` (D52 —
+test, release, and docs are three separate workflows; docs deploys on its own so a
+release is never the first exercise of the docs build, and the site can be
+redeployed without cutting a release).
+- test + release both install `pip install -e ".[dev,<extras-with-tests>]"` and run
+  `pytest -q`.
+- `release.yml` keeps a `docs-gate` job that runs `mkdocs build --strict` but does
+  **not** deploy — verify locally first (`pip install -e ".[docs]"`). Only `docs.yml`
+  deploys to Pages.
+- `publish-pypi` sets `skip-existing: true` so a re-run of a partial release skips
+  files already uploaded (PyPI never replaces a version) instead of hard-failing.
+- PyPI publish uses Trusted Publishing (OIDC, `id-token: write`), never a stored token.
+- **GitHub Pages preconditions** (one-time, owner-only on the real repo; confirm
+  before assuming `docs.yml`/`publish-pypi` will work):
+  - PyPI Trusted-Publishing must be registered for the project + workflow.
+  - Pages must be set to **Source: GitHub Actions**, not a branch. Check + set via:
+    - `gh api repos/<gh_org>/<project_name>/pages` — 404 means Pages is off; the JSON
+      `build_type` must read `workflow` (a `legacy`/branch source ignores the Actions
+      artifact and the deploy silently no-ops).
+    - `gh api -X POST repos/<gh_org>/<project_name>/pages -f build_type=workflow` to
+      enable it with the Actions source (use `-X PUT` to switch an existing
+      branch-source Pages over to `workflow`).
+  - The `github-pages` environment may carry branch/tag protection rules that block a
+    deploy from a tag ref — check the deploy job's logs if it's skipped, not failed.
+- **Debugging a green-but-wrong run**: a job can exit 0 while emitting check-run
+  **annotations** (warnings that never fail the step) — `mkdocs --strict` nav warnings,
+  `setup-python` cache misses. They don't show in the step's tail; read them with
+  `gh api repos/<gh_org>/<project_name>/check-runs/<id>/annotations` (get `<id>` from
+  `gh run view <run-id> --json jobs`).
 
 ## Releases and Versioning
 
@@ -89,6 +110,13 @@ Templates: `~/.agents/references/workflows/python/{test,release}.yml`.
   `CHANGELOG.md` keep SemVer (`v1.0.0-rc.1`). Same release, two syntaxes — never
   "fix" one to match the other.
 - Bump `version` in the same commit as the changelog entry.
+- **Release-prep checklist** (assert before tagging, not after):
+  - `src/<package_name>/py.typed` **exists** (a typed package MUST ship it — an
+    absent marker means consumers get no types from the wheel) AND the
+    `"Typing :: Typed"` classifier is present in `pyproject.toml`. Verify the marker
+    reaches the wheel: `python -m build` then `unzip -l dist/*.whl | grep py.typed`.
+  - `license`/`license-files` (PEP 639) set; no legacy `License ::` classifier
+    alongside them.
 
 ## Documentation Site
 

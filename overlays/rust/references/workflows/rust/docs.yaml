@@ -1,0 +1,59 @@
+name: Docs
+
+# OPTIONAL for Rust. docs.rs builds + hosts the API reference automatically on
+# publish, so most crates need NO docs workflow at all. Use this file only if
+# the crate ships a narrative mdBook guide beyond bare API docs (see
+# kb/RUST.md) -- then this deploys the book to GitHub Pages, kept separate from
+# release.yaml (D52 -- three workflow files: test, release, docs) so the book
+# can be rebuilt/redeployed without cutting a release.
+#
+# Triggers:
+#   - push to the default branch touching the book sources.
+#   - workflow_dispatch, for a manual redeploy against any ref.
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "book/**"
+      - "book.toml"
+      - ".github/workflows/docs.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize deploys; never cancel an in-flight Pages deploy mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  docs-build:
+    name: Build mdBook site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Install mdBook
+        run: cargo install mdbook
+      - name: Build book (strict -- fail on broken links)
+        run: mdbook build
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: book/book/
+
+  docs-deploy:
+    name: Deploy documentation to GitHub Pages
+    needs: docs-build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
