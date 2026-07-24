@@ -34,13 +34,19 @@ def build_hook_entry(
     *,
     matcher: "Optional[str]" = None,
     status_message: "Optional[str]" = None,
+    shell: "Optional[str]" = None,
 ) -> "dict[str, Any]":
     """One matcher-object wrapping a single ``type: command`` hook.
 
-    ``matcher``/``statusMessage`` are omitted entirely when None rather than
-    written as null -- an absent key is the documented "no matcher" form.
+    ``matcher``/``statusMessage``/``shell`` are omitted entirely when None rather
+    than written as null -- an absent key is the documented "no matcher" /
+    "default shell" form. ``shell`` selects the interpreter for THIS hook's own
+    ``command`` (``"bash"`` or ``"powershell"``) -- unrelated to which tool the
+    hook is matched against.
     """
     hook: "dict[str, Any]" = {"type": "command", "command": command}
+    if shell:
+        hook["shell"] = shell
     if status_message:
         hook["statusMessage"] = status_message
     entry: "dict[str, Any]" = {}
@@ -86,6 +92,7 @@ def merge_hook(
     *,
     matcher: "Optional[str]" = None,
     status_message: "Optional[str]" = None,
+    shell: "Optional[str]" = None,
 ) -> "tuple[list, bool]":
     """Fold our hook into `existing`, returning ``(normalized_list, changed)``.
 
@@ -110,7 +117,9 @@ def merge_hook(
     """
     if not isinstance(existing, list):
         # None/absent is the common case; a non-list is a malformed file we replace.
-        return [build_hook_entry(command, matcher=matcher, status_message=status_message)], True
+        return [
+            build_hook_entry(command, matcher=matcher, status_message=status_message, shell=shell)
+        ], True
 
     normalized: list = []
     changed = False
@@ -134,7 +143,7 @@ def merge_hook(
 
     if not seen_ours:
         normalized.append(
-            build_hook_entry(command, matcher=matcher, status_message=status_message)
+            build_hook_entry(command, matcher=matcher, status_message=status_message, shell=shell)
         )
         changed = True
 

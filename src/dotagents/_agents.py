@@ -143,16 +143,83 @@ class ClaudeAgent(Agent):
     ) % {"path": _HOOK_PATH}
     CWD_CHANGED_COMMAND = "[ -f AGENTS.md ] && cat AGENTS.md || true"
 
+    # Windows without Git Bash: hooks.md's `shell` field docs are explicit --
+    # "Defaults to bash, or to powershell on Windows when Git Bash isn't
+    # installed." SESSION_START_COMMAND/CWD_CHANGED_COMMAND above are bash
+    # syntax with no `shell` set, so on such a machine Claude Code runs them
+    # THROUGH POWERSHELL by default -- verified directly: `if [ -n ... ]; then
+    # ...; fi` fed to `powershell -Command` is a hard PARSE ERROR
+    # ("Missing '(' after 'if'"), not a soft failure. Every session would
+    # silently get neither env nor injected context on such a machine. This
+    # is real, if less common than having Git Bash installed (per the user:
+    # "it happens, just not usually by default").
+    #
+    # Fix: register a SECOND handler on each event, explicit `shell:
+    # "powershell"`, PowerShell-native syntax. Both handlers in a matched
+    # group run unconditionally (hooks.md: "every handler in the matched
+    # group runs") -- there is no way to select one based on which
+    # interpreter is actually present. So exactly one of the two spawns
+    # successfully per machine; the other's interpreter is simply absent
+    # (Windows without Git Bash has no `sh`/`bash` on PATH) and that spawn
+    # fails harmlessly -- SessionStart hook failures do not block the
+    # session, only that hook's own effect is lost, which is what would have
+    # happened anyway without this fix.
+    #
+    # The PowerShell variant is CONTEXT-ONLY, not env+context: `$CLAUDE_ENV_FILE`
+    # explicitly documents its effect as "subsequent BASH commands" regardless
+    # of which shell wrote it, so writing to it from a PowerShell-shelled
+    # SessionStart hook would feed nothing -- no Bash call reads a
+    # PowerShell-authored write differently, and no PowerShell call reads
+    # $CLAUDE_ENV_FILE at all (confirmed empty live, D90). The PowerShell env
+    # gap is covered separately by PRETOOLUSE_POWERSHELL_COMMAND below, which
+    # works regardless of whether Git Bash is present.
+    SESSION_START_COMMAND_POWERSHELL = (
+        r'& "$env:USERPROFILE\.agents\bin\dotagents.cmd" context'
+    )
+    CWD_CHANGED_COMMAND_POWERSHELL = (
+        r'if (Test-Path AGENTS.md) { Get-Content AGENTS.md -Raw }'
+    )
+
     # PowerShell tool gap (Windows only): $CLAUDE_ENV_FILE is Bash-tool-only --
     # every hooks.md mention says "subsequent Bash commands", and
     # $env:CLAUDE_ENV_FILE was observed empty inside a live PowerShell tool call.
     # So the SessionStart hook above never reaches PowerShell tool calls at all.
     # Closed independently via a PreToolUse hook (no matcher -- fires for every
     # tool) that, for a PowerShell call specifically, prepends a guarded env-loader
-    # to that call's OWN command via `updatedInput` -- see the script for the full
-    # design rationale, the `&` vs `-File` stdin gotcha, and what remains
-    # unverified (cross-call guard persistence, the tool_input field name).
-    PRETOOLUSE_HOOK_SCRIPT = "pretooluse_powershell_env.ps1"
+    # to that call's OWN command via `updatedInput`.
+    #
+    # INLINE `-Command`, deliberately NOT a `.ps1` file: a `.ps1` is subject to
+    # PowerShell's script execution policy (RemoteSigned/AllSigned/Restricted),
+    # and dotagents has no code-signing certificate to satisfy AllSigned or a
+    # locked-down MachinePolicy/UserPolicy (which overrides everything, including
+    # Claude Code's own `-ExecutionPolicy Bypass`). An inline `-Command` string is
+    # NOT subject to script execution policy at all -- verified directly: it ran
+    # successfully even under `Set-ExecutionPolicy -Scope Process Restricted`,
+    # which blocks every `.ps1` file. This also removes the earlier `.ps1`
+    # design's `&` vs `-File` stdin-forwarding pitfall entirely, since there is
+    # no nested spawn -- Claude Code's own hook process (which the shell-form
+    # docs confirm receives the real piped stdin) runs this directly.
+    #
+    # Kept to a single logical statement chain (`;`-joined, matching
+    # SESSION_START_COMMAND's own style) so it fits in one settings.json hook
+    # command, same as the Bash hooks above.
+    #
+    # Every literal `\` below MUST use a raw string (or be doubled) up to this
+    # point in the source -- a bare `\b` inside a normal Python string literal
+    # silently becomes a backspace character (\x08), not the two characters
+    # `\`+`b`, corrupting the emitted `\.agents\bin\...` path. Caught by testing
+    # a draft of this exact command through a real PowerShell spawn before
+    # shipping it, not by inspection -- the corruption is invisible in an editor.
+    PRETOOLUSE_POWERSHELL_COMMAND = (
+        r'$h = [Console]::In.ReadToEnd() | ConvertFrom-Json; '
+        r'if ($h.tool_name -eq "PowerShell" -and -not $env:AGENTS_RUNTIME_SET -and $h.tool_input.command) { '
+        r'$p = '
+        r"""'if (-not $env:AGENTS_RUNTIME_SET) { $env:AGENTS_RUNTIME_SET = "1"; & "$HOME\.agents\bin\dotagents.cmd" env --format powershell 2>$null | Invoke-Expression }; '; """
+        r'$u = $h.tool_input.PSObject.Copy(); '
+        r'$u.command = $p + $h.tool_input.command; '
+        r'@{hookSpecificOutput=@{hookEventName="PreToolUse";permissionDecision="allow";updatedInput=$u}} | ConvertTo-Json -Depth 10 -Compress '
+        r'}'
+    )
 
     def wire_hooks(
         self,
@@ -161,7 +228,6 @@ class ClaudeAgent(Agent):
         dry_run: bool,
         logger,
         config_root: "Optional[Path]" = None,
-        agents_home: "Optional[Path]" = None,
     ) -> None:
         """Link the shared skills dir into `~/.claude` and merge our two hooks.
 
@@ -224,25 +290,47 @@ class ClaudeAgent(Agent):
         if legacy is not None:
             changed = True
 
-        session_start, ss_changed = _hooks.merge_hook(
+        # Two independent handlers per event: bash-syntax (works with Git Bash on
+        # Windows and on every POSIX host) and a PowerShell-native equivalent
+        # (works on Windows without Git Bash, where hooks.md's documented default
+        # silently routes the bash-syntax command through PowerShell instead --
+        # a hard parse error, verified directly). Both fire unconditionally every
+        # session (hooks.md: every handler in a matched group runs); the one
+        # whose interpreter is absent on this machine fails harmlessly, the other
+        # carries the real effect. Chained `merge_hook` calls, each keyed by its
+        # own `status_message` so they merge/refresh independently and never
+        # collide with each other's identity.
+        session_start, ss_changed_1 = _hooks.merge_hook(
             hooks.get("SessionStart", legacy),
             self.SESSION_START_COMMAND,
             status_message="Loading agent context",
         )
+        session_start, ss_changed_2 = _hooks.merge_hook(
+            session_start,
+            self.SESSION_START_COMMAND_POWERSHELL,
+            status_message="Loading agent context (PowerShell)",
+            shell="powershell",
+        )
         hooks["SessionStart"] = session_start
+        ss_changed = ss_changed_1 or ss_changed_2
 
-        cwd_changed, cc_changed = _hooks.merge_hook(
+        cwd_changed, cc_changed_1 = _hooks.merge_hook(
             hooks.get("CwdChanged"),
             self.CWD_CHANGED_COMMAND,
             status_message="Checking for AGENTS.md",
         )
+        cwd_changed, cc_changed_2 = _hooks.merge_hook(
+            cwd_changed,
+            self.CWD_CHANGED_COMMAND_POWERSHELL,
+            status_message="Checking for AGENTS.md (PowerShell)",
+            shell="powershell",
+        )
         hooks["CwdChanged"] = cwd_changed
+        cc_changed = cc_changed_1 or cc_changed_2
 
         pt_changed = False
         if os.name == "nt":
-            pt_changed = self._wire_powershell_pretooluse(
-                hooks, dry_run=dry_run, logger=logger, agents_home=agents_home
-            )
+            pt_changed = self._wire_powershell_pretooluse(hooks)
 
         if not (changed or ss_changed or cc_changed or pt_changed):
             if logger:
@@ -262,66 +350,34 @@ class ClaudeAgent(Agent):
                 settings_path,
             )
 
-    def _wire_powershell_pretooluse(
-        self,
-        hooks: dict,
-        *,
-        dry_run: bool,
-        logger,
-        agents_home: "Optional[Path]" = None,
-    ) -> bool:
-        """Windows only. Copies the PowerShell env-injection script to
-        `<agents_home>/hooks/` and merges a no-matcher `PreToolUse` entry pointing
-        at it. Returns whether anything changed.
+    def _wire_powershell_pretooluse(self, hooks: dict) -> bool:
+        """Windows only. Merges a no-matcher `PreToolUse` entry running
+        `PRETOOLUSE_POWERSHELL_COMMAND` inline. Returns whether anything changed.
 
-        The script lives in the AGENTS STORE (default `~/.agents/`, overridable via
-        `agents_home` -- tests must pass an isolated one, never the real store),
-        not the caller's Claude-config `dest`/`config_root`: PowerShell tool calls
-        are session-wide, not project-specific, so this always targets the user
-        store, mirroring `$HOME/.agents/bin` in `SESSION_START_COMMAND`. The
-        emitted hook command still hardcodes `$env:USERPROFILE` (the real user
-        store) regardless of `agents_home`, since that command runs in a REAL
-        future session, never in a test.
+        `shell="powershell"` on the hook entry (per hooks.md's `shell` field)
+        means Claude Code spawns PowerShell directly for THIS hook's `command`,
+        with no bash/Git-Bash layer in between -- so `PRETOOLUSE_POWERSHELL_COMMAND`
+        is passed as-is, with no extra quoting for an outer shell. Nesting a second
+        `powershell -Command "..."` inside a bash-tokenized outer command would
+        require getting two layers of shell quoting right at once (the command
+        contains both `"` and `'`); one spawn avoids that class of bug entirely.
 
-        Copies from package data every call (create-or-refresh, not
-        create-if-absent): unlike the AGENTS.md/CLAUDE.md managed block, this
-        script has no user-editable region, so silently refreshing it on `init`
-        is correct and expected -- it should always match this dotagents version.
+        No file is written to disk for this one -- see the constant's docstring
+        for why an inline `-Command` is used instead of a `.ps1` script (execution
+        policy). Nothing to make `dry_run`/`agents_home`-aware either, since there
+        is no filesystem write left to gate or isolate.
         """
-        import shutil
-
         from dotagents import _hooks
-        from dotagents.cli._common import BASE_ROOT
-
-        src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / self.PRETOOLUSE_HOOK_SCRIPT
-        if not src_script.is_file():
-            if logger:
-                logger.warning("PowerShell hook script missing from package: %s", src_script)
-            return False
-
-        home = Path(agents_home) if agents_home else Path.home() / ".agents"
-        dest_dir = home / "hooks"
-        dest_script = dest_dir / self.PRETOOLUSE_HOOK_SCRIPT
-        script_changed = not dest_script.is_file() or (
-            dest_script.read_bytes() != src_script.read_bytes()
-        )
-        if script_changed and not dry_run:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(src_script), str(dest_script))
-
-        command = (
-            'powershell -NoProfile -NonInteractive -File '
-            '"$env:USERPROFILE\\.agents\\hooks\\%s"'
-        ) % self.PRETOOLUSE_HOOK_SCRIPT
 
         pretooluse, pt_hook_changed = _hooks.merge_hook(
             hooks.get("PreToolUse"),
-            command,
+            self.PRETOOLUSE_POWERSHELL_COMMAND,
             status_message="Checking PowerShell env",
+            shell="powershell",
         )
         hooks["PreToolUse"] = pretooluse
 
-        return script_changed or pt_hook_changed
+        return pt_hook_changed
 
     def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
         target = dest / "CONTEXT.md"

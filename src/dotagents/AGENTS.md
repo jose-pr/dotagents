@@ -66,23 +66,36 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   never `config.toml`). Codex's hook JSON is structurally identical to Claude's, so
   the same merge serves both. Gemini/Cursor/Copilot keep the base no-op: no
   published schema to target.
-- **Windows only**: `ClaudeAgent._wire_powershell_pretooluse` additionally wires a
-  no-matcher `PreToolUse` hook (fires on every tool call) pointing at
-  `_overlay/dotagents/hooks/pretooluse_powershell_env.ps1`, copied to
-  `<agents_home>/hooks/` (create-or-refresh — this script has no user-editable
-  region). Closes a real gap: `$CLAUDE_ENV_FILE` is Bash-tool-only (every hooks.md
-  mention says "subsequent Bash commands"; confirmed empirically that
+- **`SessionStart`/`CwdChanged` register TWO handlers each**, bash-syntax
+  (default shell) and a PowerShell-native equivalent (`shell: "powershell"`).
+  hooks.md: `shell` "Defaults to bash, or to powershell on Windows when Git Bash
+  isn't installed" — verified directly that bash syntax fed to `powershell
+  -Command` on such a machine is a hard parse error, not a soft failure, so
+  every session there would silently get neither env nor context. Every handler
+  in a matched group fires unconditionally (hooks.md), so both always run; the
+  one whose interpreter is absent fails harmlessly. The PowerShell
+  `SessionStart` variant is context-only (`dotagents context`), not
+  env+context: `$CLAUDE_ENV_FILE`'s documented effect is "subsequent BASH
+  commands" regardless of which shell wrote it, so writing to it from a
+  PowerShell-shelled hook would feed nothing.
+- **Windows only**: `ClaudeAgent._wire_powershell_pretooluse` additionally wires
+  a no-matcher `PreToolUse` hook (fires on every tool call), `shell:
+  "powershell"`, running `PRETOOLUSE_POWERSHELL_COMMAND` INLINE — deliberately
+  not a `.ps1` file, since a script file is subject to PowerShell's execution
+  policy (RemoteSigned/AllSigned/Restricted) and dotagents has no code-signing
+  certificate; verified directly that the inline form runs successfully even
+  under `Restricted`, which blocks every `.ps1` file outright. Closes a real
+  gap: `$CLAUDE_ENV_FILE` is Bash-tool-only (confirmed empirically that
   `$env:CLAUDE_ENV_FILE` is empty inside a live PowerShell tool call), so the
-  SessionStart env half never reaches the PowerShell tool. The script uses
-  `PreToolUse`'s `updatedInput` to prepend a guarded env-loader
-  (`AGENTS_RUNTIME_SET`, matching the precursor's convention) to a `PowerShell`
-  tool call's own command — not by trying to persist state across hook
-  invocations, which are each their own fresh process and cannot. Whether the
-  guard is visible across separate PowerShell tool calls is UNVERIFIED; the
-  script logs every firing to `<agents_home>/hooks/logs/` to test this
-  empirically. Invoking the script MUST use a real spawned process
-  (`powershell -File ...`), never `& script.ps1` — the call operator runs
-  in-process and does not forward piped stdin, verified directly.
+  SessionStart env half never reaches the PowerShell tool. Uses `PreToolUse`'s
+  `updatedInput` to prepend a guarded env-loader (`AGENTS_RUNTIME_SET`,
+  matching the precursor's convention) to a `PowerShell` tool call's own
+  command — not by trying to persist state across hook invocations, which are
+  each their own fresh process and cannot. Whether the guard is visible across
+  separate PowerShell tool calls is UNVERIFIED. Every literal `\` in the
+  command constant must be a raw string — a bare `\b` in a normal Python string
+  literal silently becomes a backspace character, corrupting the emitted path;
+  caught once by testing a draft through a real PowerShell spawn.
 - `_sync` — `PathSyncer` wrapper reproducing `install`'s backup/copy/report; requires
   `pathlib_next.Path` instances (not plain `pathlib.Path`) and a pre-created parent dir.
 
