@@ -29,6 +29,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- feat: `init` wires agent hooks and links the shared skills dir. For each active
+  agent that supports it (today: Claude), two hooks are merged into the agent's
+  `settings.json` — `SessionStart` running `dotagents context` (its stdout is
+  injected into the session context, so the assembled context reaches the model
+  automatically) and `CwdChanged` surfacing a directory's `AGENTS.md`. The merge is
+  additive and idempotent: unrelated keys and hooks you wrote yourself survive
+  verbatim, and re-running writes nothing. `--no-hooks` skips it.
+
+  `init` also links `<scope>/skills/` into the agent's config dir, closing the last
+  mile for overlay-published skills — publishing only helps if the agent reads that
+  directory. Symlink where the OS permits, copy otherwise (a copy is a snapshot;
+  re-run `init` to refresh).
+
+  No environment-variable hook is written: the `CLAUDE_ENV_FILE` variable such a
+  hook would need no longer exists in Claude Code, and the static `env` key in
+  `settings.json` cannot carry computed values. Use `dotagents env` from your shell.
+
 - feat: `tools/leak_check.py` now also scans commit messages (current branch history)
   for agent-session trailers/URLs — a `Claude-Session:` trailer or `claude.ai/code/session`
   link — and exits 1 on any hit. The trailer is auto-added by the agent harness and

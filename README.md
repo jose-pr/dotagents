@@ -66,7 +66,9 @@ manifest read by the `dotagents overlays` subcommand, which manages overlays by 
 `.pyz` needs no `pip install` at all.
 
 `init` writes the `.agents/` scaffolding — the `AGENTS.md` managed block, the per-agent
-`<CLAUDE|ANTIGRAVITY|...>.md → @AGENTS.md` pattern, the design-log convention — but
+`<CLAUDE|ANTIGRAVITY|...>.md → @AGENTS.md` pattern, the design-log convention — and
+wires each supporting agent's hooks so `dotagents context` reaches it automatically at
+session start (`--no-hooks` opts out) — but
 imposes no opinions (those come from `overlays add`). Its `AGENTS.md`/`CLAUDE.md` are a
 marker-delimited managed block, so re-running `init` never clobbers what you've added
 around it. **Scope**: project by default (`<cwd>/.agents`), or the user store with

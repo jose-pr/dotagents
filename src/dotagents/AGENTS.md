@@ -51,6 +51,12 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
 - `_skills` — publish an overlay's `skills/<name>/` into a scope's shared skills dir
   (symlink-preferred, copy fallback); unpublish removes only what the overlay
   published, then sweeps broken symlinks. Pure stdlib.
+- `_hooks` — additive, idempotent merge of our hooks into an agent's `settings.json`.
+  `hooks.<Event>` is a **list of matcher-objects** each holding its own `hooks` list,
+  not a flat command list. Foreign hooks are preserved verbatim, malformed entries
+  are dropped rather than raising, and invalid JSON raises `SystemExit` instead of
+  silently overwriting the user's file. Pure stdlib. Consumed by
+  `ClaudeAgent.wire_hooks` (the only adapter with a verified hook schema).
 - `_sync` — `PathSyncer` wrapper reproducing `install`'s backup/copy/report; requires
   `pathlib_next.Path` instances (not plain `pathlib.Path`) and a pre-created parent dir.
 

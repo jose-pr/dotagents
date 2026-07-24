@@ -41,8 +41,35 @@ See [Install](install.md) for the full walkthrough. In brief:
 dotagents init                          # base config into <cwd>/.agents (project scope)
 dotagents init -g                       # ...into ~/.agents (user scope)
 dotagents init --bin-dir ~/.local/bin   # also write a `dotagents` command on PATH
+dotagents init --no-hooks               # skip agent hook wiring + the skills link
 dotagents init --dry-run
 ```
+
+### Hook wiring and the skills link
+
+For each active agent that supports it (today: Claude), `init` also merges two hooks
+into the agent's `settings.json` and links the scope's shared `skills/` dir into the
+agent's config dir. Pass `--no-hooks` to skip both.
+
+| Hook | Command | Why |
+| --- | --- | --- |
+| `SessionStart` | `dotagents context` | Claude injects a SessionStart hook's **stdout into the session context** — this is how the assembled context reaches the model without you running anything. |
+| `CwdChanged` | `[ -f AGENTS.md ] && cat AGENTS.md \|\| true` | Surfaces a directory's `AGENTS.md` when the agent changes into it. |
+
+The merge is additive and idempotent: unrelated settings keys and hooks you wrote
+yourself are preserved verbatim, and re-running `init` writes nothing.
+
+The skills link is what makes published skills visible — publishing into
+`<scope>/skills/` only helps if the agent reads that directory. It is a symlink where
+the OS permits one and a **copy** otherwise (notably Windows without Developer Mode).
+A copy is a point-in-time snapshot: re-run `dotagents init` to refresh it after
+overlay skills change.
+
+!!! note
+    No environment-variable hook is written. The `CLAUDE_ENV_FILE` variable a
+    SessionStart hook would need no longer exists in Claude Code, and the documented
+    alternative — the static `env` key in `settings.json` — cannot carry computed
+    values. Use `dotagents env` from your shell instead.
 
 ## overlays
 
