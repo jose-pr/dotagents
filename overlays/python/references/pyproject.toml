@@ -9,9 +9,15 @@ authors = [{ name = "<copyright_holder>" }]
 description = "<one-line description>"
 readme = "README.md"
 requires-python = ">=3.9"
+# PEP 639: SPDX license expression + the file(s) it refers to. This replaces the
+# legacy `License ::` classifier (do NOT also list one -- modern build backends
+# reject the pair).
+license = "MIT"
+license-files = ["LICENSE"]
 classifiers = [
+    "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "Typing :: Typed",
     "Operating System :: OS Independent",
 ]
 # Zero required runtime deps where feasible; integrations go in extras (kb/PYTHON.md).
