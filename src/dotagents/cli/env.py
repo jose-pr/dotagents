@@ -8,7 +8,7 @@ the logger only ever names vars (Leakage rule).
 """
 
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from duho import Cmd, LoggingArgs
 
@@ -50,38 +50,44 @@ def _looks_like_path_list(key: str, value: str) -> bool:
     return "\\" in value or ";" in value
 
 
-_DRIVE_LETTER_RE = re.compile(r"^([A-Za-z]):[/\\]")
-_UNC_RE = re.compile(r"^[/\\]{2}")
+_DRIVE_LETTER_RE = re.compile(r"^([A-Za-z]):/")
 
 
 def _to_posix_path(segment: str) -> str:
     """One path segment, converted to a form MSYS2/Cygwin bash can actually
     resolve a PATH lookup through -- not just cosmetically POSIX-shaped.
 
-    ``Path(segment).as_posix()`` alone is NOT sufficient: it fixes slash
-    direction but leaves a drive letter as ``C:/...``, which fails PATH lookup
-    identically to the backslash form -- verified directly (``command -v
-    grep`` empty for ``C:/Program Files/Git/usr/bin``, populated for
-    ``/c/Program Files/Git/usr/bin``, same directory). So after
-    ``as_posix()``, a genuine drive-letter prefix is additionally rewritten to
-    its MSYS mount point (``C:/...`` -> ``/c/...``).
+    Uses ``PureWindowsPath`` explicitly, NOT the platform-dependent bare
+    ``Path``. This distinction is load-bearing, not stylistic: `Path` resolves
+    to `PosixPath` on a POSIX host, and `PosixPath("C:\\Users\\x").as_posix()`
+    does NOT recognize `C:` as a drive or `\\` as a separator -- backslashes
+    pass through as literal filename characters. This code runs in CI on
+    Linux/macOS runners (the test suite exercises it there), so a bare `Path`
+    silently only worked when the CI happened to run on a Windows runner --
+    which for THIS job it does not. `PureWindowsPath` parses Windows syntax
+    unconditionally, everywhere, matching what the value actually is (a
+    Windows path string), independent of the host running the code.
 
-    A UNC segment (``\\\\server\\share\\...``) needs the opposite correction:
-    both ``as_posix()`` and a bare backslash-to-slash replace COLLAPSE the
-    leading ``//`` to a single ``/`` (``//server/share`` -> ``/server/share``),
-    which is wrong -- MSYS keeps UNC paths double-slash-rooted. Restored
-    explicitly since neither conversion preserves it on its own.
+    `PureWindowsPath(...).as_posix()` alone still leaves a drive letter as
+    `C:/...`, which fails PATH lookup identically to the backslash form --
+    verified directly on Windows (`command -v grep` empty for `C:/Program
+    Files/Git/usr/bin`, populated for `/c/Program Files/Git/usr/bin`, same
+    directory). So a genuine drive-letter prefix is additionally rewritten to
+    its MSYS mount point (`C:/...` -> `/c/...`).
 
-    An already-POSIX or relative segment (``.agents/bin``, ``/etc/agents/bin``)
-    matches neither pattern and passes through ``as_posix()`` unchanged.
+    A UNC segment (`\\\\server\\share\\...`) is handled correctly by
+    `PureWindowsPath` natively -- it already preserves the double-slash UNC
+    root through `.as_posix()` (`//server/share/...`), unlike a naive
+    backslash-replace on a plain string, which collapses it to one slash.
+
+    An already-POSIX or relative segment (`.agents/bin`, `/etc/agents/bin`) is
+    parsed as a relative Windows path (backslashes are still separators there,
+    but there are none to convert) and passes through unchanged.
     """
-    is_unc = bool(_UNC_RE.match(segment))
-    posix = Path(segment).as_posix()
+    posix = PureWindowsPath(segment).as_posix()
     m = _DRIVE_LETTER_RE.match(posix)
     if m:
         return "/%s%s" % (m.group(1).lower(), posix[2:])
-    if is_unc and not posix.startswith("//"):
-        return "/" + posix.lstrip("/")
     return posix
 
 
