@@ -1,9 +1,13 @@
-"""`dotagents audit` -- run the config auditor against a payload/install dest."""
+"""`dotagents audit` -- run the STRUCTURAL config auditor against a payload/dest.
+
+audit validates dotagents-config structure only (manifest, forbidden BASE_PATTERNS,
+size budgets, overlay-manifest rules, templates). Personal-leak / hygiene scanning
+is NOT audit's job (D84) -- that is the separate `leak-check` tool, run locally.
+"""
 
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 from duho import Cmd, LoggingArgs
 
@@ -11,7 +15,7 @@ from dotagents.cli._common import _resolve_required_tool
 
 
 class Audit(LoggingArgs, Cmd):
-    """Run the config auditor against a payload/install destination."""
+    """Run the structural config auditor against a payload/install destination."""
 
     _parsername_ = "audit"
 
@@ -22,10 +26,6 @@ class Audit(LoggingArgs, Cmd):
     check_templates: bool = False
     "Also run --check-templates (needs Python 3.11+)."
     ("--check-templates",)
-
-    repo_hygiene: Optional[Path] = None
-    "Also run --repo-hygiene against the given repo root."
-    ("--repo-hygiene",)
 
     def __call__(self) -> int:
         # Front-end onto the single standalone implementation, tools/audit_config.py
@@ -40,8 +40,4 @@ class Audit(LoggingArgs, Cmd):
         rc |= subprocess.call(cmd)
         if self.check_templates:
             rc |= subprocess.call(cmd + ["--check-templates"])
-        if self.repo_hygiene:
-            rc |= subprocess.call(
-                [sys.executable, str(auditor_path), "--repo-hygiene", str(self.repo_hygiene)]
-            )
         return rc

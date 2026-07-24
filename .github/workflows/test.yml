@@ -36,10 +36,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Audit config manifest
+      - name: Audit config structure
         run: python tools/audit_config.py --root .
-      - name: Repo hygiene scan (no personal leftovers in tracked files)
-        run: python tools/audit_config.py --repo-hygiene .
+      # Personal-leak / hygiene scanning is NOT in CI (D84): it moved to `leak-check`,
+      # a personal tool the user runs locally before a push -- CI has no personal
+      # patterns to scan for and audit is structural-only now.
       - name: Template instantiation checks (3.11+ only)
         if: matrix.python-version != '3.9'
         run: python tools/audit_config.py --check-templates --root .
@@ -224,24 +225,19 @@ jobs:
           # --no-setup (the setup-runner escape hatch) must survive the zipapp too.
           python dist/dotagents.pyz overlays add --help | grep -q -- "--no-setup"
           ! python dist/dotagents.pyz overlays add --help | grep -q -- "--no-setup-"
-          # audit + leak-check (D70): thin fronts onto the bundled _tools scripts.
-          # Their flags/positional + help must survive the zipapp degradation, and
-          # each must actually dispatch to the bundled tool from inside the .pyz.
+          # audit (D70): a compiled built-in that shells to the bundled
+          # _tools/audit_config.py. Its flags/help must survive the zipapp
+          # degradation and it must actually dispatch from inside the .pyz. audit is
+          # STRUCTURAL-only (D84): no --repo-hygiene mode (that moved to leak-check,
+          # a personal local tool), and leak-check is not on the pyz surface at all.
           python dist/dotagents.pyz audit --help | grep -q -- "--root ROOT"
           ! python dist/dotagents.pyz audit --help | grep -q -- "--root-"
-          python dist/dotagents.pyz audit --help | grep -q -- "--repo-hygiene"
-          python dist/dotagents.pyz leak-check --help | grep -q -- "Repository root to scan"
-          python dist/dotagents.pyz leak-check --help | grep -q -- "--commits-only"
-          ! python dist/dotagents.pyz leak-check --help | grep -q -- "--commits-only-"
-          # --commits-only skips the tracked-file scan: usable as a gate on THIS
-          # repo, which tracks .agents/ refs (a full scan here would FAIL).
-          python dist/dotagents.pyz leak-check --commits-only . | grep -q -- "PASS"
-          # leak-check dispatches to the bundled leak_check.py. Scan a fresh clean
-          # repo (this repo intentionally tracks .agents/ refs, so it is NOT clean).
-          clean="$(mktemp -d)"; git -C "$clean" init -q
-          echo hi > "$clean/README.md"; git -C "$clean" add .
-          git -C "$clean" -c user.email=t@t -c user.name=t commit -q -m init
-          python dist/dotagents.pyz leak-check "$clean" | grep -q -- "PASS"
+          ! python dist/dotagents.pyz audit --help | grep -q -- "--repo-hygiene"
+          # audit dispatches to the bundled audit_config.py: a fresh init'd store
+          # runs the structural audit from inside the .pyz.
+          adest="$(mktemp -d)"
+          AGENTS_HOME="$adest" python dist/dotagents.pyz init --dest "$adest"
+          python dist/dotagents.pyz audit --root "$adest" | grep -q -- "root:"
           python dist/dotagents.pyz init
           python dist/dotagents.pyz overlays add python --source overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"

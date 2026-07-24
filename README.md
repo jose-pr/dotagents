@@ -38,9 +38,9 @@ them. Everything else is repo infrastructure.
 
 | Path | What |
 | --- | --- |
-| `src/dotagents/` | The installable `dotagents` CLI (`init`/`install`/`overlays`/`context`/`env`/`audit`/`leak-check`/`link`/`sync`/`build-pyz`) |
-| `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index). Neutral — imposes no flows |
-| `tools/` | Required tooling (not an overlay): `audit_config.py`, `leak_check.py`, `cloud-setup.sh` |
+| `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`, plus the bundled command modules `link`/`sync`/`audit`) |
+| `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index), and the bundled `dotagents/cmds/` command modules (`link`/`sync`/`audit`). Neutral — imposes no flows |
+| `tools/` | Required tooling (not an overlay): `audit_config.py`, `cloud-setup.sh` (`leak-check` moved to the opt-in `leak-check` overlay, D84) |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
 
 The **example overlays** — the `flows` workflow set, per-language `kb/` + templates,
@@ -209,8 +209,10 @@ empty, edited directly, never distributed. This repo follows the same rule: its 
 design log and all working material live in an **untracked** `.agents/dotagents/`, never
 committed — so what's public here is only the CLI, the base overlay, and the opt-in
 overlays. If you fork, keep the tracked surface free of personal paths and private
-project names (`--repo-hygiene` checks mechanically), and use `tools/leak_check.py
-<repo>` to scan any *other* repo for agent-plan leakage before its releases.
+project names. `dotagents audit` validates config *structure* only; personal-leak
+scanning (machine paths, private plan names, session trailers) is a separate,
+personal `leak-check` tool you run locally before a push — it lives in your private
+`.agents/`, not shipped in this repo.
 
 ## Documentation
 

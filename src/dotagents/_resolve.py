@@ -46,10 +46,21 @@ def get_file_paths(
             files.append((level, location / template, root))
 
     # 1. Overlays
+    #
+    # An installed overlay is any directory under ``overlays/`` whose name is a
+    # valid overlay name -- the EXACT rule ``_scope.discover_overlays`` uses (the
+    # two must agree on what counts). No manifest of any kind is required -- not
+    # ``CONTEXT.md``, not ``overlay.toml``. The old ``CONTEXT.md`` gate was a
+    # precursor leftover (`agentic` used CONTEXT.md as an overlay manifest;
+    # dotagents ships none) that silently excluded EVERY real dotagents overlay
+    # from the Contract-A walk -- overlay-level bin/env/cmds resolution never fired
+    # (D84). ``is_valid_overlay_name`` skips ``.git``/``__pycache__``/dotfiles.
+    from dotagents._scope import is_valid_overlay_name
+
     overlay_root = agents_dir / "overlays"
     if overlay_root.is_dir():
         for overlay_dir in sorted(overlay_root.iterdir()):
-            if overlay_dir.is_dir() and (overlay_dir / "CONTEXT.md").exists():
+            if overlay_dir.is_dir() and is_valid_overlay_name(overlay_dir.name):
                 add_name_paths(
                     overlay_dir, overlay_dir.name, root=overlay_dir, is_overlay=True
                 )
