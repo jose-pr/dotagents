@@ -104,20 +104,35 @@ class ClaudeAgent(Agent):
 
     # --- hooks ---------------------------------------------------------
     #
-    # SessionStart runs `dotagents context`; Claude injects a SessionStart hook's
-    # **stdout into the session context**, which is the entire point -- it is how
-    # the assembled context reaches the model without the user remembering to run
-    # anything.
+    # SessionStart does two things:
     #
-    # There is deliberately NO env-injection hook. The precursor ran
-    # `agents env --diff --format export > $CLAUDE_ENV_FILE`, but CLAUDE_ENV_FILE
-    # does not exist in current Claude Code (absent from the docs AND from a live
-    # session's environment, verified 2026-07-24) -- that redirect would write to a
-    # file named "" and silently set nothing. The documented alternative, the static
-    # `env` key in settings.json, cannot carry computed per-session values. So the
-    # env half stays unshipped until a supported mechanism exists; `dotagents env`
-    # remains available for shell use.
-    SESSION_START_COMMAND = "dotagents context"
+    # 1. `dotagents env` output is appended to $CLAUDE_ENV_FILE -- a real, documented
+    #    variable (code.claude.com/docs/en/env-vars + hooks.md "Persist environment
+    #    variables"). Claude sources that file before each Bash command, so exports
+    #    land in every subsequent command of the session. It is provided to
+    #    SessionStart/Setup/CwdChanged/FileChanged hooks ONLY, and only inside the
+    #    hook process -- it is absent from the session's own environment, so
+    #    `env | grep CLAUDE_ENV_FILE` in a normal shell proves nothing.
+    #
+    #    Two details the docs are explicit about, both load-bearing:
+    #      * APPEND (`>>`), never truncate -- other hooks write to the same file and
+    #        `>` would silently discard their variables.
+    #      * Guard on non-empty (`[ -n "$CLAUDE_ENV_FILE" ]`) -- when unset (a hook
+    #        type without access), `>> ""` would create a file literally named "".
+    #    `--diff` keeps it to the change set rather than re-exporting the world.
+    #
+    # 2. `dotagents context` runs after it; Claude injects a SessionStart hook's
+    #    **stdout into the session context**, which is how the assembled context
+    #    reaches the model without the user remembering to run anything.
+    #
+    # Both halves are one `type: command` hook: SessionStart supports only
+    # command/mcp_tool hooks, and ordering matters (env first, so context sees it).
+    SESSION_START_COMMAND = (
+        'if [ -n "$CLAUDE_ENV_FILE" ]; then '
+        "dotagents env --diff --format export >> \"$CLAUDE_ENV_FILE\"; "
+        "fi; "
+        "dotagents context"
+    )
     CWD_CHANGED_COMMAND = "[ -f AGENTS.md ] && cat AGENTS.md || true"
 
     def wire_hooks(
@@ -265,6 +280,66 @@ class CodexAgent(Agent):
             force=force, dry_run=dry_run, backup_root=backup_root,
         )
         if logger: logger.info("%s: AGENTS.md (Codex)", branch)
+
+    # --- hooks ---------------------------------------------------------
+    #
+    # Codex ships a hooks framework (learn.chatgpt.com/docs/hooks) whose JSON is
+    # **structurally identical** to Claude's -- `hooks.<Event>` is a list of
+    # matcher-objects each holding its own `hooks` list of
+    # {type, command, statusMessage} -- so `_hooks` merges it unchanged.
+    #
+    # Context half only. Codex's SessionStart adds "plain text on stdout ... as
+    # extra developer context", which is what we need. There is deliberately NO env
+    # half: Codex has no CLAUDE_ENV_FILE equivalent -- its hooks *receive* plugin
+    # vars (PLUGIN_ROOT/PLUGIN_DATA) but nothing persists exports back into the
+    # session. Writing one would be inventing a mechanism.
+    #
+    # Target `hooks.json`, not `config.toml`: Codex reads either, but a dedicated
+    # file means we never rewrite (and risk mangling) the user's main TOML config.
+    # Codex warns at startup if one layer has both, so a user with inline [hooks]
+    # should pass --no-hooks.
+    SESSION_START_COMMAND = "dotagents context"
+
+    def wire_hooks(
+        self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
+    ) -> None:
+        """Merge our SessionStart hook into `<codex-home>/hooks.json`."""
+        import os
+
+        from dotagents import _hooks
+
+        if config_root:
+            root = Path(config_root)
+        else:
+            # CODEX_HOME is Codex's own documented state-dir override.
+            root = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
+
+        hooks_path = root / "hooks.json"
+        data = _hooks.load_settings(hooks_path)
+        hooks = data.get("hooks")
+        if not isinstance(hooks, dict):
+            hooks = {}
+
+        session_start, changed = _hooks.merge_hook(
+            hooks.get("SessionStart"),
+            self.SESSION_START_COMMAND,
+            status_message="Loading agent context",
+        )
+        hooks["SessionStart"] = session_start
+
+        if not changed:
+            if logger:
+                logger.info("hooks already wired: %s", hooks_path)
+            return
+
+        data["hooks"] = hooks
+        if dry_run:
+            if logger:
+                logger.info("would wire SessionStart hook: %s", hooks_path)
+            return
+        _hooks.write_settings(hooks_path, data)
+        if logger:
+            logger.info("wired SessionStart hook: %s", hooks_path)
 
     def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
         target = dest / "AGENTS.md"
