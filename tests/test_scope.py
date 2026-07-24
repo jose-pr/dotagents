@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from dotagents._scope import project_root_default, resolve_scope
+from dotagents._scope import (
+    Scope,
+    discover_overlays,
+    is_valid_overlay_name,
+    normalize_overlay_name,
+    project_root_default,
+    resolve_scope,
+)
 
 _ROOT_VARS = ("AGENTS_PROJECT_ROOT", "CLAUDE_PROJECT_DIR")
 
@@ -62,3 +69,58 @@ def test_global_scope_ignores_project_root_env(tmp_path, monkeypatch):
     scope = resolve_scope(True, agents_dir=tmp_path / "store")
     assert scope.level == "user"
     assert scope.agents_root == tmp_path / "store"
+
+
+# --------------------------------------------------------------------------
+# Overlay-name rule (D84): a dir under overlays/ is an overlay iff its name is
+# valid; names normalize lowercase-dash. One shared rule, mirrored by the
+# get_file_paths overlay gate.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "name",
+    ["flows", "private-sync", "my_overlay", "net", "My-Overlay", "foo.bar", "v1.2"],
+)
+def test_valid_overlay_names(name):
+    # A dot mid-name is allowed (foo.bar, v1.2); only a LEADING dot is excluded.
+    assert is_valid_overlay_name(name)
+
+
+@pytest.mark.parametrize("name", [".git", ".hidden", "__pycache__", "2fast", ""])
+def test_invalid_overlay_names(name):
+    # Leading dot / underscore / digit are all excluded.
+    assert not is_valid_overlay_name(name)
+
+
+def test_normalize_overlay_name():
+    assert normalize_overlay_name("My_Overlay") == "my-overlay"
+    assert normalize_overlay_name("my-overlay") == "my-overlay"
+    assert normalize_overlay_name("NET") == "net"
+
+
+def test_discover_overlays_includes_valid_excludes_junk(tmp_path):
+    overlays = tmp_path / "overlays"
+    for d in ("flows", "my_overlay", ".git", "__pycache__"):
+        (overlays / d).mkdir(parents=True)
+    (overlays / "README.md").write_text("x", encoding="utf-8")  # a file, not a dir
+    scope = Scope("user", tmp_path)
+    found = discover_overlays(scope)
+    assert "flows" in found
+    assert "my_overlay" in found
+    assert ".git" not in found
+    assert "__pycache__" not in found
+    assert "README.md" not in found  # a file (valid NAME, but not a dir)
+
+
+def test_discover_overlays_follows_symlink_to_dir(tmp_path):
+    # A symlink pointing at a directory IS a valid overlay (is_dir follows links).
+    target = tmp_path / "real_overlay_target"
+    target.mkdir()
+    overlays = tmp_path / "overlays"
+    overlays.mkdir()
+    try:
+        (overlays / "linked").symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation not permitted (Windows without privilege)")
+    scope = Scope("user", tmp_path)
+    assert "linked" in discover_overlays(scope)

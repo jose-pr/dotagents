@@ -1,6 +1,12 @@
-"""dotagents CLI: init / audit / leak-check / context / env / overlays /
-build-pyz built-in subcommands, plus link / sync and any user command modules
-discovered from a `cmds` directory (D76).
+"""dotagents CLI: init / audit / context / env / overlays / build-pyz built-in
+subcommands, plus link / sync (bundled command modules) and any user or overlay
+command modules discovered from a `cmds` directory (D76/D84).
+
+`audit` STAYS a compiled built-in: once its personal defaults are emptied (D84) it
+is a generic config validator any fork needs, and CI self-validates via the
+standalone `tools/audit_config.py`. `leak-check` is no longer in the repo at all:
+it enforces personal plan-naming conventions, so it moves to the user's private
+`.agents/cmds/` as a discovered command module (D84), not the public repo.
 
 The per-command classes live in sibling modules (`cli/init.py`, `cli/audit.py`,
 ...); this package base holds the shared helpers (in `cli/_common.py`, re-exported
@@ -12,9 +18,10 @@ repo root is the entrypoint shim, unrelated to the removed `install` subcommand 
 
 Dispatch (D76): `main()` routes through `duho.app`, not `duho.main`, so command
 discovery runs. `link`/`sync` are no longer compiled built-ins -- they ship as
-command MODULES in the bundled `_overlay/dotagents/cmds/` dir (`init`
-lays them into `<store>/dotagents/cmds/`), discovered from there and from a
-per-scope `cmds` dir. `app`'s DEFAULT dispatch is used (dotagents has no fan-out):
+command MODULES in the bundled `_overlay/dotagents/cmds/` dir (`init` lays them
+into `<store>/dotagents/cmds/`), discovered from there, from each installed
+overlay's `<overlay-root>/cmds/`, and from a per-scope `cmds` dir (one
+`get_file_paths` Contract-A walk, `_cmds_dirs`). `app`'s DEFAULT dispatch is used (dotagents has no fan-out):
 a plain `(LoggingArgs, Cmd)` class command dispatches through `app` exactly as it
 did through `main` -- `app` calls the class's `__call__`.
 
@@ -57,7 +64,6 @@ from dotagents.cli.build_pyz import BuildPyz
 from dotagents.cli.context import Context
 from dotagents.cli.env import Env
 from dotagents.cli.init import Init
-from dotagents.cli.leak_check import LeakCheck
 from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
     OverlayAdd,
     OverlayList,
@@ -69,12 +75,16 @@ from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
 _LOGGER = logging.getLogger("dotagents")
 
 # The compiled built-in command classes, in --help order. link/sync are gone
-# (now discovered modules). `_discover` seeds the command set with these, then
-# layers discovered commands over them (later source wins on a name clash).
+# (now discovered modules -- they ship in the bundled `_overlay/dotagents/cmds/`
+# dir). audit STAYS a compiled built-in: once its personal defaults are emptied
+# (D84) it is a generic config validator any fork needs, and CI self-validates via
+# the standalone tools/audit_config.py. leak-check is gone from the repo entirely
+# (personal -- it moves to the user's private `.agents/cmds/`, D84). `_discover`
+# seeds the command set with these, then layers discovered commands over them
+# (later source wins on a name clash).
 _BUILTIN_COMMANDS = [
     Init,
     Audit,
-    LeakCheck,
     BuildPyz,
     Context,
     Env,
@@ -90,7 +100,6 @@ _BUILTIN_COMMANDS = [
 _COMMAND_MODULES = (
     "dotagents.cli.init",
     "dotagents.cli.audit",
-    "dotagents.cli.leak_check",
     "dotagents.cli.context",
     "dotagents.cli.env",
     "dotagents.cli.overlays",
@@ -179,16 +188,28 @@ def _discover_dir(source, by_name: dict) -> None:
             by_name[name] = command  # later source wins
 
 
-def _scope_cmds_dirs(argv) -> "list[Path]":
-    """The per-scope `cmds` dirs to discover from: user AND project, ALWAYS (Q3).
+def _cmds_dirs() -> "list[Path]":
+    """Every `cmds` dir to discover command modules from, in Contract-A order.
 
-    Reuses the existing scope resolution (`_scope.resolve_scope`, Q2) so command
-    discovery walks the SAME roots as overlays -- no bolt-on. User scope is the
-    configurable store (`$AGENTS_HOME`, default `~/.agents`; D58/D79);
-    project scope is `<cwd>/.agents`. Each contributes `<agents_root>/dotagents/
-    cmds` (the `Scope.cmds_dir` seam). Order: user first, then project, so a
-    project's command overrides a same-named user command."""
-    from dotagents import _scope
+    Resolved with the SAME `get_file_paths` walk that backs `bin`/PATH discovery
+    (`_env.get_bin_paths`) -- one resolver call yields the cmds dir at EVERY level
+    in precedence order, so command discovery, PATH, and every other Contract-A
+    seam agree on which roots exist and in what order. NOT a hand-rolled loop over
+    installed overlays.
+
+    The per-level name-dict maps overlay levels to `<overlay-root>/cmds` and every
+    other level (system/user/project) to `<agents_root>/dotagents/cmds` (the
+    `Scope.cmds_dir` layout, D76). `get_file_paths` returns them in Contract-A
+    precedence: overlays first, then system, user, project. Discovery layers later
+    sources over earlier ones (see `_discover_dir`), so a project cmd overrides a
+    user cmd overrides an overlay cmd of the same name -- the intended precedence
+    (an overlay may SHIP a command; a user/project can still override it).
+
+    The store location is configurable (D58/D79): the user scope resolves through
+    `$AGENTS_HOME` (default `~/.agents`); the project scope is `<cwd>/.agents`.
+    `include_missing=True` (precursor semantics): every level's cmds dir is offered
+    and the caller's `_discover_dir` skips the ones that don't exist."""
+    from dotagents import _resolve, _scope
 
     agents_dir = (
         os.environ.get(AGENTS_DIR_ENV)
@@ -196,8 +217,14 @@ def _scope_cmds_dirs(argv) -> "list[Path]":
         or None
     )
     user = _scope.resolve_scope(global_scope=True, agents_dir=agents_dir)
-    project = _scope.resolve_scope(global_scope=False)
-    return [user.cmds_dir, project.cmds_dir]
+    resolved = _resolve.get_file_paths(
+        {"default": "dotagents/cmds", "overlay": "cmds"},
+        agents_dir=user.agents_root,
+        project_root=_scope.project_root_default(),
+        global_scope=False,
+        include_missing=True,
+    )
+    return [path for _level, path, _root in resolved]
 
 
 def _discover(argv=None) -> "list":
@@ -209,7 +236,12 @@ def _discover(argv=None) -> "list":
     1. the compiled built-in command classes (`_BUILTIN_COMMANDS`);
     2. the bundled command modules (`link`/`sync`) in `<package>/_overlay/
        dotagents/cmds` -- always available, even before an install;
-    3. the per-scope `cmds` dirs (user + project, Q2/Q3) via the scope walk;
+    3. the Contract-A `cmds` dirs (`_cmds_dirs`): each installed overlay's
+       `<overlay-root>/cmds`, then system/user/project `<scope>/dotagents/cmds`,
+       in Contract-A precedence (overlays < system < user < project). This is what
+       lets an installed overlay SHIP a command, or a user drop a personal command
+       module into their private `<scope>/dotagents/cmds` (e.g. `leak-check`), while
+       a user/project cmd still overrides a same-named overlay cmd;
     4. `$AGENTS_CMDS_PATH` entries (os.pathsep-split);
     5. `--cmdspath` entries, read via `duho.parse_globals` before the full parser.
 
@@ -228,8 +260,9 @@ def _discover(argv=None) -> "list":
     if bundled is not None:
         _discover_dir(bundled, by_name)
 
-    # 3. scope cmds dirs (user + project, always)
-    for cmds_dir in _scope_cmds_dirs(argv):
+    # 3. Contract-A cmds dirs: overlay cmds + scope (user/project) cmds, in
+    #    precedence order (overlays first, project last -> project wins).
+    for cmds_dir in _cmds_dirs():
         _discover_dir(cmds_dir, by_name)
 
     # 4. $AGENTS_CMDS_PATH (back-compat: $DOTAGENTS_CMDS_PATH, removable next release)

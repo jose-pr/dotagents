@@ -16,15 +16,17 @@ by default (the `<cwd>/.agents` store, when run inside a project) or **user** wi
 | `context` | Assemble the effective context for one or more agents. |
 | `env` | Assemble the chained env-file layers + identity vars, in a chosen format. |
 | `audit` | Validate a config tree (manifest, forbidden patterns, size budgets). |
-| `leak-check` | Scan a repo's tracked files + commit messages for private leakage. |
 | `link` | Symlink (or copy) a project's `.agents` into its store. |
 | `sync` | Reconcile a copy-mode project and hand off to the store's sync path. |
 | `build-pyz` | Build the self-contained `dotagents.pyz` zipapp. |
 
-`link` and `sync` are **discovered** command modules (D76), shipped in the package
-and discovered from the store's command dir — they behave like any other subcommand.
-Additional user command modules are discovered from each scope's command dir,
-`$AGENTS_CMDS_PATH` entries, and `--cmdspath`.
+`link` and `sync` are **discovered** command modules (D76), shipped in the package's
+bundled command dir — they behave like any other subcommand. Additional command
+modules are discovered from each **installed overlay's** `cmds/` dir, each scope's
+command dir, `$AGENTS_CMDS_PATH` entries, and `--cmdspath` — one Contract-A resolver
+walk covers the overlay + scope tiers (D84). `leak-check` is not built in: it is a
+personal command module you drop into your private `<scope>/dotagents/cmds/`, where
+it is discovered like any other.
 
 ## init
 
@@ -87,13 +89,27 @@ python -m dotagents env --diff --format json   # only vars that differ from the 
     output as secret. The command itself never logs `DOTAGENTS_*` / `AGENTS_*`
     values (Leakage rule).
 
-## audit / leak-check
+## audit
 
-`audit` validates a config tree; `leak-check` scans any repo before publishing it.
+`audit` validates config **structure** only — manifest existence, generic forbidden
+patterns, size budgets, overlay-manifest rules, and (3.11+) templates. It carries no
+personal data and shells to `tools/audit_config.py`, which also runs standalone in
+CI. Personal-leak / hygiene scanning is **not** audit's job (see leak-check below).
 
 ```bash
-python -m dotagents audit --root .              # validate a checkout
-python -m dotagents audit --repo-hygiene .      # no personal leftovers in tracked files
+python -m dotagents audit --root .              # validate a checkout's structure
+python -m dotagents audit --check-templates --root .   # + template checks (3.11+)
+```
+
+### leak-check (personal, not in this repo)
+
+`leak-check` scans any repo before publishing it — personal machine paths, private
+plan names, `.agents/` refs, `Phase N` phrasing, and `Claude-Session` trailers. It
+enforces personal conventions rather than dotagents' own mechanism, so it is **not**
+shipped here: it lives as a discovered command module in your own private
+`<scope>/dotagents/cmds/`, run locally before a push.
+
+```bash
 python -m dotagents leak-check .                # tracked files + commit messages
 python -m dotagents leak-check --commits-only . # commit messages only
 ```

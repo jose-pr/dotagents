@@ -84,15 +84,57 @@ def test_discover_includes_builtins_and_bundled_link_sync(monkeypatch, tmp_path)
     monkeypatch.chdir(tmp_path)
 
     names = _names(cli._discover([]))
-    # Built-ins survive the app switch.
-    for builtin in ("init", "audit", "leak-check", "build-pyz",
-                    "context", "env", "overlays"):
+    # Compiled built-ins survive the app switch (audit stays a built-in, D84).
+    for builtin in ("init", "audit", "build-pyz", "context", "env", "overlays"):
         assert builtin in names
     # link/sync come from the bundled cmds dir, not `_subcommands_`.
     assert "link" in names
     assert "sync" in names
-    # They are no longer compiled built-ins.
+    # leak-check is GONE from the repo entirely (D84): it is a personal command
+    # module the user drops into their private `.agents/cmds/`, discovered only
+    # when present -- never a default of a fresh install.
+    assert "leak-check" not in names
+    # link/sync are no longer compiled built-ins.
     assert cli.Dotagents._subcommands_ == []
+
+
+def test_installed_overlay_cmds_are_discovered(monkeypatch, tmp_path):
+    # An installed overlay shipping a command at <overlay-root>/cmds/*.py is
+    # discovered (D84 per-overlay cmds via the get_file_paths Contract-A walk).
+    # Presence-by-directory: a BARE overlay dir (no manifest at all -- no
+    # overlay.toml, no CONTEXT.md) still counts, matching discover_overlays.
+    user_root = tmp_path / "user" / ".agents"
+    overlay = user_root / "overlays" / "toybox"
+    _write(overlay / "cmds" / "toy.py", TOY)
+    monkeypatch.setenv("AGENTS_HOME", str(user_root))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    names = _names(cli._discover([]))
+    assert "toy" in names
+
+
+def test_scope_cmds_override_overlay_cmds(monkeypatch, tmp_path):
+    # A same-named command in the user scope's dotagents/cmds overrides an
+    # overlay's cmds command (scope is later in the Contract-A walk than overlays).
+    user_root = tmp_path / "user" / ".agents"
+    overlay = user_root / "overlays" / "toybox"
+    _write(overlay / "cmds" / "toy.py", TOY)
+    _write(
+        user_root / "dotagents" / "cmds" / "toy.py",
+        TOY.replace('_parsername_ = "toy"', '_parsername_ = "toy"\n    marker = "scope"'),
+    )
+    monkeypatch.setenv("AGENTS_HOME", str(user_root))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    commands = cli._discover([])
+    toy = [
+        c for c in commands
+        if (getattr(c, "_parsername_", None) or getattr(c, "__name__", None)) == "toy"
+    ]
+    assert len(toy) == 1
+    assert getattr(toy[0], "marker", None) == "scope"
 
 
 # --------------------------------------------------------------------------- #

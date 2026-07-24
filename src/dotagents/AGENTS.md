@@ -11,13 +11,18 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `duho.app` with the discovered command set. Also the `dotagents` console script
   (`[project.scripts]`).
 - `dotagents.cli.Dotagents(LoggingArgs, Cli)` — the umbrella CLI class.
-- Command classes live in `dotagents.cli.<name>` (`init`, `install`, `overlays`,
-  `context`, `env`, `audit`, `leak_check`, `build_pyz`); each is a
-  `class X(LoggingArgs, Cmd)` with a `__call__`. `link` / `sync` are **discovered**
-  command modules (D76), shipped in the bundled `_overlay/dotagents/cmds/` dir, not
-  compiled built-ins.
-- Command discovery layers sources, later wins: built-ins < bundled `cmds` < scope
-  `cmds` dirs (user + project) < `$AGENTS_CMDS_PATH` < `--cmdspath`.
+- Compiled command classes live in `dotagents.cli.<name>` (`init`, `audit`,
+  `overlays`, `context`, `env`, `build_pyz`); each is a `class X(LoggingArgs, Cmd)`
+  with a `__call__`. `audit` stays a built-in — a STRUCTURAL config validator (no
+  personal data, D84). `link` / `sync` are **discovered** command modules (D76),
+  shipped in the bundled `_overlay/dotagents/cmds/` dir. `leak-check` is not in the
+  repo at all — it is a personal command module the user keeps in their private
+  `<scope>/dotagents/cmds/` (D84).
+- Command discovery layers sources, later wins: built-ins < bundled `cmds` <
+  overlay `cmds` (`<overlay-root>/cmds`) < scope `cmds` dirs (user + project) <
+  `$AGENTS_CMDS_PATH` < `--cmdspath`. The overlay + scope tiers come from one
+  Contract-A `get_file_paths` walk (`cli._cmds_dirs`), the same resolver that
+  backs `bin`/PATH.
 
 ## Helper modules (public surface)
 

@@ -27,8 +27,34 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 from pathlib import Path
 from typing import Optional
+
+#: A directory under ``overlays/`` is an overlay IFF its name matches this: a
+#: leading ASCII letter, then ASCII letters/digits/``_``/``.``/``-``. A dot is
+#: allowed MID-name (``foo.bar``, ``v1.2``) but not as the first char, so
+#: ``.git``/``.hidden`` are excluded; a leading underscore (``__pycache__``) and
+#: a leading digit (``2fast``) are excluded too. One shared rule for
+#: ``discover_overlays``, the ``get_file_paths`` overlay gate (`_resolve.py`), and
+#: ``overlays add`` (D84). (Whether a path IS a directory is checked separately
+#: with ``is_dir()``, which follows symlinks -- a symlink-to-dir is a valid overlay.)
+_OVERLAY_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
+
+
+def is_valid_overlay_name(name: str) -> bool:
+    """A dir under ``overlays/`` is an overlay iff its name matches: a leading ASCII
+    letter, then ASCII letters/digits/``_``/``.``/``-``. Dots are allowed mid-name
+    (``foo.bar``, ``v1.2``) but NOT as the first char, so ``.git``/``.hidden`` and
+    ``__pycache__`` (leading ``_``) and ``2fast`` (leading digit) are excluded."""
+    return bool(_OVERLAY_NAME_RE.match(name))
+
+
+def normalize_overlay_name(name: str) -> str:
+    """Overlay names normalize to lowercase-dash for matching (precursor rule):
+    ``name.lower().replace('_', '-')``. So ``My_Overlay`` and ``my-overlay`` are
+    the same overlay."""
+    return name.lower().replace("_", "-")
 
 
 class Scope:
@@ -122,13 +148,15 @@ def discover_overlays(scope: Scope) -> "list[str]":
     """Installed overlay names in this scope -- the presence of ``overlays/<name>/``.
 
     No registry: a directory under ``<scope>/overlays/`` *is* an installed overlay
-    (any dir, manifest or not). Returns sorted names; empty if the root is absent.
+    (manifest or not) as long as its name is a valid overlay name
+    (:func:`is_valid_overlay_name` -- so ``.git``/``__pycache__``/dotfiles are
+    skipped). Returns sorted names; empty if the root is absent.
     """
     root = scope.overlay_root
     if not root.is_dir():
         return []
     return sorted(
-        p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")
+        p.name for p in root.iterdir() if p.is_dir() and is_valid_overlay_name(p.name)
     )
 
 
