@@ -86,10 +86,9 @@ python install.py install --dry-run
 `pip install "dotagents[uri]"`); `init`'s base ships inside the package, so it needs no
 `--from`.
 
-> **`install --overlays <path>` is deprecated** (one-release shim): it still applies an
-> overlay by flat-copy but prints a warning. Use `dotagents overlays add <name>` instead
-> — it installs into `<scope>/.agents/overlays/<name>/` (discoverable) and publishes the
-> overlay's skills into the shared skills dir. See below.
+Overlays beyond the base are managed by name with `dotagents overlays add <name>` — it
+installs into `<scope>/.agents/overlays/<name>/` (discoverable) and publishes the
+overlay's skills into the shared skills dir. See below.
 
 ### Managing overlays
 
@@ -144,7 +143,8 @@ link never lands in the public repo). `<name>` defaults to the project's basenam
 local `~/code/app` and a cloud `/home/user/app` resolve to the same store.
 
 ```bash
-python install.py install --overlays overlays/private-sync   # kb + cloud hooks (flat-copied to ~/.agents/hooks/)
+python install.py install                                    # base
+python install.py overlays add private-sync --source overlays # kb + cloud hooks
 dotagents link .        # symlink this project's .agents into the private repo
                         #   (an existing .agents/ is adopted in on the first link;
                         #    --copy mirrors it as a real dir for no-symlink systems)
