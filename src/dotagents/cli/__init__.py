@@ -1,5 +1,5 @@
-"""dotagents CLI: init / install / link / sync / audit / context / env /
-overlays / build-pyz subcommands.
+"""dotagents CLI: init / install / link / sync / audit / leak-check / context /
+env / overlays / build-pyz subcommands.
 
 The per-command classes live in sibling modules (`cli/init.py`, `cli/install.py`,
 ...); this package base holds the shared helpers (in `cli/_common.py`, re-exported
@@ -43,6 +43,7 @@ from dotagents.cli.context import Context
 from dotagents.cli.env import Env
 from dotagents.cli.init import Init
 from dotagents.cli.install import Install
+from dotagents.cli.leak_check import LeakCheck
 from dotagents.cli.link import Link
 from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
     OverlayAdd,
@@ -63,6 +64,7 @@ _COMMAND_MODULES = (
     "dotagents.cli.link",
     "dotagents.cli.sync",
     "dotagents.cli.audit",
+    "dotagents.cli.leak_check",
     "dotagents.cli.context",
     "dotagents.cli.env",
     "dotagents.cli.overlays",
@@ -74,7 +76,7 @@ class Dotagents(LoggingArgs, Cli):
     """Umbrella CLI for installing and building the dotagents config."""
 
     _version_ = __version__
-    _subcommands_ = [Init, Install, Link, Sync, Audit, BuildPyz, Context, Env, Overlays]
+    _subcommands_ = [Init, Install, Link, Sync, Audit, LeakCheck, BuildPyz, Context, Env, Overlays]
 
     def __call__(self) -> int:
         self._logger_.info(
