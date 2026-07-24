@@ -15,9 +15,9 @@ marker-delimited **managed block**, so re-running `init` never clobbers anything
 added around it.
 
 ```bash
-python install.py init                 # writes ~/.agents/{AGENTS.md,CLAUDE.md,…}
-python install.py init --dry-run       # show what would happen
-python install.py init --force         # replace AGENTS.md/CLAUDE.md wholesale (backed up)
+dotagents init                 # writes ~/.agents/{AGENTS.md,CLAUDE.md,…}
+dotagents init --dry-run       # show what would happen
+dotagents init --force         # replace AGENTS.md/CLAUDE.md wholesale (backed up)
                                         #   instead of block-merging
 ```
 
@@ -27,9 +27,9 @@ python install.py init --force         # replace AGENTS.md/CLAUDE.md wholesale (
 `dotagents` wrapper command onto your PATH.
 
 ```bash
-python install.py install                             # base only (like init)
-python install.py install --bin-dir ~/.local/bin      # base + a `dotagents` command
-python install.py install --dry-run
+dotagents install                             # base only (like init)
+dotagents install --bin-dir ~/.local/bin      # base + a `dotagents` command
+dotagents install --dry-run
 ```
 
 `--from <path-or-uri>` selects the *base* source for a plain `pip install`
@@ -55,7 +55,7 @@ After install, point your runner at the config. For Claude Code, put `@AGENTS.md
 ## Verify an install
 
 ```bash
-python install.py init
+dotagents init
 test -f ~/.agents/AGENTS.md
 python -m dotagents overlays add flows -g
 test -f ~/.agents/overlays/flows/flows/PLAN.md

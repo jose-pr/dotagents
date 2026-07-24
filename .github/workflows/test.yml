@@ -54,6 +54,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Fetch example overlays (separate branch)
+        # The example overlays live on the `overlays` orphan branch, not in main's
+        # tree (D77). Check them out into ./overlays-src so the overlays-command
+        # integration steps below can resolve them via --source overlays-src/overlays
+        # (the branch keeps them at overlays/<name>/). The pure-unit pytest step
+        # below uses tmp fixtures and needs none of this.
+        uses: actions/checkout@v4
+        with:
+          ref: overlays
+          path: overlays-src
       - name: Install the dotagents CLI package
         run: python -m pip install -e .
       - name: Unit tests (agent registry + context generator, plans 00/04)
@@ -73,7 +83,7 @@ jobs:
         run: |
           export HOME="$(mktemp -d)"
           python install.py init
-          python -m dotagents overlays add flows references python --source overlays -g
+          python -m dotagents overlays add flows references python --source overlays-src/overlays -g
           test -f "$HOME/.agents/AGENTS.md"
           test -f "$HOME/.agents/overlays/flows/flows/PLAN.md"
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"
@@ -81,22 +91,22 @@ jobs:
         run: |
           export HOME="$(mktemp -d)"
           python install.py init
-          python -m dotagents overlays add flows --source overlays -g
-          python -m dotagents overlays add flows --source overlays -g | grep -q "skip (exists)"
+          python -m dotagents overlays add flows --source overlays-src/overlays -g
+          python -m dotagents overlays add flows --source overlays-src/overlays -g | grep -q "skip (exists)"
       - name: overlays add/list/remove into a scope (discover, not track)
         run: |
           export HOME="$(mktemp -d)"
           python install.py init                                   # lay the base AGENTS.md
           # add by name from the bundled source, into the user scope.
-          python -m dotagents overlays add python --source overlays -g
+          python -m dotagents overlays add python --source overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"     # installed as a dir
           test -f "$HOME/.agents/overlays/python/overlay.toml"     # self-describing
           grep -q "kb/PYTHON.md" "$HOME/.agents/AGENTS.md"         # D59 routing merged
           # list discovers it by presence (no registry file).
-          python -m dotagents overlays list --source overlays -g | grep -q "python"
-          python -m dotagents overlays list --source overlays -g --json | grep -q '"installed"'
+          python -m dotagents overlays list --source overlays-src/overlays -g | grep -q "python"
+          python -m dotagents overlays list --source overlays-src/overlays -g --json | grep -q '"installed"'
           # glob-filtered sync is a no-op-safe refresh.
-          python -m dotagents overlays sync 'py*' --source overlays -g
+          python -m dotagents overlays sync 'py*' --source overlays-src/overlays -g
           # remove deletes the overlay dir (+ warns about the AGENTS.md rules prune).
           python -m dotagents overlays remove python -g 2>&1 | grep -qi "NOT auto-removed"
           test ! -e "$HOME/.agents/overlays/python"
@@ -106,7 +116,7 @@ jobs:
           git config --global user.email ci@example.invalid
           git config --global user.name CI
           python install.py init
-          python -m dotagents overlays add private-sync --source overlays -g
+          python -m dotagents overlays add private-sync --source overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/private-sync/kb/PRIVATE_SYNC.md"
           test -f "$HOME/.agents/overlays/private-sync/hooks/private-sync-start.sh"
           # A project with an existing .agents is adopted into the store and symlinked.
@@ -224,5 +234,5 @@ jobs:
           git -C "$clean" -c user.email=t@t -c user.name=t commit -q -m init
           python dist/dotagents.pyz leak-check "$clean" | grep -q -- "PASS"
           python dist/dotagents.pyz init
-          python dist/dotagents.pyz overlays add python --source overlays -g
+          python dist/dotagents.pyz overlays add python --source overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"
