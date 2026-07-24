@@ -268,7 +268,7 @@ def _resolve_from(from_arg: "str | None", default: Path) -> Path:
             from pathlib_next import UriPath
         except ImportError as e:
             raise SystemExit(
-                'error: --from %r needs URI support. Install it with: pip install "dotagents[uri]"'
+                'error: --from %r needs URI support. Install it with: pip install "dotagents-cli[uri]"'
                 % from_arg
             ) from e
         return UriPath(from_arg)
