@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Scan a repo's *tracked* files and commit messages for private agent leakage.
 
-Usage: py -3.12 ~/.agents/tools/leak_check.py <repo_path>
+Usage: py -3.12 ~/.agents/tools/leak_check.py [--commits-only] <repo_path>
+
+--commits-only runs ONLY the commit-message scan (skips the tracked-file scan) --
+usable as a gate on repos that intentionally track .agents/-referencing content,
+where the tracked-file scan would otherwise flood the output.
 
 Tracked files -- patterns: references to .agents/, "Phase N" plan phrasing, and
 every plan basename harvested from <repo>/.agents/plans/ (incl. completed/). The
@@ -58,11 +62,28 @@ def scan_commit_messages(repo: Path) -> int:
 
 
 def main(argv):
-    if len(argv) != 1:
+    # --commits-only runs ONLY the commit-message scan, skipping the tracked-file
+    # scan. On repos that intentionally track .agents/-referencing content (this
+    # repo: CI/tests/docs), the tracked-file scan produces ~190 hits that drown
+    # out the commit-message signal and make the tool unusable as a gate; this
+    # flag isolates the commit-message gate so it stays runnable there. D70.
+    commits_only = False
+    positionals = []
+    for arg in argv:
+        if arg == "--commits-only":
+            commits_only = True
+        else:
+            positionals.append(arg)
+    if len(positionals) != 1:
         sys.stderr.write(__doc__)
         return 2
-    repo = Path(argv[0]).resolve()
+    repo = Path(positionals[0]).resolve()
     print("repo: %s" % repo)
+
+    if commits_only:
+        hits = scan_commit_messages(repo)
+        print("FAIL (%d hits)" % hits if hits else "PASS")
+        return 1 if hits else 0
 
     patterns = [".agents/"]  # NOT "AGENTS.md" — it's a public file post-D47 (see module docstring)
     # A plan basename is only distinctive enough to be a leak signal when it is

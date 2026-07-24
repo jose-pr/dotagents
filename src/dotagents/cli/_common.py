@@ -18,6 +18,35 @@ from pathlib import Path
 _extracted_dirs_cache: "dict[str, Path]" = {}
 
 
+def _resolve_required_tool(name: str, root: "Path | None" = None) -> "Path | None":
+    """Locate one of the dotagents-required tool scripts (`tools/<name>`).
+
+    Resolution order (first hit wins), shared by `dotagents audit` and
+    `dotagents leak-check` so both front-ends find the same single
+    implementation:
+
+      1. `<root>/tools/<name>` -- an installed dest or repo payload that ships
+         the tooling (only when `root` is given);
+      2. the copy bundled with this package as data `_tools/<name>` (a `.pyz`
+         or `pip install` carries the required tooling here);
+      3. a repo checkout's top-level `tools/<name>` (dev use -- this module is
+         `src/dotagents/cli/_common.py`, so the repo root is parents[3]).
+
+    Returns the first existing path, or None if the tool is nowhere found.
+    """
+    if root is not None:
+        candidate = Path(root) / "tools" / name
+        if candidate.exists():
+            return candidate
+    bundled_tools = _package_data_dir("_tools")
+    if bundled_tools is not None and (bundled_tools / name).exists():
+        return bundled_tools / name
+    repo_tool = Path(__file__).resolve().parents[3] / "tools" / name
+    if repo_tool.exists():
+        return repo_tool
+    return None
+
+
 def _package_data_dir(name: str) -> "Path | None":
     """Resolve a directory under the installed `dotagents` package (e.g.
     `_overlay` or `_payload`) to a real filesystem Path, working whether the
