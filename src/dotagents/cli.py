@@ -663,6 +663,26 @@ class BuildPyz(LoggingArgs, Cmd):
 # --------------------------------------------------------------------------- #
 
 
+def _run_overlay_setup(dest_dir, name, *, scope, no_setup, dry_run, logger):
+    """Run an installed overlay's `setup` script, honoring `--no-setup`.
+
+    Thin wrapper over `_overlays.run_overlay_setup` that resolves the store path
+    from the scope (D58 configurable store, passed as `DOTAGENTS_AGENTS_DIR`) and
+    short-circuits when `--no-setup` is given or the overlay ships no script.
+    Returns the setup exit code (0 when skipped / absent), so a non-zero result
+    surfaces as a clear error rather than a silent skip."""
+    from dotagents import _overlays
+
+    if no_setup:
+        if _overlays.find_setup_script(dest_dir) is not None:
+            logger.info("skipping setup for %s (--no-setup)", name)
+        return 0
+    rc = _overlays.run_overlay_setup(
+        dest_dir, name, agents_dir=scope.agents_root, dry_run=dry_run, logger=logger,
+    )
+    return rc or 0
+
+
 class OverlayAdd(LoggingArgs, Cmd):
     """Install overlay(s) by name into a scope, and publish their skills.
 
@@ -695,6 +715,10 @@ class OverlayAdd(LoggingArgs, Cmd):
     copy: bool = False
     "Copy skills into the shared dir instead of symlinking (no-symlink fallback)."
     ("--copy",)
+
+    no_setup: bool = False
+    "Skip running an overlay's idempotent `setup` script after install."
+    ("--no-setup",)
 
     dry_run: bool = False
     "Show what would happen without touching anything."
@@ -732,6 +756,14 @@ class OverlayAdd(LoggingArgs, Cmd):
                 )
                 if published:
                     self._logger_.info("published %d skill(s) from %s", published, name)
+            rc = _run_overlay_setup(
+                dest_dir, name, scope=scope, no_setup=self.no_setup,
+                dry_run=self.dry_run, logger=self._logger_,
+            )
+            if rc:
+                raise SystemExit(
+                    "error: setup for overlay %r failed (exit %d)" % (name, rc)
+                )
 
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
@@ -897,6 +929,10 @@ class OverlaySync(LoggingArgs, Cmd):
     "Copy skills into the shared dir instead of symlinking (no-symlink fallback)."
     ("--copy",)
 
+    no_setup: bool = False
+    "Skip running each overlay's idempotent `setup` script after sync."
+    ("--no-setup",)
+
     dry_run: bool = False
     "Show what would happen without touching anything."
     ("--dry-run",)
@@ -935,6 +971,14 @@ class OverlaySync(LoggingArgs, Cmd):
             if not self.dry_run:
                 _skills.resync_overlay_skills(
                     overlay_src, scope.shared_skills_dir, logger=self._logger_
+                )
+            rc = _run_overlay_setup(
+                dest_dir, name, scope=scope, no_setup=self.no_setup,
+                dry_run=self.dry_run, logger=self._logger_,
+            )
+            if rc:
+                raise SystemExit(
+                    "error: setup for overlay %r failed (exit %d)" % (name, rc)
                 )
 
         if self.dry_run:

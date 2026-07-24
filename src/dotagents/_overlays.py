@@ -13,9 +13,92 @@ Dependency resolution (`requires`) is still deferred to a future
 `dotagents overlays` subcommand.
 """
 
+import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
+
+
+#: The name of an overlay's optional idempotent setup script, tried in order.
+#: An extensionless ``setup`` (a shell/POSIX script) or a ``setup.py`` at the
+#: overlay root. Presence of one file = opt-in; absence = nothing to run.
+SETUP_SCRIPT_NAMES = ("setup", "setup.py")
+
+
+def find_setup_script(overlay_dir: Path) -> "Path | None":
+    """Return the overlay's setup script (``setup`` or ``setup.py`` at its root),
+    or ``None`` if it ships none.
+
+    The *installed* overlay dir is what should be handed in: setup runs against
+    the copy under ``<scope>/overlays/<name>/`` with that as its cwd, so a script
+    can reference its own sibling files by relative path."""
+    for name in SETUP_SCRIPT_NAMES:
+        candidate = overlay_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def run_overlay_setup(
+    overlay_dir: Path,
+    name: str,
+    *,
+    agents_dir: Path,
+    dry_run: bool,
+    logger,
+) -> "int | None":
+    """Run an overlay's idempotent ``setup`` script if it ships one.
+
+    Returns the script's exit code, or ``None`` when the overlay has no setup
+    script (nothing to run -- not an error). Presence of ``setup``/``setup.py`` at
+    the overlay root is the opt-in; the runner never second-guesses a script the
+    user chose to install (see the overlay-authoring contract).
+
+    **Idempotency is the overlay author's contract**: the script must be safe to
+    run on every ``add``/``sync`` (check-then-act). The runner only invokes it.
+
+    Invocation, matching ``_link.py``'s hook style (pure stdlib subprocess):
+
+    * **cwd** = the installed overlay dir, so the script sees its own files.
+    * **env** carries ``DOTAGENTS_AGENTS_DIR`` = the resolved store path (D58
+      configurable store), so the script never hardcodes ``~/.agents``. It also
+      gets ``DOTAGENTS_OVERLAY_DIR`` = its own installed dir for convenience.
+    * a ``.py`` script runs under the current interpreter; an extensionless
+      ``setup`` runs directly, or via ``sh`` on Windows where it isn't executable.
+
+    A non-zero exit is surfaced (returned) so the caller can raise a clear error
+    -- never a silent skip. Never prints ``DOTAGENTS_*`` values (Leakage)."""
+    script = find_setup_script(overlay_dir)
+    if script is None:
+        return None
+
+    logger.info("running setup for %s (%s)", name, script.name)
+    if dry_run:
+        logger.info("[dry-run] would run %s in %s", script.name, overlay_dir)
+        return 0
+
+    env = dict(os.environ)
+    env["DOTAGENTS_AGENTS_DIR"] = str(agents_dir)
+    env["DOTAGENTS_OVERLAY_DIR"] = str(overlay_dir)
+
+    if script.suffix.lower() == ".py":
+        import sys
+        cmd = [sys.executable, str(script)]
+    else:
+        cmd = [str(script)]
+        if os.name == "nt":
+            # An extensionless script is not directly executable on Windows.
+            cmd = ["sh"] + cmd
+
+    try:
+        res = subprocess.run(cmd, cwd=str(overlay_dir), env=env)
+    except OSError as exc:
+        logger.error("setup for %s failed to start: %s", name, exc)
+        return 1
+    if res.returncode != 0:
+        logger.error("setup for %s exited %d", name, res.returncode)
+    return res.returncode
 
 
 def _strip_comments(text: str) -> str:
