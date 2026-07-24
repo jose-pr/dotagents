@@ -22,7 +22,7 @@ class Init(LoggingArgs, Cmd):
     ("--global", "-g")
 
     agents_dir: Optional[Path] = None
-    "User store location for -g (default ~/.agents; configurable via $DOTAGENTS_STORE_DIR)."
+    "User store location for -g (default ~/.agents; configurable via $AGENTS_STORE_DIR)."
     ("--agents-dir",)
 
     dest: Optional[Path] = None

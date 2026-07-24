@@ -279,7 +279,7 @@ def _run_overlay_setup(dest_dir, name, *, scope, no_setup, dry_run, logger):
     """Run an installed overlay's `setup` script, honoring `--no-setup`.
 
     Thin wrapper over `_overlays.run_overlay_setup` that resolves the store path
-    from the scope (D58 configurable store, passed as `DOTAGENTS_AGENTS_DIR`) and
+    from the scope (D58 configurable store, passed as `AGENTS_HOME`) and
     short-circuits when `--no-setup` is given or the overlay ships no script.
     Returns the setup exit code (0 when skipped / absent), so a non-zero result
     surfaces as a clear error rather than a silent skip."""

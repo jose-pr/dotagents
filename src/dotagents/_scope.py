@@ -14,7 +14,7 @@ only wires args) to match ``_overlays.py`` / ``_skills.py`` / ``_link.py``:
   an ``OverlaySource`` whose ``.root`` is a local directory of ``<name>/`` overlay
   dirs. The default is the bundled ``overlays/`` (resolved ``.pyz``-safe via
   ``importlib.resources``, mirroring ``cli._package_data_dir``); an explicit
-  ``--source`` / ``$DOTAGENTS_OVERLAYS_SRC`` overrides it. A git/URI source is a
+  ``--source`` / ``$AGENTS_OVERLAYS_SRC`` overrides it. A git/URI source is a
   *later* swap of the resolver's default -- ``resolve_source`` is the single
   extension point (clone/pull into a cache, then hand back a local ``.root``), so a
   repo source drops in with **no** change to the command classes.
@@ -176,7 +176,9 @@ class OverlaySource:
 
 #: Environment override for the default overlay source (a local directory today;
 #: a git/URI string once ``resolve_source`` grows that branch). Read, never printed.
-SOURCE_ENV = "DOTAGENTS_OVERLAYS_SRC"
+SOURCE_ENV = "AGENTS_OVERLAYS_SRC"
+#: back-compat: DOTAGENTS_OVERLAYS_SRC is deprecated, removable next release.
+SOURCE_ENV_LEGACY = "DOTAGENTS_OVERLAYS_SRC"
 
 
 def bundled_overlays_root() -> "Path | None":
@@ -205,7 +207,7 @@ def bundled_overlays_root() -> "Path | None":
 
 
 def resolve_source(source: "Optional[str]" = None) -> OverlaySource:
-    """Resolve the overlay source: explicit ``--source`` / ``$DOTAGENTS_OVERLAYS_SRC``,
+    """Resolve the overlay source: explicit ``--source`` / ``$AGENTS_OVERLAYS_SRC``,
     else the bundled ``overlays/``.
 
     Today every branch yields a **local directory** ``OverlaySource``. The single
@@ -213,7 +215,12 @@ def resolve_source(source: "Optional[str]" = None) -> OverlaySource:
     later change), construct a ``GitOverlaySource`` instead -- callers are unaffected
     because they only use the returned object's ``available``/``overlay_dir``.
     """
-    raw = source or os.environ.get(SOURCE_ENV) or None
+    raw = (
+        source
+        or os.environ.get(SOURCE_ENV)
+        or os.environ.get(SOURCE_ENV_LEGACY)
+        or None
+    )
     if raw:
         # (extension point) a URI/git ``raw`` would branch to a cached clone here.
         root = Path(raw).expanduser()

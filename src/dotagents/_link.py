@@ -10,7 +10,7 @@ reconcile the copy it made if symlinking wasn't available. Two things around tha
 are **conventions, not requirements**:
 
 - **Where stores live.** ``<agents_dir>/projects/<name>`` is only the default; see
-  ``store_root`` (``--store-dir`` / ``DOTAGENTS_STORE_DIR``, absolute paths allowed).
+  ``store_root`` (``--store-dir`` / ``AGENTS_STORE_DIR``, absolute paths allowed).
 - **How a store reaches other machines.** ``hooks/sync`` owns that if present. The
   bundled git path is a convenience, not the model -- a store that never leaves the
   machine is a perfectly valid setup.
@@ -36,7 +36,7 @@ from typing import Optional
 
 #: Default subdirectory of the agents dir that holds per-project stores. This is
 #: a convention, not a requirement -- dotagents does not care how you file them.
-#: Override per-invocation with ``--store-dir`` or ``DOTAGENTS_STORE_DIR`` (which
+#: Override per-invocation with ``--store-dir`` or ``AGENTS_STORE_DIR`` (which
 #: may be an absolute path, putting the stores outside the agents dir entirely).
 DEFAULT_STORE_SUBDIR = "projects"
 
@@ -44,9 +44,15 @@ DEFAULT_STORE_SUBDIR = "projects"
 def store_root(agents_dir: Path, store_dir: "str | os.PathLike | None" = None) -> Path:
     """Directory holding the per-project stores.
 
-    Resolution order: explicit argument, ``DOTAGENTS_STORE_DIR``, then
+    Resolution order: explicit argument, ``AGENTS_STORE_DIR``, then
     ``<agents_dir>/projects``. An absolute value is used as-is."""
-    raw = store_dir or os.environ.get("DOTAGENTS_STORE_DIR") or DEFAULT_STORE_SUBDIR
+    # back-compat: DOTAGENTS_STORE_DIR is deprecated, removable next release.
+    raw = (
+        store_dir
+        or os.environ.get("AGENTS_STORE_DIR")
+        or os.environ.get("DOTAGENTS_STORE_DIR")
+        or DEFAULT_STORE_SUBDIR
+    )
     p = Path(raw).expanduser()
     return p if p.is_absolute() else agents_dir / p
 
@@ -465,7 +471,9 @@ def _run_sync_hook(agents_dir: Path, *, message: str, dry_run: bool, log) -> "in
     Transport is not dotagents' concern -- git is only the bundled default. A hook
     lets the store reach other machines however the user wants (or not at all).
     It receives the store path as ``$1`` and the message as ``$2``, plus
-    ``DOTAGENTS_AGENTS_DIR`` / ``DOTAGENTS_SYNC_MESSAGE`` in the environment.
+    ``AGENTS_HOME`` / ``AGENTS_SYNC_MESSAGE`` in the environment (the old
+    ``DOTAGENTS_AGENTS_DIR`` / ``DOTAGENTS_SYNC_MESSAGE`` are also set for
+    back-compat this release, removable next).
     A non-zero exit is reported and returned; it does NOT fall through to git,
     since a failed hook means the user's own sync failed."""
     hook = _find_sync_hook(agents_dir)
@@ -478,6 +486,9 @@ def _run_sync_hook(agents_dir: Path, *, message: str, dry_run: bool, log) -> "in
         return 0
 
     env = dict(os.environ)
+    env["AGENTS_HOME"] = str(agents_dir)
+    env["AGENTS_SYNC_MESSAGE"] = message
+    # back-compat: DOTAGENTS_* is deprecated, removable next release.
     env["DOTAGENTS_AGENTS_DIR"] = str(agents_dir)
     env["DOTAGENTS_SYNC_MESSAGE"] = message
     cmd = [str(hook), str(agents_dir), message]

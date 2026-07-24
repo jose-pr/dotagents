@@ -28,21 +28,24 @@
 # that re-runs it next session -- when egress is up, the clone (and steps 3-5)
 # succeed, and that same run removes the recovery hook. Without (b) the private-sync
 # hooks -- which can themselves re-clone -- would never get registered, since step 5
-# is what registers them. (b) also fires when DOTAGENTS_AGENTS_REMOTE is unset at
+# is what registers them. (b) also fires when AGENTS_REMOTE is unset at
 # setup time: hosted runners often expose secrets to the session but not to the
 # setup-script phase, so the very first bootstrap has no remote to clone -- the
 # recovery hook retries next session, where the secret is present, and heals it.
 #
 # Env (set as secrets/vars in the web UI):
-#   DOTAGENTS_AGENTS_REMOTE  tokenless https URL of your private repo, e.g.
+#   AGENTS_REMOTE            tokenless https URL of your private repo, e.g.
 #                            https://github.com/<you>/.agents.git  (needed to clone)
-#   DOTAGENTS_AGENTS_TOKEN   fine-grained PAT, Contents: read/write, scoped to it
-#   DOTAGENTS_AGENTS_DIR     where the repo lives (default: $HOME/.agents)
+#   AGENTS_HOME              where the repo lives (default: $HOME/.agents)
+#   DOTAGENTS_AGENTS_TOKEN   fine-grained PAT, Contents: read/write, scoped to it (SECRET)
 #   DOTAGENTS_CLI_INSTALL    pip spec for the CLI if not already installed
 #                            (default: "dotagents"; e.g. a git URL if unpublished)
 #   CLAUDE_PROJECT_DIR       project to link (default: current directory)
+#
+# back-compat: the old names DOTAGENTS_AGENTS_REMOTE / DOTAGENTS_AGENTS_DIR are
+# still honored this release (removable next); the AGENTS_* names win when both set.
 
-AGENTS_DIR="${DOTAGENTS_AGENTS_DIR:-$HOME/.agents}"
+AGENTS_DIR="${AGENTS_HOME:-${DOTAGENTS_AGENTS_DIR:-$HOME/.agents}}"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 
 # Banner so the environment's setup-script log unambiguously shows this ran (a
@@ -169,13 +172,15 @@ _dg_install_recovery_hook() {
 }
 
 # --- 2. Clone (with retry/backoff) or pull the private repo. ------------------
+# back-compat: DOTAGENTS_AGENTS_REMOTE is deprecated, removable next release.
+AGENTS_REMOTE="${AGENTS_REMOTE:-${DOTAGENTS_AGENTS_REMOTE:-}}"
 if [ -d "$AGENTS_DIR/.git" ]; then
     dg_git -C "$AGENTS_DIR" pull --rebase --autostash --quiet \
         || echo "dotagents: pull failed, using local copy"
-elif [ -n "${DOTAGENTS_AGENTS_REMOTE:-}" ]; then
+elif [ -n "${AGENTS_REMOTE:-}" ]; then
     echo "dotagents: cloning private agents repo into $AGENTS_DIR"
     _dg_tries=0
-    until dg_git clone --quiet "$DOTAGENTS_AGENTS_REMOTE" "$AGENTS_DIR"; do
+    until dg_git clone --quiet "$AGENTS_REMOTE" "$AGENTS_DIR"; do
         _dg_tries=$((_dg_tries + 1))
         if [ "$_dg_tries" -ge 5 ]; then
             echo "dotagents: clone failed after $_dg_tries attempts (egress not ready at container start?)"
@@ -195,7 +200,7 @@ else
     # recovery hook and retry next session, when the secret is available. A run
     # that genuinely has no remote just re-skips next session (~100ms, idempotent);
     # the first session that sees it clones and drops the hook in step 5.
-    echo "dotagents: DOTAGENTS_AGENTS_REMOTE unset at setup time (secret not injected into the setup phase?)"
+    echo "dotagents: AGENTS_REMOTE unset at setup time (secret not injected into the setup phase?)"
     _dg_install_recovery_hook
     exit 0
 fi
