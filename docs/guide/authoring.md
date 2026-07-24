@@ -74,7 +74,7 @@ An overlay (or a scope's command dir) can ship **command modules** that become n
 and dotagents discovers it from:
 
 - the scope command dirs (user + project), always;
-- `$DOTAGENTS_CMDS_PATH` entries (os.pathsep-split);
+- `$AGENTS_CMDS_PATH` entries (os.pathsep-split);
 - `--cmdspath` entries passed on the command line.
 
 Later sources override an earlier same-named command, so a project command can shadow a
