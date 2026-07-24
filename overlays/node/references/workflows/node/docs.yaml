@@ -3,13 +3,20 @@ name: Docs
 # Builds the API reference + docs site and deploys it to GitHub Pages. Kept
 # separate from release.yaml (D52 -- three workflow files: test, release, docs)
 # so the docs site can be rebuilt/redeployed without cutting a release, and a
-# release is not the first time the docs build is exercised. release.yaml still
-# runs `npm run docs` as a gate, but only this workflow deploys.
+# release is not the first time the docs build is exercised. This workflow owns
+# ALL Pages deploys (main = latest, release = the version just shipped):
+# release.yaml builds + GATES on `npm run docs` and creates the release object;
+# publishing that release fires `release: published`, which triggers THIS
+# workflow to deploy -- so the release path never deploys Pages itself (see
+# release.yaml's docs-gate). It self-enables Pages (configure-pages) on every run.
 #
 # Triggers:
+#   - release published (a v* release ships its matching docs).
 #   - push to the default branch touching docs sources (keeps Pages current).
 #   - workflow_dispatch, for a manual redeploy against any ref.
 on:
+  release:
+    types: [published]
   push:
     branches: ["main"]
     paths:

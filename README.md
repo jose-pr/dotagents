@@ -1,5 +1,9 @@
 # dotagents
 
+[![Test](https://img.shields.io/github/actions/workflow/status/jose-pr/dotagents/test.yml?branch=main&label=tests)](https://github.com/jose-pr/dotagents/actions/workflows/test.yml)
+[![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://jose-pr.github.io/dotagents/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/jose-pr/dotagents/blob/main/LICENSE)
+
 Like dotfiles, but for AI coding agents: a portable, token-budgeted `~/.agents`
 configuration that works across agent runners (Claude Code, Antigravity, Copilot,
 Codex, ...) and records your engineering standards once — repo structure, CI/release
@@ -32,7 +36,7 @@ them. Everything else is repo infrastructure.
 
 | Path | What |
 | --- | --- |
-| `src/dotagents/` | The installable `dotagents` CLI (`init`/`install`/`link`/`sync`/`build-pyz`/`audit`) |
+| `src/dotagents/` | The installable `dotagents` CLI (`init`/`install`/`overlays`/`context`/`env`/`audit`/`leak-check`/`link`/`sync`/`build-pyz`) |
 | `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index). Neutral — imposes no flows |
 | `overlays/flows/` | PLAN / EXEC / REVIEW / REPO task flows + `MODELS.md` (executor selection) |
 | `overlays/recovery/` | `kb/RECOVERY.md` — config-recovery playbook |
@@ -207,6 +211,12 @@ committed — so what's public here is only the CLI, the base overlay, and the o
 overlays. If you fork, keep the tracked surface free of personal paths and private
 project names (`--repo-hygiene` checks mechanically), and use `tools/leak_check.py
 <repo>` to scan any *other* repo for agent-plan leakage before its releases.
+
+## Documentation
+
+Full docs — install modes, the overlay model, the CLI command surface, private sync,
+authoring your own overlays and commands, and the API reference — are at
+[jose-pr.github.io/dotagents](https://jose-pr.github.io/dotagents/).
 
 ## License
 

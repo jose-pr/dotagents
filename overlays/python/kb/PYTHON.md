@@ -81,7 +81,9 @@ redeployed without cutting a release).
   `pytest -q`.
 - `release.yml` keeps a `docs-gate` job that runs `mkdocs build --strict` but does
   **not** deploy — verify locally first (`pip install -e ".[docs]"`). Only `docs.yml`
-  deploys to Pages.
+  deploys to Pages, on three triggers: `release: published` (a `v*` release ships its
+  matching docs — the gated release object, once published, fires this deploy), push
+  to `main` touching docs sources (latest between releases), and `workflow_dispatch`.
 - `publish-pypi` sets `skip-existing: true` so a re-run of a partial release skips
   files already uploaded (PyPI never replaces a version) instead of hard-failing.
 - PyPI publish uses Trusted Publishing (OIDC, `id-token: write`), never a stored token.
