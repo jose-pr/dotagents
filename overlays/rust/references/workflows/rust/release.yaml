@@ -4,9 +4,9 @@ name: Release
 # push/PR events on branches -- this is a release gate, not general CI.
 #
 # NOTE: docs.rs builds + hosts API docs automatically on publish -- no docs
-# job is needed for that part. Add docs-build/docs-deploy jobs (mirroring the
-# python template's Pages jobs) only if the project ships a narrative mdBook
-# guide beyond bare API docs (see kb/RUST.md).
+# workflow is needed for that part. Enable the companion docs.yaml (D52 -- the
+# three-workflow standard) only if the project ships a narrative mdBook guide
+# beyond bare API docs (see kb/RUST.md); the release path never deploys Pages.
 on:
   push:
     tags:

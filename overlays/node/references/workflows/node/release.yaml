@@ -49,8 +49,11 @@ jobs:
           name: dist
           path: "*.tgz"
 
-  docs-build:
-    name: Build documentation site
+  # Docs are DEPLOYED by docs.yaml (D52 -- three workflow files). This job only
+  # GATES the release on a docs build: a release must never ship if the docs
+  # site is broken, but the release path never deploys Pages itself.
+  docs-gate:
+    name: Docs build gate (no deploy)
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -58,31 +61,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: actions/configure-pages@v5
       - run: npm ci
       # TypeDoc outputs to docs/api/ -- never point it at docs/ itself, it
       # would clobber the hand-written landing page (see kb/NODE.md).
-      - name: Build API reference + site
+      - name: Build API reference + site (gate only)
         run: npm run docs
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/
-
-  docs-deploy:
-    name: Deploy documentation to GitHub Pages
-    needs: docs-build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
 
   github-release:
     name: Create GitHub Release
