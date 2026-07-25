@@ -251,3 +251,17 @@ jobs:
           python dist/dotagents.pyz init
           python dist/dotagents.pyz overlays add python --source overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"
+          # pyvenv/py (D-latest): DISCOVERED commands that INHERIT a dotagents-defined
+          # base class (DotAgentsArgs, in cli/_common.py -- not their own module) are a
+          # DIFFERENT zipapp gap than the ones above: duho's AST introspection walks the
+          # MRO, so the base class's module needs repointing too, not just the leaf
+          # command module's own file. This regressed exactly this way once already
+          # (`-g` silently vanished, `--global` degraded to the name-derived
+          # `--global-scope`) before `dotagents.cli._common` was added to
+          # `_COMMAND_MODULES` -- assert directly against the real short flag, not just
+          # presence of the long form, so a future regression here fails loud.
+          python dist/dotagents.pyz pyvenv --help | grep -q -- "\-\-global, -g"
+          ! python dist/dotagents.pyz pyvenv --help | grep -q -- "--global-scope"
+          python dist/dotagents.pyz py --help | grep -q -- "\-\-global, -g"
+          python dist/dotagents.pyz pyvenv -g --dry-run
+          python dist/dotagents.pyz py -g -- -c "print(1)" | grep -q -- "^1$"

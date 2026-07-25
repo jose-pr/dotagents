@@ -100,15 +100,26 @@ _BUILTIN_COMMANDS = [
 # The cli submodules whose sources duho introspects for flag/help definitions.
 # Every module that defines a field-bearing BUILT-IN command class must be
 # repointed inside a zipapp (see `_repoint_zipapp_sources`). DISCOVERED command
-# modules never need repointing: an overlay's cmds live on the real filesystem,
-# and the bundled cmds dir is extracted to real temp files by `_package_data_dir`
-# before import (so its `__file__` already exists -- see `_bundled_cmds_dir`).
+# modules themselves never need repointing: an overlay's cmds live on the real
+# filesystem, and the bundled cmds dir is extracted to real temp files by
+# `_package_data_dir` before import (so its `__file__` already exists -- see
+# `_bundled_cmds_dir`). BUT a discovered class can still INHERIT fields from a
+# base class defined in dotagents itself -- duho's AST introspection walks the
+# MRO and needs each base's module source too, not just the leaf class's own
+# module. `dotagents.cli._common` is exactly that case since `DotAgentsArgs`
+# was added there (confirmed live: an overlay command subclassing it lost its
+# `-g` short flag and `--global` degraded to the name-derived `--global-scope`
+# inside a built .pyz, because `_common`'s own `__file__` was still zip-internal
+# even though the discovered command module's own file was real on disk) -- so
+# `_common` must be repointed here too, even though it ships no command class
+# of its own and is never in `_BUILTIN_COMMANDS`.
 _COMMAND_MODULES = (
     "dotagents.cli.init",
     "dotagents.cli.context",
     "dotagents.cli.env",
     "dotagents.cli.overlays",
     "dotagents.cli.build_pyz",
+    "dotagents.cli._common",
 )
 
 #: Extra env-var command search paths (os.pathsep-split), additive to the scope
