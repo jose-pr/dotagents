@@ -41,21 +41,34 @@ Python-specific extras/overrides on top of the generic repo standard in
   — that catches version-specific breakage (e.g. APIs added after the floor). Keep one
   venv per version you test against, named per the scheme below. CI runs the full matrix;
   locally, at minimum smoke-test latest + floor.
-- **Virtual Environments**: project-local, gitignored, named
-  `.venv/<ver>-<os>-<arch>[-<task>]` — `<os>` is `nt`/`posix`/`darwin`, `<arch>` from
-  `platform.machine().lower()` (e.g. `.venv/3.14-nt-amd64`, or
-  `.venv/3.14-nt-amd64-docs` for a task-specific env). One derivation:
-  `python -c "import os,platform;print(platform.python_version()+('-nt-' if os.name=='nt' else '-posix-')+platform.machine().lower())"`.
-  **Never** install to system/user Python unless explicitly told. Create with the
-  chosen interpreter (`py -<ver> -m venv .venv/<tag>` on Windows), then always invoke
-  venv-scoped executables (Windows `.venv\<tag>\Scripts\{python,pip,pytest}`, Unix `bin/`).
+- **Virtual Environments**: use `dotagents pyvenv` (this overlay's own command)
+  to create them — never `python -m venv` by hand. It creates
+  `<scope>/.pyvenv/<version>-<os>-<arch>/` (a sibling of `.agents`; project
+  scope by default, `-g` for the user-wide store shared across projects) and
+  no-ops if it already exists, so re-running it is always safe. `<os>` is
+  `nt`/`posix`/`darwin`, `<arch>` is `platform.machine().lower()` (e.g.
+  `3.14.6-nt-amd64`) — the name is derived from the interpreter's actual probed
+  version, not trusted from a filename, so the same version+os+arch always
+  names the same dir regardless of which install produced it.
+  - **Normal work**: no version argument — `dotagents pyvenv` resolves and
+    uses the **latest** Python installed on the machine. No version to track
+    or pass day to day.
+  - **Before a release, or after finishing a significant chunk of work**: also
+    create and test against the **floor** version from `requires-python` (see
+    Version policy above; currently 3.9) — `dotagents pyvenv 3.9` — and run the
+    test suite against it. This is what actually catches version-specific
+    breakage before it ships, not a per-commit ritual.
+  - Always invoke venv-scoped executables from the created dir (Windows
+    `.pyvenv\<tag>\Scripts\{python,pip,pytest}`, Unix `bin/`). **Never** install
+    to system/user Python unless explicitly told.
 - **Interpreter management**: use the **Python Manager** (`py install <ver>`;
-  `py -0p` lists installs with real paths) to add/select versions — the `py` launcher
-  then resolves them. **Avoid Microsoft Store Python**: its app-execution alias
-  sandboxes the filesystem and `pip install` silently hangs / no-ops (exits 0 having
-  installed nothing, no output past pip's startup line). A pymanager/python.org build
-  under a real path (`py -0p` shows one) does not have this problem.
-- **Install**: `.venv/<tag>/<Scripts|bin>/pip install -e ".[dev,<extras-with-tests>]"`
+  `py -0p` lists installs with real paths) to add/select versions — the `py`
+  launcher then resolves them, and `dotagents pyvenv` discovers them the same
+  way. **Avoid Microsoft Store Python**: its app-execution alias sandboxes the
+  filesystem and `pip install` silently hangs / no-ops (exits 0 having
+  installed nothing, no output past pip's startup line). A pymanager/python.org
+  build under a real path (`py -0p` shows one) does not have this problem.
+- **Install**: `<pyvenv-dir>/<Scripts|bin>/pip install -e ".[dev,<extras-with-tests>]"`
   — include every extra that has tests depending on it, or those tests silently skip
   instead of running.
 - **Test config**: `pythonpath = ["src"]` + `testpaths` under
@@ -69,7 +82,9 @@ Python-specific extras/overrides on top of the generic repo standard in
   the project deliberately opts in.
 - **`.gitignore` language block** (source for the template placeholder):
   `__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.hypothesis/`, `.mypy_cache/`,
-  `.ruff_cache/`, `.coverage*`, `htmlcov/`, `*.egg-info/`, `.venv/`.
+  `.ruff_cache/`, `.coverage*`, `htmlcov/`, `*.egg-info/`, `.pyvenv/` (project-scope
+  `dotagents pyvenv` output; no trailing content to gitignore for `-g` runs, they
+  land outside the repo entirely).
 
 ## CI/CD: Implementing the Three-Workflow Split
 
@@ -135,4 +150,4 @@ redeployed without cutting a release).
 - MkDocs strict-nav errors on repo-level markdown when snippets `base_path: ["."]` →
   set `docs_dir: docs` (the template does).
 - Windows/PowerShell venv console script resolving outside the venv →
-  `.\.venv\<tag>\Scripts\python.exe -m <module>` instead of the direct script.
+  `.\.pyvenv\<tag>\Scripts\python.exe -m <module>` instead of the direct script.
