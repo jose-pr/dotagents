@@ -1,5 +1,14 @@
 """`dotagents pyvenv` -- create a shared venv for a Python version, once.
 
+Also ships `dotagents py`: run a python subprocess using this same shared
+venv store, passing everything after ``--`` straight through (duho's
+``_passthrough_`` convention -- ``dotagents py -- -c "print(1)"`` runs
+``python -c "print(1)"`` against the resolved venv's interpreter). It
+creates the venv first if missing (the same idempotent create-or-reuse
+``Pyvenv`` logic, not a separate code path), so ``py`` is really "the venv
+command AND where you run things with it" -- one command finds/creates the
+interpreter, the other one uses it.
+
 Discovered command module shipped BY THIS OVERLAY (D84 per-overlay ``cmds/``
 discovery, D85): plain dotagents ships no ``pyvenv`` command -- installing the
 ``python`` overlay is what makes it exist.
@@ -201,6 +210,42 @@ def _resolve_interpreter(version: "Optional[str]", logger) -> Path:
     return best[1]
 
 
+def _venv_target(scope, py_version: "Optional[str]") -> Path:
+    """The venv dir a given scope + version spec resolves to, whether or not it
+    exists yet -- the single naming rule shared by ``pyvenv`` and ``py``."""
+    pyvenv_root = scope.agents_root.parent / ".pyvenv"
+    interpreter = _resolve_interpreter(py_version, logger=None)
+    probed = _probe_version(interpreter)
+    version_str = "%d.%d.%d" % probed if probed else "unknown"
+    return pyvenv_root / ("%s-%s-%s" % (version_str, _os_bucket(), _arch_bucket())), interpreter
+
+
+def _ensure_venv(scope, py_version: "Optional[str]", *, dry_run: bool, logger) -> "Optional[Path]":
+    """Resolve the venv for ``py_version`` under ``scope``, creating it first if
+    missing -- the one code path both ``pyvenv`` and ``py`` share, so ``py``
+    never drifts from what ``pyvenv`` would have produced for the same inputs.
+    Returns the venv's own python executable, or ``None`` on ``--dry-run`` when
+    nothing exists yet (nothing to run against)."""
+    target, interpreter = _venv_target(scope, py_version)
+    venv_python = _venv_python(target)
+
+    if venv_python.is_file():
+        logger.info("pyvenv: exists, nothing to do: %s" % target)
+        return venv_python
+
+    logger.info("pyvenv: creating %s (from %s)" % (target, interpreter))
+    if dry_run:
+        logger.info("dry-run: no venv created")
+        return None
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([str(interpreter), "-m", "venv", str(target)], check=True)
+    if not venv_python.is_file():
+        raise SystemExit("error: venv creation reported success but %s is missing" % venv_python)
+    logger.info("pyvenv: created %s" % target)
+    return venv_python
+
+
 class Pyvenv(DotAgentsArgs):
     """Create a shared venv for a Python version under the scope's ``.pyvenv/``
     store, once. If the target already looks like a real venv, do nothing --
@@ -224,28 +269,43 @@ class Pyvenv(DotAgentsArgs):
 
     def __call__(self) -> int:
         scope = self.resolve_scope()
-        pyvenv_root = scope.agents_root.parent / ".pyvenv"
-        interpreter = _resolve_interpreter(self.py_version, self._logger_)
-        probed = _probe_version(interpreter)
-        version_str = "%d.%d.%d" % probed if probed else "unknown"
-
-        target = pyvenv_root / ("%s-%s-%s" % (version_str, _os_bucket(), _arch_bucket()))
-        venv_python = _venv_python(target)
-
-        if venv_python.is_file():
-            self._logger_.info("pyvenv: exists, nothing to do: %s" % target)
-            return 0
-
-        self._logger_.info("pyvenv: creating %s (from %s)" % (target, interpreter))
-        if self.dry_run:
-            self._logger_.info("dry-run: no venv created")
-            return 0
-
-        target.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            [str(interpreter), "-m", "venv", str(target)], check=True,
-        )
-        if not venv_python.is_file():
-            raise SystemExit("error: venv creation reported success but %s is missing" % venv_python)
-        self._logger_.info("pyvenv: created %s" % target)
+        _ensure_venv(scope, self.py_version, dry_run=self.dry_run, logger=self._logger_)
         return 0
+
+
+class Py(DotAgentsArgs):
+    """Run Python against the shared ``.pyvenv/`` store, creating the venv first
+    if it doesn't exist yet (same logic as ``pyvenv`` -- this IS "the venv
+    command and where you run things with it", not a separate lookup).
+
+    Everything after the first literal ``--`` is passed straight through to the
+    subprocess (duho's ``_passthrough_`` convention) -- stdin/stdout/stderr are
+    the real terminal streams, not captured, so interactive input and streamed
+    output both work exactly like invoking python directly.
+
+        dotagents py -- -c "print(1)"      # -> python<selected> -c "print(1)"
+        dotagents py 3.9 -- -m pytest -q   # pick a version explicitly, then run it
+
+    ``--version``/``py_version`` before ``--`` picks which interpreter (same
+    spec as ``pyvenv``'s positional: a bare "3.11"/"3", a full interpreter path,
+    or omitted for latest); everything from the FIRST ``--`` on belongs to the
+    subprocess, including any ``-v``/``-q`` python would otherwise try to
+    consume as its own flags -- they are never parsed by duho once past ``--``.
+    """
+
+    _parsername_ = "py"
+
+    py_version: Optional[str] = None
+    ("Python version to use: a full interpreter path, a bare version spec "
+     "(\"3.11\", \"3\"), or omitted for the highest version found on the system.")
+    ("py_version",)
+
+    def __call__(self) -> int:
+        scope = self.resolve_scope()
+        venv_python = _ensure_venv(scope, self.py_version, dry_run=False, logger=self._logger_)
+        # `_ensure_venv` only returns None on dry_run, which this command never
+        # sets -- but guard anyway rather than pass None to subprocess.
+        if venv_python is None:
+            raise SystemExit("error: venv creation failed; nothing to run")
+        proc = subprocess.run([str(venv_python), *self._passthrough_])
+        return proc.returncode

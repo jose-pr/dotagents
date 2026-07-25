@@ -61,13 +61,28 @@ Python-specific extras/overrides on top of the generic repo standard in
   - Always invoke venv-scoped executables from the created dir (Windows
     `.pyvenv\<tag>\Scripts\{python,pip,pytest}`, Unix `bin/`). **Never** install
     to system/user Python unless explicitly told.
+- **Running one-off Python: `dotagents py`**. If you need to actually run
+  something (not just create the venv), use `dotagents py` — it creates the
+  venv first if missing (same logic/naming as `pyvenv` above, not a second
+  lookup) and passes everything after `--` straight through to that
+  interpreter, with real stdin/stdout/stderr (not captured) and the real exit
+  code, so interactive input and streamed output both work as if you'd
+  invoked python directly:
+  ```
+  dotagents py -- -c "print(1)"       # latest Python on the machine
+  dotagents py 3.9 -- -m pytest -q    # the floor version, explicitly
+  ```
+  This is the one command for both finding/creating a shared interpreter AND
+  using it — do not separately locate `.pyvenv/<tag>/.../python.exe` by hand
+  when `dotagents py` already resolves and runs it in one step.
 - **Interpreter management**: use the **Python Manager** (`py install <ver>`;
   `py -0p` lists installs with real paths) to add/select versions — the `py`
-  launcher then resolves them, and `dotagents pyvenv` discovers them the same
-  way. **Avoid Microsoft Store Python**: its app-execution alias sandboxes the
-  filesystem and `pip install` silently hangs / no-ops (exits 0 having
-  installed nothing, no output past pip's startup line). A pymanager/python.org
-  build under a real path (`py -0p` shows one) does not have this problem.
+  launcher then resolves them, and `dotagents pyvenv`/`dotagents py` discover
+  them the same way. **Avoid Microsoft Store Python**: its app-execution alias
+  sandboxes the filesystem and `pip install` silently hangs / no-ops (exits 0
+  having installed nothing, no output past pip's startup line). A
+  pymanager/python.org build under a real path (`py -0p` shows one) does not
+  have this problem.
 - **Install**: `<pyvenv-dir>/<Scripts|bin>/pip install -e ".[dev,<extras-with-tests>]"`
   — include every extra that has tests depending on it, or those tests silently skip
   instead of running.
