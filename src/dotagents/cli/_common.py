@@ -14,9 +14,51 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Optional
+
+from duho import Cmd, LoggingArgs
 
 
 _extracted_dirs_cache: "dict[str, Path]" = {}
+
+
+class DotAgentsArgs(LoggingArgs, Cmd):
+    """Shared ``-g/--global`` + ``--agents-dir`` fields for any command whose scope
+    is *where the store lives* (``_scope.resolve_scope``'s two axes) -- ``init``,
+    ``overlays add/remove/sync``, ``link-project``, and overlay-shipped commands
+    (e.g. the ``python`` overlay's ``pyvenv``) all redeclare this same pair today;
+    new commands should inherit this instead of copying the fields again.
+
+    NOT retrofitted onto the existing duplicated commands -- each already ships
+    with slightly different field defaults/help text tuned to its own command
+    (``overlays add``'s ``agents_dir`` defaults eagerly to
+    ``Path.home() / ".agents"``, where ``resolve_scope`` itself treats ``None`` as
+    "unset, use the default") -- collapsing that difference is a separate, wider
+    change, not a side effect of adding this base. Mix in as the FIRST base so a
+    subclass's own ``_parsername_``/``__call__`` still take precedence:
+    ``class Foo(DotAgentsArgs): ...`` -- already inherits ``LoggingArgs``/``Cmd``
+    transitively, do not also list them.
+
+    Available both as ``dotagents.cli._common.DotAgentsArgs`` and re-exported at
+    ``dotagents.cli.DotAgentsArgs`` -- an overlay-shipped command module (which
+    always runs inside a real ``dotagents`` process, so ``dotagents.cli`` is
+    always importable there) should use the top-level import."""
+
+    global_scope: bool = False
+    "Use the user scope (~/.agents) instead of the project scope."
+    ("--global", "-g")
+
+    agents_dir: "Optional[Path]" = None
+    "Store root override (default: ~/.agents for -g, else <project>/.agents)."
+    ("--agents-dir",)
+
+    def resolve_scope(self, *, project_root: "str | os.PathLike | None" = None):
+        """This command's resolved ``Scope``, from the two fields above."""
+        from dotagents._scope import resolve_scope
+
+        return resolve_scope(
+            self.global_scope, agents_dir=self.agents_dir, project_root=project_root,
+        )
 
 
 # NOTE: `_resolve_required_tool` was removed. It existed so a compiled `audit` /

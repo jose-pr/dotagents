@@ -34,3 +34,7 @@ Thumbs.db
 .idea/
 .vscode/
 _staging/
+
+# `overlays` branch, checked out here as a worktree/clone for local editing
+# (D77: example overlays split off this repo's main branch).
+overlays/

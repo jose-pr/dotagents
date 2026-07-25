@@ -7,19 +7,19 @@ overlays are the dirs under `<scope>/overlays/`.
 """
 
 import shutil
-from pathlib import Path
 from typing import Optional
 
-from duho import Cli, Cmd, LoggingArgs
+from duho import Cli, LoggingArgs
 
 from dotagents.cli._common import (
     BASE_ROOT,
+    DotAgentsArgs,
     _installed_overlay_dirs,
     _run_overlay_setup,
 )
 
 
-class OverlayAdd(LoggingArgs, Cmd):
+class OverlayAdd(DotAgentsArgs):
     """Install overlay(s) by name into a scope, and publish their skills.
 
     Resolves each ``<name>`` against the source (``--source`` /
@@ -39,14 +39,6 @@ class OverlayAdd(LoggingArgs, Cmd):
     source: Optional[str] = None
     "Overlay source directory (default: $AGENTS_OVERLAYS_SRC or the bundled overlays/)."
     ("--source",)
-
-    global_scope: bool = False
-    "Install into the user scope (~/.agents) instead of the project scope."
-    ("--global", "-g")
-
-    agents_dir: Path = Path.home() / ".agents"
-    "User-scope agents dir (default: ~/.agents)."
-    ("--agents-dir",)
 
     copy: bool = False
     "Copy skills into the shared dir instead of symlinking (no-symlink fallback)."
@@ -80,7 +72,7 @@ class OverlayAdd(LoggingArgs, Cmd):
             names.append(_scope.normalize_overlay_name(raw))
 
         source = _scope.resolve_source(self.source)
-        scope = _scope.resolve_scope(self.global_scope, agents_dir=self.agents_dir)
+        scope = self.resolve_scope()
         self._logger_.info("scope: %s (%s)", scope.level, scope.agents_root)
         agents_md = scope.agents_root / "AGENTS.md"
 
@@ -130,7 +122,7 @@ class OverlayAdd(LoggingArgs, Cmd):
         return 0
 
 
-class OverlayRemove(LoggingArgs, Cmd):
+class OverlayRemove(DotAgentsArgs):
     """Remove installed overlay(s): delete the overlay dir + unpublish its skills.
 
     Deletes only ``<scope>/.agents/overlays/<name>/`` and unpublishes only the
@@ -146,25 +138,17 @@ class OverlayRemove(LoggingArgs, Cmd):
     "Overlay name(s) to remove."
     ("name",)
 
-    global_scope: bool = False
-    "Operate on the user scope (~/.agents) instead of the project scope."
-    ("--global", "-g")
-
-    agents_dir: Path = Path.home() / ".agents"
-    "User-scope agents dir (default: ~/.agents)."
-    ("--agents-dir",)
-
     dry_run: bool = False
     "Show what would happen without touching anything."
     ("--dry-run",)
 
     def __call__(self) -> int:
-        from dotagents import _overlays, _scope, _skills
+        from dotagents import _overlays, _skills
 
         if not self.name:
             self._logger_.warning("no overlay name given; nothing to remove")
             return 0
-        scope = _scope.resolve_scope(self.global_scope, agents_dir=self.agents_dir)
+        scope = self.resolve_scope()
         self._logger_.info("scope: %s (%s)", scope.level, scope.agents_root)
 
         for name in self.name:
@@ -197,7 +181,7 @@ class OverlayRemove(LoggingArgs, Cmd):
         return 0
 
 
-class OverlayList(LoggingArgs, Cmd):
+class OverlayList(DotAgentsArgs):
     """List overlays: those installed in the scope, and those available from source.
 
     ``installed`` is discovered by presence under ``<scope>/.agents/overlays/``; no
@@ -210,14 +194,6 @@ class OverlayList(LoggingArgs, Cmd):
     "Overlay source directory (default: $AGENTS_OVERLAYS_SRC or the bundled overlays/)."
     ("--source",)
 
-    global_scope: bool = False
-    "List the user scope (~/.agents) instead of the project scope."
-    ("--global", "-g")
-
-    agents_dir: Path = Path.home() / ".agents"
-    "User-scope agents dir (default: ~/.agents)."
-    ("--agents-dir",)
-
     json: bool = False
     "Emit JSON instead of plain text."
     ("--json",)
@@ -227,7 +203,7 @@ class OverlayList(LoggingArgs, Cmd):
 
         from dotagents import _scope
 
-        scope = _scope.resolve_scope(self.global_scope, agents_dir=self.agents_dir)
+        scope = self.resolve_scope()
         installed = _scope.discover_overlays(scope)
         try:
             available = _scope.resolve_source(self.source).available()
@@ -260,7 +236,7 @@ class OverlayList(LoggingArgs, Cmd):
         return 0
 
 
-class OverlaySync(LoggingArgs, Cmd):
+class OverlaySync(DotAgentsArgs):
     """Refresh installed overlays from source, and resync their skills.
 
     Re-applies each installed overlay (additive: new files land, hand-edits stay),
@@ -277,14 +253,6 @@ class OverlaySync(LoggingArgs, Cmd):
     "Overlay source directory (default: $AGENTS_OVERLAYS_SRC or the bundled overlays/)."
     ("--source",)
 
-    global_scope: bool = False
-    "Sync the user scope (~/.agents) instead of the project scope."
-    ("--global", "-g")
-
-    agents_dir: Path = Path.home() / ".agents"
-    "User-scope agents dir (default: ~/.agents)."
-    ("--agents-dir",)
-
     copy: bool = False
     "Copy skills into the shared dir instead of symlinking (no-symlink fallback)."
     ("--copy",)
@@ -300,7 +268,7 @@ class OverlaySync(LoggingArgs, Cmd):
     def __call__(self) -> int:
         from dotagents import _overlays, _scope, _skills
 
-        scope = _scope.resolve_scope(self.global_scope, agents_dir=self.agents_dir)
+        scope = self.resolve_scope()
         source = _scope.resolve_source(self.source)
         installed = _scope.discover_overlays(scope)
         names = _scope.filter_names(installed, self.pattern)

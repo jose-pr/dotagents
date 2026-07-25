@@ -31,7 +31,10 @@ did through `main` -- `app` calls the class's `__call__`.
 
 `_compose_block` and `_package_data_dir` are re-exported at package level because
 other package modules import them as `dotagents.cli._compose_block` /
-`dotagents.cli._package_data_dir` (see `_overlays.py`, `_scope.py`).
+`dotagents.cli._package_data_dir` (see `_overlays.py`, `_scope.py`). `DotAgentsArgs`
+is re-exported the same way, but for a different audience: an overlay-shipped
+command module (which always runs inside a real `dotagents` process) is meant to
+`from dotagents.cli import DotAgentsArgs`.
 """
 
 import logging
@@ -50,6 +53,7 @@ from dotagents import __version__
 from dotagents.cli._common import (  # noqa: F401
     BASE_PLAIN_FILES,
     BASE_ROOT,
+    DotAgentsArgs,
     _apply_base,
     _compose_block,
     _installed_overlay_dirs,

@@ -4,12 +4,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from duho import Cmd, LoggingArgs
-
-from dotagents.cli._common import BASE_ROOT, _apply_base, _resolve_from
+from dotagents.cli._common import BASE_ROOT, DotAgentsArgs, _apply_base, _resolve_from
 
 
-class Init(LoggingArgs, Cmd):
+class Init(DotAgentsArgs):
     """Lay down the neutral base config -- the `AGENTS.md` scaffolding and design-log
     convention, never the opinionated overlays (those come from `overlays add`).
 
@@ -20,14 +18,6 @@ class Init(LoggingArgs, Cmd):
     """
 
     _parsername_ = "init"
-
-    global_scope: bool = False
-    "Init the user store (~/.agents) instead of this project's <cwd>/.agents."
-    ("--global", "-g")
-
-    agents_dir: Optional[Path] = None
-    "User store location for -g (default ~/.agents; configurable via $AGENTS_STORE_DIR)."
-    ("--agents-dir",)
 
     dest: Optional[Path] = None
     "Explicit destination, overriding the resolved scope (project/user)."
@@ -62,9 +52,7 @@ class Init(LoggingArgs, Cmd):
         if self.dest is not None:
             dest = Path(self.dest).expanduser().resolve()
         else:
-            from dotagents import _scope
-
-            scope = _scope.resolve_scope(self.global_scope, agents_dir=self.agents_dir)
+            scope = self.resolve_scope()
             dest = Path(scope.agents_root).expanduser().resolve()
             self._logger_.info("scope: %s (%s)", scope.level, dest)
 
