@@ -320,6 +320,130 @@ def test_powershell_and_cmd_keep_native_path():
         assert "PATHEXT" in out
 
 
+# --------------------------------------------------------------------------- #
+# The MIRROR bug: `dotagents env` invoked from a genuine Windows PowerShell/
+# cmd terminal whose OWN inherited PATH already contains WSL/MSYS-mount-style
+# entries (not something dotagents itself emits -- a pre-existing condition of
+# the caller's live environment, confirmed on a real machine). Left
+# unconverted, `${env:PATH} = '/usr/bin:/mnt/c/...'` is syntactically valid
+# PowerShell but semantically useless: a single opaque colon-joined string,
+# not a `;`-split list powershell.exe's own PATH lookup can use.
+# --------------------------------------------------------------------------- #
+
+# The exact shape reported live: WSL-native entries (no Windows equivalent)
+# mixed with /mnt/c/... mounted entries, several containing spaces.
+WSL_PATH = {
+    "PATH": (
+        "/usr/local/sbin:/usr/bin:/mnt/c/Users/jose/.agents/bin:"
+        "/mnt/c/Program Files/Git/cmd:/mnt/c/Windows/system32"
+    ),
+}
+
+# The MSYS2/Git-Bash mount form (`/c/...`, what `_to_posix_path` itself
+# produces) rather than WSL's `/mnt/c/...` -- both must convert.
+MSYS_PATH = {"PATH": "/c/Users/jose/.agents/bin:/c/Program Files/Git/cmd"}
+
+
+def test_powershell_converts_wsl_mount_path_to_native():
+    out = _format_env(WSL_PATH, "powershell")
+    assert (
+        r"${env:PATH} = 'C:\Users\jose\.agents\bin;"
+        r"C:\Program Files\Git\cmd;C:\Windows\system32'" in out
+    )
+
+
+def test_powershell_drops_wsl_only_segments_with_no_windows_equivalent():
+    """/usr/local/sbin and /usr/bin have no Windows-side meaning at all --
+    dropped, not mangled into a bogus relative path that could shadow an
+    unrelated file under Windows' cwd."""
+    out = _format_env(WSL_PATH, "powershell")
+    assert "usr" not in out
+    assert "sbin" not in out
+
+
+def test_cmd_also_converts_wsl_mount_path():
+    out = _format_env(WSL_PATH, "cmd")
+    assert (
+        r'set "PATH=C:\Users\jose\.agents\bin;'
+        r'C:\Program Files\Git\cmd;C:\Windows\system32"' in out
+    )
+
+
+def test_powershell_converts_msys_mount_path_too():
+    out = _format_env(MSYS_PATH, "powershell")
+    assert r"C:\Users\jose\.agents\bin" in out
+    assert r"C:\Program Files\Git\cmd" in out
+
+
+def test_powershell_leaves_native_path_untouched_no_double_conversion():
+    """A value that is ALREADY Windows-native must not be run through the
+    POSIX-mount detector at all -- covered by test_powershell_and_cmd_keep_
+    native_path above; this pins the gate function directly so the two
+    detectors (native-target vs POSIX-target) can never both fire."""
+    from dotagents.cli.env import _looks_like_posix_path_list
+
+    assert not _looks_like_posix_path_list("PATH", WINDOWS_PATH["PATH"])
+    assert _looks_like_posix_path_list("PATH", WSL_PATH["PATH"])
+
+
+def test_non_path_colon_value_never_treated_as_path_list():
+    """A colon in a value is not automatically a path-list separator --
+    e.g. a model tag with a version suffix must pass through untouched."""
+    out = _format_env({"AGENTS_MODEL": "claude-opus-4:20260101"}, "powershell")
+    assert "${env:AGENTS_MODEL} = 'claude-opus-4:20260101'" in out
+
+
+def test_to_windows_path_handles_unc_and_relative():
+    from dotagents.cli.env import _to_windows_path
+
+    # Already-native passes through (mirrors _to_posix_path's own UNC case).
+    assert _to_windows_path(r"C:\Program Files\Git\bin") == r"C:\Program Files\Git\bin"
+    # A relative segment normalizes separators but isn't dropped.
+    assert _to_windows_path(".agents/bin") == r".agents\bin"
+    # A WSL-only absolute path with no drive to recover is dropped (None).
+    assert _to_windows_path("/usr/local/bin") is None
+
+
+def test_powershell_converts_mixed_native_and_posix_path():
+    """Real machine bug: `get_environment` PREPENDS dotagents' own
+    Windows-native bin dirs (`;`-joined) onto whatever PATH the caller's
+    environment already held -- so a genuinely POSIX-sourced PATH (WSL/MSYS
+    pwsh) arrives as ONE STRING with BOTH separators live at once:
+    `<native>;<native>;/usr/bin:/mnt/c/Windows/system32:...`. An earlier
+    version of the conversion bailed out the instant it saw ANY `;` in the
+    whole value, so the native prefix converted but the still-POSIX tail
+    after it passed through completely untouched -- caught by sourcing real
+    output into a live PowerShell session and watching `git.exe` fail to
+    resolve. The fix splits on `;` FIRST, then only `:`-splits the chunks
+    that actually look POSIX."""
+    mixed = {
+        "PATH": (
+            r"C:\Users\jose\.agents\bin;C:\Program Files\Git\cmd;"
+            "/usr/local/sbin:/usr/bin:/mnt/c/Windows/system32:/mnt/c/Program Files/Git/usr/bin"
+        )
+    }
+    out = _format_env(mixed, "powershell")
+    assert (
+        r"${env:PATH} = 'C:\Users\jose\.agents\bin;C:\Program Files\Git\cmd;"
+        r"C:\Windows\system32;C:\Program Files\Git\usr\bin'" in out
+    )
+    # The WSL-only /usr/local/sbin, /usr/bin segments must be gone entirely,
+    # not merely reordered or left dangling as a broken relative path.
+    assert "usr/local" not in out
+    assert "/usr/bin" not in out
+
+
+def test_looks_like_posix_chunk_checks_every_semicolon_segment():
+    """The gate must inspect EACH `;`-delimited chunk, not bail the instant
+    any `;` or `\\` appears anywhere in the whole value -- the exact
+    regression `test_powershell_converts_mixed_native_and_posix_path` pins
+    end to end; this isolates the gate function itself."""
+    from dotagents.cli.env import _looks_like_posix_path_list
+
+    mixed = r"C:\Users\jose\.agents\bin;/usr/bin:/mnt/c/Windows/system32"
+    assert _looks_like_posix_path_list("PATH", mixed)
+
+
 def test_json_and_yaml_keep_native_path():
     """Data formats are for machine consumption of the RAW assembled env, not
     for sourcing -- must not silently rewrite values."""

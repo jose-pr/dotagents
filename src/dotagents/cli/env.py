@@ -103,6 +103,136 @@ def _to_posix_path_list(value: str) -> str:
     return ":".join(segments)
 
 
+_WSL_MOUNT_RE = re.compile(r"^/mnt/([A-Za-z])(/.*)?$")
+_MSYS_MOUNT_RE = re.compile(r"^/([A-Za-z])(/.*)?$")
+
+
+def _to_windows_path(segment: str) -> "str | None":
+    """One path segment, converted to a form a native Windows process
+    (``cmd.exe``/``powershell.exe``) can actually resolve a PATH lookup
+    through -- the inverse of :func:`_to_posix_path`.
+
+    Real machine bug this fixes: ``dotagents env`` was invoked from a genuine
+    Windows PowerShell terminal, but the process's own inherited ``PATH``
+    already contained POSIX/WSL-mount-style entries (``/mnt/c/Program
+    Files/...``) -- not something dotagents itself emits (its own bin dirs
+    resolve via native ``Path`` and are already Windows-native), but a
+    pre-existing condition of the caller's live environment. Emitted
+    unconverted into ``${env:PATH} = '...'``, the assignment is syntactically
+    VALID PowerShell (a single-quoted string can contain anything), but the
+    resulting ``PATH`` value is colon-joined POSIX paths with embedded spaces
+    -- ``powershell.exe`` splits it on nothing (a single opaque string) and
+    every subsequent bare-command PATH lookup in that session breaks, the
+    Windows-side mirror of the POSIX PATH bug ``_to_posix_path`` already
+    guards against.
+
+    Handles the two mount conventions actually seen in practice:
+    ``/mnt/c/...`` (WSL's own mount point) and ``/c/...`` (MSYS2/Git-Bash/
+    Cygwin's mount point, i.e. exactly what `_to_posix_path` produces) --
+    both rewrite to ``C:\\...``. A segment that already looks Windows-native
+    (contains a backslash, or a drive-letter-colon prefix) passes through via
+    ``PureWindowsPath`` unchanged (backslashes normalized, forward slashes
+    converted) rather than being misparsed as a POSIX path.
+
+    Returns ``None`` for a segment with NO drive to recover (e.g. WSL-only
+    paths like ``/usr/bin`` or ``/home/x/.local/bin`` -- genuinely part of the
+    Linux filesystem inside WSL, not reachable from Windows at all under any
+    rewrite). Silently turning one of these into a relative ``\\usr\\bin``
+    would be worse than useless: it wouldn't error, but it would resolve
+    against Windows' cwd and could shadow an unrelated file there. Dropping
+    it is correct -- that directory has no Windows-side meaning, so a lookup
+    through it was never going to succeed either way.
+    """
+    if "\\" in segment or re.match(r"^[A-Za-z]:", segment):
+        return str(PureWindowsPath(segment))
+    m = _WSL_MOUNT_RE.match(segment) or _MSYS_MOUNT_RE.match(segment)
+    if m:
+        drive = m.group(1).upper()
+        rest = (m.group(2) or "/").replace("/", "\\")
+        return "%s:%s" % (drive, rest)
+    if segment.startswith("/"):
+        return None  # a real POSIX-only path with no Windows equivalent
+    # A relative segment (e.g. ".agents/bin") -- just normalize separators.
+    return str(PureWindowsPath(segment.replace("/", "\\")))
+
+
+def _looks_like_posix_chunk(chunk: str) -> bool:
+    """True if a single `;`-delimited chunk (see `_to_windows_path_list`) is
+    itself a POSIX mount-point segment or a `:`-joined list of them -- i.e.
+    something that needs further `:`-splitting, not a single already-native
+    Windows path that merely happens to sit in the same PATH value.
+
+    A chunk containing a backslash is unambiguous: nothing POSIX ever has
+    one, so it is native and this returns False outright, before even
+    checking for mount points -- guards a pathological case like a Windows
+    path containing a literal `:` beyond its drive prefix (not realistic in
+    practice, but the check order makes the function correct regardless).
+    """
+    if "\\" in chunk:
+        return False
+    return any(
+        _WSL_MOUNT_RE.match(seg) or _MSYS_MOUNT_RE.match(seg)
+        for seg in chunk.split(":")
+        if seg
+    )
+
+
+def _to_windows_path_list(value: str) -> str:
+    """Convert a PATH value back to an OS-native (Windows) ``;``-joined one,
+    for a Windows-target shell-sourceable format (``powershell``, ``cmd``).
+
+    Handles the MIXED case, not just a purely POSIX value: `get_environment`
+    prepends dotagents' own bin dirs (already Windows-native, `;`-joined)
+    onto whatever `PATH` the caller's environment already held -- so a
+    genuinely POSIX-sourced `PATH` (WSL/MSYS pwsh inheriting a Linux-side
+    `PATH`) arrives here as ``<native-bin-dirs-joined-with-;>;<original-
+    colon-joined-POSIX-path>``, one string with BOTH separators live at once.
+    Confirmed live: an earlier version of this function split on `;` only
+    implicitly (via a value-wide backslash/`;` presence check bailing out
+    entirely), so the native PREFIX converted correctly but the still-POSIX
+    TAIL after it passed through completely untouched.
+
+    Splits on `;` FIRST (safe: a POSIX path segment never legitimately
+    contains a literal `;`), then for each chunk that looks POSIX
+    (`_looks_like_posix_chunk`) splits it again on `:` and converts each
+    piece; a chunk that is already native passes through as one segment
+    unchanged. Empty segments are dropped, same rationale as
+    :func:`_to_posix_path_list`; POSIX segments with no Windows equivalent
+    (`_to_windows_path` returning ``None`` -- WSL-only paths like
+    ``/usr/bin``) are dropped too, rather than emitted as a broken relative
+    path.
+    """
+    segments: "list[str]" = []
+    for chunk in value.split(";"):
+        if not chunk:
+            continue
+        if _looks_like_posix_chunk(chunk):
+            for piece in chunk.split(":"):
+                if not piece:
+                    continue
+                converted = _to_windows_path(piece)
+                if converted is not None:
+                    segments.append(converted)
+        else:
+            segments.append(chunk)
+    return ";".join(segments)
+
+
+def _looks_like_posix_path_list(key: str, value: str) -> bool:
+    """True if `key`/`value` is a PATH-shaped var containing at least one
+    ALREADY-POSIX chunk that needs converting back to native Windows form for
+    a Windows-target format (``powershell``/``cmd``) -- the inverse gate of
+    :func:`_looks_like_path_list`. Handles a value that MIXES native and
+    POSIX chunks (see `_to_windows_path_list`'s docstring for why that shape
+    occurs), not just a purely POSIX one -- checks every `;`-delimited chunk
+    rather than bailing out on the value as a whole the moment any `;` or
+    `\\` appears anywhere in it.
+    """
+    if not key.endswith("PATH"):
+        return False
+    return any(_looks_like_posix_chunk(chunk) for chunk in value.split(";") if chunk)
+
+
 def _format_env(env: "dict[str, str]", output_format: str) -> str:
     """Render the assembled env in the requested (canonical or aliased) format.
 
@@ -165,6 +295,27 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
             k: (_to_posix_path_list(v) if _looks_like_path_list(k, v) else v)
             for k, v in env.items()
             if k != "PATHEXT" and _POSIX_IDENTIFIER_RE.match(k)
+        }
+    elif fmt in ("powershell", "cmd"):
+        # The MIRROR bug, going the other way: confirmed live on a real
+        # machine running `dotagents env` from a genuine Windows PowerShell
+        # terminal, where the process's own inherited `PATH` already
+        # contained WSL/MSYS-mount-style entries (`/mnt/c/Program Files/...`)
+        # -- not something dotagents' own bin-path logic emits, a pre-existing
+        # condition of the caller's live environment (see `_to_windows_path`'s
+        # docstring). Left unconverted, `${env:PATH} = '/usr/bin:/mnt/c/...'`
+        # is syntactically valid PowerShell (a quoted string can hold
+        # anything) but semantically useless: powershell.exe's own PATH
+        # lookup expects `;`-joined, backslash-native segments, so the whole
+        # value becomes one opaque unusable string and every bare-command
+        # lookup breaks for that session -- the Windows-target mirror of the
+        # POSIX-target PATH bug already guarded above. Convert only
+        # PATH-shaped values that are ALREADY POSIX-style
+        # (`_looks_like_posix_path_list`); an ordinary already-native value is
+        # never touched.
+        env = {
+            k: (_to_windows_path_list(v) if _looks_like_posix_path_list(k, v) else v)
+            for k, v in env.items()
         }
 
     keys = sorted(env)
