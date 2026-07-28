@@ -294,6 +294,7 @@ class TestPowerShellPreToolUse:
             "the PowerShell PreToolUse wiring must stay gated to Windows"
         )
 
+    @pytest.mark.skipif(os.name != "nt", reason="PreToolUse wiring is gated to os.name == 'nt'")
     def test_wires_pretooluse_inline_no_file(self, tmp_path):
         dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
 
@@ -308,6 +309,7 @@ class TestPowerShellPreToolUse:
         assert "-File" not in entry["command"], "must be inline, not a script file reference"
         assert ".ps1" not in entry["command"]
 
+    @pytest.mark.skipif(os.name != "nt", reason="PreToolUse wiring is gated to os.name == 'nt'")
     def test_idempotent(self, tmp_path):
         dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
         agent = ClaudeAgent()
@@ -338,8 +340,19 @@ class TestPowerShellPreToolUse:
 
     def test_command_is_valid_powershell_syntax(self):
         """Parses the exact production string with PowerShell's own tokenizer --
-        catches a syntax error without needing a live hook invocation."""
+        catches a syntax error without needing a live hook invocation.
+
+        Skips (never fails) when `powershell` isn't on this host at all --
+        confirmed on Linux CI runners, `subprocess.run` raises `FileNotFoundError`
+        for a missing executable rather than returning a non-zero exit code, so
+        that must be caught explicitly, not inferred from `proc.returncode`."""
+        import shutil
         import subprocess
+
+        import pytest
+
+        if shutil.which("powershell") is None:
+            pytest.skip("no PowerShell available on this host")
 
         proc = subprocess.run(
             [
@@ -351,9 +364,6 @@ class TestPowerShellPreToolUse:
             input=ClaudeAgent.PRETOOLUSE_POWERSHELL_COMMAND,
             capture_output=True, text=True,
         )
-        if proc.returncode != 0 and "powershell" in (proc.stderr or "").lower():
-            import pytest
-            pytest.skip("no PowerShell available on this host")
         assert proc.stdout.strip() == "OK", proc.stdout + proc.stderr
 
 
