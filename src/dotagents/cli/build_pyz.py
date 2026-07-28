@@ -1,5 +1,6 @@
 """`dotagents build-pyz` -- vendor deps and package a self-contained pyz."""
 
+import re
 import shutil
 import subprocess
 import sys
@@ -8,6 +9,11 @@ from pathlib import Path
 from typing import Optional
 
 from duho import Cmd, LoggingArgs
+
+#: `pyproject.toml`'s `[project] version = "..."` line -- deliberately a plain
+#: regex, not a TOML parser (tomllib is 3.11+, this repo's floor is 3.9, and a
+#: single quoted scalar under a known table header doesn't need one).
+_PYPROJECT_VERSION_RE = re.compile(r'(?m)^version\s*=\s*"([^"]+)"')
 
 
 class BuildPyz(LoggingArgs, Cmd):
@@ -77,6 +83,31 @@ class BuildPyz(LoggingArgs, Cmd):
                 dotagents_pkg_dest,
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
             )
+
+            # `dotagents.__version__` is a second, independently-maintained copy
+            # of pyproject.toml's `version` -- confirmed stale on a real release
+            # (pyproject.toml had already been bumped twice past what
+            # __version__ still said, so `dotagents --version` on a freshly
+            # built pyz reported a version two releases old). Rather than trust
+            # the source tree's __init__.py to have been bumped in lockstep,
+            # read pyproject.toml directly and rewrite the STAGED copy's
+            # __version__ to match -- the built artifact is then correct
+            # regardless of whether __init__.py itself was ever touched.
+            pyproject = repo_root / "pyproject.toml"
+            match = _PYPROJECT_VERSION_RE.search(pyproject.read_text(encoding="utf-8"))
+            if match is None:
+                self._logger_.warning(
+                    "could not read version from %s; __version__ left as-is", pyproject
+                )
+            else:
+                version = match.group(1)
+                init_py = dotagents_pkg_dest / "__init__.py"
+                init_py.write_text(
+                    '"""dotagents: installable CLI for the dotagents agent-config payload."""\n\n'
+                    '__version__ = "%s"\n' % version,
+                    encoding="utf-8",
+                )
+                self._logger_.info("stamped __version__ = %s (from pyproject.toml)", version)
 
             tools_dest = dotagents_pkg_dest / "_tools"
             shutil.copytree(

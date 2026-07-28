@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-25
+
+### Added
+
+- feat: **`AntigravityAgent`** — context injection for Google's Antigravity
+  CLI/IDE (a separate product from Gemini CLI, despite sharing the `~/.gemini/`
+  namespace for some files). Antigravity's hooks have no `SessionStart`
+  equivalent — only `PreToolUse`/`PostToolUse`/`PreInvocation`/`PostInvocation`/
+  `Stop` — so a `PreInvocation` hook gated on `invocationNum == 0` behaves like a
+  one-shot context load instead of resending it every model turn. Wires into
+  `~/.gemini/config/hooks.json`. No detection marker exists for Antigravity, so
+  it's explicit-`--agents antigravity`-only, never auto-detected.
+- feat: **Codex gets a `PreToolUse` env hook**, closing the one gap Codex had
+  versus Claude: Codex has no per-session env-persistence mechanism at any hook
+  event, so a deployed script prepends a guarded env-loader to every `Bash` tool
+  call via `updatedInput.command` — the same rewrite mechanism Claude's own
+  `PreToolUse` hook uses, confirmed directly against Codex's docs.
+- feat: **`init` wires a PowerShell `PreToolUse` env hook on Windows**, closing
+  a real gap: `$CLAUDE_ENV_FILE` only reaches Claude's *Bash* tool
+  (`$env:CLAUDE_ENV_FILE` is empty inside a live PowerShell tool call, confirmed
+  directly) — a fresh PowerShell tool call gets none of the SessionStart env.
+  The hook prepends a guarded env-loader to a PowerShell tool call's own command,
+  shipped as an inline command string (never a `.ps1` file — a script file is
+  subject to PowerShell's execution policy, and dotagents has no code-signing
+  certificate; the inline form runs even under `Restricted`).
+- feat: **`SessionStart`/`CwdChanged` now register two handlers each** — a
+  bash-syntax one and an explicit `shell: "powershell"` one — because Claude's
+  own hooks.md says the shell "defaults to bash, or to powershell on Windows
+  when Git Bash isn't installed": bash syntax fed to `powershell -Command` on
+  such a machine is a hard parse error, silently losing both env and context for
+  the whole session.
+- feat: **`DotAgentsArgs`** (`dotagents.cli`, re-exported for overlay-shipped
+  commands) — one shared `-g/--global` + `--agents-dir` base class. `init` and
+  all four `overlays` subcommands now inherit it instead of independently
+  redeclaring the same fields, so scope resolution can't silently drift between
+  commands (one previously defaulted `agents_dir` eagerly to `Path.home() /
+  ".agents"`; harmless in practice, but needless).
+
+### Fixed
+
+- fix: **`dotagents env --format powershell`/`cmd` left an already-POSIX `PATH`
+  unconverted**, the mirror of the export/dotenv/fish fix below going the other
+  direction. Found live: run from a genuine Windows PowerShell terminal whose
+  own inherited `PATH` already held WSL/MSYS-mount-style entries
+  (`/mnt/c/Program Files/...`), the emitted `${env:PATH} = '...'` was
+  syntactically valid PowerShell but a single opaque colon-joined string, not
+  the `;`-split list PowerShell's own PATH lookup needs — every subsequent
+  bare-command lookup broke for that session. Also handles the MIXED case
+  (dotagents' own native bin dirs prepended onto an already-POSIX inherited
+  PATH, one string with both separators at once), caught by sourcing real
+  output into a live PowerShell session and watching `git.exe` fail to
+  resolve before the second fix. A WSL-only segment with no Windows equivalent
+  (`/usr/bin`) is dropped rather than mangled into a broken relative path.
+- fix: **the built `.pyz` degraded `-g` on any discovered command inheriting a
+  dotagents-defined base class** (first hit by `DotAgentsArgs` above) — duho's
+  AST introspection walks the full MRO for a command's flags, but the zipapp
+  source-repoint shim only ever covered built-in command modules, not a base
+  class's own module (`dotagents.cli._common`). `--global` degraded to the
+  name-derived `--global-scope` and `-g` vanished silently. Fixed, with new CI
+  coverage asserting the exact short flag survives a real built pyz.
+- fix: **`harness_loads` relative entries matched by bare filename, not full
+  path** — a relative entry like Codex's `"AGENTS.md"` wrongly suppressed ANY
+  file sharing that basename anywhere on disk, including the unrelated
+  `~/.agents/AGENTS.md` user-store file Codex's harness never reads.
+  `dotagents context --agents codex` emitted an empty `sources: []` even with
+  real content present. Now resolved against `project_root` and compared by
+  full path, like the absolute (`~/`, `/`) forms already were.
+- fix: `dotagents context --format json` crashed with `UnicodeEncodeError` on
+  any character outside Latin-1 (a bare `print()` encoding with the console's
+  codepage) — the same class of bug already fixed for the markdown path, just
+  never covered for JSON.
+- fix: PowerShell format uses `${env:NAME}` (curly-brace form), not the bare
+  `$env:NAME` sigil — a handful of real Windows env vars have parens in their
+  names (`ProgramFiles(x86)`), and `$env:FOO(X86) = ...` is a PowerShell parse
+  error; the curly-brace form is valid for every name.
+
+## [0.3.1] - 2026-07-24
+
 ### Fixed
 
 - fix: **`dotagents env --format export`/`dotenv`/`fish` now emit a POSIX PATH on
@@ -26,8 +104,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - fix: a UNC PATH segment (`\\server\share\...`) no longer collapses to a single
   leading slash (`/server/share/...`) during the POSIX conversion above — MSYS
   requires the double-slash UNC root (`//server/share/...`) to resolve it.
-
-## [0.3.1] - 2026-07-24
 
 Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0).
 
