@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+
+- **`dotagents._sync`** — a `pathlib_next.PathSyncer` wrapper that existed only
+  to back the `install` subcommand's backup/copy report. `install` was removed
+  in 0.3.x; the module has had no callers since, no tests, and a return
+  annotation that disagreed with what it returned. `pathlib_next` remains a
+  dependency (duho, and `--from` URI support). Its API-reference page went with
+  it.
+
 ### Fixed
 
 - fix: **`dotagents env` and `dotagents context` now resolve their roots instead

@@ -1,3 +1,0 @@
-# Sync
-
-::: dotagents._sync

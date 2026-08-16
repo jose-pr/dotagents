@@ -148,8 +148,6 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   that `python3` resolves to the Microsoft Store app-execution-alias stub and
   fails outright on this dev machine (exit 49), the same trap noted elsewhere
   for `py`/venv creation.
-- `_sync` — `PathSyncer` wrapper reproducing `install`'s backup/copy/report; requires
-  `pathlib_next.Path` instances (not plain `pathlib.Path`) and a pre-created parent dir.
 
 ## Environment variables
 

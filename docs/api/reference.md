@@ -21,4 +21,3 @@ form its API. Generated from docstrings, organized by module:
 - **[Hooks](hooks.md)** — additive, idempotent merge of dotagents' hooks into an
   agent's own settings/config file.
 - **[Skills](skills.md)** — publishing an overlay's skills into a scope's shared dir.
-- **[Sync](sync.md)** — the `PathSyncer` backup/copy wrapper for `install`.
