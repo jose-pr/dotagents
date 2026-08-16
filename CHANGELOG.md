@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-16
+
+### Added
+
+- feat: `env` and `context` gained **`--agents-dir`** (from the shared
+  `DotAgentsArgs` base) to override the store for one run. Their `-g/--global`
+  keeps its existing, narrower meaning here — *skip the project-level files* —
+  and now says so in `--help`.
+
 ### Removed
 
 - **`build-pyz` no longer bundles the repo's `tools/`** as `dotagents/_tools`
@@ -52,10 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   legacy `$DOTAGENTS_AGENTS_DIR` → `~/.agents`), matching what the package's own
   `resolve_scope` docstring and command discovery already promised. Behavior is
   unchanged when none of the vars are set.
-- feat: `env` and `context` gained **`--agents-dir`** (from the shared
-  `DotAgentsArgs` base) to override the store for one run. Their `-g/--global`
-  keeps its existing, narrower meaning here — *skip the project-level files* —
-  and now says so in `--help`.
 
 ## [0.3.2] - 2026-07-25
 
