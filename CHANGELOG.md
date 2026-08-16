@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- fix: **`dotagents env` and `dotagents context` now resolve their roots instead
+  of hardcoding them.** Both took `Path.cwd()` as the project root and
+  `~/.agents` as the user store, so `$AGENTS_PROJECT_ROOT` (or the agent-native
+  `$CLAUDE_PROJECT_DIR`) and `$AGENTS_HOME` were ignored by the two commands
+  that most needed them — a `SessionStart` hook runs `dotagents context` from
+  wherever the session happens to start, so a pinned project root was silently
+  dropped and a relocated store was never read. They now use
+  `_scope.project_root_default()` and the new
+  `dotagents.cli.resolve_user_store()` (`--agents-dir` → `$AGENTS_HOME` →
+  legacy `$DOTAGENTS_AGENTS_DIR` → `~/.agents`), matching what the package's own
+  `resolve_scope` docstring and command discovery already promised. Behavior is
+  unchanged when none of the vars are set.
+- feat: `env` and `context` gained **`--agents-dir`** (from the shared
+  `DotAgentsArgs` base) to override the store for one run. Their `-g/--global`
+  keeps its existing, narrower meaning here — *skip the project-level files* —
+  and now says so in `--help`.
+
 ## [0.3.2] - 2026-07-25
 
 ### Added

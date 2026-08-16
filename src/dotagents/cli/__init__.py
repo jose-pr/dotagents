@@ -51,6 +51,8 @@ from dotagents import __version__
 # Re-export shared helpers so `dotagents.cli.<name>` keeps resolving for both the
 # command modules and external importers (`dotagents._overlays`, `dotagents._scope`).
 from dotagents.cli._common import (  # noqa: F401
+    AGENTS_DIR_ENV,
+    AGENTS_DIR_ENV_LEGACY,
     BASE_PLAIN_FILES,
     BASE_ROOT,
     DotAgentsArgs,
@@ -60,6 +62,7 @@ from dotagents.cli._common import (  # noqa: F401
     _package_data_dir,
     _resolve_from,
     _run_overlay_setup,
+    resolve_user_store,
 )
 
 # Import each built-in command class to register it as a compiled subcommand.
@@ -127,13 +130,6 @@ _COMMAND_MODULES = (
 CMDS_PATH_ENV = "AGENTS_CMDS_PATH"
 #: back-compat: DOTAGENTS_CMDS_PATH is deprecated, removable next release.
 CMDS_PATH_ENV_LEGACY = "DOTAGENTS_CMDS_PATH"
-
-#: The configurable user-scope store (D58). Discovery resolves the user scope's
-#: cmds dir through this, not a hardcoded ~/.agents, when set. This is the same
-#: var `dotagents env` emits (D79).
-AGENTS_DIR_ENV = "AGENTS_HOME"
-#: back-compat: DOTAGENTS_AGENTS_DIR is deprecated, removable next release.
-AGENTS_DIR_ENV_LEGACY = "DOTAGENTS_AGENTS_DIR"
 
 
 class Dotagents(LoggingArgs, Cli):
@@ -225,20 +221,16 @@ def _cmds_dirs() -> "list[Path]":
     (an overlay may SHIP a command; a user/project can still override it).
 
     The store location is configurable (D58/D79): the user scope resolves through
-    `$AGENTS_HOME` (default `~/.agents`); the project scope is `<cwd>/.agents`.
+    `resolve_user_store()` (`$AGENTS_HOME`, legacy `$DOTAGENTS_AGENTS_DIR`, default
+    `~/.agents`) -- the same resolver `env`/`context` use, so every user-store
+    reader agrees; the project scope is `<cwd>/.agents`.
     `include_missing=True` (precursor semantics): every level's cmds dir is offered
     and the caller's `_discover_dir` skips the ones that don't exist."""
     from dotagents import _resolve, _scope
 
-    agents_dir = (
-        os.environ.get(AGENTS_DIR_ENV)
-        or os.environ.get(AGENTS_DIR_ENV_LEGACY)
-        or None
-    )
-    user = _scope.resolve_scope(global_scope=True, agents_dir=agents_dir)
     resolved = _resolve.get_file_paths(
         {"default": "dotagents/cmds", "overlay": "cmds"},
-        agents_dir=user.agents_root,
+        agents_dir=resolve_user_store(),
         project_root=_scope.project_root_default(),
         global_scope=False,
         include_missing=True,

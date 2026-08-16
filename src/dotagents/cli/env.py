@@ -9,8 +9,9 @@ the logger only ever names vars (Leakage rule).
 
 import re
 from pathlib import Path, PureWindowsPath
+from typing import Optional
 
-from duho import Cmd, LoggingArgs
+from dotagents.cli._common import DotAgentsArgs, resolve_user_store
 
 # POSIX shell variable names: a leading letter/underscore, then letters/digits/
 # underscores only (IEEE Std 1003.1 "Name"). Windows env vars like
@@ -359,7 +360,7 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
     return "\n".join("export %s=%s" % (k, _json.dumps(env[k])) for k in keys)
 
 
-class Env(LoggingArgs, Cmd):
+class Env(DotAgentsArgs):
     """Assemble the chained env (env files + env.py execution) under contract B.
 
     Prepends overlay/level ``bin`` dirs to ``PATH`` first, then evaluates the
@@ -378,7 +379,21 @@ class Env(LoggingArgs, Cmd):
     so the output is sourceable where it runs: ``export`` (aliases
     ``posix``/``sh``/``bash``), ``dotenv`` (``env``), ``powershell``
     (``pwsh``/``ps``), ``cmd`` (``bat``/``batch``), ``fish``, plus the data
-    forms ``json``/``ini``/``yaml``. An explicit ``--format`` always wins."""
+    forms ``json``/``ini``/``yaml``. An explicit ``--format`` always wins.
+
+    Roots (both configurable, never hardcoded -- D58/D79/D80): the user store is
+    ``--agents-dir`` -> ``$AGENTS_HOME`` -> legacy ``$DOTAGENTS_AGENTS_DIR`` ->
+    ``~/.agents`` (:func:`~dotagents.cli._common.resolve_user_store`), and the
+    project root is ``$AGENTS_PROJECT_ROOT`` -> ``$CLAUDE_PROJECT_DIR`` -> the cwd
+    (:func:`~dotagents._scope.project_root_default`). A harness that pins those
+    vars gets ONE root per session regardless of the cwd a subprocess runs in --
+    which is the point of ``env`` emitting them in the first place.
+
+    ``-g/--global`` here means **skip the project-level env files**, NOT "resolve a
+    different store": the walk always starts from the USER store and ``-g`` only
+    drops the project tiers. (`DotAgentsArgs.resolve_scope` -- which would return
+    ``<project>/.agents`` as the root -- is deliberately NOT used; this command
+    inherits the class only for the shared ``-g``/``--agents-dir`` flag pair.)"""
 
     _parsername_ = "env"
 
@@ -394,17 +409,26 @@ class Env(LoggingArgs, Cmd):
     "Emit only vars that differ from the current environment."
     ("--diff",)
 
+    # Both flags come from `DotAgentsArgs`; only their HELP is restated here,
+    # because this command's `-g` means something narrower than the base's (skip
+    # the project tiers, same store) and its store is always the user store. The
+    # flags, defaults and types are identical to the base's -- duho takes the
+    # subclass's declaration, so the strings below are what `--help` prints.
     global_scope: bool = False
-    "Use global scope (skip project-level env files)."
+    "Skip project-level env files (the store root is unaffected)."
     ("--global", "-g")
+
+    agents_dir: "Optional[Path]" = None
+    "User store root override (default: $AGENTS_HOME, else ~/.agents)."
+    ("--agents-dir",)
 
     def __call__(self) -> int:
         import os
 
-        from dotagents import _env
+        from dotagents import _env, _scope
 
-        project_root = Path.cwd()
-        agents_dir = Path.home() / ".agents"
+        project_root = _scope.project_root_default()
+        agents_dir = resolve_user_store(self.agents_dir)
         base = dict(os.environ)
 
         if self.format not in _env.KNOWN_FORMATS:

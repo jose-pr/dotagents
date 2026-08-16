@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from duho import Cmd, LoggingArgs
+from dotagents.cli._common import DotAgentsArgs, resolve_user_store
 
 
 def _write_stdout(text: str) -> None:
@@ -27,8 +27,21 @@ def _write_stdout(text: str) -> None:
     buffer.flush()
 
 
-class Context(LoggingArgs, Cmd):
-    """Assemble the effective context for agents (Plan 04)."""
+class Context(DotAgentsArgs):
+    """Assemble the effective context for agents (Plan 04).
+
+    Roots (both configurable, never hardcoded -- D58/D79/D80): the user store is
+    ``--agents-dir`` -> ``$AGENTS_HOME`` -> legacy ``$DOTAGENTS_AGENTS_DIR`` ->
+    ``~/.agents`` (:func:`~dotagents.cli._common.resolve_user_store`), and the
+    project root is ``$AGENTS_PROJECT_ROOT`` -> ``$CLAUDE_PROJECT_DIR`` -> the cwd
+    (:func:`~dotagents._scope.project_root_default`). This matters most here: the
+    SessionStart hook runs ``dotagents context`` from wherever the session happens
+    to start, so a pinned project root is the only thing that keeps the assembled
+    context stable across subdirectories.
+
+    ``-g/--global`` means **skip the project-level context files**, NOT "resolve a
+    different store" -- same narrowed meaning as ``dotagents env``'s (and unlike
+    ``DotAgentsArgs.resolve_scope``, which is deliberately not used here)."""
 
     _parsername_ = "context"
 
@@ -36,9 +49,16 @@ class Context(LoggingArgs, Cmd):
     "Output format: markdown, system-reminder, or json."
     ("--format",)
 
+    # Inherited from `DotAgentsArgs`; help restated because this command's `-g` is
+    # narrower than the base's and its store is always the user store (see the
+    # matching comment in `cli/env.py`).
     global_scope: bool = False
-    "Use global scope."
+    "Skip project-level context files (the store root is unaffected)."
     ("--global", "-g")
+
+    agents_dir: "Optional[Path]" = None
+    "User store root override (default: $AGENTS_HOME, else ~/.agents)."
+    ("--agents-dir",)
 
     agents: "list[str]" = []
     "List of agents to generate context for (e.g. claude,gemini). Default: active agent."
@@ -56,11 +76,12 @@ class Context(LoggingArgs, Cmd):
     def __call__(self) -> int:
         from dotagents import _agents
         from dotagents import _context
+        from dotagents import _scope
         import json
         import os
 
-        project_root = Path.cwd()
-        agents_dir = Path.home() / ".agents"
+        project_root = _scope.project_root_default()
+        agents_dir = resolve_user_store(self.agents_dir)
 
         agent_names = []
         if self.agents:

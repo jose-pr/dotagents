@@ -11,8 +11,17 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `duho.app` with the discovered command set. Also the `dotagents` console script
   (`[project.scripts]`).
 - `dotagents.cli.Dotagents(LoggingArgs, Cli)` — the umbrella CLI class.
+- `dotagents.cli.DotAgentsArgs` — mix-in base carrying the shared `-g/--global` +
+  `--agents-dir` pair and `resolve_scope()`; an overlay-shipped command module
+  should inherit it (as the FIRST base) rather than redeclare the flags.
+- `dotagents.cli.resolve_user_store(agents_dir=None) -> Path` — the USER store
+  root: `agents_dir` (`--agents-dir`) → `$AGENTS_HOME` → legacy
+  `$DOTAGENTS_AGENTS_DIR` → `~/.agents`. Use it (not `resolve_scope`) when the
+  store is always the user store and the project scope only adds/removes tiers,
+  as in `env` / `context`.
 - Compiled command classes live in `dotagents.cli.<name>` (`init`, `overlays`,
-  `context`, `env`, `build_pyz`); each is a `class X(LoggingArgs, Cmd)` with a
+  `context`, `env`, `build_pyz`); each is a `class X(LoggingArgs, Cmd)` — or
+  `class X(DotAgentsArgs)`, which is that pair transitively — with a
   `__call__`. That is the WHOLE shipped surface — dotagents bundles no command
   module of its own. `link` / `sync` left the package with their logic (D85): the
   opt-in **private-sync** overlay ships them, renamed `link-project` /
@@ -180,6 +189,15 @@ scope roots — `AGENTS_HOME` (the user store, `agents_dir`/`~/.agents`) and
 `AGENTS_PROJECT_ROOT` (this project's root). Both are seeded only if unset, so a
 harness/env can pin them. `resolve_scope` READS `AGENTS_PROJECT_ROOT` (then the
 agent-native `CLAUDE_PROJECT_DIR`, then cwd) for the project scope's root.
+
+Every command READS both back, so the pin actually holds: `env` and `context`
+resolve their user store through `cli.resolve_user_store()` (`--agents-dir` →
+`$AGENTS_HOME` → legacy `$DOTAGENTS_AGENTS_DIR` → `~/.agents`) and their project
+root through `_scope.project_root_default()` — neither is taken from the cwd or a
+hardcoded home. This matters for hook-invoked runs: a `SessionStart` hook runs
+`dotagents context` / `dotagents env` from wherever the session started, and only
+the pinned root makes that cwd-independent. `-g/--global` on these two means
+*skip the project tier*, not *use a different store*.
 
 ## Gotchas
 

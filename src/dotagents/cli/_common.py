@@ -21,6 +21,38 @@ from duho import Cmd, LoggingArgs
 
 _extracted_dirs_cache: "dict[str, Path]" = {}
 
+#: The configurable user-scope store (D58). Every reader of the user store
+#: resolves it through this var (default `~/.agents`) rather than hardcoding the
+#: home path -- this is the same var `dotagents env` emits (D79). Defined HERE
+#: rather than in `cli/__init__` so command modules can use it without importing
+#: the umbrella (import cycle); `cli/__init__` re-exports both names.
+AGENTS_DIR_ENV = "AGENTS_HOME"
+#: back-compat: DOTAGENTS_AGENTS_DIR is deprecated, removable next release.
+AGENTS_DIR_ENV_LEGACY = "DOTAGENTS_AGENTS_DIR"
+
+
+def resolve_user_store(agents_dir: "Optional[Path]" = None) -> Path:
+    """The USER store root, in precedence order: an explicit ``agents_dir``
+    (``--agents-dir``) -> ``$AGENTS_HOME`` -> the legacy
+    ``$DOTAGENTS_AGENTS_DIR`` -> ``~/.agents`` (D58/D79/D80).
+
+    Distinct from :meth:`DotAgentsArgs.resolve_scope`, which answers "which scope
+    do I install INTO" and returns ``<project>/.agents`` for the project scope.
+    Commands that always walk from the user store and merely *include or skip*
+    project-level files -- ``env`` and ``context``, whose Contract-A walk takes
+    the user store as ``agents_dir`` and the project root separately -- want this
+    instead: the store never becomes the project dir, whatever ``-g`` says.
+
+    Never logs or prints the raw env value (Leakage rule); only the resolved path
+    is ever reported.
+    """
+    if agents_dir:
+        return Path(agents_dir).expanduser()
+    value = os.environ.get(AGENTS_DIR_ENV) or os.environ.get(AGENTS_DIR_ENV_LEGACY)
+    if value:
+        return Path(value).expanduser()
+    return Path.home() / ".agents"
+
 
 class DotAgentsArgs(LoggingArgs, Cmd):
     """Shared ``-g/--global`` + ``--agents-dir`` fields for any command whose scope
