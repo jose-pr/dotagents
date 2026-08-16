@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 # redirect/placeholder before someone else does, but the CLI ships under -cli.
 [project]
 name = "dotagents-cli"
-version = "0.3.3"
+version = "0.3.4"
 authors = [{ name = "Jose A." }]
 description = "The dotagents CLI: install and manage a portable ~/.agents config for AI coding agents"
 readme = "README.md"
@@ -30,8 +30,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "duho>=0.4.0",
-    "pathlib_next>=0.8.0",
+    "duho>=0.5.0,<0.6",
+    "pathlib_next>=0.9.0,<0.10",
 ]
 
 [project.optional-dependencies]

@@ -170,7 +170,7 @@ jobs:
           echo "edit" > "$proj/.agents/plans/local.md"
           python -m dotagents sync-project --project "$proj" --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "sync"
           test -f "$HOME/.agents/projects/$(basename "$proj")/plans/local.md"  # copied back
-      - name: Built .pyz keeps flags/help/positional under duho 0.4.x (zipapp shim)
+      - name: Built .pyz keeps flags/help/positional under the vendored duho (zipapp shim)
         run: |
           export HOME="$(mktemp -d)"
           python -m dotagents build-pyz --out dist/dotagents.pyz

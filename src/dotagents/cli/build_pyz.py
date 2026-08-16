@@ -28,11 +28,17 @@ class BuildPyz(LoggingArgs, Cmd):
     "Shebang line to embed in the pyz."
     ("--python",)
 
-    duho_version: str = "0.4.0"
+    # These two are a SECOND copy of the dependency versions declared in
+    # `pyproject.toml`'s `[project] dependencies`, and the two must move
+    # together: the zipapp bundles what the package claims to support, so a
+    # stale pin here ships an artifact `pip install dotagents-cli` would refuse.
+    # Pin the FLOOR of each declared range, not the latest patch -- the .pyz then
+    # exercises the minimum the metadata promises.
+    duho_version: str = "0.5.0"
     "Pinned duho version to vendor."
     ("--duho-version",)
 
-    pathlib_next_version: str = "0.8.0"
+    pathlib_next_version: str = "0.9.0"
     "Pinned pathlib_next version to vendor."
     ("--pathlib-next-version",)
 

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-08-16
+
+### Changed
+
+- chore: raise the dependency floors and scope them to a minor series —
+  `duho>=0.5.0,<0.6` (was `>=0.4.0`) and `pathlib_next>=0.9.0,<0.10` (was
+  `>=0.8.0`). Both are pre-1.0, where a minor bump is the signal that the
+  documented API broke, so the ceiling is what keeps the next one from arriving
+  unannounced. Neither floor sits above its `.0` patch: the suite and a CLI
+  smoke pass at exactly duho 0.5.0 and pathlib_next 0.9.0, so nothing here needs
+  an API added later in either series. The one 0.5.0 behavior change that
+  reaches this CLI's surface is list-typed *option* fields taking one value per
+  occurrence instead of `nargs="*"` — `--agents` and `--cmdspath` are unaffected,
+  since the documented forms are the comma list (`--agents a,b`, split by the
+  command itself) and the repeated flag, both of which behave the same either
+  way. Exercised end to end against duho 0.5.4 / pathlib_next 0.9.2 on Python
+  3.9 and 3.14. The `[uri]`/`[http]`/`[sftp]`/`[s3]` extras stay unversioned
+  passthroughs to `pathlib_next`'s own extras.
+- chore: `build-pyz`'s vendored pins moved with those floors — the `.pyz` now
+  bundles duho 0.5.0 and pathlib_next 0.9.0 (was 0.4.0 / 0.8.0), the minimum the
+  package claims to support rather than the latest patch. These pins are a
+  second copy of the dependency versions and had drifted a full minor series
+  behind, so the shipped zipapp bundled versions `pip install dotagents-cli`
+  would have refused. The rebuilt `.pyz` keeps full flag/help/positional
+  fidelity through the zipapp shim.
+
 ## [0.3.3] - 2026-08-16
 
 ### Added
