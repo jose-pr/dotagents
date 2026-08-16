@@ -261,16 +261,16 @@ def test_auto_resolves_to_concrete_format():
 # --------------------------------------------------------------------------- #
 
 WINDOWS_PATH = {
-    "PATH": r"C:\Users\jose\.agents\bin;C:\Program Files\Git\usr\bin;.agents\bin",
+    "PATH": r"C:\Users\devuser\.agents\bin;C:\Program Files\Git\usr\bin;.agents\bin",
     "PATHEXT": ".COM;.EXE;.BAT;.CMD",
-    "AGENTS_HOME": r"C:\Users\jose\.agents",  # single path, NOT a list -- untouched
+    "AGENTS_HOME": r"C:\Users\devuser\.agents",  # single path, NOT a list -- untouched
 }
 
 
 def test_export_converts_windows_path_to_posix():
     out = _format_env(WINDOWS_PATH, "export")
     assert (
-        'export PATH="/c/Users/jose/.agents/bin:/c/Program Files/Git/usr/bin:'
+        'export PATH="/c/Users/devuser/.agents/bin:/c/Program Files/Git/usr/bin:'
         '.agents/bin"' in out
     )
 
@@ -316,7 +316,7 @@ def test_powershell_and_cmd_keep_native_path():
     subprocesses need the native form, PATHEXT included."""
     for fmt in ("powershell", "cmd"):
         out = _format_env(WINDOWS_PATH, fmt)
-        assert r"C:\Users\jose\.agents\bin" in out
+        assert r"C:\Users\devuser\.agents\bin" in out
         assert "PATHEXT" in out
 
 
@@ -334,20 +334,20 @@ def test_powershell_and_cmd_keep_native_path():
 # mixed with /mnt/c/... mounted entries, several containing spaces.
 WSL_PATH = {
     "PATH": (
-        "/usr/local/sbin:/usr/bin:/mnt/c/Users/jose/.agents/bin:"
+        "/usr/local/sbin:/usr/bin:/mnt/c/Users/devuser/.agents/bin:"
         "/mnt/c/Program Files/Git/cmd:/mnt/c/Windows/system32"
     ),
 }
 
 # The MSYS2/Git-Bash mount form (`/c/...`, what `_to_posix_path` itself
 # produces) rather than WSL's `/mnt/c/...` -- both must convert.
-MSYS_PATH = {"PATH": "/c/Users/jose/.agents/bin:/c/Program Files/Git/cmd"}
+MSYS_PATH = {"PATH": "/c/Users/devuser/.agents/bin:/c/Program Files/Git/cmd"}
 
 
 def test_powershell_converts_wsl_mount_path_to_native():
     out = _format_env(WSL_PATH, "powershell")
     assert (
-        r"${env:PATH} = 'C:\Users\jose\.agents\bin;"
+        r"${env:PATH} = 'C:\Users\devuser\.agents\bin;"
         r"C:\Program Files\Git\cmd;C:\Windows\system32'" in out
     )
 
@@ -364,14 +364,14 @@ def test_powershell_drops_wsl_only_segments_with_no_windows_equivalent():
 def test_cmd_also_converts_wsl_mount_path():
     out = _format_env(WSL_PATH, "cmd")
     assert (
-        r'set "PATH=C:\Users\jose\.agents\bin;'
+        r'set "PATH=C:\Users\devuser\.agents\bin;'
         r'C:\Program Files\Git\cmd;C:\Windows\system32"' in out
     )
 
 
 def test_powershell_converts_msys_mount_path_too():
     out = _format_env(MSYS_PATH, "powershell")
-    assert r"C:\Users\jose\.agents\bin" in out
+    assert r"C:\Users\devuser\.agents\bin" in out
     assert r"C:\Program Files\Git\cmd" in out
 
 
@@ -418,13 +418,13 @@ def test_powershell_converts_mixed_native_and_posix_path():
     that actually look POSIX."""
     mixed = {
         "PATH": (
-            r"C:\Users\jose\.agents\bin;C:\Program Files\Git\cmd;"
+            r"C:\Users\devuser\.agents\bin;C:\Program Files\Git\cmd;"
             "/usr/local/sbin:/usr/bin:/mnt/c/Windows/system32:/mnt/c/Program Files/Git/usr/bin"
         )
     }
     out = _format_env(mixed, "powershell")
     assert (
-        r"${env:PATH} = 'C:\Users\jose\.agents\bin;C:\Program Files\Git\cmd;"
+        r"${env:PATH} = 'C:\Users\devuser\.agents\bin;C:\Program Files\Git\cmd;"
         r"C:\Windows\system32;C:\Program Files\Git\usr\bin'" in out
     )
     # The WSL-only /usr/local/sbin, /usr/bin segments must be gone entirely,
@@ -440,7 +440,7 @@ def test_looks_like_posix_chunk_checks_every_semicolon_segment():
     end to end; this isolates the gate function itself."""
     from dotagents.cli.env import _looks_like_posix_path_list
 
-    mixed = r"C:\Users\jose\.agents\bin;/usr/bin:/mnt/c/Windows/system32"
+    mixed = r"C:\Users\devuser\.agents\bin;/usr/bin:/mnt/c/Windows/system32"
     assert _looks_like_posix_path_list("PATH", mixed)
 
 
