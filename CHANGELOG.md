@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+- **`build-pyz` no longer bundles the repo's `tools/`** as `dotagents/_tools`
+  inside the built `.pyz`, and the `--tools-dir` flag is gone with it. Nothing
+  read `_tools`: the compiled `audit`/`leak-check` wrappers that shelled out to
+  it no longer exist. Every shipped artifact carried the dead weight while
+  `tools/audit.py` claimed it was "not shipped in the `.pyz`" — now true.
 - **`dotagents._sync`** — a `pathlib_next.PathSyncer` wrapper that existed only
   to back the `install` subcommand's backup/copy report. `install` was removed
   in 0.3.x; the module has had no callers since, no tests, and a return

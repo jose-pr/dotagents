@@ -3,9 +3,9 @@
 
 Thin root-level wrapper over ``dotagents build-pyz`` (``dotagents.cli.build_pyz``):
 it vendors ``duho`` + ``pathlib_next`` into the archive (via ``pip install --target``,
-using **the Python that runs this script**), copies the ``dotagents`` package and the
-required ``tools/``, strips caches/metadata, and packages a runnable zipapp. The result
-needs no ``pip install`` on the target machine.
+using **the Python that runs this script**), copies the ``dotagents`` package, strips
+caches/metadata, and packages a runnable zipapp. The result needs no ``pip install``
+on the target machine. The repo's ``tools/`` is CI tooling and is NOT bundled.
 
 Usage:
     python build.py                      # -> dist/dotagents.pyz

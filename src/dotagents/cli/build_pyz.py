@@ -6,7 +6,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 from duho import Cmd, LoggingArgs
 
@@ -37,20 +36,20 @@ class BuildPyz(LoggingArgs, Cmd):
     "Pinned pathlib_next version to vendor."
     ("--pathlib-next-version",)
 
-    tools_dir: Optional[Path] = None
-    "Repo tools/ dir (required tooling) to bundle as _tools (default: autodetected)."
-    ("--tools-dir",)
-
     def __call__(self) -> int:
         import zipapp
 
         # This module lives at src/dotagents/cli/build_pyz.py, so the repo root
         # is parents[3] (cli -> dotagents -> src -> repo) and the dotagents
         # package dir is parents[1].
+        #
+        # The repo's `tools/` is NOT bundled. It used to ride along as
+        # `dotagents/_tools` for compiled `audit`/`leak-check` wrappers that
+        # shelled out to it; both wrappers are gone (audit is repo CI tooling,
+        # leak-check is a personal command module), nothing reads `_tools`, and
+        # `tools/audit.py`'s own docstring says it is not shipped in the .pyz --
+        # which is only true now that this stopped copying it.
         repo_root = Path(__file__).resolve().parents[3]
-        tools_src = Path(self.tools_dir) if self.tools_dir else (repo_root / "tools")
-        if not tools_src.exists():
-            raise SystemExit("error: repo tools/ not found at %s (pass --tools-dir)" % tools_src)
 
         with tempfile.TemporaryDirectory(prefix="dotagents-pyz-") as tmp:
             stage = Path(tmp) / "stage"
@@ -108,13 +107,6 @@ class BuildPyz(LoggingArgs, Cmd):
                     encoding="utf-8",
                 )
                 self._logger_.info("stamped __version__ = %s (from pyproject.toml)", version)
-
-            tools_dest = dotagents_pkg_dest / "_tools"
-            shutil.copytree(
-                tools_src,
-                tools_dest,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
 
             for path in stage.rglob("*.dist-info"):
                 shutil.rmtree(path, ignore_errors=True)

@@ -13,7 +13,25 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
-from dotagents.cli.build_pyz import _PYPROJECT_VERSION_RE  # noqa: E402
+from dotagents.cli.build_pyz import BuildPyz, _PYPROJECT_VERSION_RE  # noqa: E402
+
+
+def test_no_tools_bundling_surface():
+    """The repo's `tools/` is CI tooling and is not shipped in the .pyz.
+
+    Cheap guard for the part of that promise a unit test can see: the command
+    exposes no `--tools-dir` knob and never references a `_tools` destination.
+    (That the built archive actually contains no `_tools` entry is asserted in
+    the CI .pyz job, which is the only place a real build happens.)
+    """
+    assert not hasattr(BuildPyz, "tools_dir")
+    source = (SRC / "dotagents" / "cli" / "build_pyz.py").read_text(encoding="utf-8")
+    # Only the explanatory comment may mention it -- no code path may.
+    code = "\n".join(
+        line for line in source.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "_tools" not in code
+    assert "tools_dir" not in code
 
 
 def test_matches_real_pyproject_version_line():
