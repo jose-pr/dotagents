@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- docs: a cluster of "docs say X, tree does Y" corrections — `tools/audit.py`
+  no longer claims to ship as a bundled `audit` command module (it is repo CI
+  tooling and there is no `dotagents audit`) and its `--root` help names the
+  real default; `install.py`'s usage line drops the removed `install` and the
+  never-existing `audit`; the README's `tools/` row says where `leak-check`
+  actually lives; the API header names the real `_overlays` exports
+  (`install_overlay_dir` / `apply_overlay` / `run_overlay_setup`) and the real
+  package-data dirs (`_overlay` / `_overlays_src`, never a `skeleton/`); and
+  `_merge._extract_block`'s docstring now says it returns the block *including*
+  its marker lines, which is what it has always done and what callers rely on.
 - fix: **`stamp_identity` no longer pretends to emit `AGENTS_AGENT`.** The line
   sourced the value from `$AGENTS_AGENT` and only assigned when that same key
   was unset, so it could never emit anything — while the docstring and the

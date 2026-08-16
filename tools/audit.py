@@ -53,10 +53,12 @@ REFS = []
 # leak_check.py is no longer a required tool of main: it moved to the opt-in
 # `leak-check` overlay as a command module (D84), so main's tree no longer ships
 # it and it is not in this manifest.
-# The auditor itself now ships as the bundled `audit` COMMAND MODULE (this file):
-# `src/dotagents/_overlay/dotagents/cmds/audit.py`. It is both the tool (run it
-# directly) and the `dotagents audit` command, so there is no separate
-# tools/audit_config.py. leak_check.py is personal (D84) and not shipped here.
+# The auditor itself is repo CI tooling only: this file is BOTH the script (run it
+# directly, which is what CI does) and a duho command class defined at the bottom of
+# it -- but it is NOT shipped. There is no `dotagents audit` command, nothing bundles
+# it into `src/dotagents/_overlay/dotagents/cmds/` (that dir holds only its README),
+# and the `.pyz` CI job asserts `audit` is absent from the built artifact's help.
+# leak_check.py is personal (D84) and not shipped here either.
 EXIST_ONLY = [
     "tools/audit.py",
     "tools/cloud-setup.sh",
@@ -229,7 +231,7 @@ class Audit(LoggingArgs, Cmd):
     _parsername_ = "audit"
 
     root: Path = DEFAULT_ROOT
-    "Config tree to audit (default ~/.agents; a checkout: --root .)."
+    "Repo checkout to audit (default: this checkout's root)."
     ("--root",)
 
     probe: Optional[Path] = None

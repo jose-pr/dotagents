@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point for the dotagents CLI (init / install / overlays / build-pyz / ...).
+"""Entry point for the dotagents CLI (init / overlays / context / env / build-pyz).
 
 Thin front over ``dotagents.cli.main()``, kept at this filename so existing
 muscle-memory/docs pointing at ``python install.py`` still work.
@@ -14,7 +14,7 @@ bare ``pip`` off PATH) guarantees the install lands in *this* Python, so the
 import that follows actually sees it. When everything is already importable it
 just dispatches -- no pip is ever run.
 
-Usage: python install.py <init|install|overlays|audit|build-pyz|...> [options]
+Usage: python install.py <init|overlays|context|env|build-pyz|...> [options]
 Run `python install.py --help` for the full subcommand/flag reference.
 """
 import os

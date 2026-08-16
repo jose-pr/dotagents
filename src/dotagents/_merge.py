@@ -18,8 +18,12 @@ END_MARKER = "<!-- dotagents:end -->"
 def _extract_block(
     text: str, begin_marker: str = BEGIN_MARKER, end_marker: str = END_MARKER
 ) -> str:
-    """Return the managed block's inner text (without the marker lines) from
-    a skeleton/template file that is itself fully marker-wrapped."""
+    """Return the managed block from a base-overlay/template file that is itself
+    fully marker-wrapped -- the inner text INCLUDING both marker lines.
+
+    The markers are part of the returned string on purpose: callers write this
+    straight into a target file, and the block has to stay detectable there (the
+    merge finds an existing block by marker presence alone)."""
     start = text.index(begin_marker)
     end = text.index(end_marker)
     return text[start : end + len(end_marker)]

@@ -490,10 +490,18 @@ class AntigravityAgent(Agent):
     # PreToolUse hooks do.
     #
     # No `shell`/`commandWindows`-equivalent field is documented for Antigravity
-    # hook commands at all (checked directly, absent) -- the emitted command
-    # must therefore work via a bare interpreter invocation with no shell
-    # assumptions, `python "<path>"` exactly as Codex's does, no dual-platform
-    # variant possible/needed here since nothing platform-specific is offered.
+    # hook commands at all (checked directly, absent) -- the emitted command must
+    # therefore work via a bare interpreter invocation with no shell assumptions,
+    # and there is exactly ONE string to get right for every platform.
+    #
+    # It emits `python "<path>"`. That is NOT what Codex does, despite the
+    # similar shape: Codex emits `python3` and overrides it to `python` through
+    # its `commandWindows` field, precisely because `python3` is the POSIX name
+    # and `python3` on Windows hits the Store app-execution-alias stub. With no
+    # second field available here, one name has to cover both, and `python` is
+    # the one that works on Windows -- but a POSIX box that ships only `python3`
+    # (still common) gets a hook that cannot start. Known gap, no fix available
+    # inside the hook entry itself; see `.agents/plans/` for the follow-up.
     PRETOOLUSE_HOOK_SCRIPT = "preinvocation_antigravity_context.py"
 
     def wire_hooks(

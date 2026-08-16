@@ -39,8 +39,9 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
 
 - `_agents` — `Agent` base type + per-agent adapters; `stamp_identity(...)` emits the
   standardized `AGENTS_*` / `AGENT` identity vars.
-- `_overlays` — `install_overlay` / `read_manifest` / `find_setup_script` /
-  `run_setup_script`; installs an overlay's files and collects its `routing` / `rules`
+- `_overlays` — `install_overlay_dir` (copy an overlay into a scope, self-describing)
+  / `apply_overlay` (lay its files down) / `read_manifest` / `find_setup_script` /
+  `run_overlay_setup`; installs an overlay's files and collects its `routing` / `rules`
   contributions to the managed `AGENTS.md` block. `DEFAULT_PRIORITY = 500`.
 - `_scope` — `resolve_scope(global_scope, agents_dir=None)` and `resolve_source(...)`;
   scope = *where installed overlays live* (user = the configurable store, project =
@@ -210,8 +211,10 @@ the pinned root makes that cwd-independent. `-g/--global` on these two means
   `cli.main()` calls `_repoint_zipapp_sources()` first, extracting the built-in command
   modules to real temp files. Discovered `cmds` modules are extracted by
   `_package_data_dir` before import, so they need no repoint.
-- **Package data in a `.pyz`.** `_package_data_dir()` resolves `skeleton/` and the
-  bundled payload via `importlib.resources` (a zip-backed `Traversable` is extracted to
-  a temp dir once), never `Path(__file__).exists()` (always False in a zipapp).
+- **Package data in a `.pyz`.** `_package_data_dir(name)` resolves a package-data dir
+  by name — `_overlay` (the base overlay `init` writes) and `_overlays_src` (bundled
+  example overlays, when a build includes them) — via `importlib.resources` (a
+  zip-backed `Traversable` is extracted to a temp dir once), never
+  `Path(__file__).exists()` (always False in a zipapp).
 - **`pathlib_next` needs `typing_extensions` on Python < 3.10** (an upstream gap); a
   3.9 environment must `pip install typing_extensions`.
