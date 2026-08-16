@@ -155,7 +155,14 @@ dotagents context --write-agent                # write each agent's native confi
 - `--write-agent` — write each agent's native config file instead of `[output]`.
 - `--agents <a,b>` — which agents to generate for (default: the active agent).
 - `--format markdown|system-reminder|json` — output shape.
-- `-g` / `--global` — user scope.
+- `-g` / `--global` — skip the project-level context files (the store is unaffected).
+- `--agents-dir <dir>` — user store override for this run.
+
+Roots: the store is `--agents-dir` → `$AGENTS_HOME` → `~/.agents`, and the project
+root is `$AGENTS_PROJECT_ROOT` → `$CLAUDE_PROJECT_DIR` → the cwd. A `SessionStart`
+hook runs this from wherever the session started, so pinning
+`AGENTS_PROJECT_ROOT` is what keeps the assembled context the same in every
+subdirectory.
 
 ## env
 
@@ -174,7 +181,12 @@ python -m dotagents env --diff --format json   # only vars that differ from the 
   (`bat`/`batch`, `set "KEY=value"`), `fish` (`set -gx KEY value`). Data forms:
   `json`, `ini`, `yaml`. An explicit `--format` always wins.
 - `--diff` — emit only the change set vs. the caller's environment.
-- `-g` / `--global` — user scope.
+- `-g` / `--global` — skip the project-level env files (the store is unaffected).
+- `--agents-dir <dir>` — user store override for this run.
+
+Roots resolve exactly as for `context` above (`$AGENTS_HOME` /
+`$AGENTS_PROJECT_ROOT`, both of which `env` also emits — so a subprocess reading
+them agrees with the parent that wrote them).
 
 !!! warning
     `env` output is sensitive by design — it prints resolved values. Treat the

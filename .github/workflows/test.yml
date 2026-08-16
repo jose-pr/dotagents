@@ -211,6 +211,13 @@ jobs:
           python dist/dotagents.pyz context --help | grep -q -- "--format FORMAT"
           python dist/dotagents.pyz context --help | grep -q -- "--agents"
           python dist/dotagents.pyz context --help | grep -q -- "Output format: markdown"
+          # context/env inherit -g/--agents-dir from DotAgentsArgs (a base class in
+          # ANOTHER module -- the exact shape that degraded once before, see the
+          # pyvenv asserts below). Assert the real short flag and the non-degraded
+          # `--agents-dir AGENTS_DIR` metavar, not just the long form's presence.
+          python dist/dotagents.pyz context --help | grep -q -- "--agents-dir AGENTS_DIR"
+          ! python dist/dotagents.pyz context --help | grep -q -- "--agents-dir-"
+          python dist/dotagents.pyz context --help | grep -q -- "\-\-global, -g"
           # init's --agents list flag must not degrade to a name-derived form.
           python dist/dotagents.pyz init --help | grep -q -- "--agents"
           # context --format json runs and emits parseable JSON (empty HOME -> claude).
@@ -223,6 +230,13 @@ jobs:
           python dist/dotagents.pyz env --help | grep -q -- "--format FORMAT"
           python dist/dotagents.pyz env --help | grep -q -- "--diff"
           python dist/dotagents.pyz env --help | grep -q -- "Output format. Default 'auto'"
+          python dist/dotagents.pyz env --help | grep -q -- "--agents-dir AGENTS_DIR"
+          ! python dist/dotagents.pyz env --help | grep -q -- "--agents-dir-"
+          python dist/dotagents.pyz env --help | grep -q -- "\-\-global, -g"
+          # A store pinned with $AGENTS_HOME is actually walked -- the .pyz-level
+          # proof of the root-resolution fix (unit coverage: tests/test_env_cli_scope.py).
+          store="$(mktemp -d)"; printf 'export FROM_PINNED_STORE=yes\n' > "$store/env"
+          AGENTS_HOME="$store" python dist/dotagents.pyz env --format export -g | grep -q "FROM_PINNED_STORE"
           # env --format json runs and emits parseable JSON (identity vars stamped).
           python dist/dotagents.pyz env --diff --format json -g | python -c "import sys,json; json.load(sys.stdin)"
           # env --format export dispatches and prints export lines.
