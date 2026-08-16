@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- fix: **`stamp_identity` no longer pretends to emit `AGENTS_AGENT`.** The line
+  sourced the value from `$AGENTS_AGENT` and only assigned when that same key
+  was unset, so it could never emit anything — while the docstring and the
+  shipped API header both advertised the var. Line removed; the API header's
+  "emitted by the identity/env layer" list now drops both `AGENTS_AGENT` and
+  `AGENTS_CODE_SESSION_ID` (the latter was deliberately never emitted) and says
+  so explicitly, so nothing branches on a var that never arrives.
 - fix: **`dotagents env` and `dotagents context` now resolve their roots instead
   of hardcoding them.** Both took `Path.cwd()` as the project root and
   `~/.agents` as the user store, so `$AGENTS_PROJECT_ROOT` (or the agent-native

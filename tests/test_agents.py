@@ -173,6 +173,24 @@ def test_stamp_no_blanket_rewrite_junk():
     assert all(not k.endswith("_SESSION_ID") for k in ident)
 
 
+def test_stamp_never_emits_agents_agent():
+    """`AGENTS_AGENT` is NOT part of the emitted set, in either direction.
+
+    The removed line read the value from `$AGENTS_AGENT` and only assigned when
+    that same key was unset, so it could never fire -- while the docstring and
+    the shipped API header both advertised it. Nothing derives a persona, so the
+    var stays absent until something does; this pins that so the claim cannot
+    quietly come back without an implementation behind it.
+    """
+    # Unset upstream: nothing to source, nothing emitted.
+    assert "AGENTS_AGENT" not in stamp_identity({"CLAUDECODE": "1"}, root=EMPTY_ROOT)
+    # Already set upstream: echoing it back into a CHANGE set is meaningless.
+    ident = stamp_identity(
+        {"CLAUDECODE": "1", "AGENTS_AGENT": "reviewer"}, root=EMPTY_ROOT
+    )
+    assert "AGENTS_AGENT" not in ident
+
+
 def test_harness_ids_are_distinct_from_short_names():
     # The whole point of the bug fix: harness_id != short name where they differ.
     assert ClaudeAgent.harness_id == "claude-code" != ClaudeAgent.name

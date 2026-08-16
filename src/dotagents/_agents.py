@@ -964,13 +964,19 @@ def stamp_identity(
     Emits ``AGENTS_HARNESS`` (the harness_id, e.g. ``claude-code`` -- NOT the
     short name), ``AGENTS_VENDOR``, ``AGENT`` (= AGENTS_HARNESS, aligning with
     the emerging ecosystem marker used by Goose/Amp; agentsmd/agents.md#136),
-    and, when derivable, ``AGENTS_MODEL`` (from the adapter's vendor model var)
-    and ``AGENTS_AGENT`` (a named persona, from $AGENTS_AGENT if already set).
+    and, when derivable, ``AGENTS_MODEL`` (from the adapter's vendor model var).
 
     Never emits a var it cannot source (no empty ``AGENTS_MODEL=``). Does NOT
     clobber a value already set in ``environ`` -- an explicit user/harness value
     wins. The deliberate curated mapping replaces the precursor's blanket
     ``CLAUDE_*``->``AGENTS_*`` rewrite (no ``AGENTS_CODE_SESSION_ID`` junk).
+
+    ``AGENTS_AGENT`` (a named persona) is NOT emitted and never was: the line
+    that claimed to "surface an already-selected persona" read the value from
+    the same key its own not-already-set guard required to be absent, so it was
+    unreachable in both directions. A persona would have to be DERIVED from
+    something (e.g. a ``<store>/<agent>.md``), which was never ported -- until
+    it is, nothing may branch on this var.
     """
     active = resolve_active_agent(environ, explicit=explicit, root=root)
 
@@ -984,7 +990,5 @@ def stamp_identity(
     _set("AGENTS_VENDOR", active.vendor)
     _set("AGENT", active.harness_id or active.name)
     _set("AGENTS_MODEL", active.resolve_model(environ))
-    # A named persona (~/.agents/<agent>.md); only surface one already selected.
-    _set("AGENTS_AGENT", environ.get("AGENTS_AGENT"))
 
     return identity

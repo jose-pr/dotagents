@@ -181,11 +181,14 @@ Tool-internal / secret vars (`DOTAGENTS_*` — kept; read, **never printed**):
 - `DOTAGENTS_AUDIT_PATTERNS` — path to the machine-local audit-pattern file (tooling).
 
 Emitted by the identity/env layer (safe to branch on in env files):
-`AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENTS_MODEL`, `AGENTS_AGENT` / `AGENT`,
-`AGENTS_CODE_SESSION_ID`, `AGENTS_PROXY`, `AGENTS_WEBFETCH_PROXY_URL`, plus the two
+`AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENTS_MODEL`, `AGENT`, `AGENTS_PROXY`,
+`AGENTS_WEBFETCH_PROXY_URL`, plus the two
 scope roots — `AGENTS_HOME` (the user store, `agents_dir`/`~/.agents`) and
 `AGENTS_PROJECT_ROOT` (this project's root). Both are seeded only if unset, so a
-harness/env can pin them. `resolve_scope` READS `AGENTS_PROJECT_ROOT` (then the
+harness/env can pin them. Deliberately NOT emitted, despite looking like they
+would be: `AGENTS_AGENT` (a named persona — nothing derives one, so there is
+nothing to emit) and `AGENTS_CODE_SESSION_ID` (dropped with the precursor's
+blanket `CLAUDE_*`→`AGENTS_*` rewrite). Do not branch on either. `resolve_scope` READS `AGENTS_PROJECT_ROOT` (then the
 agent-native `CLAUDE_PROJECT_DIR`, then cwd) for the project scope's root.
 
 Every command READS both back, so the pin actually holds: `env` and `context`
