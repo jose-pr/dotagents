@@ -267,14 +267,28 @@ class ClaudeAgent(Agent):
     # `command not found` away from silently delivering nothing -- which is exactly
     # what happened on this project's own dev box. Project scope comes first so a
     # project's own wrapper wins over the user store's.
-    _HOOK_PATH = 'PATH=".agents/bin:$HOME/.agents/bin:$PATH"'
+    # The store is `$AGENTS_HOME` when set, `~/.agents` otherwise -- the chain
+    # `resolve_user_store` walks. A hardcoded `$HOME/.agents` left a custom
+    # store with hooks that could not find `dotagents` at all.
+    _HOOK_PATH = 'PATH=".agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH"'
     SESSION_START_COMMAND = (
         'if [ -n "$CLAUDE_ENV_FILE" ]; then '
         '%(path)s dotagents env --diff --format export >> "$CLAUDE_ENV_FILE"; '
         "fi; "
         "%(path)s dotagents context"
     ) % {"path": _HOOK_PATH}
-    CWD_CHANGED_COMMAND = "[ -f AGENTS.md ] && cat AGENTS.md || true"
+    # On `cd` into another project: re-pin AGENTS_PROJECT_ROOT for the rest of
+    # the session (the SessionStart pin is only-if-unset, so without this the
+    # first project's root stuck to every later command), then show that
+    # project's root AGENTS.md. `pwd -W` is Git Bash's Windows-native form
+    # (`C:/...`) -- a `/c/...` MSYS path would be misread by the Windows Python
+    # that runs `dotagents`; elsewhere `pwd -W` fails and plain `pwd` is used.
+    CWD_CHANGED_COMMAND = (
+        'if [ -n "$CLAUDE_ENV_FILE" ] && [ -d .agents ]; then '
+        "printf \"export AGENTS_PROJECT_ROOT='%s'\\n\" \"$(pwd -W 2>/dev/null || pwd)\" "
+        '>> "$CLAUDE_ENV_FILE"; fi; '
+        "[ -f AGENTS.md ] && cat AGENTS.md || true"
+    )
 
     # Windows without Git Bash: hooks.md's `shell` field docs are explicit --
     # "Defaults to bash, or to powershell on Windows when Git Bash isn't
@@ -290,13 +304,15 @@ class ClaudeAgent(Agent):
     # Fix: register a SECOND handler on each event, explicit `shell:
     # "powershell"`, PowerShell-native syntax. Both handlers in a matched
     # group run unconditionally (hooks.md: "every handler in the matched
-    # group runs") -- there is no way to select one based on which
-    # interpreter is actually present. So exactly one of the two spawns
-    # successfully per machine; the other's interpreter is simply absent
-    # (Windows without Git Bash has no `sh`/`bash` on PATH) and that spawn
-    # fails harmlessly -- SessionStart hook failures do not block the
-    # session, only that hook's own effect is lost, which is what would have
-    # happened anyway without this fix.
+    # group runs") -- there is no way to select one at the settings level
+    # based on which interpreter is present. So the PowerShell variant
+    # SELECTS ITSELF: it runs only when `bash` is not on PATH. Without that
+    # gate, on the common Windows box that has BOTH Git Bash and PowerShell,
+    # both handlers succeeded and the same context was injected twice per
+    # session start -- measured 2026-09-09: two identical 100 KB payloads
+    # (review finding 1.1). SessionStart hook failures do not block the
+    # session, so on a box without bash the bash handler's failed spawn
+    # still costs nothing.
     #
     # The PowerShell variant is CONTEXT-ONLY, not env+context: `$CLAUDE_ENV_FILE`
     # explicitly documents its effect as "subsequent BASH commands" regardless
@@ -306,11 +322,19 @@ class ClaudeAgent(Agent):
     # $CLAUDE_ENV_FILE at all (confirmed empty live, D90). The PowerShell env
     # gap is covered separately by PRETOOLUSE_POWERSHELL_COMMAND below, which
     # works regardless of whether Git Bash is present.
-    SESSION_START_COMMAND_POWERSHELL = (
-        r'& "$env:USERPROFILE\.agents\bin\dotagents.cmd" context'
+    #
+    # The store is `$env:AGENTS_HOME` when set, `$HOME\.agents` otherwise, and
+    # the project's own `.agents\bin` wins when present -- the same resolution
+    # as the bash variant's PATH prefix.
+    _PS_NO_BASH = r'if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { '
+    _PS_STORE = r'$(if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" })'
+    _PS_DOTAGENTS = (
+        r'$d = if (Test-Path ".agents\bin\dotagents.cmd") { ".agents\bin\dotagents.cmd" } '
+        r'else { "' + _PS_STORE + r'\bin\dotagents.cmd" }'
     )
+    SESSION_START_COMMAND_POWERSHELL = _PS_NO_BASH + _PS_DOTAGENTS + r'; & $d context }'
     CWD_CHANGED_COMMAND_POWERSHELL = (
-        r'if (Test-Path AGENTS.md) { Get-Content AGENTS.md -Raw }'
+        _PS_NO_BASH + r'if (Test-Path AGENTS.md) { Get-Content AGENTS.md -Raw } }'
     )
 
     # PowerShell tool gap (Windows only): $CLAUDE_ENV_FILE is Bash-tool-only --
@@ -337,6 +361,12 @@ class ClaudeAgent(Agent):
     # SESSION_START_COMMAND's own style) so it fits in one settings.json hook
     # command, same as the Bash hooks above.
     #
+    # `env --diff`, not the full env: each PowerShell tool call is its own
+    # process (the AGENTS_RUNTIME_SET guard never survives to the next call),
+    # so the loader runs on EVERY call and re-assigning the caller's whole
+    # environment through Invoke-Expression each time is pure cost -- the
+    # change set is what it needs. The store is `$env:AGENTS_HOME` when set.
+    #
     # Every literal `\` below MUST use a raw string (or be doubled) up to this
     # point in the source -- a bare `\b` inside a normal Python string literal
     # silently becomes a backspace character (\x08), not the two characters
@@ -347,7 +377,7 @@ class ClaudeAgent(Agent):
         r'$h = [Console]::In.ReadToEnd() | ConvertFrom-Json; '
         r'if ($h.tool_name -eq "PowerShell" -and -not $env:AGENTS_RUNTIME_SET -and $h.tool_input.command) { '
         r'$p = '
-        r"""'if (-not $env:AGENTS_RUNTIME_SET) { $env:AGENTS_RUNTIME_SET = "1"; & "$HOME\.agents\bin\dotagents.cmd" env --format powershell 2>$null | Invoke-Expression }; '; """
+        r"""'if (-not $env:AGENTS_RUNTIME_SET) { $env:AGENTS_RUNTIME_SET = "1"; $s = if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" }; & "$s\bin\dotagents.cmd" env --diff --format powershell 2>$null | Invoke-Expression }; '; """
         r'$u = $h.tool_input.PSObject.Copy(); '
         r'$u.command = $p + $h.tool_input.command; '
         r'@{hookSpecificOutput=@{hookEventName="PreToolUse";permissionDecision="allow";updatedInput=$u}} | ConvertTo-Json -Depth 10 -Compress '
@@ -384,28 +414,43 @@ class ClaudeAgent(Agent):
             root = self._config_root(dest)
 
         # 1. Skills last mile. Publishing into `<scope>/skills/` only helps if the
-        #    agent reads that dir; without this link it never does.
+        #    agent reads that dir; without this link it never does. PER SKILL,
+        #    into `<config>/skills/<name>`: linking the whole directory failed
+        #    ("conflict") for anyone who already had their own `~/.claude/skills`,
+        #    i.e. every existing Claude user, and never retried (review
+        #    2026-09-09). A same-named skill the user placed there by hand is a
+        #    conflict and is left alone, with a warning.
         shared_skills = Path(dest) / "skills"
-        if not shared_skills.is_dir():
+        skill_dirs = (
+            sorted(d for d in shared_skills.iterdir() if d.is_dir())
+            if shared_skills.is_dir() else []
+        )
+        if not skill_dirs:
             if logger:
-                logger.info("no skills to link (%s absent)", shared_skills)
+                logger.info("no skills to link (%s has none)", shared_skills)
         elif dry_run:
             if logger:
-                logger.info("would link skills: %s -> %s", shared_skills, root / "skills")
+                logger.info(
+                    "would link %d skill(s): %s -> %s", len(skill_dirs), shared_skills,
+                    root / "skills",
+                )
         else:
-            result = _skills.sync_path(shared_skills, root / "skills", prefer_symlink=True)
-            if not result.success:
-                if logger:
-                    logger.warning("skills not linked: %s", result.message)
-            else:
-                if logger:
-                    logger.info("skills (%s): %s", result.mode, result.message)
-                if result.mode == "copy" and logger:
-                    logger.warning(
-                        "skills were COPIED, not symlinked (no symlink support here): "
-                        "the copy is a point-in-time snapshot and goes stale when overlay "
-                        "skills change -- re-run `dotagents init` to refresh it"
-                    )
+            copied = False
+            for skill in skill_dirs:
+                result = _skills.sync_path(skill, root / "skills" / skill.name, prefer_symlink=True)
+                if not result.success:
+                    if logger:
+                        logger.warning("skill %s not linked: %s", skill.name, result.message)
+                    continue
+                copied = copied or result.mode == "copy"
+                if logger and "already" not in result.message:
+                    logger.info("skill %s (%s): %s", skill.name, result.mode, result.message)
+            if copied and logger:
+                logger.warning(
+                    "some skills were COPIED, not symlinked (no symlink support here): "
+                    "a copy is a point-in-time snapshot and goes stale when overlay "
+                    "skills change -- re-run `dotagents init` to refresh it"
+                )
 
         # 2. Hooks. In a project, write `settings.local.json` -- the gitignored
         # personal file. `settings.json` there is checked into source control, and
@@ -619,7 +664,7 @@ class AntigravityAgent(Agent):
     # the one that works on Windows -- but a POSIX box that ships only `python3`
     # (still common) gets a hook that cannot start. Known gap, no fix available
     # inside the hook entry itself; see `.agents/plans/` for the follow-up.
-    PRETOOLUSE_HOOK_SCRIPT = "preinvocation_antigravity_context.py"
+    PREINVOCATION_HOOK_SCRIPT = "preinvocation_antigravity_context.py"
 
     def wire_hooks(
         self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
@@ -641,14 +686,14 @@ class AntigravityAgent(Agent):
 
         root = Path(config_root) if config_root else (Path.home() / ".gemini" / "config")
 
-        src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / self.PRETOOLUSE_HOOK_SCRIPT
+        src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / self.PREINVOCATION_HOOK_SCRIPT
         if not src_script.is_file():
             if logger:
                 logger.warning("Antigravity hook script missing from package: %s", src_script)
             return
 
         dest_dir = root / "hooks"
-        dest_script = dest_dir / self.PRETOOLUSE_HOOK_SCRIPT
+        dest_script = dest_dir / self.PREINVOCATION_HOOK_SCRIPT
         script_changed = not dest_script.is_file() or (
             dest_script.read_bytes() != src_script.read_bytes()
         )
@@ -745,7 +790,7 @@ class CodexAgent(Agent):
     # the wrapper `init` wrote, so the hook resolves `dotagents` with no global
     # install and no PATH edit by the user.
     SESSION_START_COMMAND = (
-        'PATH=".agents/bin:$HOME/.agents/bin:$PATH" dotagents context'
+        'PATH=".agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH" dotagents context'
     )
 
     # PreToolUse gives Codex the LIVE env half SessionStart cannot: hooks.md

@@ -139,6 +139,33 @@ def test_status_message_identifies_our_hook_across_command_revisions():
     assert commands == ["new-command"], "the superseded hook must be gone"
 
 
+def test_foreign_sibling_in_our_matcher_object_survives():
+    """A matcher-object holding a user's hook AND an older shape of ours: the
+    status-message match used to drop the whole object, user's hook included."""
+    mixed = {"hooks": [
+        {"type": "command", "command": "echo mine"},
+        {"type": "command", "command": "OLD", "statusMessage": "Loading agent context"},
+    ]}
+    merged, changed = _hooks.merge_hook([mixed], "NEW", status_message="Loading agent context")
+    assert changed is True
+    commands = [h["command"] for e in merged for h in e["hooks"]]
+    assert "echo mine" in commands
+    assert "NEW" in commands and "OLD" not in commands
+    # Idempotent from here on.
+    again, changed_again = _hooks.merge_hook(merged, "NEW", status_message="Loading agent context")
+    assert changed_again is False and again == merged
+
+
+def test_metadata_revision_reaches_an_unchanged_command():
+    """Same command text, new `shell`: the entry must be refreshed, not kept
+    as-is -- otherwise a revised shell/matcher/commandWindows never ships."""
+    old, _ = _hooks.merge_hook(None, CMD, status_message="Loading")
+    merged, changed = _hooks.merge_hook(old, CMD, status_message="Loading", shell="powershell")
+    assert changed is True
+    assert merged[0]["hooks"][0]["shell"] == "powershell"
+    assert len(merged) == 1
+
+
 def test_status_match_does_not_touch_a_foreign_hook():
     """Only OUR status message supersedes; a user's hook is never dropped."""
     foreign = {"hooks": [{"type": "command", "command": "mine", "statusMessage": "Mine"}]}

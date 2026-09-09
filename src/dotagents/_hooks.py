@@ -108,15 +108,20 @@ def merge_hook(
     Rules, in order:
 
     * absent / not-a-list ``existing`` -> a fresh single-entry list (changed).
-    * an entry already carrying our exact ``command`` -> kept as-is; the first
-      such entry wins and any later duplicate is dropped (changed), so repeated
-      ``init`` runs converge instead of accumulating.
+    * an entry that is exactly what we would write -> kept as-is (unchanged);
+      one carrying our hook in an older shape (a revised ``shell`` / ``matcher``
+      / ``commandWindows`` / status, or an older command text under the same
+      status message) -> replaced in place; any later duplicate is dropped
+      (changed), so repeated ``init`` runs converge instead of accumulating.
+    * a matcher-object holding a foreign hook AND ours -> the foreign hook stays
+      verbatim in that entry, ours moves to its own entry (never drop a user's
+      hook because it happened to share an object with ours).
     * foreign entries -> preserved verbatim, untouched, in their original order.
     * malformed entries (bare strings, dicts without a ``hooks`` list, non-dicts)
       -> dropped, flagged changed. Never raises: a user's hand-edited settings
       file must not make ``init`` explode.
 
-    ``status_message`` doubles as our hook's IDENTITY. An entry carrying the same
+    ``status_message`` doubles as our hook's IDENTITY. A hook carrying the same
     status message is treated as an older shape of our own hook and replaced, not
     left beside the new one. Without that, dedup is by exact command string, so
     revising the command we write silently orphans the previous version and the
@@ -124,36 +129,59 @@ def merge_hook(
     is a stable label we choose, which makes it a better key than the command text
     it describes.
     """
+    ours = build_hook_entry(
+        command, matcher=matcher, status_message=status_message, shell=shell,
+        command_windows=command_windows,
+    )
     if not isinstance(existing, list):
         # None/absent is the common case; a non-list is a malformed file we replace.
-        return [
-            build_hook_entry(command, matcher=matcher, status_message=status_message, shell=shell, command_windows=command_windows)
-        ], True
+        return [ours], True
+
+    def _mine(hook: Any) -> bool:
+        return isinstance(hook, dict) and (
+            hook.get("command") == command
+            or bool(status_message and hook.get("statusMessage") == status_message)
+        )
 
     normalized: list = []
     changed = False
     seen_ours = False
 
     for entry in existing:
-        if _is_ours(entry, command):
-            if seen_ours:
-                changed = True  # collapse duplicates of our own command
-                continue
-            seen_ours = True
-            normalized.append(entry)
-            continue
-        if status_message and _has_status(entry, status_message):
-            changed = True  # an older shape of OUR hook -- replace, don't duplicate
-            continue
         if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
             changed = True  # malformed -- drop it
             continue
-        normalized.append(entry)  # foreign but well-formed: leave alone
+        inner = entry["hooks"]
+        if not any(_mine(h) for h in inner):
+            normalized.append(entry)  # foreign but well-formed: leave alone
+            continue
+        foreign = [h for h in inner if not _mine(h)]
+        if foreign:
+            # A matcher-object holding BOTH a foreign hook and ours: the foreign
+            # sibling stays, verbatim, in its own entry; ours moves to (or is
+            # refreshed in) our own entry below. Dropping the whole object took
+            # the user's hook with it (review 2026-09-09).
+            kept = dict(entry)
+            kept["hooks"] = foreign
+            normalized.append(kept)
+            changed = True
+            continue
+        if seen_ours:
+            changed = True  # a duplicate of our own hook -- collapse it
+            continue
+        seen_ours = True
+        # Ours, and only ours: keep it exactly when it already equals what we
+        # would write, otherwise REPLACE it -- a revised `shell` / `matcher` /
+        # `commandWindows` / status must reach existing users even when the
+        # command text itself is unchanged.
+        if entry == ours:
+            normalized.append(entry)
+        else:
+            normalized.append(ours)
+            changed = True
 
     if not seen_ours:
-        normalized.append(
-            build_hook_entry(command, matcher=matcher, status_message=status_message, shell=shell, command_windows=command_windows)
-        )
+        normalized.append(ours)
         changed = True
 
     return normalized, changed

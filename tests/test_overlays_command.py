@@ -352,6 +352,19 @@ def test_remove_overlay_skills_only_own(tmp_path):
     assert other.is_dir()  # untouched
 
 
+def test_unpublish_keeps_a_user_edited_copy(tmp_path):
+    """`_paths_match` compared file NAMES only, so a copy the user had edited
+    (same file set, different bytes) was deleted as "ours"."""
+    src = make_source(tmp_path)
+    scope = make_scope(tmp_path)
+    _skills.publish_overlay_skills(src / "py-demo", scope.shared_skills_dir, copy=True)
+    target = scope.shared_skills_dir / "py-lint" / "SKILL.md"
+    target.write_text(target.read_text(encoding="utf-8") + "\nMY EDIT\n", encoding="utf-8")
+    removed = _skills.remove_overlay_skills(src / "py-demo", scope.shared_skills_dir, logger=logger())
+    assert removed == 0
+    assert "MY EDIT" in target.read_text(encoding="utf-8")
+
+
 def test_clean_broken_syncs(tmp_path):
     shared = tmp_path / "skills"
     shared.mkdir()

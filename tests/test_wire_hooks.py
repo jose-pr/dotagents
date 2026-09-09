@@ -13,6 +13,7 @@ Run: ``PYTHONPATH=src python -m pytest tests/test_wire_hooks.py``
 import json
 import logging
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -112,11 +113,12 @@ def test_hook_prefixes_scope_bin_on_path():
     self-sufficient. Without it the hook is one `command not found` from silently
     delivering nothing -- which is exactly what happened on the dev box.
     """
+    store_bin = "${AGENTS_HOME:-$HOME/.agents}/bin"
     for cmd in (ClaudeAgent.SESSION_START_COMMAND, CodexAgent.SESSION_START_COMMAND):
         assert ".agents/bin" in cmd
-        assert "$HOME/.agents/bin" in cmd
+        assert store_bin in cmd, "the store is $AGENTS_HOME when set, ~/.agents otherwise"
         assert "$PATH" in cmd, "must PREPEND, not replace, the inherited PATH"
-        assert cmd.index(".agents/bin") < cmd.index("$HOME/.agents/bin"), (
+        assert cmd.index(".agents/bin") < cmd.index(store_bin), (
             "project scope should win over the user store"
         )
 
@@ -207,6 +209,19 @@ def test_skills_are_linked_or_copied(tmp_path):
     assert (root / "skills" / "demo-skill" / "SKILL.md").is_file()
 
 
+def test_skills_are_linked_per_skill_into_an_existing_skills_dir(tmp_path):
+    """A user who already has `~/.claude/skills` (everyone with their own
+    skills) got "skills not linked: conflict" on every init, because the WHOLE
+    directory was linked and never forced. Per-skill: theirs stay, ours land."""
+    dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
+    mine = root / "skills" / "my-own"
+    mine.mkdir(parents=True)
+    (mine / "SKILL.md").write_text("mine\n", encoding="utf-8")
+    ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+    assert (root / "skills" / "demo-skill" / "SKILL.md").is_file()
+    assert (mine / "SKILL.md").read_text(encoding="utf-8") == "mine\n"
+
+
 def test_absent_skills_dir_is_tolerated(tmp_path):
     """True of every overlay today: none ships skills yet."""
     dest, root = tmp_path / "agents", tmp_path / "claude"
@@ -254,7 +269,47 @@ class TestDualShellSessionHooks:
         )
         assert "CLAUDE_ENV_FILE" not in ps_session_start["hooks"][0]["command"]
         assert "dotagents.cmd" in ps_session_start["hooks"][0]["command"]
-        assert ps_session_start["hooks"][0]["command"].strip().endswith("context")
+        assert ps_session_start["hooks"][0]["command"].strip().endswith("context }")
+
+    def test_powershell_variants_only_run_when_bash_is_absent(self, tmp_path):
+        """Both handlers fire on every session (hooks.md); on a Windows box that
+        has BOTH Git Bash and PowerShell, both succeeded and the same context
+        was injected twice (two identical 100 KB payloads, measured). The
+        PowerShell variant selects itself: `bash` absent, or it does nothing."""
+        for cmd in (
+            ClaudeAgent.SESSION_START_COMMAND_POWERSHELL,
+            ClaudeAgent.CWD_CHANGED_COMMAND_POWERSHELL,
+        ):
+            assert cmd.startswith("if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {")
+            assert cmd.rstrip().endswith("}")
+
+    def test_cwd_changed_repins_the_project_root(self):
+        """The SessionStart pin is only-if-unset; a `cd` into another project
+        must re-pin AGENTS_PROJECT_ROOT or every later command keeps the first
+        project's root."""
+        cmd = ClaudeAgent.CWD_CHANGED_COMMAND
+        assert "export AGENTS_PROJECT_ROOT=" in cmd
+        assert '>> "$CLAUDE_ENV_FILE"' in cmd
+        assert "[ -d .agents ]" in cmd, "only a directory that IS a project re-pins"
+        assert "pwd -W" in cmd, "Git Bash needs the Windows-native form for a Windows Python"
+
+    @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+    def test_cwd_changed_command_runs_and_pins(self, tmp_path):
+        import subprocess
+
+        (tmp_path / ".agents").mkdir()
+        (tmp_path / "AGENTS.md").write_text("ROOT-AGENTS\n", encoding="utf-8")
+        env_file = tmp_path / "env.sh"
+        env_file.write_text("", encoding="utf-8")
+        proc = subprocess.run(
+            ["bash", "-c", ClaudeAgent.CWD_CHANGED_COMMAND], cwd=str(tmp_path),
+            env={**os.environ, "CLAUDE_ENV_FILE": str(env_file)}, capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "ROOT-AGENTS" in proc.stdout
+        pinned = env_file.read_text(encoding="utf-8")
+        assert pinned.startswith("export AGENTS_PROJECT_ROOT='")
+        assert tmp_path.name in pinned
 
     def test_idempotent_no_duplication_across_shell_variants(self, tmp_path):
         dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
@@ -336,7 +391,14 @@ class TestPowerShellPreToolUse:
         containing `\\b` fails fast instead of silently shipping broken."""
         cmd = ClaudeAgent.PRETOOLUSE_POWERSHELL_COMMAND
         assert chr(8) not in cmd, "backspace character found -- a \\b literal was not raw-stringed"
-        assert "\\.agents\\bin\\dotagents.cmd" in cmd
+        assert '\\.agents"' in cmd and "\\bin\\dotagents.cmd" in cmd
+
+    def test_loader_uses_the_diff_and_the_configurable_store(self):
+        """Each PowerShell tool call is a fresh process, so the loader runs on
+        every call -- the change set, not a re-assignment of the whole env."""
+        cmd = ClaudeAgent.PRETOOLUSE_POWERSHELL_COMMAND
+        assert "env --diff --format powershell" in cmd
+        assert "$env:AGENTS_HOME" in cmd
 
     def test_command_is_valid_powershell_syntax(self):
         """Parses the exact production string with PowerShell's own tokenizer --
@@ -483,6 +545,46 @@ class TestCodexPreToolUse:
         assert cmd.endswith("echo hi")
         assert "AGENTS_RUNTIME_SET" in cmd
         assert "dotagents env --diff --format export" in cmd
+
+    @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+    def test_rewritten_command_actually_runs_in_bash(self, tmp_path):
+        """Execute the prefix with a stub `dotagents` on the project bin: the
+        exported var must land and PATH must carry NO literal quote characters
+        (the old `\\"` inside `$(...)` were literal quotes, so PATH became
+        `".agents/bin:...:<last>"` and the project bin was never found)."""
+        import subprocess
+        import sys
+
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
+        CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        script = root / "hooks" / CodexAgent.PRETOOLUSE_HOOK_SCRIPT
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            input='{"tool_name":"Bash","tool_input":{"command":"printf %s:%s \\"$FROM_STUB\\" \\"$STUB_PATH\\""}}',
+            capture_output=True, text=True,
+        )
+        cmd = json.loads(proc.stdout)["hookSpecificOutput"]["updatedInput"]["command"]
+
+        # The stub stands in for `dotagents env --diff`: it reports the PATH it
+        # was spawned with (the prefix's own PATH= assignment) as an export.
+        project = tmp_path / "proj"
+        stub_bin = project / ".agents" / "bin"
+        stub_bin.mkdir(parents=True)
+        (stub_bin / "dotagents").write_text(
+            "#!/bin/sh\necho \"export FROM_STUB='yes'\"\necho \"export STUB_PATH='$PATH'\"\n",
+            encoding="utf-8", newline="\n",
+        )
+        (stub_bin / "dotagents").chmod(0o755)
+        run = subprocess.run(
+            ["bash", "-c", cmd], cwd=str(project), capture_output=True, text=True,
+            env={k: v for k, v in os.environ.items() if k != "AGENTS_RUNTIME_SET"},
+        )
+        assert run.returncode == 0, run.stderr
+        value, path = run.stdout.split(":", 1)
+        assert value == "yes", run.stdout + run.stderr
+        assert '"' not in path, "PATH must not carry literal quote characters"
+        assert path.startswith(".agents/bin:"), path
 
     def test_script_guard_skips_when_already_set(self, tmp_path):
         import subprocess
@@ -766,7 +868,7 @@ class TestAntigravityHooks:
         assert len(entries) == 1
         hook = entries[0]["hooks"][0]
         assert "python" in hook["command"]
-        assert AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT in hook["command"]
+        assert AntigravityAgent.PREINVOCATION_HOOK_SCRIPT in hook["command"]
         # PreInvocation's matcher is documented as ignored -- no matcher key.
         assert "matcher" not in entries[0]
 
@@ -776,10 +878,10 @@ class TestAntigravityHooks:
 
         AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
-        script = root / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT
+        script = root / "hooks" / AntigravityAgent.PREINVOCATION_HOOK_SCRIPT
         assert script.is_file()
         from dotagents.cli._common import BASE_ROOT
-        package_script = Path(BASE_ROOT) / "dotagents" / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT
+        package_script = Path(BASE_ROOT) / "dotagents" / "hooks" / AntigravityAgent.PREINVOCATION_HOOK_SCRIPT
         assert script.read_bytes() == package_script.read_bytes()
 
     def test_idempotent(self, tmp_path):
@@ -796,7 +898,7 @@ class TestAntigravityHooks:
         dest.mkdir()
         AntigravityAgent().wire_hooks(dest, dry_run=True, logger=None, config_root=root)
         assert not (root / "hooks.json").exists()
-        assert not (root / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT).exists()
+        assert not (root / "hooks" / AntigravityAgent.PREINVOCATION_HOOK_SCRIPT).exists()
 
     def test_script_only_injects_on_first_invocation(self, tmp_path):
         """The real property that makes this behave like SessionStart at all:
@@ -807,7 +909,7 @@ class TestAntigravityHooks:
         dest, root = tmp_path / "agents", tmp_path / "gemini_config"
         dest.mkdir()
         AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
-        script = root / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT
+        script = root / "hooks" / AntigravityAgent.PREINVOCATION_HOOK_SCRIPT
 
         first = subprocess.run(
             [sys.executable, str(script)],
@@ -839,7 +941,7 @@ class TestAntigravityHooks:
         dest, root = tmp_path / "agents", tmp_path / "gemini_config"
         dest.mkdir()
         AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
-        script = root / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT
+        script = root / "hooks" / AntigravityAgent.PREINVOCATION_HOOK_SCRIPT
 
         # Stub `dotagents` at `<cwd>/.agents/bin/`, the FIRST location
         # `_find_dotagents()` checks -- it deliberately wins over any real
@@ -877,7 +979,7 @@ class TestAntigravityHooks:
         dest, root = tmp_path / "agents", tmp_path / "gemini_config"
         dest.mkdir()
         AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
-        script = root / "hooks" / AntigravityAgent.PRETOOLUSE_HOOK_SCRIPT
+        script = root / "hooks" / AntigravityAgent.PREINVOCATION_HOOK_SCRIPT
 
         proc = subprocess.run(
             [sys.executable, str(script)],

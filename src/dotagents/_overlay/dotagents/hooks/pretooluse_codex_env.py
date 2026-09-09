@@ -61,10 +61,16 @@ def main() -> int:
 
     # PATH prefix mirrors SESSION_START_COMMAND's own -- `<scope>/bin` may not
     # be on PATH yet (that is part of what this loads), so `dotagents` is
-    # findable without a global install or a PATH edit by the user.
+    # findable without a global install or a PATH edit by the user; the store
+    # is `$AGENTS_HOME` when set. Inside `"$( ... )"` the command substitution
+    # is parsed afresh, so the inner quotes are plain `"` -- the earlier `\"`
+    # were LITERAL quote characters there, which put `".agents/bin:...:<last>"`
+    # (quotes included) into PATH and broke both the project bin lookup and
+    # the last original PATH entry (review 2026-09-09; executed in
+    # tests/test_wire_hooks.py).
     prefix = (
         'if [ -z "$AGENTS_RUNTIME_SET" ]; then export AGENTS_RUNTIME_SET=1; '
-        'eval "$(PATH=\\".agents/bin:$HOME/.agents/bin:$PATH\\" '
+        'eval "$(PATH=".agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH" '
         'dotagents env --diff --format export 2>/dev/null)"; fi; '
     )
 

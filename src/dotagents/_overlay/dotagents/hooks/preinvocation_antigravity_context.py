@@ -37,9 +37,12 @@ runnable via a bare `python <path>` invocation with no shell features assumed
 on either platform, and must not rely on shell quoting/redirection anywhere.
 
 `workspacePaths` (a Common Input Field: "Absolute directory paths representing
-the user's mounted workspaces") is used to find AGENTS.md, since Antigravity's
-own project-level convention is `.agents/rules/`, not a bare root file --
-see AntigravityAgent's write_context/harness_loads for the full picture.
+the user's mounted workspaces") pins the project root: the first existing entry
+becomes the cwd and `AGENTS_PROJECT_ROOT` of the `dotagents context` spawn, so
+the workspace's `.agents/` is what gets assembled rather than whatever the hook
+process's undocumented cwd happens to be. Antigravity's own project-level
+convention is `.agents/rules/`, not a bare root file -- see AntigravityAgent's
+context_target/harness_loads for the full picture.
 
 Fails safe on any error: never lets a hook bug break the session.
 """
@@ -66,7 +69,8 @@ def _find_dotagents() -> "str | None":
     import shutil
 
     names = ("dotagents.cmd", "dotagents") if os.name == "nt" else ("dotagents",)
-    for base in (Path(".agents") / "bin", Path.home() / ".agents" / "bin"):
+    store = Path(os.environ.get("AGENTS_HOME") or (Path.home() / ".agents"))
+    for base in (Path(".agents") / "bin", store / "bin"):
         for name in names:
             candidate = base / name
             if candidate.is_file():
@@ -74,7 +78,24 @@ def _find_dotagents() -> "str | None":
     return shutil.which("dotagents")
 
 
+def _workspace_root(hook_input) -> "str | None":
+    """The first `workspacePaths` entry (a Common Input Field: "Absolute
+    directory paths representing the user's mounted workspaces"). The hook
+    process's own cwd is not documented, so this is what pins the PROJECT root:
+    it becomes `AGENTS_PROJECT_ROOT` (and the cwd) for the `dotagents context`
+    spawn, so the project's `.agents/` is resolved rather than whatever
+    directory the hook happened to start in."""
+    paths = hook_input.get("workspacePaths")
+    if isinstance(paths, list):
+        for p in paths:
+            if isinstance(p, str) and p and os.path.isdir(p):
+                return p
+    return None
+
+
 def main() -> int:
+    import os
+
     try:
         hook_input = json.load(sys.stdin)
     except Exception:
@@ -83,17 +104,25 @@ def main() -> int:
     if hook_input.get("invocationNum", 0) != 0:
         return 0  # every turn after the first: no-op, no `dotagents` spawn
 
+    root = _workspace_root(hook_input)
+    if root:
+        os.chdir(root)
     dotagents = _find_dotagents()
     if not dotagents:
         return 0  # nothing to inject if the command isn't resolvable
 
+    env = dict(os.environ)
+    if root:
+        env["AGENTS_PROJECT_ROOT"] = root
     try:
         proc = subprocess.run(
             [dotagents, "context", "--agents", "antigravity"],
-            capture_output=True, timeout=25,
+            capture_output=True, timeout=25, env=env,
         )  # bytes, NOT text=True -- see below
     except Exception:
         return 0
+    if proc.returncode != 0:
+        return 0  # a failed assembly must not inject a partial payload
 
     # `text=True` would decode the child's stdout using the platform default
     # encoding (cp1252 on this Windows machine), not UTF-8 -- confirmed live:

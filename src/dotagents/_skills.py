@@ -19,6 +19,7 @@ deliberately **dropped** -- publish-to-shared-dir is the stdlib, useful part.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 from pathlib import Path
@@ -36,20 +37,36 @@ class SyncResult:
         return self.success
 
 
-def _paths_match(source: Path, target: Path) -> bool:
-    """True if ``target`` already mirrors ``source`` (same file set, by name).
+def _digest(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
-    A cheap structural check -- enough to decide "already published, leave it" from
-    "conflicting content, overwrite". Not a content hash: republish on ``sync`` is a
-    separate, explicit path (``resync_path``)."""
+
+def _paths_match(source: Path, target: Path) -> bool:
+    """True if ``target`` already mirrors ``source``: the same file set AND the
+    same bytes in each file.
+
+    This is what ``unsync_path`` uses to decide "this copy is ours, remove it"
+    from "the user edited it, leave it alone", and what ``resync_path`` uses to
+    detect drift -- so it has to see content, not just names. A name-only
+    check deleted a user-edited copy whose file set happened to match (review
+    2026-09-09). Skill dirs are small; hashing them is cheap."""
     if not source.exists() or not target.exists():
         return False
     if source.is_file() and target.is_file():
-        return source.stat().st_size == target.stat().st_size
+        return _digest(source) == _digest(target)
     if source.is_dir() and target.is_dir():
-        src_files = {str(p.relative_to(source)) for p in source.rglob("*") if p.is_file()}
-        tgt_files = {str(p.relative_to(target)) for p in target.rglob("*") if p.is_file()}
-        return src_files == tgt_files
+        src_files = {str(p.relative_to(source)): p for p in source.rglob("*") if p.is_file()}
+        tgt_files = {str(p.relative_to(target)): p for p in target.rglob("*") if p.is_file()}
+        if set(src_files) != set(tgt_files):
+            return False
+        try:
+            return all(_digest(src_files[k]) == _digest(tgt_files[k]) for k in src_files)
+        except OSError:
+            return False
     return False
 
 
