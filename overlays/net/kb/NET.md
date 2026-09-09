@@ -1,8 +1,10 @@
 # NET — dependency-free HTTP tooling
 
-Installed by `dotagents overlays add net`. Its `setup.py` wires everything into
-`dotagents env`, so after `add` these are live in an env-applied shell. `NET_ROOT`
-points at the installed overlay dir.
+Installed by `dotagents overlays add net`. `dotagents env` wires it in on its
+own — every installed overlay's `bin/` goes on `PATH`, its `lib/` on
+`PYTHONPATH`, and `NET_OVERLAY_ROOT` points at the installed overlay dir — so
+after `add` these are live in an env-applied shell. `NET_ROOT` is the short
+alias for the same dir, added by this overlay's `setup.py`.
 
 ## curl shim — `$NET_ROOT/bin/curl` (`curl.cmd` on Windows)
 
@@ -25,8 +27,9 @@ working `curl` with **zero dependencies**.
 
 Not the real cert bundle: `certifi.where()` resolves a CA bundle from
 `$SSL_CERT_FILE` → `ssl.get_default_verify_paths()` → well-known OS paths. With
-`$NET_ROOT/lib` on `PYTHONPATH` (setup does this), any library that
-`import certifi` verifies TLS through the OS trust store with no shipped certs.
+`$NET_ROOT/lib` on `PYTHONPATH` (`dotagents env` puts every installed overlay's
+`lib/` there), any library that `import certifi` verifies TLS through the OS
+trust store with no shipped certs.
 
     python -m certifi        # prints the resolved OS CA bundle path
 
@@ -53,5 +56,7 @@ not at all.
 
 ## Referencing the lib from a skill
 
-Use `$NET_ROOT/lib` (or `$NET_OVERLAY_ROOT/lib`) — a stable path the setup
-exports — instead of hardcoding the store path.
+Use `$NET_OVERLAY_ROOT/lib` — `dotagents env` exports one `<NAME>_OVERLAY_ROOT`
+per installed overlay, so this needs no setup — or its short alias `$NET_ROOT`
+(the one thing this overlay's `setup.py` still adds). Never hardcode the store
+path.

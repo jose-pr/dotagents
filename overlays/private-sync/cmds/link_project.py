@@ -11,10 +11,11 @@ Renamed from the old bare `link` (D85): the command acts on **a project's
 
 Importing the logic: `duho.discover_commands` imports this file as a standalone
 module under a synthesized name, not as a package member -- so neither a relative
-import nor a plain sibling import is available. `_load_link()` below resolves
-`<overlay-root>/lib/_link.py` **by path**, which needs no PYTHONPATH and works
-even if this overlay's `setup.py` never ran. A plain `import _link` (what setup.py
-enables) is preferred when it resolves to our module.
+import nor a plain sibling import is available. A plain `import _link` is
+preferred when it resolves to our module: `dotagents env` puts every installed
+overlay's `lib/` on `PYTHONPATH`, so in an env-applied shell it does. When it
+does not (a bare shell, a relocated store), `_load_link()` below resolves
+`<overlay-root>/lib/_link.py` **by path**, which needs no PYTHONPATH at all.
 """
 
 import importlib.util

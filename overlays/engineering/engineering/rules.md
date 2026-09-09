@@ -63,8 +63,10 @@ the secrets/leakage guard, and the managed-marker contract (`_merge.py`).
 
 Everything here is convention on top of that. `plans/` is a case in point — the CLI
 seeds an empty `plans/` dir into a new store as a convenience, but nothing in the
-tool reads or requires that layout, and `findings/` is not referenced by code at all.
-A user who files work differently should not have to fight their own config.
+tool reads or requires that layout. `findings/` has a command (`dotagents findings`
+manages `<scope>/findings/`), but using it is likewise opt-in: nothing else in the
+tool depends on a findings queue existing. A user who files work differently
+should not have to fight their own config.
 
 `Releases` in particular is opinionated *and* important ([D02](../../design/decisions/D02.md)
 argues it must be always-on rather than gated behind loading a flow file). Opt in

@@ -69,9 +69,10 @@ release (so it stays current between them).
   in `.agents/AGENTS.md`, human-facing overview in `README.md`.
 - `CHANGELOG.md`: Keep a Changelog format (`references/CHANGELOG.md`) — `[Unreleased]`
   always at top, one `## [x.y.z] - <date>` heading per release. Before release, run
-  `py -3.12 ~/.agents/tools/leak_check.py <repo>` — it scans tracked files for
-  private-plan leaks AND commit messages for agent-session trailers/URLs
-  (`Claude-Session:`, `claude.ai/code/session`). That trailer is auto-added by the
+  your personal pre-push leak scan (a personal command module in your private
+  `.agents/`, not part of dotagents) — it scans tracked files for private-plan leaks
+  AND commit messages for agent-attribution trailers/URLs (`Co-Authored-By:`, any
+  `*-Session:` trailer, `claude.ai/code/session`). Those are auto-added by the
   harness and must be stripped before pushing public — the link exposes a session id.
   If one already landed, rewrite it out
   (`git filter-branch --msg-filter "sed '/^Claude-Session:/d'"`); pre-rewrite SHAs stay
@@ -81,7 +82,7 @@ release (so it stays current between them).
   release: a **previous→current benchmark table** (median) from `.agents/bench/`;
   **migration nuance** too detailed for Keep a Changelog; **benchmark caveats** (runner
   noise, OS, language version, local-vs-CI); **validation evidence** (tests/build/docs/
-  leak-check, CI run IDs); **publication state** (prepared / main pushed / tag awaiting
+  leak scan, CI run IDs); **publication state** (prepared / main pushed / tag awaiting
   per-release consent). `[Unreleased]` records the next perf target so a regression is
   caught before tagging. Same leak rules as public notes.
 - `LICENSE`: MIT by default (`references/LICENSE`; fill `<year>`/`<copyright_holder>`).

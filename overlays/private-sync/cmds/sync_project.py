@@ -10,9 +10,10 @@ Renamed from the old bare `sync` (D85): the command reconciles and pushes **a
 project's `.agents` store** (and the bare name collided conceptually with
 `overlays sync`, which refreshes overlays -- a different thing entirely).
 
-See `link_project.py` for why the logic is loaded by path rather than imported:
-discovered command modules are imported standalone, so `_load_link()` resolves
-`<overlay-root>/lib/_link.py` directly and needs no PYTHONPATH or setup run.
+See `link_project.py` for how the logic is loaded: a plain `import _link` when
+`dotagents env` has put this overlay's `lib/` on `PYTHONPATH` (it does, for every
+installed overlay), else `_load_link()` resolves `<overlay-root>/lib/_link.py`
+by path, needing no PYTHONPATH or setup run.
 """
 
 import importlib.util
