@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The contract-A walk is `Scope.paths(*names, include_missing=False)`; the
+  `_resolve` module (and its API docs page) is gone, its `LEVEL_NAMES` live in
+  `_scope`.
 - The system store is a store like the others. `Scope.system_root`
   (`/etc/agents`, or `$AGENTS_SYSTEM_ROOT`) heads `Scope.stores`, and the
   contract-A walk goes store by store -- system, user, project -- each store's
