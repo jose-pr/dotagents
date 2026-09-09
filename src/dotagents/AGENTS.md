@@ -70,9 +70,16 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `.install_to(dest_overlay_dir, dry_run, overwrite=False)` (self-describing:
   ships the manifest; `overwrite` replaces files whose content differs) /
   `.merge_rules_into(agents_md, dry_run, logger)`. `Overlay.discover(root)` is the
-  ONE discovery rule (valid-named dirs under an `overlays/` root; `_scope`,
-  `_resolve` and `env` all call it), `Overlay.sort_by_priority(items)` the one
-  merge order. It is `os.PathLike`, so it goes anywhere a path does.
+  ONE discovery rule (valid-named dirs under ONE `overlays/` root — what
+  `overlays add/remove/sync` install into), and **`Overlay.installed(*stores)`**
+  folds it over `.agents` roots in precedence order (the user store, then the
+  project's; `-g` = the user store alone; a `None` store is skipped): every
+  result is stamped with its `.store`, and an overlay whose name appears in a
+  LATER store is dropped — **the project's copy shadows the store's**, so only
+  its bin/lib/env/cmds/CONTEXT.md/root var resolve. `_resolve`, `env`,
+  `context` and `overlays list`/`show` all go through `installed`.
+  `Overlay.sort_by_priority(items)` is the one merge order. It is `os.PathLike`,
+  so it goes anywhere a path does.
   `recompose_overlay_block(...)` (over a *set* of overlays) is the only module
   function. `DEFAULT_PRIORITY = 500`.
 - `_scope` — `resolve_scope(global_scope, agents_dir=None, project_root=None)`,
@@ -82,9 +89,10 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   an overlay comes from* (bundled by default). `-g` resolves the store through
   `resolve_user_store` (`--agents-dir` → `$AGENTS_HOME` → legacy → `~/.agents`),
   never the literal home dir; `--agents-dir` overrides the store in EITHER scope.
-  Installed overlays are **discovered** by presence (`discover_overlays(scope)` →
-  names, via `Overlay.discover`), not tracked in a registry. Nothing overlay-only
-  lives here any more (the name regex / `is_valid_overlay_name` moved to `Overlay`).
+  Installed overlays are **discovered** by presence (`Overlay.discover(scope.overlay_root)`
+  for one scope, `Overlay.installed(...)` for what a session uses), not tracked in
+  a registry. Nothing overlay-only lives here (name rules and discovery are
+  `Overlay`'s).
 - `_context` — assemble the effective per-agent context (Plan 04):
   `assemble_context(agent, agents_dir, project_root, global_scope=False,
   inline=False)` / `assemble_context_data(...)`. Sources are the contract-A

@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **One overlay name, two scopes = one overlay, the project's.** A project
+  session uses the user store's overlays AND the project's (`<project>/.agents/
+  overlays/`); an overlay installed in both under the same name is the
+  project's copy only, which shadows the store's for bin, lib, env files,
+  cmds, `CONTEXT.md` and the `<NAME>_OVERLAY_ROOT` var (a store root the
+  session had already pinned is re-pointed). `-g` sees the user store alone.
+  `Overlay.installed(*stores)` is the one discovery behind the contract-A
+  walk, `env`, `context` and `overlays list` / `show`; the `_scope`
+  `discover_overlays` pass-through is gone (`Overlay.discover(root)` is the
+  single-root form). `overlays list` in a project scope prints both
+  `installed (project)` and `installed (user)`, marking shadowed store copies;
+  `overlays show` falls back to the user store's copy before the source.
 - Overlay routing lines refer to overlay files through `$<NAME>_OVERLAY_ROOT`
   (the variable `env` exports per installed overlay), not a hard `~/.agents/`
   path; when a merged block carries such lines, `AGENTS.md` gets one line
