@@ -183,8 +183,14 @@ def load_settings(path: Path) -> "dict[str, Any]":
 
 
 def write_settings(path: Path, data: "dict[str, Any]", *, dry_run: bool = False) -> None:
-    """Write settings.json with a stable 2-space indent and trailing newline."""
+    """Write settings.json with a stable 2-space indent and trailing newline.
+
+    LF-only and ATOMIC (temp file + ``os.replace``): the agent may read its own
+    settings at any moment, and a half-written file is invalid JSON. Non-ASCII
+    is kept as-is (``ensure_ascii=False``) rather than rewriting a user's own
+    values as ``\\uXXXX`` escapes."""
     if dry_run:
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    from dotagents._fs import write_text_lf
+
+    write_text_lf(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n", atomic=True)

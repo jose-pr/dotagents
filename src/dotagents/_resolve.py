@@ -7,6 +7,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+#: Level names the walk itself uses. An overlay's DIRECTORY NAME is its level
+#: label, so an overlay named like one of these would collide with the per-level
+#: name-dict keys (`{"project-root": ""}` would drop that overlay's `bin`);
+#: `Overlay.is_valid_name` rejects them.
+LEVEL_NAMES = frozenset({"default", "overlay", "system", "user", "project", "project-root"})
+
 
 def get_file_paths(
     *names: str | dict[str, str],
@@ -18,11 +24,19 @@ def get_file_paths(
     """Resolve file paths across the precedence hierarchy (Contract A).
 
     Precedence order:
-    1. overlays (in ~/.agents/overlays or equivalent)
+    1. user-store overlays (`<agents_dir>/overlays/<name>/`)
     2. system (/etc/agents)
     3. user (agents_dir)
-    4. project (project_root / .agents) -- skipped if global_scope
-    5. project-root (project_root) -- skipped if global_scope
+    4. project overlays (`<project_root>/.agents/overlays/<name>/`) -- skipped if
+       global_scope. Added 2026-09-09: `overlays add` installs into the PROJECT
+       scope by default, and nothing consumed those overlays' bin/lib/env/cmds/
+       CONTEXT.md before -- only the AGENTS.md recompose saw them.
+    5. project (project_root / .agents) -- skipped if global_scope
+    6. project-root (project_root) -- skipped if global_scope
+
+    Each returned tuple is ``(level, path, root)``: for an overlay, ``level`` is
+    the overlay's directory name and ``root`` its directory; for every other
+    level ``root`` is ``None`` -- that is how callers tell overlays apart.
     """
     files: list[tuple[str, Path, Path | None]] = []
 
@@ -38,27 +52,27 @@ def get_file_paths(
             default = name_dict.get("default")
             if is_overlay:
                 default = name_dict.get("overlay", default)
-            
+
             template = name_dict.get(level, default)
             if not template:
                 continue
-            
+
             files.append((level, location / template, root))
 
-    # 1. Overlays
-    #
-    # An installed overlay is any directory under ``overlays/`` whose name is a
-    # valid overlay name -- ``Overlay.discover``, the SAME routine
-    # ``_scope.discover_overlays`` uses (the two must agree on what counts). No
-    # manifest of any kind is required -- not ``CONTEXT.md``, not
-    # ``overlay.toml``. The old ``CONTEXT.md`` gate was a precursor leftover
-    # (`agentic` used CONTEXT.md as an overlay manifest; dotagents ships none)
-    # that silently excluded EVERY real dotagents overlay from the Contract-A
-    # walk -- overlay-level bin/env/cmds resolution never fired (D84).
-    from dotagents._overlays import Overlay
+    def add_overlays(overlays_root: Path) -> None:
+        # An installed overlay is any directory under ``overlays/`` whose name is
+        # a valid overlay name -- ``Overlay.discover``, the SAME routine
+        # ``_scope.discover_overlays`` uses (the two must agree on what counts).
+        # No manifest of any kind is required -- not ``CONTEXT.md``, not
+        # ``overlay.toml``. The old ``CONTEXT.md`` gate was a precursor leftover
+        # that silently excluded EVERY real dotagents overlay from the walk (D84).
+        from dotagents._overlays import Overlay
 
-    for overlay in Overlay.discover(agents_dir / "overlays"):
-        add_name_paths(overlay.path, overlay.name, root=overlay.path, is_overlay=True)
+        for overlay in Overlay.discover(overlays_root):
+            add_name_paths(overlay.path, overlay.name, root=overlay.path, is_overlay=True)
+
+    # 1. User-store overlays
+    add_overlays(agents_dir / "overlays")
 
     # 2. System
     add_name_paths(Path("/etc/agents"), "system")
@@ -66,8 +80,9 @@ def get_file_paths(
     # 3. User
     add_name_paths(agents_dir, "user")
 
-    # 4 & 5. Project (if not global)
+    # 4, 5 & 6. Project (if not global)
     if not global_scope:
+        add_overlays(project_root / ".agents" / "overlays")
         add_name_paths(project_root / ".agents", "project")
         add_name_paths(project_root, "project-root")
 

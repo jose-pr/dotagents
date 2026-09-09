@@ -46,14 +46,17 @@ def layout(tmp_path):
     # Two overlays with CONTEXT.md and differing priority.
     ov = agents_dir / "overlays"
     ov.mkdir()
-    late = ov / "zeta"
-    late.mkdir()
-    (late / "CONTEXT.md").write_text("ZETA-CONTEXT", encoding="utf-8")
-    (late / "overlay.toml").write_text('name = "zeta"\npriority = 900\n', encoding="utf-8")
-    early = ov / "alpha"
+    # Priority order is the REVERSE of alphabetical order on purpose: with
+    # alpha=100/zeta=900 the old test passed even while priority sorting was
+    # silently broken (alphabetical happened to give the same answer).
+    early = ov / "zeta"
     early.mkdir()
-    (early / "CONTEXT.md").write_text("ALPHA-CONTEXT", encoding="utf-8")
-    (early / "overlay.toml").write_text('name = "alpha"\npriority = 100\n', encoding="utf-8")
+    (early / "CONTEXT.md").write_text("ZETA-CONTEXT root=<ZETA_OVERLAY_ROOT>", encoding="utf-8")
+    (early / "overlay.toml").write_text('name = "zeta"\npriority = 100\n', encoding="utf-8")
+    late = ov / "alpha"
+    late.mkdir()
+    (late / "CONTEXT.md").write_text("ALPHA-CONTEXT", encoding="utf-8")
+    (late / "overlay.toml").write_text('name = "alpha"\npriority = 900\n', encoding="utf-8")
 
     # A skill (must be LISTED, never inlined).
     skills = agents_dir / "skills"
@@ -71,15 +74,12 @@ def layout(tmp_path):
 # --------------------------------------------------------------------------
 
 def test_harness_loads_subtracts_user_agents_md(layout, monkeypatch):
-    """Claude's harness_loads has TWO entries: the absolute `~/.agents/AGENTS.md`
-    and the relative `AGENTS.md` (meaning "at the project root"). This test
-    covers the absolute form -- `Path.home()` is redirected to the isolated
-    `agents_dir`'s parent so `~/.agents/AGENTS.md` genuinely resolves to the
-    fixture's file, rather than the real machine's `~/.agents/AGENTS.md`
-    (which does not exist in this tmp_path and would silently make the
-    absolute-form branch a no-op, leaving only the relative form to explain a
-    pass -- exactly the bug this test previously masked, see
-    test_relative_harness_load_matches_project_root_only below)."""
+    """Claude loads the store's AGENTS.md only through an `@` include in
+    `~/.claude/CLAUDE.md` -- so `context` subtracts it exactly when that
+    include is really there (`ClaudeAgent.loaded_paths` reads the entry files),
+    not on the old static assumption. `Path.home()` is redirected to a fake
+    home carrying both the store and the include, so `~/.claude/CLAUDE.md`
+    genuinely resolves to the fixture's file, rather than the real machine's."""
     agents_dir, project_root = layout
     # `~/.agents/AGENTS.md` must resolve to agents_dir/AGENTS.md exactly. No
     # symlink (this machine can't create one without elevation, confirmed
@@ -108,11 +108,20 @@ def test_harness_loads_subtracts_user_agents_md(layout, monkeypatch):
             shutil.copy2(item, dest)
     home_var = "USERPROFILE" if os.name == "nt" else "HOME"
     monkeypatch.setenv(home_var, str(fake_home))
+    monkeypatch.delenv("AGENTS_HOME", raising=False)
 
     claude = _agents.ClaudeAgent()
+
+    # Fresh install, no include yet: NOTHING loads the store's AGENTS.md, so
+    # `context` must emit it (the old static assumption dropped it here, and
+    # the base rules never reached a session -- review 2026-09-09, 1.5).
     text = _context.assemble_context(claude, dotagents_dir, project_root, global_scope=True)
-    # Claude's harness already loads ~/.agents/AGENTS.md, so it must NOT be
-    # re-emitted as a source block.
+    assert "# User rules" in text
+
+    # With the include `init` writes, the harness loads it -> subtracted.
+    (fake_home / ".claude").mkdir()
+    (fake_home / ".claude" / "CLAUDE.md").write_text("@../.agents/AGENTS.md\n", encoding="utf-8")
+    text = _context.assemble_context(claude, dotagents_dir, project_root, global_scope=True)
     assert "# User rules" not in text
     # But the overlays (never loaded by the harness) ARE emitted.
     assert "ALPHA-CONTEXT" in text
@@ -164,10 +173,60 @@ def test_non_claude_agent_keeps_agents_md(layout):
 def test_inlines_bare_and_backticked_refs(layout):
     agents_dir, project_root = layout
     gemini = _agents.GeminiAgent()  # keeps AGENTS.md so the refs are present
-    text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True)
+    text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True, inline=True)
     assert "PYTHON-KB-BODY" in text   # bare "read kb/PYTHON.md"
     assert "GIT-KB-BODY" in text      # backticked `kb/GIT.md`
     assert "On-Demand Files (Inlined)" in text
+
+
+def test_inlining_is_opt_in(layout):
+    """The base rule is "read the matching file BEFORE such a task, never
+    preemptively"; inlining every mention made a 100 KB SessionStart payload."""
+    agents_dir, project_root = layout
+    gemini = _agents.GeminiAgent()
+    text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True)
+    assert "read kb/PYTHON.md" in text          # the pointer is still there
+    assert "PYTHON-KB-BODY" not in text         # the body is not
+    assert "On-Demand Files (Inlined)" not in text
+
+
+def test_inlining_never_double_sends_sources_or_harness_files(layout):
+    agents_dir, project_root = layout
+    (agents_dir / "AGENTS.md").write_text(
+        "# User rules\nsee `CLAUDE.md`, .agents/AGENTS.md and kb/GIT.md\n", encoding="utf-8"
+    )
+    (project_root / "CLAUDE.md").write_text("CLAUDE-ENTRY", encoding="utf-8")
+    (project_root / ".agents" / "AGENTS.md").write_text("PROJECT-RULES", encoding="utf-8")
+    gemini = _agents.GeminiAgent()
+    text = _context.assemble_context(gemini, agents_dir, project_root, inline=True)
+    assert "GIT-KB-BODY" in text
+    assert text.count("PROJECT-RULES") == 1       # a source, emitted once
+    assert "CLAUDE-ENTRY" not in text             # a harness entry file, never inlined
+
+
+def test_overlay_placeholders_expand(layout):
+    """`<NAME_OVERLAY_ROOT>` names the same dir `env` emits for the overlay --
+    it never expanded before, because the resolver labels overlay entries by
+    NAME and the code compared against the literal "overlay"."""
+    agents_dir, project_root = layout
+    gemini = _agents.GeminiAgent()
+    text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True)
+    assert "<ZETA_OVERLAY_ROOT>" not in text
+    assert "root=%s" % (agents_dir / "overlays" / "zeta") in text
+
+
+def test_project_scope_overlays_are_context_sources(layout):
+    """`overlays add` installs into the PROJECT scope by default; its CONTEXT.md
+    must be a source (only the store's overlays were walked before)."""
+    agents_dir, project_root = layout
+    pov = project_root / ".agents" / "overlays" / "projov"
+    pov.mkdir(parents=True)
+    (pov / "CONTEXT.md").write_text("PROJECT-OVERLAY-CONTEXT", encoding="utf-8")
+    gemini = _agents.GeminiAgent()
+    assert "PROJECT-OVERLAY-CONTEXT" in _context.assemble_context(gemini, agents_dir, project_root)
+    assert "PROJECT-OVERLAY-CONTEXT" not in _context.assemble_context(
+        gemini, agents_dir, project_root, global_scope=True
+    )
 
 
 # --------------------------------------------------------------------------
@@ -192,9 +251,9 @@ def test_overlay_priority_orders_by_manifest(layout):
     agents_dir, project_root = layout
     gemini = _agents.GeminiAgent()
     text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True)
-    # alpha (priority 100) must appear before zeta (priority 900) despite alpha
+    # zeta (priority 100) must appear before alpha (priority 900) despite zeta
     # sorting later alphabetically -- proves priority, not name, drives order.
-    assert text.index("ALPHA-CONTEXT") < text.index("ZETA-CONTEXT")
+    assert text.index("ZETA-CONTEXT") < text.index("ALPHA-CONTEXT")
 
 
 def test_default_priority_is_500():
@@ -222,7 +281,9 @@ def test_manifest_reports_priority(tmp_path):
 def test_json_payload_shape(layout):
     agents_dir, project_root = layout
     gemini = _agents.GeminiAgent()
-    data = _context.assemble_context_data(gemini, agents_dir, project_root, global_scope=True)
+    data = _context.assemble_context_data(
+        gemini, agents_dir, project_root, global_scope=True, inline=True
+    )
     # Round-trips as JSON.
     json.dumps(data)
     assert data["agent"] == "gemini"

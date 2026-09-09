@@ -2,8 +2,54 @@
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 from typing import Optional
+
+from dotagents._fs import write_text_lf
+
+
+def _is_user_store(dest: "str | os.PathLike[str]") -> bool:
+    """True if ``dest`` is THE user store -- the configurable one
+    (``resolve_user_store``: ``$AGENTS_HOME`` → ``~/.agents``), not the literal
+    home path. Comparing against ``~/.agents`` alone sent a custom store's
+    user-scope hooks to ``<store-parent>/.claude/settings.local.json``, a file
+    no harness reads (review 2026-09-09)."""
+    from dotagents._scope import resolve_user_store
+
+    try:
+        return Path(dest).expanduser().resolve() == resolve_user_store().resolve()
+    except OSError:
+        return False
+
+
+#: A Claude Code `@path` include line: the path is the rest of the line.
+_INCLUDE_LINE_RE = re.compile(r"^\s*@(\S+)\s*$")
+
+
+def _claude_includes(entry_file: Path, seen: "set[Path]") -> None:
+    """Add ``entry_file`` and every file it ``@``-includes (recursively,
+    relative to the including file, ``~`` expanded) to ``seen``."""
+    try:
+        resolved = entry_file.expanduser().resolve()
+    except OSError:
+        return
+    if resolved in seen or not resolved.is_file():
+        return
+    seen.add(resolved)
+    try:
+        lines = resolved.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        m = _INCLUDE_LINE_RE.match(line)
+        if not m:
+            continue
+        ref = Path(m.group(1)).expanduser()
+        if not ref.is_absolute():
+            ref = resolved.parent / ref
+        _claude_includes(ref, seen)
 
 
 class Agent:
@@ -48,9 +94,47 @@ class Agent:
         """Write the base configuration files for this agent (used by init/install)."""
         pass
 
-    def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
-        """Write the assembled context file for this agent (used by context generator)."""
-        pass
+    #: The harness's own instruction file, relative to the PROJECT ROOT, that
+    #: `write_context` merges the assembled context into (as a managed
+    #: `dotagents:context` block, never a raw overwrite). Empty = no such file.
+    context_target: str = ""
+
+    def write_context(self, project_root: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
+        """Merge the assembled context into this harness's own instruction file
+        under ``project_root`` (:attr:`context_target`), as a managed block.
+
+        ``project_root`` is the project, NOT the store: this used to take the
+        user store and, for Codex, overwrote ``<store>/AGENTS.md`` -- a context
+        SOURCE -- so every run re-inlined the previous run's output (review
+        2026-09-09). Prefer the SessionStart hook where the harness has one;
+        this is the static alternative for a harness without hooks."""
+        if not self.context_target:
+            if logger:
+                logger.info("%s: no native context file to write", self.name)
+            return
+        from dotagents._merge import merge_context_block
+
+        target = Path(project_root) / self.context_target
+        branch = merge_context_block(target, effective_context, dry_run=dry_run)
+        if logger:
+            logger.info("%s: %s", "would write" if dry_run else branch, target)
+
+    def loaded_paths(self, project_root: Path) -> "list[Path]":
+        """Resolved paths this harness loads by itself, so ``context`` never
+        double-sends them. The static :attr:`harness_loads` entries: ``~/`` and
+        ``/`` forms are absolute, anything else is relative to ``project_root``.
+        A harness with an include mechanism overrides this to report what its
+        entry files actually include on this machine."""
+        out: "list[Path]" = []
+        for hl in self.harness_loads:
+            try:
+                if hl.startswith("~/") or hl.startswith("/"):
+                    out.append(Path(hl).expanduser().resolve())
+                else:
+                    out.append((Path(project_root) / hl).resolve())
+            except OSError:
+                pass
+        return out
 
     def wire_hooks(
         self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
@@ -72,8 +156,17 @@ class Agent:
 class ClaudeAgent(Agent):
     name = "claude"
     context_files = ["CLAUDE.md"]
-    # Claude's harness loads ~/.agents/AGENTS.md (via @-include) and any per-dir AGENTS.md
-    harness_loads = ["~/.agents/AGENTS.md", "AGENTS.md"]
+    # What Claude Code loads by itself: the project-root AGENTS.md, plus whatever
+    # its entry files `@`-include -- resolved live by `loaded_paths`, NOT assumed.
+    # `~/.agents/AGENTS.md` used to be listed here statically, on the assumption
+    # that `~/.claude/CLAUDE.md` includes it; `init` never wrote that include, so
+    # on a fresh install the store's rules were subtracted from `context` as
+    # "already loaded" while nothing loaded them (review 2026-09-09, 1.5).
+    harness_loads = ["AGENTS.md"]
+    #: Claude Code's entry files, relative to the project root (`~/`-prefixed =
+    #: the user-level one). `@path` lines in any of them are includes.
+    ENTRY_FILES = ("~/.claude/CLAUDE.md", "CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md")
+    context_target = ".claude/CLAUDE.md"
     # Confirmed markers (code.claude.com/docs/en/env-vars): CLAUDECODE=1 plus the
     # CLAUDE_CODE_* family (CLAUDE_CODE_ENTRYPOINT, ...).
     detect_env_vars = ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"]
@@ -81,9 +174,38 @@ class ClaudeAgent(Agent):
     vendor = "anthropic"
     model_source_vars = ["ANTHROPIC_MODEL"]
 
+    def loaded_paths(self, project_root: Path) -> "list[Path]":
+        seen: "set[Path]" = set()
+        for entry in self.ENTRY_FILES:
+            if entry.startswith("~/"):
+                _claude_includes(Path(entry), seen)
+            else:
+                _claude_includes(Path(project_root) / entry, seen)
+        return super().loaded_paths(project_root) + sorted(seen)
+
+    def _config_root(self, dest: Path) -> Path:
+        """`~/.claude` for the user store, `<project>/.claude` otherwise
+        (`dest` is `<scope>/.agents`, so its parent is the project root)."""
+        if _is_user_store(dest):
+            return Path.home() / ".claude"
+        return Path(dest).expanduser().resolve().parent / ".claude"
+
+    def _include_line(self, dest: Path, entry_file: Path) -> str:
+        """The `@path` line that makes `entry_file` load `<dest>/AGENTS.md`:
+        relative when the store sits beside the config dir (`@../.agents/AGENTS.md`
+        -- the store stays relocatable), absolute otherwise."""
+        target = Path(dest).expanduser().resolve() / "AGENTS.md"
+        try:
+            rel = Path(os.path.relpath(target, entry_file.parent))
+        except ValueError:  # different drives
+            rel = None
+        if rel is not None and rel.parts.count("..") <= 1:
+            return "@" + rel.as_posix()
+        return "@" + target.as_posix()
+
     def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
-        from dotagents._merge import merge_block, merge_claude_md, timestamped_backup_root
-        
+        from dotagents._merge import merge_block, merge_claude_md, merge_include_line, timestamped_backup_root
+
         backup_root = timestamped_backup_root(dest) if force else None
 
         branch = merge_block(
@@ -101,6 +223,17 @@ class ClaudeAgent(Agent):
                 force=force, dry_run=dry_run, backup_root=backup_root,
             )
             if logger: logger.info("%s: CLAUDE.md", branch)
+
+        # The last mile: Claude Code reads `~/.claude/CLAUDE.md` (user scope) or
+        # `<project>/.claude/CLAUDE.md` (project scope), never `<store>/CLAUDE.md`.
+        # Without this include the store's AGENTS.md reaches no session at all.
+        # A managed block, appended, and skipped when the include line is already
+        # there by hand (this is exactly what a working hand-wired setup carries).
+        entry = self._config_root(dest) / "CLAUDE.md"
+        branch = merge_include_line(
+            entry, self._include_line(dest, entry), dry_run=dry_run,
+        )
+        if logger: logger.info("%s: %s (include)", branch, entry)
 
     # --- hooks ---------------------------------------------------------
     #
@@ -240,13 +373,15 @@ class ClaudeAgent(Agent):
 
         # Scope-aware, like the rest of dotagents: a project-scope `init` must not
         # silently edit the user's GLOBAL settings. `dest` is `<scope>/.agents`, so
-        # its parent is the project root in project scope and $HOME in user scope.
+        # its parent is the project root in project scope; the user store is
+        # whatever `resolve_user_store` says (`$AGENTS_HOME`), not literally
+        # `~/.agents`.
+        is_user_scope = _is_user_store(dest)
         if config_root:
             root = Path(config_root)
-        elif Path(dest).expanduser().resolve() == (Path.home() / ".agents").resolve():
-            root = Path.home() / ".claude"
+            is_user_scope = False
         else:
-            root = Path(dest).parent / ".claude"
+            root = self._config_root(dest)
 
         # 1. Skills last mile. Publishing into `<scope>/skills/` only helps if the
         #    agent reads that dir; without this link it never does.
@@ -275,7 +410,6 @@ class ClaudeAgent(Agent):
         # 2. Hooks. In a project, write `settings.local.json` -- the gitignored
         # personal file. `settings.json` there is checked into source control, and
         # these hooks carry machine-specific paths that must never be committed.
-        is_user_scope = root == (Path.home() / ".claude")
         settings_path = root / (
             "settings.json" if is_user_scope else "settings.local.json"
         )
@@ -379,18 +513,12 @@ class ClaudeAgent(Agent):
 
         return pt_hook_changed
 
-    def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
-        target = dest / "CONTEXT.md"
-        if not dry_run:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(effective_context, encoding="utf-8")
-        if logger: logger.info("wrote context to %s", target)
-
 
 class GeminiAgent(Agent):
     name = "gemini"
     context_files = ["GEMINI.md"]
     harness_loads = ["GEMINI.md"]
+    context_target = "GEMINI.md"
     # Confirmed marker: GEMINI_CLI=1, set by Gemini CLI in every child process it
     # spawns (google-gemini.github.io/gemini-cli, run_shell_command docs). The old
     # GEMINI_SESSION was invented; GEMINI_API_KEY is a credential, not a marker.
@@ -409,13 +537,6 @@ class GeminiAgent(Agent):
         )
         if logger: logger.info("%s: GEMINI.md", branch)
 
-    def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
-        target = dest / "GEMINI.md"
-        if not dry_run:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(effective_context, encoding="utf-8")
-        if logger: logger.info("wrote context to %s", target)
-
 
 class AntigravityAgent(Agent):
     name = "antigravity"
@@ -429,6 +550,9 @@ class AntigravityAgent(Agent):
     # workspaces") -- shared with GeminiAgent's own file, by the docs'
     # own account, not a separate Antigravity-only global file.
     harness_loads = ["~/.gemini/GEMINI.md", ".agents/rules/dotagents.md"]
+    # The rules-folder file is OURS (nothing else writes it), so the whole file
+    # is the managed block -- `merge_context_block` creates/refreshes it.
+    context_target = ".agents/rules/dotagents.md"
     # NO env-var detection marker is documented anywhere (checked hooks,
     # rules-workflows, getting-started, plugins pages) -- unlike Claude
     # (CLAUDECODE=1), Codex (CODEX_HOME), Gemini CLI (GEMINI_CLI=1). Past
@@ -455,13 +579,6 @@ class AntigravityAgent(Agent):
             force=force, dry_run=dry_run, backup_root=backup_root,
         )
         if logger: logger.info("%s: AGENTS.md (Antigravity)", branch)
-
-    def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
-        target = dest / ".agents" / "rules" / "dotagents.md"
-        if not dry_run:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(effective_context, encoding="utf-8")
-        if logger: logger.info("wrote context to %s", target)
 
     # --- hooks ---------------------------------------------------------
     #
@@ -576,11 +693,15 @@ class CodexAgent(Agent):
     name = "codex"
     context_files = ["AGENTS.md"]
     harness_loads = ["AGENTS.md"]
+    context_target = "AGENTS.md"
     # Codex ships NO dedicated runtime marker (openai/codex). The old CODEX_SESSION
-    # was invented. Detect via the state dir CODEX_HOME or the sandbox signal vars
-    # Codex sets for child processes (CODEX_SANDBOX, CODEX_SANDBOX_NETWORK_DISABLED,
-    # any CODEX_SANDBOX_* -- matched by prefix in detect_env below).
-    detect_env_vars = ["CODEX_HOME", "CODEX_SANDBOX"]
+    # was invented. Detect via the sandbox signal vars Codex sets for child
+    # processes (CODEX_SANDBOX, CODEX_SANDBOX_NETWORK_DISABLED, any CODEX_SANDBOX_*
+    # -- matched by prefix in detect_env below). CODEX_HOME is NOT a marker: it is
+    # the user's persistent state-dir override, typically exported from a shell
+    # profile, so it is present in every session of every harness on that box.
+    # `_config_root` still honours it as the config location.
+    detect_env_vars = ["CODEX_SANDBOX"]
     harness_id = "codex"
     vendor = "openai"
     # OpenAI base/model live under OPENAI_* (support the OPENAI_API_BASE alias
@@ -823,18 +944,12 @@ class CodexAgent(Agent):
             shutil.copy2(str(src_script), str(dest_script))
         return changed
 
-    def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
-        target = dest / "AGENTS.md"
-        if not dry_run:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(effective_context, encoding="utf-8")
-        if logger: logger.info("wrote context to %s", target)
-
 
 class CursorAgent(Agent):
     name = "cursor"
     context_files = [".cursorrules", ".cursor/rules/"]
     harness_loads = [".cursorrules", ".cursor/rules/"]
+    context_target = ".cursorrules"
     # Intended marker: CURSOR_AGENT=1 (cursor.com/docs/cli). Note a known bug where
     # it is not always propagated to spawned bash (forum.cursor.com/t/.../132427),
     # so config-file detect() remains the fallback. The old CURSOR_SESSION_ID was
@@ -854,18 +969,12 @@ class CursorAgent(Agent):
         )
         if logger: logger.info("%s: .cursorrules", branch)
 
-    def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
-        target = dest / ".cursorrules"
-        if not dry_run:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(effective_context, encoding="utf-8")
-        if logger: logger.info("wrote context to %s", target)
-
 
 class CopilotAgent(Agent):
     name = "copilot"
     context_files = [".github/copilot-instructions.md"]
     harness_loads = [".github/copilot-instructions.md"]
+    context_target = ".github/copilot-instructions.md"
     # Copilot ships NO runtime marker var yet -- the request for one (e.g.
     # COPILOT_AGENT) is still open (microsoft/vscode#311734). COPILOT_MODEL /
     # COPILOT_HOME exist but are config, not reliable "am I running" markers, so
@@ -886,13 +995,6 @@ class CopilotAgent(Agent):
             force=force, dry_run=dry_run, backup_root=backup_root,
         )
         if logger: logger.info("%s: %s", branch, target.relative_to(dest))
-
-    def write_context(self, dest: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
-        target = dest / ".github" / "copilot-instructions.md"
-        if not dry_run:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(effective_context, encoding="utf-8")
-        if logger: logger.info("wrote context to %s", target)
 
 
 # Registry of agents
@@ -994,7 +1096,9 @@ def stamp_identity(
     it is, nothing may branch on this var.
     """
     active = resolve_active_agent(environ, explicit=explicit, root=root)
-    override = explicit is not None
+    # Only a KNOWN explicit name overrides: an unknown one falls through to
+    # detection above, and the detected identity must not clobber a pin.
+    override = explicit is not None and explicit in _REGISTRY
 
     identity: dict[str, str] = {}
 

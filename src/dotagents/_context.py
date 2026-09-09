@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from dotagents import _resolve
 from dotagents import _agents
@@ -23,10 +23,31 @@ def _expand_placeholders(text: str, project_root: Path, overlay_roots: list[Path
     return text
 
 
+def _installed_overlay_roots(
+    agents_dir: Path, project_root: Path, global_scope: bool
+) -> "list[Path]":
+    """Every installed overlay's dir -- user store first, then (unless
+    ``global_scope``) the project's -- the same set ``dotagents env`` names with
+    a ``<NAME>_OVERLAY_ROOT`` var, so a placeholder resolves for ANY installed
+    overlay, not only one that happens to ship a ``CONTEXT.md``."""
+    from dotagents._env import get_overlay_roots
+
+    return get_overlay_roots(
+        agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
+    )
+
+
 # A relative path token ending in .md: one or more path segments, no spaces,
 # no leading slash or `~` (absolute paths are already-known files, not on-demand
 # pointers), at least the trailing `.md`. Used for the BARE reference pass.
 _BARE_MD_REF = re.compile(r'(?<![\w`./~-])((?:[\w.-]+/)*[\w.-]+\.md)\b')
+
+#: Bare filenames (no directory) that name a harness-walked context file rather
+#: than an on-demand target -- and would match every mention of the word.
+_HARNESS_FILENAMES = frozenset({
+    "AGENTS.md", "AGENTS.local.md", "CONTEXT.md", "CLAUDE.md", "CLAUDE.local.md",
+    "GEMINI.md",
+})
 
 
 def _find_md_refs(text: str) -> "list[str]":
@@ -38,8 +59,9 @@ def _find_md_refs(text: str) -> "list[str]":
     - the `<!-- Source: ... -->` provenance comments this module emits (they are
       absolute source paths, not on-demand pointers),
     - absolute / home paths (already-loaded, not on-demand),
-    - the bare filename `AGENTS.md` with no directory (a harness-walked file, not
-      an on-demand pointer -- and it would match every mention of the word).
+    - harness-walked context files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, ...,
+      bare or under `.agents/`) -- a source or a harness load, never an
+      on-demand pointer, and inlining one double-sends it.
     Order-preserving, de-duplicated.
     """
     seen: "dict[str, None]" = {}
@@ -48,9 +70,9 @@ def _find_md_refs(text: str) -> "list[str]":
         ref = ref.strip()
         if not ref or ref in seen:
             return
-        # Skip bare top-level filenames with no directory component that name a
-        # harness-walked context file rather than an on-demand target.
-        if "/" not in ref and ref in ("AGENTS.md", "AGENTS.local.md", "CONTEXT.md"):
+        if ref.rsplit("/", 1)[-1] in _HARNESS_FILENAMES and (
+            "/" not in ref or ref.startswith((".agents/", ".claude/", ".gemini/"))
+        ):
             return
         seen[ref] = None
 
@@ -68,14 +90,30 @@ def _find_md_refs(text: str) -> "list[str]":
     return list(seen)
 
 
-def _inline_referenced_files(text: str, search_roots: list[Path]) -> str:
+def _inline_referenced_files(
+    text: str, search_roots: list[Path], exclude: "Iterable[Path]" = ()
+) -> str:
     """Find markdown file references (backticked or bare) and inline them.
 
     This defeats unreliable on-demand loading: an `AGENTS.md` that merely points
     at `kb/X.md` gets that file's content appended inline so the agent never has
     to fetch it. Only references that resolve to a real file under a search root
-    are inlined; unresolved references are left as-is."""
+    are inlined; unresolved references are left as-is, and a file in ``exclude``
+    (a source already emitted, or one the harness loads itself) is never
+    inlined twice.
+
+    OPT-IN (``inline=True`` on the assemblers / ``context --inline``): the base
+    AGENTS.md's own rule is "read the matching file BEFORE such a task; skip it
+    otherwise, never preemptively", and inlining every mention does the opposite
+    -- measured 2026-09-09, a 100 KB payload on every session start, most of it
+    a CHANGELOG and an API header that happened to be mentioned in prose."""
     refs = _find_md_refs(text)
+    excluded = set()
+    for p in exclude:
+        try:
+            excluded.add(Path(p).resolve())
+        except OSError:
+            pass
 
     inlined: "dict[str, str]" = {}
     for ref in refs:
@@ -83,6 +121,8 @@ def _inline_referenced_files(text: str, search_roots: list[Path]) -> str:
             cand = root / ref
             try:
                 if cand.is_file():
+                    if cand.resolve() in excluded:
+                        break
                     inlined[ref] = cand.read_text(encoding="utf-8")
                     break
             except OSError:
@@ -101,14 +141,13 @@ def _collect_skills(agents_dir: Path, project_root: Path, global_scope: bool) ->
 
     Skills are OPT-IN: the generator lists them so the user can choose to invoke
     one, but never inlines a skill body (that would defeat the user's
-    'skills I decide to use' model). Deterministic order."""
+    'skills I decide to use' model). Deterministic order: the store, the
+    project's ``.agents``, then every installed overlay (the one discovery rule,
+    :meth:`Overlay.discover` -- ``.git`` / ``__pycache__`` never count)."""
     roots = [agents_dir]
     if not global_scope:
         roots.append(project_root / ".agents")
-
-    overlay_root = agents_dir / "overlays"
-    if overlay_root.is_dir():
-        roots.extend([d for d in sorted(overlay_root.iterdir()) if d.is_dir()])
+    roots.extend(_installed_overlay_roots(agents_dir, project_root, global_scope))
 
     skills: "list[tuple[str, str]]" = []
     seen: "set[str]" = set()
@@ -151,10 +190,13 @@ def _resolve_and_filter_sources(
     agents_dir: Path,
     project_root: Path,
     global_scope: bool,
-) -> "list[tuple[str, Path, Path | None]]":
+) -> "tuple[list[tuple[str, Path, Path | None]], list[Path]]":
     """Resolve context sources (contract A), priority-order them, and subtract
-    the active agent's ``harness_loads`` so nothing already in the harness's
-    context is re-emitted (no double-send)."""
+    what the active agent's harness already loads so nothing already in the
+    harness's context is re-emitted (no double-send).
+
+    Returns ``(sources, harness_loaded)`` -- the second is the resolved list of
+    files the harness loads itself, so the inliner can skip them too."""
     sources = _resolve.get_file_paths(
         {"overlay": "CONTEXT.md", "default": "AGENTS.md"},
         {"project": "AGENTS.local.md", "project-root": "AGENTS.local.md"},
@@ -170,33 +212,30 @@ def _resolve_and_filter_sources(
     # non-overlay levels (system/user/project) keep the resolver's precedence
     # order, placed after all overlays via a high sentinel. Stable sort preserves
     # resolver order within equal keys.
+    #
+    # An overlay entry is the one whose `root` is set (the resolver labels it
+    # with the overlay's NAME, not the literal "overlay" -- keying on that label
+    # meant no entry ever counted as an overlay, so priority ordering and
+    # placeholder expansion silently never happened; review 2026-09-09).
     _NON_OVERLAY_SENTINEL = 10_000
 
     def _sort_key(item):
         level, path, root = item
-        if level == "overlay" and root:
+        if root is not None:
             return (_overlays.Overlay(root).priority, path.name)
         return (_NON_OVERLAY_SENTINEL, "")
 
     sources.sort(key=_sort_key)
 
-    # Subtract harness loads (no double-send). A relative entry (e.g. Codex's
-    # "AGENTS.md") means "the harness reads this path relative to the PROJECT
-    # ROOT" -- resolved against `project_root`, exactly like the `~/`/`/`
-    # absolute forms are resolved against home/root. Previously this was a bare
-    # `path.name == hl` filename match with no directory check at all, so ANY
-    # source file merely named "AGENTS.md" was suppressed -- including
-    # `~/.agents/AGENTS.md` (the user-store file, which Codex's harness never
-    # reads) getting wrongly matched against Codex's project-root
-    # "AGENTS.md" entry purely because the basenames happened to coincide.
-    # Confirmed live: `dotagents context --agents codex` emitted an empty
-    # `sources: []` even with `~/.agents/AGENTS.md` present and non-empty.
-    harness_loads_resolved = []
-    for hl in agent.harness_loads:
-        if hl.startswith("~/") or hl.startswith("/"):
-            harness_loads_resolved.append(Path(hl).expanduser().resolve())
-        else:
-            harness_loads_resolved.append((project_root / hl).resolve())
+    # Subtract harness loads (no double-send). `Agent.loaded_paths` resolves the
+    # static `harness_loads` list (a relative entry, e.g. Codex's "AGENTS.md",
+    # means "relative to the PROJECT ROOT"; `~/` and `/` forms are absolute)
+    # and, for a harness with an include mechanism (Claude's `@path` lines),
+    # whatever its entry files actually include -- so the subtraction reflects
+    # what is loaded on THIS machine, not an assumption. Previously this was a
+    # bare `path.name == hl` filename match with no directory check at all, so
+    # ANY source file merely named "AGENTS.md" was suppressed.
+    harness_loads_resolved = agent.loaded_paths(project_root)
 
     filtered = []
     for item in sources:
@@ -209,7 +248,47 @@ def _resolve_and_filter_sources(
             pass
         if not skip:
             filtered.append(item)
-    return filtered
+    return filtered, harness_loads_resolved
+
+
+def _assemble(
+    agent: _agents.Agent,
+    agents_dir: Path,
+    project_root: Path,
+    global_scope: bool,
+    inline: bool,
+) -> "tuple[str, list[str]]":
+    """The shared body of both assemblers: ``(text, source_paths)``."""
+    filtered_sources, harness_loaded = _resolve_and_filter_sources(
+        agent, agents_dir, project_root, global_scope
+    )
+
+    assembled_parts = []
+    search_roots = [project_root, agents_dir]
+    source_paths: "list[str]" = []
+    emitted: "list[Path]" = []
+
+    for level, path, root in filtered_sources:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        source_paths.append(str(path))
+        emitted.append(path)
+        if root:
+            search_roots.append(root)
+        assembled_parts.append(f"<!-- Source: {path} -->\n{content.strip()}\n")
+
+    text = "\n\n".join(assembled_parts)
+    if inline and text:
+        text = _inline_referenced_files(
+            text, search_roots, exclude=[*emitted, *harness_loaded]
+        )
+    # Placeholders last, so ones inside inlined files expand too; every
+    # installed overlay gets a root, matching `dotagents env`.
+    overlay_roots = _installed_overlay_roots(agents_dir, project_root, global_scope)
+    text = _expand_placeholders(text, project_root, overlay_roots)
+    return text, source_paths
 
 
 def assemble_context(
@@ -217,37 +296,18 @@ def assemble_context(
     agents_dir: Path,
     project_root: Path,
     global_scope: bool = False,
+    inline: bool = False,
 ) -> str:
     """Assemble the effective context text (markdown) for the given agent.
 
     Returns '' if, after subtracting what the agent's harness already loads,
-    there is nothing new to emit (no empty double of already-loaded content)."""
-    filtered_sources = _resolve_and_filter_sources(
-        agent, agents_dir, project_root, global_scope
-    )
-    if not filtered_sources:
+    there is nothing new to emit (no empty double of already-loaded content).
+    ``inline=True`` appends the on-demand files the sources reference (see
+    :func:`_inline_referenced_files` for why that is opt-in)."""
+    text, source_paths = _assemble(agent, agents_dir, project_root, global_scope, inline)
+    if not source_paths:
         return ""
-
-    assembled_parts = []
-    search_roots = [project_root, agents_dir]
-    overlay_roots = []
-
-    for level, path, root in filtered_sources:
-        try:
-            content = path.read_text(encoding="utf-8")
-            if root:
-                search_roots.append(root)
-                if level == "overlay":
-                    overlay_roots.append(root)
-            assembled_parts.append(f"<!-- Source: {path} -->\n{content.strip()}\n")
-        except OSError:
-            pass
-
-    text = "\n\n".join(assembled_parts)
-    text = _expand_placeholders(text, project_root, overlay_roots)
-    text = _inline_referenced_files(text, search_roots)
     text += _get_skills_listing(agents_dir, project_root, global_scope)
-
     return text
 
 
@@ -256,6 +316,7 @@ def assemble_context_data(
     agents_dir: Path,
     project_root: Path,
     global_scope: bool = False,
+    inline: bool = False,
 ) -> "dict[str, object]":
     """Structured form of the assembled context, for ``--format json``.
 
@@ -267,33 +328,11 @@ def assemble_context_data(
           "context": <assembled markdown text, minus the skills listing>,
           "skills": [{"name": ..., "description": ...}, ...],  # opt-in listing
         }
-    ``context`` is the same assembled+inlined text the markdown format emits, but
-    WITHOUT the skills listing appended -- skills are their own structured field
-    so a consumer can render them separately and keep the opt-in distinction."""
-    filtered_sources = _resolve_and_filter_sources(
-        agent, agents_dir, project_root, global_scope
-    )
-
-    assembled_parts = []
-    search_roots = [project_root, agents_dir]
-    overlay_roots = []
-    source_paths: "list[str]" = []
-
-    for level, path, root in filtered_sources:
-        try:
-            content = path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        source_paths.append(str(path))
-        if root:
-            search_roots.append(root)
-            if level == "overlay":
-                overlay_roots.append(root)
-        assembled_parts.append(f"<!-- Source: {path} -->\n{content.strip()}\n")
-
-    text = "\n\n".join(assembled_parts)
-    text = _expand_placeholders(text, project_root, overlay_roots)
-    text = _inline_referenced_files(text, search_roots)
+    ``context`` is the same assembled(+inlined, with ``inline=True``) text the
+    markdown format emits, but WITHOUT the skills listing appended -- skills are
+    their own structured field so a consumer can render them separately and
+    keep the opt-in distinction."""
+    text, source_paths = _assemble(agent, agents_dir, project_root, global_scope, inline)
 
     skills = [
         {"name": n, "description": d}

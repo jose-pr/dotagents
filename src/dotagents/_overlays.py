@@ -159,8 +159,14 @@ class Overlay:
         :data:`NAME_RE`: a leading ASCII letter, then ASCII letters/digits/``_``/
         ``.``/``-``. Dots are allowed mid-name (``foo.bar``, ``v1.2``) but NOT as
         the first char, so ``.git``/``.hidden`` and ``__pycache__`` (leading ``_``)
-        and ``2fast`` (leading digit) are excluded."""
-        return bool(Overlay.NAME_RE.match(name))
+        and ``2fast`` (leading digit) are excluded. The contract-A level names
+        (``user``, ``project``, ``system``, ``project-root``, ``default``,
+        ``overlay`` -- :data:`dotagents._resolve.LEVEL_NAMES`) are reserved: an
+        overlay's dir name is its level label in the walk, and one of these
+        would collide with the per-level filename keys."""
+        from dotagents._resolve import LEVEL_NAMES
+
+        return bool(Overlay.NAME_RE.match(name)) and name.lower() not in LEVEL_NAMES
 
     @staticmethod
     def normalize_name(name: str) -> str:
@@ -475,7 +481,8 @@ class Overlay:
         content outside the block is never touched. A no-op (returns False) when
         the overlay contributes nothing, the file is absent, or it carries no
         managed block."""
-        from dotagents._merge import BEGIN_MARKER, END_MARKER
+        from dotagents._fs import write_text_lf
+        from dotagents._merge import find_block
         from dotagents.cli import _compose_block
 
         manifest = self.read_manifest()
@@ -487,21 +494,21 @@ class Overlay:
             )
             return False
         existing = agents_md.read_text(encoding="utf-8")
-        if BEGIN_MARKER not in existing or END_MARKER not in existing:
+        span = find_block(existing)
+        if span is None:
             logger.warning(
                 "AGENTS.md has no dotagents managed block; overlay rules/routing not "
                 "merged (run `dotagents init` first)"
             )
             return False
-        start = existing.index(BEGIN_MARKER)
-        end = existing.index(END_MARKER) + len(END_MARKER)
+        start, end = span
         block = existing[start:end]
         merged = _compose_block(block, [self], logger)
         if merged == block:
             return False
         new_text = existing[:start] + merged + existing[end:]
         if not dry_run:
-            agents_md.write_text(new_text, encoding="utf-8")
+            write_text_lf(agents_md, new_text)
         return True
 
 
@@ -535,7 +542,8 @@ def recompose_overlay_block(
     outside the markers is untouched. Returns True if the file changed, False on a
     no-op (nothing to merge, file/markers absent, or block already correct).
     """
-    from dotagents._merge import BEGIN_MARKER, END_MARKER
+    from dotagents._fs import write_text_lf
+    from dotagents._merge import _extract_block, find_block
     from dotagents.cli import _compose_block
 
     if not agents_md.is_file():
@@ -544,7 +552,8 @@ def recompose_overlay_block(
         )
         return False
     existing = agents_md.read_text(encoding="utf-8")
-    if BEGIN_MARKER not in existing or END_MARKER not in existing:
+    span = find_block(existing)
+    if span is None:
         logger.warning(
             "AGENTS.md has no dotagents managed block; overlay rules/routing not "
             "merged (run `dotagents init` first)"
@@ -553,16 +562,13 @@ def recompose_overlay_block(
 
     # Compose over the pristine base block, not the current (already-merged) one, so
     # every install of the same overlay set yields identical output.
-    b_start = base_block.index(BEGIN_MARKER)
-    b_end = base_block.index(END_MARKER) + len(END_MARKER)
-    pristine = base_block[b_start:b_end]
+    pristine = _extract_block(base_block)
     merged = _compose_block(pristine, list(overlays), logger)
 
-    start = existing.index(BEGIN_MARKER)
-    end = existing.index(END_MARKER) + len(END_MARKER)
+    start, end = span
     if existing[start:end] == merged:
         return False
     new_text = existing[:start] + merged + existing[end:]
     if not dry_run:
-        agents_md.write_text(new_text, encoding="utf-8")
+        write_text_lf(agents_md, new_text)
     return True

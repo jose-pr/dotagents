@@ -60,7 +60,6 @@ def test_gemini_does_not_detect_on_api_key_or_invented_session():
 
 
 @pytest.mark.parametrize("env", [
-    {"CODEX_HOME": "/tmp/codex"},
     {"CODEX_SANDBOX": "1"},
     {"CODEX_SANDBOX_NETWORK_DISABLED": "1"},  # prefix match
 ])
@@ -70,6 +69,9 @@ def test_codex_detect_env(env):
 
 def test_codex_no_invented_session_marker():
     assert not CodexAgent().detect_env({"CODEX_SESSION": "x"})
+    # CODEX_HOME is the user's persistent state-dir override (exported from a
+    # shell profile, present in every harness's sessions), not a runtime marker.
+    assert not CodexAgent().detect_env({"CODEX_HOME": "/tmp/codex"})
 
 
 def test_cursor_detect_env():

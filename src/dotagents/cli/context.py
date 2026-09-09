@@ -1,9 +1,9 @@
 """`dotagents context` -- assemble the effective context for agents (Plan 04)."""
 
-import sys
 from pathlib import Path
 from typing import Optional
 
+from dotagents._fs import write_text_lf
 from dotagents.cli._common import (  # noqa: F401  (_write_stdout re-exported for tests)
     DotAgentsArgs,
     _write_stdout,
@@ -54,8 +54,22 @@ class Context(DotAgentsArgs):
     ("out",)
 
     write_agent: bool = False
-    "Write each agent's native config file (e.g. Claude's CONTEXT.md) instead of a path."
+    (
+        "Merge the context into each agent's own instruction file under the "
+        "project root (Claude .claude/CLAUDE.md, Codex AGENTS.md, Gemini "
+        "GEMINI.md, Cursor .cursorrules, Copilot .github/copilot-instructions.md) "
+        "as a managed block, instead of printing it."
+    )
     ("--write-agent",)
+
+    inline: bool = False
+    (
+        "Also inline the on-demand .md files the sources reference. Off by "
+        "default: the base rules say to read those only when a task needs them."
+    )
+    ("--inline",)
+
+    FORMATS = ("markdown", "system-reminder", "json")
 
     def __call__(self) -> int:
         from dotagents import _agents
@@ -63,6 +77,16 @@ class Context(DotAgentsArgs):
         from dotagents import _scope
         import json
         import os
+
+        if self.format not in self.FORMATS:
+            raise SystemExit(
+                "error: --format must be one of %s (got %r)"
+                % (", ".join(self.FORMATS), self.format)
+            )
+        if self.write_agent and self.format == "json":
+            raise SystemExit("error: --write-agent writes markdown; it cannot take --format json")
+        if self.write_agent and self.out != "-":
+            raise SystemExit("error: --write-agent and an output path are mutually exclusive")
 
         project_root = _scope.project_root_default()
         agents_dir = resolve_user_store(self.agents_dir)
@@ -92,14 +116,15 @@ class Context(DotAgentsArgs):
         if self.format == "json":
             payloads = [
                 _context.assemble_context_data(
-                    agent, agents_dir, project_root, global_scope=self.global_scope
+                    agent, agents_dir, project_root, global_scope=self.global_scope,
+                    inline=self.inline,
                 )
                 for agent in active_agents
             ]
             out_obj = payloads[0] if len(payloads) == 1 else payloads
             blob = json.dumps(out_obj, indent=2, ensure_ascii=False)
             if self.out and self.out != "-":
-                Path(self.out).write_text(blob, encoding="utf-8")
+                write_text_lf(self.out, blob)
                 self._logger_.info("Wrote JSON context to %s", self.out)
             else:
                 # default '-' -> stdout (json never writes native configs). Same
@@ -113,7 +138,8 @@ class Context(DotAgentsArgs):
         # --- markdown / system-reminder text paths ---
         for agent in active_agents:
             text = _context.assemble_context(
-                agent, agents_dir, project_root, global_scope=self.global_scope
+                agent, agents_dir, project_root, global_scope=self.global_scope,
+                inline=self.inline,
             )
 
             if self.format == "system-reminder":
@@ -124,7 +150,9 @@ class Context(DotAgentsArgs):
                 )
 
             if self.write_agent:
-                agent.write_context(agents_dir, text, force=False, dry_run=False, logger=self._logger_)
+                # The PROJECT root, never the store: the target is the harness's
+                # own instruction file, merged as a managed block.
+                agent.write_context(project_root, text, force=False, dry_run=False, logger=self._logger_)
             elif self.out == "-":
                 # Just the context on stdout. A per-agent delimiter is emitted ONLY when
                 # more than one agent is generated, so a single-agent run (the default)
@@ -133,7 +161,7 @@ class Context(DotAgentsArgs):
                     _write_stdout("# --- %s ---\n" % agent.name)
                 _write_stdout(text + "\n")
             else:
-                Path(self.out).write_text(text, encoding="utf-8")
+                write_text_lf(self.out, text)
                 self._logger_.info(f"Wrote {agent.name} context to {self.out}")
 
         return 0

@@ -145,6 +145,38 @@ def test_agents_dir_overrides_the_project_store(tmp_path):
     assert scope.agents_root == tmp_path / "store"
 
 
+def test_project_scope_overlays_are_walked(roots):
+    """`overlays add` installs into the project scope by default; its bin/env/
+    root var were invisible to the chain (only the store's overlays were walked)."""
+    agents_dir, project_root = roots
+    pov = project_root / ".agents" / "overlays" / "projov"
+    (pov / "bin").mkdir(parents=True)
+    (pov / "env.py").write_text(_py_emit({"FROM_PROJECT_OVERLAY": "1"}), encoding="utf-8")
+    env = _run(agents_dir, project_root)
+    assert env["FROM_PROJECT_OVERLAY"] == "1"
+    assert env["PROJOV_OVERLAY_ROOT"] == str(pov)
+    assert str(pov / "bin") in env["PATH"].split(os.pathsep)
+    # -g drops them with the rest of the project tier.
+    env_g = _run(agents_dir, project_root, global_scope=True)
+    assert "FROM_PROJECT_OVERLAY" not in env_g and "PROJOV_OVERLAY_ROOT" not in env_g
+
+
+def test_project_overlay_root_wins_over_a_same_named_store_overlay(roots):
+    agents_dir, project_root = roots
+    (agents_dir / "overlays" / "same").mkdir(parents=True)
+    (project_root / ".agents" / "overlays" / "same").mkdir(parents=True)
+    env = _run(agents_dir, project_root)
+    assert env["SAME_OVERLAY_ROOT"] == str(project_root / ".agents" / "overlays" / "same")
+
+
+def test_level_names_are_not_valid_overlay_names():
+    from dotagents._overlays import Overlay
+
+    for reserved in ("user", "project", "system", "project-root", "default", "overlay", "User"):
+        assert not Overlay.is_valid_name(reserved)
+    assert Overlay.is_valid_name("users")
+
+
 def test_source_available_applies_the_overlay_name_rule(tmp_path):
     src = tmp_path / "src"
     for name in ("good", "__pycache__", ".hidden", "2fast"):

@@ -500,15 +500,28 @@ def get_bin_paths(
     return [path for _level, path, _root in resolved]
 
 
-def get_overlay_roots(*, agents_dir: Path) -> "list[Path]":
-    """The installed overlay dirs under ``<agents_dir>/overlays/``, sorted by name.
-
-    :meth:`Overlay.discover` -- the same presence-by-directory rule as the
-    contract-A walk in :func:`dotagents._resolve.get_file_paths` (no manifest
-    required), so the set of overlays that get a ``<NAME>_OVERLAY_ROOT`` var is
-    exactly the set whose ``bin``/``env`` files the chain resolves.
+def get_overlay_roots(
+    *,
+    agents_dir: Path,
+    project_root: "Optional[Path]" = None,
+    global_scope: bool = False,
+) -> "list[Path]":
+    """The installed overlay dirs: ``<agents_dir>/overlays/*`` sorted by name,
+    then (when ``project_root`` is given and not ``global_scope``)
+    ``<project_root>/.agents/overlays/*`` -- the same order and the same
+    presence-by-directory rule (:meth:`Overlay.discover`) as the contract-A walk
+    in :func:`dotagents._resolve.get_file_paths`, so the set of overlays that
+    get a ``<NAME>_OVERLAY_ROOT`` var is exactly the set whose ``bin``/``env``
+    files the chain resolves. A project overlay comes LATER, so on a name clash
+    its root wins (later-overrides-earlier, like the rest of the chain).
     """
-    return [overlay.path for overlay in Overlay.discover(agents_dir / "overlays")]
+    roots = [overlay.path for overlay in Overlay.discover(agents_dir / "overlays")]
+    if project_root is not None and not global_scope:
+        roots.extend(
+            overlay.path
+            for overlay in Overlay.discover(Path(project_root) / ".agents" / "overlays")
+        )
+    return roots
 
 
 def get_lib_paths(
@@ -689,9 +702,12 @@ def get_environment(
     # (`Overlay.root_var` is the single naming rule). Seeded before the chain so
     # env files can reference an overlay's install dir; only-if-unset, like the
     # scope roots, so an upstream pin holds.
-    for root in get_overlay_roots(agents_dir=agents_dir):
+    pinned_upstream = {k for k, v in osenv.items() if k.endswith("_OVERLAY_ROOT") and v}
+    for root in get_overlay_roots(
+        agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
+    ):
         overlay = Overlay(root)
-        if not osenv.get(overlay.root_var):
+        if overlay.root_var not in pinned_upstream:
             _apply({overlay.root_var: str(overlay.path)})
 
     # --- Contract B step 1: bins onto PATH FIRST. ---
