@@ -10,7 +10,7 @@ any refactor of `_env.py`'s shape:
   3. within a tier, the contract-A precedence walk (per store -- system, user,
      project -- its overlays then itself; then project-root; historically
      "overlays -> system -> user
-     -> project -> project-root), reusing `_resolve.py`;
+     -> project -> project-root), via `Scope.paths`;
   4. chained eval: each file sees the accumulated env of prior files and LATER
      OVERRIDES EARLIER;
   5. `.py` files are EXECUTED and emit JSON env changes; plain files sourced;
@@ -38,19 +38,18 @@ sys.path.insert(0, str(SRC))
 
 from dotagents import _env  # noqa: E402
 from dotagents._scope import Scope  # noqa: E402
-from dotagents import _resolve  # noqa: E402
 
 
 HAVE_BASH = shutil.which("bash") is not None
 
 
 # --------------------------------------------------------------------------
-# get_file_paths overlay tier: presence-by-directory, no manifest required (D84).
+# Scope.paths overlay tier: presence-by-directory, no manifest required (D84).
 # --------------------------------------------------------------------------
 
-def test_get_file_paths_resolves_bare_overlay_dir(tmp_path):
+def test_paths_resolves_bare_overlay_dir(tmp_path):
     """A BARE overlay dir (no CONTEXT.md, no overlay.toml) with a bin/ subdir is
-    resolved by get_file_paths -- the old CONTEXT.md gate (a precursor leftover)
+    resolved by Scope.paths -- the old CONTEXT.md gate (a precursor leftover)
     silently excluded every real dotagents overlay from the Contract-A walk."""
     agents_dir = tmp_path / "agents"
     project_root = tmp_path / "proj"
@@ -60,10 +59,8 @@ def test_get_file_paths_resolves_bare_overlay_dir(tmp_path):
     (agents_dir / "overlays" / ".git" / "bin").mkdir(parents=True)
     (agents_dir / "overlays" / "__pycache__" / "bin").mkdir(parents=True)
 
-    resolved = _resolve.get_file_paths(
-        {"default": "bin", "project-root": ""},
-        scope=Scope.of(agents_dir=agents_dir, project_root=project_root),
-        include_missing=True,
+    resolved = Scope.of(agents_dir=agents_dir, project_root=project_root).paths(
+        {"default": "bin", "project-root": ""}, include_missing=True,
     )
     paths = [p for _lvl, p, _root in resolved]
     assert bare / "bin" in paths

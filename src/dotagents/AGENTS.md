@@ -43,7 +43,7 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
 - Command discovery layers sources, later wins: built-ins < bundled `cmds` <
   store overlay `cmds` (`<overlay-root>/cmds`) < system < user < project
   overlay `cmds` < project < `$AGENTS_CMDS_PATH` < `--cmdspath`. The overlay +
-  scope tiers come from one Contract-A `get_file_paths` walk (`cli._cmds_dirs`),
+  scope tiers come from one Contract-A `Scope.paths` walk (`cli._cmds_dirs`),
   the same resolver that backs `bin`/PATH; an `--agents-dir X` on the command
   line is honoured for the walk. A source that fails to import for ANY reason
   (a `SyntaxError`, an exception at import time) is skipped with a warning
@@ -72,11 +72,12 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `.merge_rules_into(agents_md, dry_run, logger)`. `Overlay.discover(root)` is the
   ONE discovery rule (valid-named dirs under ONE `overlays/` root — what
   `overlays add/remove/sync` install into), and **`Overlay.installed(*stores)`**
-  folds it over `.agents` roots in precedence order (the user store, then the
-  project's; `-g` = the user store alone; a `None` store is skipped): every
+  folds it over `.agents` roots in precedence order (`Scope.stores`: system,
+  user, then the project's; `-g` has no project store; a `None` store is
+  skipped): every
   result is stamped with its `.store`, and an overlay whose name appears in a
   LATER store is dropped — **the project's copy shadows the store's**, so only
-  its bin/lib/env/cmds/CONTEXT.md/root var resolve. `_resolve`, `env`,
+  its bin/lib/env/cmds/CONTEXT.md/root var resolve. `Scope.paths`, `env`,
   `context` and `overlays list`/`show` all go through `installed`.
   `Overlay.sort_by_priority(items)` is the one merge order. It is `os.PathLike`,
   so it goes anywhere a path does.
@@ -85,9 +86,10 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
 - `_scope` — **`Scope`**, the one object every walk takes: `level` (`user` /
   `project`), `agents_root` (the scope's own store, the install target),
   `user_root` (the user store — every walk starts from it), `project_root`,
-  `stores` (in precedence order), `overlays` (`Overlay.installed(*stores)`),
-  `project_store`, `global_scope`, and `files(*names, include_missing=False)`
-  (the contract-A walk). `Scope.of(agents_dir=, project_root=, global_scope=)`
+  `system_root`, `stores` (in precedence order: system, user, project),
+  `overlays` (`Overlay.installed(*stores)`), `project_store`, `global_scope`,
+  `store_level(store)`, and `paths(*names, include_missing=False)` (the
+  contract-A walk, typed `list[tuple[str, Path, Optional[Path]]]`). `Scope.of(agents_dir=, project_root=, global_scope=)`
   builds one from resolved parts (what `env` / `context` / `_cmds_dirs` do);
   `resolve_scope(global_scope, agents_dir=None, project_root=None)` is the
   install-command form; `resolve_user_store(agents_dir=None)` (the home of the
@@ -130,11 +132,11 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   dir named `env` is not an env file); a plain file whose `source` fails
   contributes nothing (`source F || exit 1`, so the failure is visible); bash's
   own `PWD`/`OLDPWD`/`SHLVL`/`MSYSTEM*` are never reported as a file's changes.
-- `_resolve` — `get_file_paths(*names, scope, include_missing=False)` (=
-  `scope.files(*names)`): the Contract-A precedence walk / filename resolution,
-  store by store over `Scope.stores` — system (`Scope.system_root`, `/etc/agents`
-  or `$AGENTS_SYSTEM_ROOT`), user, project — each store's overlays first, then
-  the store itself; then project-root. The project store and project-root exist
+- **`Scope.paths(*names, include_missing=False)`** — the Contract-A precedence
+  walk / filename resolution (there is no `_resolve` module any more), store by
+  store over `Scope.stores` — system (`Scope.system_root`, `/etc/agents` or
+  `$AGENTS_SYSTEM_ROOT`), user, project — each store's overlays first, then the
+  store itself; then project-root. The project store and project-root exist
   only in a project scope (`overlays add` installs into the project store by
   default, since 2026-09-09 walked like any other). Each
   tuple is `(level, path, root)`; an overlay entry's `level` is the overlay's

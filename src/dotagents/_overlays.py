@@ -193,7 +193,7 @@ class Overlay:
     #: ``.git``/``.hidden`` are excluded; a leading underscore (``__pycache__``) and
     #: a leading digit (``2fast``) are excluded too. One shared rule for
     #: :meth:`discover` (which backs :meth:`installed`, the contract-A
-    #: overlay walk in ``_resolve.py`` and the ``env`` overlay roots) and
+    #: overlay walk in ``Scope.paths`` and the ``env`` overlay roots) and
     #: ``overlays add`` (D84). (Whether a path IS a directory is checked separately
     #: with ``is_dir()``, which follows symlinks -- a symlink-to-dir is a valid
     #: overlay.)
@@ -249,10 +249,10 @@ class Overlay:
         the first char, so ``.git``/``.hidden`` and ``__pycache__`` (leading ``_``)
         and ``2fast`` (leading digit) are excluded. The contract-A level names
         (``user``, ``project``, ``system``, ``project-root``, ``default``,
-        ``overlay`` -- :data:`dotagents._resolve.LEVEL_NAMES`) are reserved: an
+        ``overlay`` -- :data:`dotagents._scope.LEVEL_NAMES`) are reserved: an
         overlay's dir name is its level label in the walk, and one of these
         would collide with the per-level filename keys."""
-        from dotagents._resolve import LEVEL_NAMES
+        from dotagents._scope import LEVEL_NAMES
 
         return bool(Overlay.NAME_RE.match(name)) and name.lower() not in LEVEL_NAMES
 
@@ -348,7 +348,7 @@ class Overlay:
         dropped -- the later store's copy REPLACES it, so the project's bin/lib/
         env/cmds/CONTEXT.md/root var are the only ones that resolve, not both
         stacked. This is the one function behind the contract-A walk
-        (``_resolve.get_file_paths``), ``env``'s overlay roots, ``context``'s
+        (``Scope.paths``), ``env``'s overlay roots, ``context``'s
         sources/placeholders/skills and ``overlays list``/``show``, so they can
         never disagree about what is installed."""
         per_store = [

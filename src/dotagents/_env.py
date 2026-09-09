@@ -489,7 +489,7 @@ def get_bin_paths(scope: Scope) -> "list[Path]":
     (``{"project-root": ""}``): a project's own top-level ``bin`` is not an
     agent bin.
     """
-    resolved = scope.files({"default": "bin", "project-root": ""}, include_missing=True)
+    resolved = scope.paths({"default": "bin", "project-root": ""}, include_missing=True)
     return [path for _level, path, _root in resolved]
 
 
@@ -512,7 +512,7 @@ def get_lib_paths(scope: Scope) -> "list[Path]":
     rule out. project-root's ``lib`` is excluded for the same reason as its
     ``bin``: a project's own top-level ``lib`` is not an agent library.
     """
-    resolved = scope.files({"default": "lib", "project-root": ""}, include_missing=False)
+    resolved = scope.paths({"default": "lib", "project-root": ""}, include_missing=False)
     return [path for _level, path, _root in resolved if path.is_dir()]
 
 
@@ -545,7 +545,7 @@ def resolve_env_files(scope: Scope) -> "list[tuple[str, Path, Optional[Path]]]":
     """The ordered, existing env files: ALL pre-tier then ALL main-tier, for a
     :class:`Scope`.
 
-    Each tier is one contract-A resolution (:func:`get_file_paths`). Per-level
+    Each tier is one contract-A resolution (:meth:`Scope.paths`). Per-level
     filename resolution (contract A point 2): ``pre.env.py``/``pre.env`` and
     ``env.py``/``env`` resolve at every level EXCEPT project-root; the project
     (``<project>/.agents``) and project-root levels ADDITIONALLY resolve
@@ -559,12 +559,12 @@ def resolve_env_files(scope: Scope) -> "list[tuple[str, Path, Optional[Path]]]":
     ``.agents/``-level files and the user-local ``local.env`` (which a checkout
     does not normally carry) keep their behaviour.
     """
-    pre_tier = scope.files(
+    pre_tier = scope.paths(
         {"default": "pre.env.py", "project-root": ""},
         {"default": "pre.env", "project-root": ""},
         {"project": "pre.local.env", "project-root": "pre.local.env"},
     )
-    main_tier = scope.files(
+    main_tier = scope.paths(
         {"default": "env.py", "project-root": ""},
         {"default": "env", "project-root": ""},
         {"project": "local.env", "project-root": "local.env"},

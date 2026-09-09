@@ -24,7 +24,7 @@ discovery runs. Command MODULES are discovered from the bundled
 `_overlay/dotagents/cmds/` dir (which ships `findings`),
 from each installed overlay's `<overlay-root>/cmds/` -- this is how the
 private-sync overlay supplies `link-project`/`sync-project` -- and from a
-per-scope `cmds` dir (one `get_file_paths` Contract-A walk, `_cmds_dirs`).
+per-scope `cmds` dir (one `Scope.paths` Contract-A walk, `_cmds_dirs`).
 `app`'s DEFAULT dispatch is used (dotagents has no fan-out):
 a plain `(LoggingArgs, Cmd)` class command dispatches through `app` exactly as it
 did through `main` -- `app` calls the class's `__call__`.
@@ -237,7 +237,7 @@ def _agents_dir_from_argv(argv) -> "str | None":
 def _cmds_dirs(argv=None) -> "list[Path]":
     """Every `cmds` dir to discover command modules from, in Contract-A order.
 
-    Resolved with the SAME `get_file_paths` walk that backs `bin`/PATH discovery
+    Resolved with the SAME `Scope.paths` walk that backs `bin`/PATH discovery
     (`_env.get_bin_paths`) -- one resolver call yields the cmds dir at EVERY level
     in precedence order, so command discovery, PATH, and every other Contract-A
     seam agree on which roots exist and in what order. NOT a hand-rolled loop over
@@ -245,7 +245,7 @@ def _cmds_dirs(argv=None) -> "list[Path]":
 
     The per-level name-dict maps overlay levels to `<overlay-root>/cmds` and every
     other level (system/user/project) to `<agents_root>/dotagents/cmds` (the
-    `Scope.cmds_dir` layout, D76). `get_file_paths` returns them in Contract-A
+    `Scope.cmds_dir` layout, D76). `Scope.paths` returns them in Contract-A
     precedence: per store (system, user, project), each store's overlays' `cmds`
     first and then the store's own `dotagents/cmds`. Discovery layers later
     sources over earlier ones (see `_discover_dir`), so a project cmd overrides a
@@ -264,7 +264,7 @@ def _cmds_dirs(argv=None) -> "list[Path]":
         agents_dir=resolve_user_store(_agents_dir_from_argv(argv)),
         project_root=_scope.project_root_default(),
     )
-    resolved = scope.files({"default": "dotagents/cmds", "overlay": "cmds"}, include_missing=True)
+    resolved = scope.paths({"default": "dotagents/cmds", "overlay": "cmds"}, include_missing=True)
     return [path for _level, path, _root in resolved]
 
 

@@ -1,3 +1,0 @@
-# Resolution
-
-::: dotagents._resolve

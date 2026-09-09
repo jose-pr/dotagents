@@ -185,7 +185,7 @@ def _resolve_and_filter_sources(
 
     Returns ``(sources, harness_loaded)`` -- the second is the resolved list of
     files the harness loads itself, so the inliner can skip them too."""
-    sources = scope.files(
+    sources = scope.paths(
         {"overlay": "CONTEXT.md", "default": "AGENTS.md"},
         {"project": "AGENTS.local.md", "project-root": "AGENTS.local.md"},
     )

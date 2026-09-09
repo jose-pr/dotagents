@@ -42,7 +42,6 @@ nav:
       - Scope: api/scope.md
       - Context: api/context.md
       - Environment: api/env.md
-      - Resolution: api/resolve.md
       - Merge: api/merge.md
       - Filesystem: api/fs.md
       - Hooks: api/hooks.md

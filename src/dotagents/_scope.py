@@ -20,10 +20,10 @@ only wires args) to match ``_overlays.py`` / ``_skills.py``:
   repo source drops in with **no** change to the command classes.
 
 The ``system`` store (``Scope.system_root``: ``/etc/agents``, or
-``$AGENTS_SYSTEM_ROOT``) is walked by the Contract-A resolver
-(``_resolve.get_file_paths``) for overlays/env/context/bin/cmds like any store,
-first in precedence, but nothing installs into it -- there is no ``--system``
-scope for ``init`` / ``overlays``.
+``$AGENTS_SYSTEM_ROOT``) is walked by the Contract-A resolver (``Scope.paths``)
+for overlays/env/context/bin/cmds like any store, first in precedence, but
+nothing installs into it -- there is no ``--system`` scope for ``init`` /
+``overlays``.
 
 Never print ``DOTAGENTS_*`` values (Leakage): this module reads the env var but
 only ever reports the resolved path, never the raw value.
@@ -38,6 +38,13 @@ from typing import Optional
 
 from dotagents._overlays import Overlay
 
+#: Level names the walk itself uses. An overlay's DIRECTORY NAME is its level
+#: label, so an overlay named like one of these would collide with the per-level
+#: name-dict keys (`{"project-root": ""}` would drop that overlay's `bin`);
+#: `Overlay.is_valid_name` rejects them.
+LEVEL_NAMES = frozenset({"default", "overlay", "system", "user", "project", "project-root"})
+
+
 class Scope:
     """Where a session's config lives -- the one object every walk takes.
 
@@ -49,7 +56,7 @@ class Scope:
     ``project_root``; ``stores`` is the pair in precedence order, and
     :attr:`overlays` is :meth:`Overlay.installed` over them (a same-named
     project overlay shadows the store's copy). The user scope has one store.
-    ``files(*names)`` is the contract-A walk for this scope; ``env``, ``context``
+    :meth:`paths` is the contract-A walk for this scope; ``env``, ``context``
     and ``cli._cmds_dirs`` all go through it.
 
     The ``overlays/`` and ``skills/`` subdirs beneath ``agents_root`` are the
@@ -140,11 +147,62 @@ class Scope:
         over :attr:`stores`: the project's copy shadows a same-named store copy)."""
         return Overlay.installed(*self.stores)
 
-    def files(self, *names, include_missing: bool = False):
-        """The contract-A walk for this scope (:func:`dotagents._resolve.get_file_paths`)."""
-        from dotagents._resolve import get_file_paths
+    def paths(
+        self, *names: "str | dict[str, str]", include_missing: bool = False
+    ) -> "list[tuple[str, Path, Optional[Path]]]":
+        """Resolve file paths across this scope's precedence hierarchy (Contract A).
 
-        return get_file_paths(*names, scope=self, include_missing=include_missing)
+        Each ``name`` is a filename (resolved at every level) or a per-level
+        dict -- ``{"default": ..., "overlay": ..., "<level>": ...}`` -- where an
+        empty / missing entry skips that level.
+
+        Precedence order -- each of :attr:`stores` in turn, its overlays first,
+        then the store itself; finally the project root:
+        1. system overlays, then system (:attr:`system_root`)
+        2. user-store overlays, then user (:attr:`user_root`)
+        3. project overlays (``<project_root>/.agents/overlays/<name>/``), then
+           project (``<project_root>/.agents``) -- a project scope only
+        4. project-root (:attr:`project_root`) -- a project scope only
+
+        An overlay installed in more than one store under the same name is one
+        overlay, the later store's: it SHADOWS the earlier copies entirely
+        (:meth:`Overlay.installed`), so its bin/lib/env/cmds/CONTEXT.md are the
+        only ones that resolve -- not stacked.
+
+        Each returned tuple is ``(level, path, root)``: for an overlay,
+        ``level`` is the overlay's directory name and ``root`` its directory;
+        for every other level ``root`` is ``None`` -- that is how callers tell
+        overlays apart. ``include_missing`` returns every candidate, else only
+        the ones that exist.
+        """
+        found: "list[tuple[str, Path, Optional[Path]]]" = []
+
+        def add(location: Path, level: str, root: "Optional[Path]" = None,
+                is_overlay: bool = False) -> None:
+            for name in names:
+                name_dict = {level: name} if isinstance(name, str) else name
+                default = name_dict.get("default")
+                if is_overlay:
+                    default = name_dict.get("overlay", default)
+                template = name_dict.get(level, default)
+                if template:
+                    found.append((level, location / template, root))
+
+        # No manifest of any kind is required for an overlay to count -- not
+        # ``CONTEXT.md``, not ``overlay.toml`` (the old ``CONTEXT.md`` gate was a
+        # precursor leftover that silently excluded EVERY real overlay, D84).
+        overlays = self.overlays  # shadowing already applied, store-stamped
+        for store in self.stores:
+            for overlay in overlays:
+                if overlay.store == store:
+                    add(overlay.path, overlay.name, root=overlay.path, is_overlay=True)
+            add(store, self.store_level(store))
+        if not self.global_scope:
+            add(self.project_root, "project-root")  # type: ignore[arg-type]
+
+        if include_missing:
+            return found
+        return [(level, path, root) for level, path, root in found if path.exists()]
 
     @property
     def overlay_root(self) -> Path:

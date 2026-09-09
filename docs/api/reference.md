@@ -13,8 +13,6 @@ form its API. Generated from docstrings, organized by module:
   command.
 - **[Context](context.md)** — assembling the effective context for agents.
 - **[Environment](env.md)** — chained env-file assembly and `env.py` execution.
-- **[Resolution](resolve.md)** — the precedence walk / filename resolution
-  (Contract A).
 - **[Merge](merge.md)** — the managed-block merge for `init`'s `AGENTS.md` /
   `CLAUDE.md`, the harness-entry `@` include, the `context --write-agent`
   block, and other comment syntaxes (e.g. TOML) via `begin_marker`/

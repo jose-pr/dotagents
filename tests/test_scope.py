@@ -77,7 +77,7 @@ def test_global_scope_ignores_project_root_env(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 # Overlay-name rule (D84): a dir under overlays/ is an overlay iff its name is
 # valid; names normalize lowercase-dash. One shared rule, mirrored by the
-# get_file_paths overlay gate.
+# Scope.paths overlay gate.
 # --------------------------------------------------------------------------
 
 def test_discover_overlays_includes_valid_excludes_junk(tmp_path):

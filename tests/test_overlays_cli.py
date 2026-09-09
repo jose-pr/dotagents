@@ -271,7 +271,7 @@ def test_system_store_is_walked_first_and_shadowed_by_user(tmp_path, monkeypatch
     scope = Scope.of(agents_dir=store)
     assert scope.stores == [system, store]
     assert [(o.name, o.store) for o in scope.overlays] == [("sys-only", system), ("common", store)]
-    levels = [lvl for lvl, _p, _r in scope.files({"default": "bin"}, include_missing=True)]
+    levels = [lvl for lvl, _p, _r in scope.paths({"default": "bin"}, include_missing=True)]
     assert levels == ["sys-only", "system", "common", "user"]
 
 
