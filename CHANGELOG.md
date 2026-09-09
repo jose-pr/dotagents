@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The system store is a store like the others. `Scope.system_root`
+  (`/etc/agents`, or `$AGENTS_SYSTEM_ROOT`) heads `Scope.stores`, and the
+  contract-A walk goes store by store -- system, user, project -- each store's
+  overlays first, then the store itself, then the project root; the hardcoded
+  `/etc/agents` tier and its odd position (after the user store's overlays,
+  before the user store) are gone. A system overlay is shadowed by a same-named
+  user or project one. `overlays list` prints one `installed (<level>)` block
+  per store that has anything, most specific first.
 - The library walk takes one object. `Scope` now carries the whole picture
   (`user_root`, `project_root`, `stores`, `overlays`, `files(*names)`), and
   `get_file_paths`, `get_environment`, `get_diff`, `resolve_env_files`,

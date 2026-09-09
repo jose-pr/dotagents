@@ -131,10 +131,12 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   contributes nothing (`source F || exit 1`, so the failure is visible); bash's
   own `PWD`/`OLDPWD`/`SHLVL`/`MSYSTEM*` are never reported as a file's changes.
 - `_resolve` — `get_file_paths(*names, scope, include_missing=False)` (=
-  `scope.files(*names)`): the Contract-A precedence walk / filename resolution:
-  user-store overlays → system → user → **project overlays** (since 2026-09-09:
-  `<project>/.agents/overlays/*`, where `overlays add` installs by default) →
-  project → project-root; the last three skipped with `global_scope`. Each
+  `scope.files(*names)`): the Contract-A precedence walk / filename resolution,
+  store by store over `Scope.stores` — system (`Scope.system_root`, `/etc/agents`
+  or `$AGENTS_SYSTEM_ROOT`), user, project — each store's overlays first, then
+  the store itself; then project-root. The project store and project-root exist
+  only in a project scope (`overlays add` installs into the project store by
+  default, since 2026-09-09 walked like any other). Each
   tuple is `(level, path, root)`; an overlay entry's `level` is the overlay's
   dir name and `root` its dir (`root is None` for every other level — that is
   the overlay test). `LEVEL_NAMES` are reserved as overlay names.
@@ -282,6 +284,8 @@ Config / path / sync vars (`AGENTS_*`, non-secret — read, and some emitted):
 
 - `AGENTS_HOME` — the configurable user-scope store path (default `~/.agents`). Also
   **emitted** by `dotagents env` (D79) and set for overlay setup scripts / sync hooks.
+- `AGENTS_SYSTEM_ROOT` — the machine-wide store (default `/etc/agents`), walked
+  first for overlays/bin/lib/env/cmds/AGENTS.md; nothing installs into it.
 - `AGENTS_STORE_DIR` — per-project store location (absolute paths allowed).
 - `AGENTS_OVERLAYS_SRC` — default overlay source dir for `overlays`.
 - `AGENTS_CMDS_PATH` — extra command-module search paths (os.pathsep-split).
