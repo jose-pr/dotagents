@@ -208,12 +208,12 @@ def check_templates(root):
 
 
 # --------------------------------------------------------------------------- #
-# Command surface. This module IS the tool AND the `dotagents audit` command:
-# it is a discovered command module (D76/D84) in the bundled `dotagents/cmds/`
-# dir, so `dotagents audit` resolves to the class below -- there is no separate
-# wrapper shelling out to a script. Run it directly too (`python audit.py
-# --root .`): `__main__` dispatches through duho, so BOTH paths share one
-# argument definition, one help text, one implementation.
+# Command surface. This module is repo CI tooling, NOT a `dotagents` command
+# (it is not in the bundled `dotagents/cmds/` dir and never ships in the
+# package -- `tests/test_audit_leak.py` pins that). It is run directly
+# (`python tools/audit.py --root .`); `__main__` dispatches through duho for
+# the argument definition and help text, which is why the CI job that runs it
+# has to `pip install duho` (or `-e .`) first.
 #
 # Everything above this line is stdlib-only, so the audit logic itself carries
 # no package/duho dependency; only the command surface does.

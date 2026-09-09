@@ -11,9 +11,13 @@ no opinionated flows, model-routing, or repo-standards content.
   `<!-- dotagents:begin -->` / `<!-- dotagents:end -->` markers is managed by
   `dotagents init` — re-running `init` refreshes only that block, never touching
   anything you add outside it.
-- `CLAUDE.md` (and any other per-agent entry file, e.g. `ANTIGRAVITY.md`) — a
-  one-liner (`@AGENTS.md`) that points that agent runner at the shared root config.
-  Add one per agent runner you use; they all converge on the same `AGENTS.md`.
+- `CLAUDE.md` — a one-liner (`@AGENTS.md`) beside the root config, kept as the
+  skeleton's example of an agent entry file. The include that a harness actually
+  reads is written by `init` into that harness's own config dir — for Claude
+  Code, `~/.claude/CLAUDE.md` (user scope) or `<project>/.claude/CLAUDE.md`
+  (project scope), as a managed block that skips itself when you already wrote
+  the line by hand. Harnesses without an include mechanism get the assembled
+  context through a hook (`init` wires it) or `dotagents context --write-agent`.
 - `dotagents/DECISIONS.md` + `dotagents/decisions/` — a design log for this config
   itself (why a rule exists, what changed and when), as a lean index + one file per
   decision. Not loaded in normal sessions.
@@ -39,5 +43,6 @@ One filename *is* conventional: a named agent (Claude, Antigravity, …) reads i
 
 If you'd rather start from a fuller, opinionated example than build from scratch, see
 this project's opt-in overlays (`engineering` rules, planning/execution flows, language
-knowledge bases, CI/reference templates) — layer them in deliberately with
-`dotagents install --overlays <path>`, never wholesale.
+knowledge bases, CI/reference templates) — layer them in deliberately, by name, with
+`dotagents overlays add <name> --source <dir>` (or set `AGENTS_OVERLAYS_SRC`), never
+wholesale. `dotagents overlays show <name>` describes one before you add it.

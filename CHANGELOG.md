@@ -23,6 +23,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **One broken command module no longer breaks every `dotagents` call.**
+  Discovery skips a source that fails to import for any reason (a
+  `SyntaxError`, an exception at import time) with a warning naming it. It
+  caught `ImportError` only, and duho propagates the rest on purpose, so a
+  typo in `~/.agents/dotagents/cmds/foo.py` made `env`, `context`, `init` and
+  even `--version` traceback, i.e. the hooks delivered nothing.
+- **No more temp-directory litter from the `.pyz`.** Everything a zipapp run
+  extracts (package data, the repointed module sources) lives under one
+  per-process scratch directory removed at exit; a `mkdtemp` per item with no
+  cleanup had left 632 `dotagents-*` directories in one machine's `%TEMP%`.
+- `overlays add` installs a source dir spelled `my_overlay` (it normalized to
+  `my-overlay` and looked only that up), validates and resolves EVERY name
+  against the source before touching anything (`add good bad` used to install
+  `good`, run its setup, then fail), installs each manifest's `requires`
+  first (transitively; `--no-requires` to skip; a missing requirement warns, a
+  cycle errors), publishes skills from the INSTALLED copy (a symlink into the
+  source dies with a temporary checkout and could never be matched by
+  `remove`), and reports the setup script on a dry run.
+- `overlays remove` normalizes names (`add My_Ov` + `remove My_Ov` said "not
+  installed") and recomposes the managed block over the overlays that remain,
+  so an overlay's rules and routing leave `AGENTS.md` with it; the warning
+  that pointed at the removed `dotagents install` is gone.
+- `overlays sync` honours `--copy` (declared and ignored) and gains
+  `--overwrite`, which replaces installed files whose content differs from the
+  source; without it a sync never updated an upstream change to an existing
+  file.
+- New `overlays show <name>` describes an overlay (installed copy first, else
+  the source): description, priority, requires, routing, rules, setup script,
+  skills, file count, root var; `--json`.
+- The manifest reader strips trailing `#` comments quote-aware and finds an
+  array's closing `]` by scanning, so `routing = ["a"] # note` no longer
+  swallows the NEXT array (a rules path became a routing line), an indented
+  `]` no longer yields `[]`, `'single-quoted'` strings parse, and
+  `priority = 5 # low` is 5, not 500. `description` and `requires` are read.
+- `_compose_block` with a base that has no `## Load on demand` heading appends
+  the overlay rules at the end of the block, as its warning always claimed;
+  they were dropped.
+- `build-pyz` outside a source checkout is a clear error instead of a
+  `FileNotFoundError`.
+- `dotagents`, `overlays` and `findings` invoked with no subcommand print
+  their help and exit 2 instead of logging a hint and exiting 0.
+- `--agents-dir X` on the command line is honoured by command discovery, so
+  the store the command is about to use is the one whose `cmds/` are found.
+- `findings add` rejects a name already carried by another note's frontmatter
+  (`get` matches frontmatter names first, so `done` would have processed the
+  wrong file).
+- Two overlay dirs with the same manifest `name` sort deterministically (dir
+  name is the final tiebreaker).
 - **SessionStart context is no longer injected twice.** The PowerShell
   variants of Claude's `SessionStart` / `CwdChanged` handlers run only when
   `bash` is not on PATH. Both handlers fire on every session, and on a Windows

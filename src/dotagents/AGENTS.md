@@ -19,8 +19,14 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `$DOTAGENTS_AGENTS_DIR` → `~/.agents`. Use it (not `resolve_scope`) when the
   store is always the user store and the project scope only adds/removes tiers,
   as in `env` / `context`.
-- Compiled command classes live in `dotagents.cli.<name>` (`init`, `overlays`,
-  `context`, `env`, `build_pyz`); each is a `class X(LoggingArgs, Cmd)` — or
+- Compiled command classes live in `dotagents.cli.<name>` (`init`, `overlays`
+  — `add` (installs each manifest's `requires` first, `--no-requires` to skip;
+  every name validated and resolved against the source BEFORE anything is
+  touched; skills published from the INSTALLED copy), `remove` (recomposes the
+  managed block over what remains — the un-merge), `list`, `sync` (`--copy`
+  honoured, `--overwrite` replaces changed files), `show` (manifest, setup,
+  skills, files, `--json`) — `context`, `env`, `build_pyz` (a checkout only:
+  a clear error elsewhere)); each is a `class X(LoggingArgs, Cmd)` — or
   `class X(DotAgentsArgs)`, which is that pair transitively — with a
   `__call__`. Plus ONE bundled command module,
   `_overlay/dotagents/cmds/findings.py` (`dotagents findings`: a per-scope
@@ -35,10 +41,15 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   tooling never has to live in the repo (D84). `audit` is repo CI tooling
   (`tools/audit.py`), not a command.
 - Command discovery layers sources, later wins: built-ins < bundled `cmds` <
-  overlay `cmds` (`<overlay-root>/cmds`) < scope `cmds` dirs (user + project) <
-  `$AGENTS_CMDS_PATH` < `--cmdspath`. The overlay + scope tiers come from one
-  Contract-A `get_file_paths` walk (`cli._cmds_dirs`), the same resolver that
-  backs `bin`/PATH.
+  store overlay `cmds` (`<overlay-root>/cmds`) < system < user < project
+  overlay `cmds` < project < `$AGENTS_CMDS_PATH` < `--cmdspath`. The overlay +
+  scope tiers come from one Contract-A `get_file_paths` walk (`cli._cmds_dirs`),
+  the same resolver that backs `bin`/PATH; an `--agents-dir X` on the command
+  line is honoured for the walk. A source that fails to import for ANY reason
+  (a `SyntaxError`, an exception at import time) is skipped with a warning
+  naming it — discovery runs before every invocation, hooks included, so one
+  broken personal module must never take `env`/`context` down. An umbrella
+  invoked with no subcommand prints its help and exits 2.
 
 ## Helper modules (public surface)
 
@@ -49,10 +60,15 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   bare name works: `Overlay.is_valid_name(n)` / `.normalize_name(n)` (THE canonical
   name, lowercase `_`→`-`, = the install dir `overlays/<n>/`) / `.root_var_for(n)`
   (`<NAME>_OVERLAY_ROOT`). Instance: `.path` / `.name` / `.normalized_name` /
-  `.root_var` / `.is_valid` / `.manifest_path`, `.read_manifest()` / `.priority` /
-  `.sort_key`, `.find_setup_script()` / `.run_setup(agents_dir=, dry_run=, logger=)`,
+  `.root_var` / `.is_valid` / `.manifest_path`, `.read_manifest()` (`name`,
+  `description`, `routing`, `rules`, `requires` — normalized names —,
+  `priority`; a small quote-aware TOML reader: trailing `#` comments, `'...'`
+  and `'''...'''` strings and an indented closing `]` all parse) / `.priority` /
+  `.sort_key` (`(priority, manifest name, dir name)`),
+  `.find_setup_script()` / `.run_setup(agents_dir=, dry_run=, logger=)`,
   `.files()` / `.rule_blocks(rel_paths)` / `.apply_to(dest, dry_run)` /
-  `.install_to(dest_overlay_dir, dry_run)` (self-describing: ships the manifest) /
+  `.install_to(dest_overlay_dir, dry_run, overwrite=False)` (self-describing:
+  ships the manifest; `overwrite` replaces files whose content differs) /
   `.merge_rules_into(agents_md, dry_run, logger)`. `Overlay.discover(root)` is the
   ONE discovery rule (valid-named dirs under an `overlays/` root; `_scope`,
   `_resolve` and `env` all call it), `Overlay.sort_by_priority(items)` the one
@@ -314,7 +330,10 @@ the pinned root makes that cwd-independent. `-g/--global` on these two means
 - **Package data in a `.pyz`.** `_package_data_dir(name)` resolves a package-data dir
   by name — `_overlay` (the base overlay `init` writes) and `_overlays_src` (bundled
   example overlays, when a build includes them) — via `importlib.resources` (a
-  zip-backed `Traversable` is extracted to a temp dir once), never
-  `Path(__file__).exists()` (always False in a zipapp).
+  zip-backed `Traversable` is extracted once), never `Path(__file__).exists()`
+  (always False in a zipapp). Everything a `.pyz` run extracts — package data
+  and the repointed module sources — lives under ONE per-process scratch dir
+  (`_common._scratch_dir()`), removed at interpreter exit; a `mkdtemp` per item
+  with no cleanup had littered a dev box's `%TEMP%` with 632 directories.
 - **`pathlib_next` needs `typing_extensions` on Python < 3.10** (an upstream gap); a
   3.9 environment must `pip install typing_extensions`.

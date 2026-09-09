@@ -31,10 +31,14 @@ shared helper modules.
 
 Discovery layers sources so a later one overrides a same-named command:
 
-    built-ins  <  installed overlays' cmds/  <  system  <  user  <  project
+    built-ins  <  the bundled cmds/ (findings)  <  the store's overlays' cmds/
+    <  system  <  user  <  the project's overlays' cmds/  <  project
+    <  $AGENTS_CMDS_PATH entries  <  --cmdspath entries
 
 So a command you drop here (user scope) overrides one an overlay ships, and a
-project's `.agents/dotagents/cmds/` overrides yours.
+project's `.agents/dotagents/cmds/` overrides yours. A module that fails to
+import (a syntax error, an exception at import time) is skipped with a
+warning naming the file -- it never takes the other commands down with it.
 
 ## What dotagents ships here
 
