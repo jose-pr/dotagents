@@ -39,7 +39,7 @@ carry the opinions.
 dotagents init
 
 # Layer in opinionated overlays by name, into the user scope:
-dotagents overlays add flows python -g
+dotagents overlays add engineering python -g
 
 # See what's installed vs. available:
 dotagents overlays list -g

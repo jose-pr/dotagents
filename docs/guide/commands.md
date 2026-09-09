@@ -134,7 +134,7 @@ inventing one is how a silently-broken hook gets shipped.
 Manages opt-in overlays **by name**. See [Overlays](overlays.md) for the full model.
 
 ```bash
-dotagents overlays add python flows        # install into the scope, publish skills
+dotagents overlays add python engineering  # install into the scope, publish skills
 dotagents overlays list                    # installed (discovered) + available
 dotagents overlays sync 'py*'              # refresh installed overlays matching a glob
 dotagents overlays remove python           # delete the overlay dir, unpublish its skills, un-merge its rules

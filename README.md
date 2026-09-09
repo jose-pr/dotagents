@@ -106,7 +106,7 @@ where the example overlays live. Installed overlays are *discovered* by their pr
 under `<scope>/.agents/overlays/` — there is no registry file.
 
 ```bash
-dotagents overlays add python flows        # install into the scope, publish skills, merge D59 rules/routing
+dotagents overlays add python engineering  # install into the scope, publish skills, merge D59 rules/routing
 dotagents overlays list                    # installed (discovered) + available (from source)
 dotagents overlays sync 'py*'              # refresh installed overlays matching a glob, resync their skills
 dotagents overlays remove python           # delete the overlay dir + unpublish its skills
@@ -153,7 +153,7 @@ Then wire your runner to it — e.g. Claude Code: put `@AGENTS.md` in
 `~/.claude/CLAUDE.md`... which is exactly what the installed `CLAUDE.md` contains.
 
 **Or let your agent do it:** point it at this repo and say —
-> Read README.md, run `python install.py init && python install.py overlays add flows -g`,
+> Read README.md, run `python install.py init && python install.py overlays add engineering -g`,
 > and confirm `~/.agents/overlays/flows/flows/PLAN.md` exists.
 
 ## Private sync (per-user + per-project, one private repo)

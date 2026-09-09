@@ -120,7 +120,7 @@ def _check_overlay_manifests(root):
     failure that let three rules live only in the install target and nowhere in
     source. Cheap to catch here, invisible otherwise."""
     failures = []
-    overlays = root / "overlays"
+    overlays = _overlays_dir(root)
     if not overlays.is_dir():
         return failures
     for manifest in sorted(overlays.glob("*/overlay.toml")):
@@ -136,6 +136,16 @@ def _check_overlay_manifests(root):
                 )
     return failures
 
+
+def _overlays_dir(root):
+    """The directory holding `<name>/overlay.toml` entries. CI checks the
+    `overlays` branch out INTO ./overlays (so the overlays sit directly under
+    it); a local clone of that branch at ./overlays nests them one level down
+    (./overlays/overlays/<name>/). Accept both."""
+    ov = root / "overlays"
+    if (ov / "overlays").is_dir() and not any(ov.glob("*/overlay.toml")):
+        return ov / "overlays"
+    return ov
 
 def check_templates(root):
     if sys.version_info < (3, 11):
@@ -157,14 +167,15 @@ def check_templates(root):
     failures = []
     tmp = Path(tempfile.mkdtemp(prefix="agents_tpl_"))
     try:
-        refs_dir = root / "overlays" / "references" / "references"
+        ov = _overlays_dir(root)
+        refs_dir = ov / "engineering" / "references"
         sources = [(refs_dir / n, n) for n in
                    ["README.md", "CHANGELOG.md", ".gitignore", "docs-index.md"]]
         sources += [
-            (root / "overlays" / "python" / "references" / "mkdocs.yml", "mkdocs.yml"),
-            (root / "overlays" / "node" / "references" / "package.json", "package.json"),
-            (root / "overlays" / "python" / "references" / "pyproject.toml", "pyproject.toml"),
-            (root / "overlays" / "rust" / "references" / "Cargo.toml", "Cargo.toml"),
+            (ov / "python" / "references" / "mkdocs.yml", "mkdocs.yml"),
+            (ov / "node" / "references" / "package.json", "package.json"),
+            (ov / "python" / "references" / "pyproject.toml", "pyproject.toml"),
+            (ov / "rust" / "references" / "Cargo.toml", "Cargo.toml"),
         ]
         for src, name in sources:
             text = src.read_text(encoding="utf-8")
@@ -200,7 +211,7 @@ def check_templates(root):
         # .agents (D55/1c9bf7c: `dotagents link-project` makes it a symlink, which a
         # directory-only pattern would not match).
         ck(".gitignore", lambda: has(".gitignore",
-                                     ["\n.agents\n", "*.local.md", "CLAUDE*", ".claude"]))
+                                     ["\n.agents\n", "*.local.*", "CLAUDE*", ".claude"]))
         ck("docs-index.md", lambda: has("docs-index.md", ["#"]))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

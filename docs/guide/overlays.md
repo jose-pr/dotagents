@@ -39,7 +39,7 @@ your own. Point `--source` at a checkout of that branch to install any with
 ## Managing overlays
 
 ```bash
-dotagents overlays add python flows    # install into the scope, publish skills, merge rules/routing
+dotagents overlays add python engineering  # install into the scope, publish skills, merge rules/routing
 dotagents overlays list                # installed (discovered) + available (from source)
 dotagents overlays sync 'py*'          # refresh installed overlays matching a glob
 dotagents overlays remove python       # delete the overlay dir, unpublish its skills, un-merge its rules
@@ -67,9 +67,9 @@ Nothing in an overlay has to set up its own paths. For every installed overlay,
 exports **`$<NAME>_OVERLAY_ROOT`** — the overlay's installed directory (`NAME` is the
 directory name upper-cased, `-`/`.` → `_`: `private-sync` → `PRIVATE_SYNC_OVERLAY_ROOT`).
 That variable is how overlay content refers to itself and to other overlays: a
-routing line reads `$FLOWS_OVERLAY_ROOT/flows/PLAN.md`, never `~/.agents/flows/PLAN.md`
+routing line reads `$ENGINEERING_OVERLAY_ROOT/flows/PLAN.md`, never `~/.agents/flows/PLAN.md`
 — overlays install under `overlays/<name>/`, and the store itself can live anywhere
-(`$AGENTS_HOME`). In a `CONTEXT.md` the angle-bracket form `<FLOWS_OVERLAY_ROOT>` is
+(`$AGENTS_HOME`). In a `CONTEXT.md` the angle-bracket form `<ENGINEERING_OVERLAY_ROOT>` is
 expanded by `dotagents context` at assembly time. An overlay that needs to export
 something of its own ships an `env.py` at its root: `dotagents env` runs it and reads a
 JSON object of env changes from its stdout.

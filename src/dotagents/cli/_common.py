@@ -252,7 +252,7 @@ def _compose_block(base_text: str, overlays, logger) -> str:
 OVERLAY_ROOT_NOTE = (
     "Overlay paths below use `$<NAME>_OVERLAY_ROOT` -- an environment variable "
     "`dotagents env` exports per installed overlay (its install dir); resolve it "
-    "in a shell (`echo $FLOWS_OVERLAY_ROOT`) before opening the file with a file tool."
+    "in a shell (`echo $ENGINEERING_OVERLAY_ROOT`) before opening the file with a file tool."
 )
 
 

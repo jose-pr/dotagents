@@ -49,6 +49,6 @@ After install, point your runner at the config. For Claude Code, put `@AGENTS.md
 ```bash
 dotagents init
 test -f ~/.agents/AGENTS.md
-python -m dotagents overlays add flows -g
+python -m dotagents overlays add engineering -g
 test -f ~/.agents/overlays/flows/flows/PLAN.md
 ```

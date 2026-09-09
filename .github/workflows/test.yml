@@ -90,16 +90,16 @@ jobs:
         run: |
           export HOME="$(mktemp -d)"
           python install.py init -g
-          python -m dotagents overlays add flows references python --source overlays-src/overlays -g
+          python -m dotagents overlays add engineering python --source overlays-src/overlays -g
           test -f "$HOME/.agents/AGENTS.md"
-          test -f "$HOME/.agents/overlays/flows/flows/PLAN.md"
+          test -f "$HOME/.agents/overlays/engineering/flows/PLAN.md"
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"
       - name: Re-adding an overlay is idempotent (skips present files)
         run: |
           export HOME="$(mktemp -d)"
           python install.py init -g
-          python -m dotagents overlays add flows --source overlays-src/overlays -g
-          python -m dotagents overlays add flows --source overlays-src/overlays -g | grep -q "skip (exists)"
+          python -m dotagents overlays add engineering --source overlays-src/overlays -g
+          python -m dotagents overlays add engineering --source overlays-src/overlays -g | grep -q "skip (exists)"
       - name: overlays add/list/remove into a scope (discover, not track)
         run: |
           export HOME="$(mktemp -d)"

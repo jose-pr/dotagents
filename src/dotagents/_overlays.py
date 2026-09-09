@@ -527,7 +527,7 @@ class Overlay:
 
         Returns (blocks, warnings). Only the leading run of bullets is taken: a
         rules file may carry explanatory prose under a `## ` heading
-        (engineering/rules.md documents *why* its rules are not in the base), and
+        (the engineering overlay's rules/ENGINEERING.md documents *why* its rules are not in the base), and
         that must not be merged into the core. A path that does not exist is
         reported, not fatal -- a broken optional overlay must never block the
         base config landing."""

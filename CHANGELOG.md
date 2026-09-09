@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The overlay-root note `overlays add` writes above routing lines cites
+  `$ENGINEERING_OVERLAY_ROOT` as its example; the docs and CI install the
+  `engineering` overlay, which now carries the flows, references, and tools that
+  were separate overlays (each is a category dir under it, never `<name>/<name>/`).
 - The contract-A walk is `Scope.paths(*names, include_missing=False)`; the
   `_resolve` module (and its API docs page) is gone, its `LEVEL_NAMES` live in
   `_scope`.
