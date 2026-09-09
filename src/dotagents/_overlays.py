@@ -13,8 +13,8 @@ property of :class:`Overlay`. Two manifest keys are read:
 :func:`recompose_overlay_block` is the one operation over a *set* of overlays and
 stays a module function.
 
-Dependency resolution (`requires`) is still deferred to a future
-`dotagents overlays` subcommand.
+`requires` (overlay names this one needs) is read too; `overlays add` installs
+them first (see `cli/overlays.py`), and `description` feeds `overlays show`.
 """
 
 from __future__ import annotations
@@ -38,43 +38,116 @@ DEFAULT_PRIORITY = 500
 
 
 def _strip_comments(text: str) -> str:
-    """Drop whole-line `#` comments, leaving string contents untouched.
+    """Drop `#` comments -- whole-line AND trailing -- leaving string contents
+    untouched: a `#` inside `"..."`, `'...'`, `\"\"\"...\"\"\"` or `'''...'''`
+    (multi-line included) is data.
 
-    Only line comments are removed, and only when `#` is the first non-space
-    character -- enough for these manifests, and it cannot corrupt a `#` inside
-    a quoted value the way a general strip-to-end-of-line would."""
-    return "\n".join(
-        ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
-    )
+    Whole-line stripping alone left `routing = ["a"] # note` for the array
+    reader, whose single-line form then failed on the trailing text and whose
+    multi-line form ran on to the NEXT array's `]` -- a rules PATH became a
+    routing line in AGENTS.md (review 2026-09-09)."""
+    out = []
+    i, n = 0, len(text)
+    quote: "Optional[str]" = None
+    while i < n:
+        c = text[i]
+        if quote:
+            if text.startswith(quote, i):
+                out.append(quote)
+                i += len(quote)
+                quote = None
+            elif c == "\\" and quote in ('"', '"""') and i + 1 < n:
+                out.append(text[i : i + 2])  # an escape inside a basic string
+                i += 2
+            else:
+                out.append(c)
+                i += 1
+            continue
+        if text.startswith('"""', i) or text.startswith("'''", i):
+            quote = text[i : i + 3]
+            out.append(quote)
+            i += 3
+        elif c in ('"', "'"):
+            quote = c
+            out.append(c)
+            i += 1
+        elif c == "#":
+            while i < n and text[i] != "\n":
+                i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _array_body(text: str, key: str) -> "Optional[str]":
+    """The text between the `[` and its matching `]` of a top-level
+    `key = [...]`, found by a quote-aware scan -- so a `]` inside a string
+    (a markdown link in a routing line) or the NEXT key's array can never be
+    mistaken for this array's end, and the closing bracket may sit on the same
+    line, on its own line, indented, or right after a multi-line string."""
+    m = re.search(r"(?m)^%s\s*=\s*\[" % re.escape(key), text)
+    if m is None:
+        return None
+    i, n = m.end(), len(text)
+    start = i
+    quote: "Optional[str]" = None
+    while i < n:
+        c = text[i]
+        if quote:
+            if text.startswith(quote, i):
+                i += len(quote)
+                quote = None
+            elif c == "\\" and quote in ('"', '"""') and i + 1 < n:
+                i += 2
+            else:
+                i += 1
+            continue
+        if text.startswith('"""', i) or text.startswith("'''", i):
+            quote = text[i : i + 3]
+            i += 3
+        elif c in ('"', "'"):
+            quote = c
+            i += 1
+        elif c == "]":
+            return text[start:i]
+        else:
+            i += 1
+    return None  # unterminated: treat as absent
 
 
 def _parse_string_array(text: str, key: str) -> "list[str]":
-    """Read a top-level `key = [...]` array of strings from TOML source.
+    """Read a top-level `key = [...]` array of strings from (comment-stripped)
+    TOML source.
 
     A deliberately small reader rather than a TOML dependency: the floor is
     Python 3.9, where `tomllib` does not exist, and pulling in `tomli` to read
     two arrays would be a real dependency for a trivial need (D13). Handles the
-    forms these manifests actually use -- `"..."` and `\"\"\"...\"\"\"`
-    (multi-line), one or many per array."""
-    # Single-line form first (incl. the empty `key = []`). It must be tried
-    # before the multi-line form and must not cross a newline: `routing = []`
-    # followed later by `rules = [...]` would otherwise let a greedy multi-line
-    # match swallow the *next* array and report it as this key's value.
-    m = re.search(r"(?m)^%s\s*=\s*\[([^\[\]\n]*)\]\s*$" % re.escape(key), text)
-    if m is None:
-        m = re.search(r"(?ms)^%s\s*=\s*\[(.*?)^\]" % re.escape(key), text)
-        if m is None:
-            return []
-    body = m.group(1)
+    forms these manifests actually use -- `"..."`, `'...'`, and the multi-line
+    `\"\"\"...\"\"\"` / `'''...'''` -- one or many per array, with the closing
+    `]` on the same line or on its own (indented or not)."""
+    body = _array_body(text, key)
+    if body is None:
+        return []
     # Triple-quoted first so its content is not re-matched as single-quoted.
-    items = re.findall(r'"""(.*?)"""', body, re.DOTALL)
-    remainder = re.sub(r'""".*?"""', "", body, flags=re.DOTALL)
-    items += re.findall(r'"([^"\n]*)"', remainder)
+    items = re.findall(r'"""(.*?)"""|\'\'\'(.*?)\'\'\'', body, re.DOTALL)
+    items = [a or b for a, b in items]
+    remainder = re.sub(r'""".*?"""|\'\'\'.*?\'\'\'', "", body, flags=re.DOTALL)
+    items += [a or b for a, b in re.findall(r'"([^"\n]*)"|\'([^\'\n]*)\'', remainder)]
     return [s.strip("\n") for s in items if s.strip()]
 
 
+def _parse_string(text: str, key: str) -> "Optional[str]":
+    """A top-level single-line `key = "..."` / `key = '...'` string, or None."""
+    m = re.search(r"""(?m)^%s\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)')\s*$""" % re.escape(key), text)
+    if m is None:
+        return None
+    return m.group(1) if m.group(1) is not None else m.group(2)
+
+
 def _parse_priority(text: str) -> int:
-    """Read a top-level `priority = <int>` from TOML source (plan 02).
+    """Read a top-level `priority = <int>` from (comment-stripped) TOML source
+    (plan 02).
 
     Same minimal-reader rationale as `_parse_string_array`: no `tomllib` on the
     3.9 floor. Missing/unparseable -> DEFAULT_PRIORITY."""
@@ -85,6 +158,15 @@ def _parse_priority(text: str) -> int:
         return int(m.group(1))
     except ValueError:
         return DEFAULT_PRIORITY
+
+
+def _same_content(a: Path, b: Path) -> bool:
+    try:
+        if a.stat().st_size != b.stat().st_size:
+            return False
+        return a.read_bytes() == b.read_bytes()
+    except OSError:
+        return False
 
 
 # --------------------------------------------------------------------------- #
@@ -247,12 +329,14 @@ class Overlay:
     # -- manifest -------------------------------------------------------------
 
     def read_manifest(self) -> "dict[str, object]":
-        """Parse `overlay.toml`, returning at least name/routing/rules/priority.
+        """Parse `overlay.toml`, returning name / description / routing / rules /
+        requires / priority.
 
         A missing or unreadable manifest yields empty contributions -- an overlay
         is allowed to be just a directory of files."""
-        empty = {
-            "name": self.name, "routing": [], "rules": [], "priority": DEFAULT_PRIORITY,
+        empty: "dict[str, object]" = {
+            "name": self.name, "description": "", "routing": [], "rules": [],
+            "requires": [], "priority": DEFAULT_PRIORITY,
         }
         path = self.manifest_path
         if not path.is_file():
@@ -261,11 +345,14 @@ class Overlay:
             raw = _strip_comments(path.read_text(encoding="utf-8"))
         except OSError:
             return empty
-        name = re.search(r'(?m)^name\s*=\s*"([^"]*)"', raw)
         return {
-            "name": name.group(1) if name else self.name,
+            "name": _parse_string(raw, "name") or self.name,
+            "description": _parse_string(raw, "description") or "",
             "routing": _parse_string_array(raw, "routing"),
             "rules": _parse_string_array(raw, "rules"),
+            "requires": [
+                self.normalize_name(r) for r in _parse_string_array(raw, "requires")
+            ],
             "priority": _parse_priority(raw),
         }
 
@@ -280,7 +367,7 @@ class Overlay:
             return DEFAULT_PRIORITY
 
     @property
-    def sort_key(self) -> "tuple[int, str]":
+    def sort_key(self) -> "tuple[int, str, str]":
         """The `(priority, name)` merge-order key (plan 02 / D68).
 
         Lower `priority` (default `DEFAULT_PRIORITY`, 500) sorts earlier; a
@@ -288,10 +375,11 @@ class Overlay:
         AGENTS.md block and wins on conflict -- the same "lower sorts earlier /
         higher wins" convention `_context.py` uses for its own priority ordering.
         `name` is the stable tiebreaker for equal-priority overlays, keyed off
-        the manifest `name` (falling back to the directory name) so output is
-        deterministic regardless of input order."""
+        the manifest `name` (falling back to the directory name), then the
+        directory name itself (two dirs can carry the same manifest name), so
+        output is deterministic regardless of input order."""
         manifest = self.read_manifest()
-        return (self.priority, str(manifest.get("name", self.name)))
+        return (self.priority, str(manifest.get("name", self.name)), self.name)
 
     @classmethod
     def sort_by_priority(
@@ -427,31 +515,39 @@ class Overlay:
             blocks.append(body.rstrip())
         return blocks, warnings
 
-    def _copy_into(self, sources: "list[Path]", dest: Path, dry_run: bool, verb: str):
+    def _copy_into(
+        self, sources: "list[Path]", dest: Path, dry_run: bool, verb: str,
+        overwrite: bool = False,
+    ):
         """Copy `sources` (under this overlay) to the same relative path under
-        `dest`, create-if-absent; never clobber. Returns (copied, skipped, lines)."""
-        copied = skipped = 0
+        `dest`, create-if-absent; never clobber -- unless `overwrite`, which
+        replaces an existing file whose CONTENT differs (an identical file is
+        still a skip). Returns (written, skipped, lines)."""
+        written = skipped = 0
         lines = []
         for src in sources:
             rel = src.relative_to(self.path)
             target = dest / rel
             if target.exists():
-                lines.append("skip (exists): %s" % rel.as_posix())
-                skipped += 1
-                continue
-            lines.append("%s: %s" % (verb, rel.as_posix()))
+                if not overwrite or _same_content(src, target):
+                    lines.append("skip (exists): %s" % rel.as_posix())
+                    skipped += 1
+                    continue
+                lines.append("update: %s" % rel.as_posix())
+            else:
+                lines.append("%s: %s" % (verb, rel.as_posix()))
             if not dry_run:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(src), str(target))
-            copied += 1
-        return copied, skipped, lines
+            written += 1
+        return written, skipped, lines
 
     def apply_to(self, dest: Path, dry_run: bool):
         """Copy the overlay's files into `dest` (create-if-absent; never clobber
         an existing file). Returns (copied, skipped) counts and per-file log lines."""
         return self._copy_into(self.files(), dest, dry_run, "overlay")
 
-    def install_to(self, dest_overlay_dir: Path, dry_run: bool):
+    def install_to(self, dest_overlay_dir: Path, dry_run: bool, overwrite: bool = False):
         """Install the overlay as a *directory* under `<scope>/overlays/<name>/`
         (the "install model = overlay-dirs" decision): the overlay is the
         discoverable unit.
@@ -459,15 +555,16 @@ class Overlay:
         Copies every file the overlay ships (minus its manifest / caches -- see
         :meth:`files`) into `dest_overlay_dir`, create-if-absent so re-adding an
         overlay never clobbers a file the user hand-edited inside the installed
-        copy (additive/no-clobber, mirroring :meth:`apply_to`). The overlay's own
-        `overlay.toml` is copied too so a later `sync`/`list` can re-read its
-        manifest from the installed copy. Returns (copied, skipped) counts and
-        log lines."""
+        copy (additive/no-clobber, mirroring :meth:`apply_to`); `overwrite`
+        (`sync --overwrite`) replaces files whose content differs from the
+        source. The overlay's own `overlay.toml` is copied too so a later
+        `sync`/`list`/`show` can re-read its manifest from the installed copy.
+        Returns (written, skipped) counts and log lines."""
         # Ship the manifest alongside the files so the installed dir is self-describing.
         sources = self.files()
         if self.manifest_path.is_file():
             sources.append(self.manifest_path)
-        return self._copy_into(sources, dest_overlay_dir, dry_run, "install")
+        return self._copy_into(sources, dest_overlay_dir, dry_run, "install", overwrite)
 
     def merge_rules_into(self, agents_md: Path, dry_run: bool, logger) -> bool:
         """Fold this overlay's D59 routing + rules into an already-installed

@@ -59,9 +59,11 @@ from dotagents.cli._common import (  # noqa: F401
     _apply_base,
     _compose_block,
     _installed_overlay_dirs,
+    _no_subcommand,
     _package_data_dir,
     _resolve_from,
     _run_overlay_setup,
+    _scratch_dir,
     _write_stdout,
     resolve_user_store,
 )
@@ -80,6 +82,7 @@ from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
     OverlayAdd,
     OverlayList,
     OverlayRemove,
+    OverlayShow,
     OverlaySync,
     Overlays,
 )
@@ -153,11 +156,10 @@ class Dotagents(LoggingArgs, Cli):
     ("--cmdspath",)
 
     def __call__(self) -> int:
-        self._logger_.info(
-            "pick a subcommand, e.g. `init`, `overlays`, `context`, `env`, "
-            "`build-pyz`"
+        return _no_subcommand(
+            self,
+            "pick a subcommand, e.g. `init`, `overlays`, `context`, `env`, `build-pyz`",
         )
-        return 0
 
 
 def _bundled_cmds_dir() -> "Path | None":
@@ -196,8 +198,18 @@ def _discover_dir(source, by_name: dict) -> None:
         return
     try:
         commands = discover_commands(path)
-    except (ImportError, NotImplementedError, OSError) as exc:
-        _LOGGER.warning("skipping command source %r: %s", str(source), exc)
+    except Exception as exc:  # noqa: BLE001 -- see below
+        # EVERYTHING, not only ImportError: duho deliberately lets a
+        # SyntaxError or a module-level RuntimeError propagate ("a real bug
+        # the author wants surfaced"), which is right for an app that owns its
+        # commands -- but discovery runs before EVERY dotagents invocation,
+        # including `env` / `context` inside the SessionStart hooks, so one typo
+        # in `~/.agents/dotagents/cmds/foo.py` took down env, context, init and
+        # even `--version` for the whole session (review 2026-09-09). The bad
+        # source is named, with the exception, and skipped.
+        _LOGGER.warning(
+            "skipping command source %r: %s: %s", str(source), type(exc).__name__, exc
+        )
         return
     for command in commands:
         name = getattr(command, "_parsername_", None) or getattr(
@@ -207,7 +219,22 @@ def _discover_dir(source, by_name: dict) -> None:
             by_name[name] = command  # later source wins
 
 
-def _cmds_dirs() -> "list[Path]":
+def _agents_dir_from_argv(argv) -> "str | None":
+    """The value of an `--agents-dir X` / `--agents-dir=X` anywhere in `argv`,
+    so command discovery walks the store the command itself is about to use.
+    The flag belongs to the subcommands, not the umbrella, and `_discover`
+    runs before the subcommand parser exists -- so it is read by hand."""
+    if argv is None:
+        argv = sys.argv[1:]
+    for i, arg in enumerate(argv):
+        if arg == "--agents-dir" and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith("--agents-dir="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def _cmds_dirs(argv=None) -> "list[Path]":
     """Every `cmds` dir to discover command modules from, in Contract-A order.
 
     Resolved with the SAME `get_file_paths` walk that backs `bin`/PATH discovery
@@ -234,7 +261,7 @@ def _cmds_dirs() -> "list[Path]":
 
     resolved = _resolve.get_file_paths(
         {"default": "dotagents/cmds", "overlay": "cmds"},
-        agents_dir=resolve_user_store(),
+        agents_dir=resolve_user_store(_agents_dir_from_argv(argv)),
         project_root=_scope.project_root_default(),
         global_scope=False,
         include_missing=True,
@@ -277,7 +304,7 @@ def _discover(argv=None) -> "list":
 
     # 3. Contract-A cmds dirs: overlay cmds + scope (user/project) cmds, in
     #    precedence order (overlays first, project last -> project wins).
-    for cmds_dir in _cmds_dirs():
+    for cmds_dir in _cmds_dirs(argv):
         _discover_dir(cmds_dir, by_name)
 
     # 4. $AGENTS_CMDS_PATH (back-compat: $DOTAGENTS_CMDS_PATH, removable next release)
@@ -350,9 +377,10 @@ def _repoint_zipapp_sources() -> None:
             text = resource.read_text(encoding="utf-8")
         except (FileNotFoundError, ModuleNotFoundError, OSError, TypeError):
             continue
-        tmp = Path(tempfile.mkdtemp(prefix="dotagents-src-")) / (
-            modname.replace(".", "_") + ".py"
-        )
+        # Under the one per-process scratch dir (removed at exit) -- one
+        # `mkdtemp` per module, never cleaned, littered %TEMP% at ~9 dirs per run.
+        tmp = _scratch_dir() / "src" / (modname.replace(".", "_") + ".py")
+        tmp.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(text, encoding="utf-8")
         mod.__file__ = str(tmp)
 

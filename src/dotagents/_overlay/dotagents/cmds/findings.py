@@ -61,7 +61,7 @@ from typing import Optional
 
 from duho import Cli, LoggingArgs
 
-from dotagents.cli import DotAgentsArgs, _write_stdout
+from dotagents.cli import DotAgentsArgs, _no_subcommand, _write_stdout
 
 FINDINGS_DIRNAME = "findings"
 PROCESSED_DIRNAME = "processed"
@@ -262,7 +262,10 @@ class FindingsStore:
         if not slug:
             raise SystemExit("error: %r yields no usable file name; pass --name" % (name or description))
         path = self.root / (slug + ".md")
-        if path.exists() or (self.processed_dir / (slug + ".md")).exists():
+        # By file AND by frontmatter name: `get` matches the frontmatter `name`
+        # first, so a hand note `foo.md` carrying `name: bar` would otherwise be
+        # what `done bar` processes after `add --name bar` created `bar.md`.
+        if path.exists() or (self.processed_dir / (slug + ".md")).exists() or self.get(slug):
             raise SystemExit("error: finding %r already exists under %s (pass --name)" % (slug, self.root))
         meta = {
             "name": slug,
@@ -571,7 +574,6 @@ class Findings(LoggingArgs, Cli):
     _subcommands_ = [Add, List, Show, Done, Reopen, Remove, Index, PathCmd]
 
     def __call__(self) -> int:
-        self._logger_.info(
-            "pick a findings subcommand: add, list, show, done, reopen, remove, index, path"
+        return _no_subcommand(
+            self, "pick a findings subcommand: add, list, show, done, reopen, remove, index, path"
         )
-        return 0

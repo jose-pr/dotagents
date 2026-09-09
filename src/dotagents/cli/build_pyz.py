@@ -57,6 +57,15 @@ class BuildPyz(LoggingArgs, Cmd):
         # `tools/audit.py`'s own docstring says it is not shipped in the .pyz --
         # which is only true now that this stopped copying it.
         repo_root = Path(__file__).resolve().parents[3]
+        pyproject = repo_root / "pyproject.toml"
+        dotagents_pkg_src = Path(__file__).resolve().parents[1]
+        if not pyproject.is_file() or not dotagents_pkg_src.is_dir():
+            # A wheel install (site-packages) or a run from inside a .pyz has
+            # no checkout around it -- say so instead of a FileNotFoundError.
+            raise SystemExit(
+                "error: build-pyz needs a source checkout (no pyproject.toml above "
+                "%s); run it from the dotagents repository" % dotagents_pkg_src
+            )
 
         with tempfile.TemporaryDirectory(prefix="dotagents-pyz-") as tmp:
             stage = Path(tmp) / "stage"
@@ -82,7 +91,6 @@ class BuildPyz(LoggingArgs, Cmd):
             if rc != 0:
                 return rc
 
-            dotagents_pkg_src = Path(__file__).resolve().parents[1]
             dotagents_pkg_dest = stage / "dotagents"
             shutil.copytree(
                 dotagents_pkg_src,
@@ -99,7 +107,6 @@ class BuildPyz(LoggingArgs, Cmd):
             # read pyproject.toml directly and rewrite the STAGED copy's
             # __version__ to match -- the built artifact is then correct
             # regardless of whether __init__.py itself was ever touched.
-            pyproject = repo_root / "pyproject.toml"
             match = _PYPROJECT_VERSION_RE.search(pyproject.read_text(encoding="utf-8"))
             if match is None:
                 self._logger_.warning(

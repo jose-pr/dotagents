@@ -252,19 +252,30 @@ def test_project_scope_contributes(monkeypatch, tmp_path):
 
 
 def test_bad_source_is_skipped_not_fatal(monkeypatch, tmp_path):
-    # A nonexistent dir + a syntactically-broken command file must not crash.
+    # A nonexistent dir + a syntactically-broken command file + one that raises
+    # at import time must not crash: discovery runs before EVERY invocation,
+    # including `env`/`context` inside the SessionStart hooks, so one typo in a
+    # personal cmds module used to take the whole session's env and context
+    # down (review 2026-09-09). duho propagates SyntaxError on purpose; the
+    # dotagents layer is where it must stop.
     good = tmp_path / "good"
     _write(good / "toy.py", TOY)
+    broken = tmp_path / "broken"
+    _write(broken / "typo.py", BROKEN)
+    raising = tmp_path / "raising"
+    _write(raising / "boom.py", "raise RuntimeError('import-time failure')\n")
     missing = tmp_path / "does-not-exist"
     monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
     monkeypatch.setenv(
-        "AGENTS_CMDS_PATH", os.pathsep.join([str(missing), str(good)])
+        "AGENTS_CMDS_PATH",
+        os.pathsep.join([str(missing), str(broken), str(raising), str(good)]),
     )
     monkeypatch.chdir(tmp_path)
 
-    # A missing dir is simply skipped; the good source still loads.
+    # Every bad source is skipped; the good one still loads, as do built-ins.
     names = _names(cli._discover([]))
     assert "toy" in names
+    assert "env" in names and "context" in names
 
 
 def test_later_source_wins_dedup(monkeypatch, tmp_path):

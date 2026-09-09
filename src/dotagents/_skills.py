@@ -137,13 +137,14 @@ def unsync_path(target: Path, source: Path) -> SyncResult:
         return SyncResult(False, "copy", "removal failed: %s" % exc)
 
 
-def resync_path(source: Path, target: Path) -> SyncResult:
+def resync_path(source: Path, target: Path, *, prefer_symlink: bool = True) -> SyncResult:
     """Refresh a published skill from its overlay source. A symlink is inherently
-    current; a copy is re-copied when its file set drifted."""
+    current; a copy is re-copied when its content drifted; an unpublished skill
+    is published (symlink-preferred unless ``prefer_symlink`` is False)."""
     if not source.exists():
         return SyncResult(False, "error", "source does not exist")
     if not os.path.lexists(str(target)):
-        return sync_path(source, target, prefer_symlink=True)
+        return sync_path(source, target, prefer_symlink=prefer_symlink)
     if os.path.islink(str(target)):
         return SyncResult(True, "symlink", "symlink is current")
     if _paths_match(source, target):
@@ -215,17 +216,20 @@ def publish_overlay_skills(
     return published
 
 
-def resync_overlay_skills(overlay_dir: Path, shared_skills: Path, *, logger=None) -> int:
+def resync_overlay_skills(
+    overlay_dir: Path, shared_skills: Path, *, copy: bool = False, logger=None
+) -> int:
     """Refresh already-published skills of this overlay (copy-mode drift). New
-    skills are published; symlinks are inherently current."""
+    skills are published (as copies with ``copy``, the ``sync --copy`` form --
+    which used to be accepted and ignored); symlinks are inherently current."""
     skill_dirs = _overlay_skill_dirs(overlay_dir)
     if not skill_dirs or not shared_skills.is_dir():
         # Nothing published yet -> fall back to a fresh publish.
-        return publish_overlay_skills(overlay_dir, shared_skills, logger=logger)
+        return publish_overlay_skills(overlay_dir, shared_skills, copy=copy, logger=logger)
     updated = 0
     for skill_dir in skill_dirs:
         target = shared_skills / skill_dir.name
-        result = resync_path(skill_dir, target)
+        result = resync_path(skill_dir, target, prefer_symlink=not copy)
         if result and result.mode == "copy" and "current" not in result.message:
             updated += 1
             if logger is not None:

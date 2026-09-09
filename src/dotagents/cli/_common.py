@@ -102,6 +102,28 @@ class DotAgentsArgs(LoggingArgs, Cmd):
 # the package shells out to `tools/`.
 
 
+_scratch: "Path | None" = None
+
+
+def _scratch_dir() -> Path:
+    """The ONE per-process temp directory for anything extracted out of a
+    zipapp (package data, the repointed module sources), created lazily and
+    removed at interpreter exit.
+
+    Every `.pyz` run used to `mkdtemp` once per extracted item -- eight
+    module sources plus the `_overlay` data -- and never removed any of them:
+    632 `dotagents-*` directories were sitting in one machine's `%TEMP%`,
+    about 18 more per session start (review 2026-09-09). A plain install
+    never creates it."""
+    global _scratch
+    if _scratch is None:
+        import atexit
+
+        _scratch = Path(tempfile.mkdtemp(prefix="dotagents-"))
+        atexit.register(shutil.rmtree, str(_scratch), True)
+    return _scratch
+
+
 def _package_data_dir(name: str) -> "Path | None":
     """Resolve a directory under the installed `dotagents` package (e.g.
     `_overlay` or `_payload`) to a real filesystem Path, working whether the
@@ -128,9 +150,11 @@ def _package_data_dir(name: str) -> "Path | None":
         _extracted_dirs_cache[name] = as_path
         return as_path
 
-    # Zip-backed (or otherwise non-filesystem) Traversable: extract to a
-    # temp dir that lives for the process lifetime.
-    extract_root = Path(tempfile.mkdtemp(prefix="dotagents-%s-" % name))
+    # Zip-backed (or otherwise non-filesystem) Traversable: extract under the
+    # ONE process scratch dir, removed at exit (see `_scratch_dir`).
+    extract_root = _scratch_dir() / name
+    if extract_root.exists():
+        shutil.rmtree(str(extract_root), ignore_errors=True)
 
     def _extract(node, dest: Path):
         dest.mkdir(parents=True, exist_ok=True)
@@ -147,9 +171,9 @@ def _package_data_dir(name: str) -> "Path | None":
 
 
 # The base overlay (neutral minimum) is bundled package data at
-# `src/dotagents/_overlay`; `init` and `install` both lay it down. Overlays
-# beyond the base are opt-in examples applied from an external path via
-# `install --overlays <dir>` (the installer bundles none of them).
+# `src/dotagents/_overlay`; `init` lays it down. Overlays beyond the base are
+# opt-in and installed by name with `overlays add` from a source dir
+# (`--source` / `$AGENTS_OVERLAYS_SRC`; this package bundles none of them).
 BASE_ROOT = _package_data_dir("_overlay") or (
     Path(__file__).resolve().parent.parent / "_overlay"
 )
@@ -195,8 +219,14 @@ def _compose_block(base_text: str, overlays, logger) -> str:
         # Append after the last always-on bullet, i.e. just before the next heading.
         m = re.search(r"(?m)^## Load on demand", text)
         if m is None:
+            # A custom `--from` base without the heading: the rules still have
+            # to land somewhere -- at the end of the block, as the warning says
+            # (they used to be dropped while the warning claimed otherwise).
             logger.warning("base AGENTS.md has no 'Load on demand' heading; "
                            "appending overlay rules at the end of the block")
+            end = re.search(r"(?m)^[ \t]*<!-- dotagents:end -->", text)
+            insert_at = end.start() if end else len(text)
+            text = text[:insert_at] + "\n".join(rules) + "\n\n" + text[insert_at:]
         else:
             text = text[: m.start()] + "\n".join(rules) + "\n\n" + text[m.start():]
     if routing:
@@ -206,10 +236,22 @@ def _compose_block(base_text: str, overlays, logger) -> str:
             "",
             text,
         )
-        end = re.search(r"(?m)^<!-- dotagents:end -->", text)
+        end = re.search(r"(?m)^[ \t]*<!-- dotagents:end -->", text)
         insert_at = end.start() if end else len(text)
         text = text[:insert_at] + "\n".join(routing) + "\n" + text[insert_at:]
     return text
+
+
+def _no_subcommand(cmd, hint: str) -> int:
+    """What an umbrella (`dotagents`, `overlays`, `findings`) does when invoked
+    with no subcommand: print its help and exit 2, the argparse convention --
+    not an info log and exit 0, which read as success to a script."""
+    parser = getattr(type(cmd), "_duho_last_parser_", None)
+    if parser is not None and hasattr(parser, "print_help"):
+        parser.print_help()
+    else:
+        cmd._logger_.info(hint)
+    return 2
 
 
 def _installed_overlay_dirs(scope, source, *, adding=None, dry_run=False) -> "list[Path]":
@@ -275,15 +317,15 @@ def _apply_base(
     agents: "list[str] | None" = None,
     wire_hooks: bool = False,
 ) -> None:
-    """Lay down the base overlay: managed-block merge AGENTS.md/CLAUDE.md,
-    create-if-absent the plain files. Shared by `init` and `install`.
+    """Lay down the base overlay: managed-block merge AGENTS.md/CLAUDE.md (and,
+    for Claude, the `@` include in its own config dir), create-if-absent the
+    plain files. `init`'s body.
 
     With `wire_hooks`, each active agent also gets its hooks merged and the shared
     skills dir linked into its config dir (a no-op for adapters that don't
     implement it). Done here because this is where the active-agent list is
     already resolved."""
     from dotagents import _agents
-    import os
 
     base_agents = (Path(src) / "AGENTS.md").read_text(encoding="utf-8")
 
@@ -389,17 +431,23 @@ def _resolve_from(from_arg: "str | None", default: Path) -> Path:
     raise SystemExit("error: --from path does not exist: %s" % from_arg)
 
 
-def _run_overlay_setup(dest_dir, name, *, scope, no_setup, dry_run, logger):
+def _run_overlay_setup(dest_dir, name, *, scope, no_setup, dry_run, logger, source_dir=None):
     """Run an installed overlay's `setup` script, honoring `--no-setup`.
 
     Thin wrapper over `Overlay.run_setup` that resolves the store path from the
     scope (D58 configurable store, passed as `AGENTS_HOME`) and short-circuits
     when `--no-setup` is given or the overlay ships no script. Returns the setup
     exit code (0 when skipped / absent), so a non-zero result surfaces as a
-    clear error rather than a silent skip."""
+    clear error rather than a silent skip.
+
+    On a `--dry-run` the installed dir may not exist yet, so the SOURCE overlay
+    (`source_dir`) is what gets inspected for a script -- a dry run used to
+    report nothing about setup at all."""
     from dotagents._overlays import Overlay
 
     overlay = Overlay(dest_dir)
+    if dry_run and source_dir is not None and overlay.find_setup_script() is None:
+        overlay = Overlay(source_dir)
     if no_setup:
         if overlay.find_setup_script() is not None:
             logger.info("skipping setup for %s (--no-setup)", name)

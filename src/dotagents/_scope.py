@@ -197,13 +197,22 @@ class OverlaySource:
         return [overlay.name for overlay in Overlay.discover(self.root)]
 
     def overlay_dir(self, name: str) -> Path:
-        candidate = self.root / name
-        if not candidate.is_dir():
-            raise SystemExit(
-                "error: overlay %r not found in source %s (available: %s)"
-                % (name, self.root, ", ".join(self.available()) or "none")
-            )
-        return candidate
+        """The source dir for ``name``: the literal dir, its normalized form, or
+        any available overlay whose NORMALIZED name matches -- so a source dir
+        named ``my_overlay`` resolves for ``add my_overlay`` / ``add my-overlay``
+        alike (``add`` normalizes before looking up, and a source dir is not
+        obliged to use the normalized spelling)."""
+        wanted = Overlay.normalize_name(name)
+        for candidate in (self.root / name, self.root / wanted):
+            if candidate.is_dir():
+                return candidate
+        for overlay in Overlay.discover(self.root):
+            if overlay.normalized_name == wanted:
+                return overlay.path
+        raise SystemExit(
+            "error: overlay %r not found in source %s (available: %s)"
+            % (name, self.root, ", ".join(self.available()) or "none")
+        )
 
     def __repr__(self) -> str:
         return "OverlaySource(%s)" % self.root

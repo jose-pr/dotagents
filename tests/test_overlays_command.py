@@ -103,7 +103,7 @@ def test_overlay_instance_surface(tmp_path):
     d.mkdir()
     (d / "overlay.toml").write_text('name = "ov"\npriority = 7\n', encoding="utf-8")
     assert ov.priority == 7
-    assert ov.sort_key == (7, "ov")
+    assert ov.sort_key == (7, "ov", "My_Ov.v2")  # priority, manifest name, dir name
     # os.PathLike: usable wherever a path is, and Overlay(Overlay) is identity.
     assert Path(ov) == d
     assert Overlay(ov) == ov
@@ -625,9 +625,9 @@ def _make_rules_overlay(src_root: Path, name: str, marker: str, priority=None):
 
 def test_overlay_sort_key_default_priority_when_absent(tmp_path):
     ov = _make_rules_overlay(tmp_path, "no-prio", "NP")  # no priority key
-    prio, name = Overlay(ov).sort_key
+    prio, name, dirname = Overlay(ov).sort_key
     assert prio == _overlays.DEFAULT_PRIORITY
-    assert name == "no-prio"
+    assert name == "no-prio" and dirname == "no-prio"
 
 
 def test_sort_overlays_by_priority_orders_low_first_regardless_of_input(tmp_path):
@@ -717,7 +717,12 @@ def test_existing_bundled_overlay_manifests_still_parse(tmp_path):
     repo_overlays = Path(__file__).resolve().parents[1] / "overlays"
     if not repo_overlays.is_dir():
         pytest.skip("no bundled overlays/ (they live on the `overlays` branch, D77)")
-    manifests = sorted(repo_overlays.glob("*/overlay.toml"))
+    # Either layout: the branch checked out AT `overlays/` (CI: `overlays-src/`,
+    # manifests at `overlays/<name>/`), or a clone of the branch placed under it
+    # (a dev box: `overlays/overlays/<name>/`).
+    manifests = sorted(repo_overlays.glob("*/overlay.toml")) or sorted(
+        repo_overlays.glob("overlays/*/overlay.toml")
+    )
     assert manifests, "expected bundled overlays to exist"
     for manifest in manifests:
         parsed = Overlay(manifest.parent).read_manifest()
