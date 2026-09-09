@@ -23,7 +23,9 @@ Contract B, the exact sequence :func:`get_environment` performs:
      ACCUMULATED environment of every file before it; the result also
      accumulates. Later files win on conflicting keys.
   5. **``.py`` files are EXECUTED** (:func:`get_env_from_py` runs the script and
-     reads back a JSON object of env changes); plain files are **sourced**
+     reads back its env changes as JSON -- one object, or one object per line
+     merged in order, so overlay-managed blocks appended to one ``env.py`` can
+     each print their own); plain files are **sourced**
      (:func:`get_env_from_file`, via ``bash ... env -0``).
   6. :func:`get_diff` returns only the vars that differ from the caller's base
      environment; :func:`get_environment` returns the full change set.
@@ -322,12 +324,19 @@ def get_env_from_py(
     global_scope: bool,
     logger=None,
 ) -> "dict[str, str]":
-    """Execute an ``env.py`` and read back its JSON object of env changes.
+    """Execute an ``env.py`` and read back its JSON object(s) of env changes.
 
     The script runs as a child with ``base_env`` (the accumulated environment)
-    and must print a JSON dict to stdout. A non-zero exit or unparseable output
-    contributes nothing and is logged by NAME only -- never abort assembly, and
-    never echo the child's stdout (it may carry secret values).
+    and prints its changes to stdout as JSON: ONE object, or one object PER
+    LINE, merged in order (a later line wins on a key). The per-line form is
+    what makes overlay-managed blocks composable: each overlay's ``setup.py``
+    appends its own block to the store's ``env.py`` and each block prints its
+    own object, so a store with two such overlays emits two lines -- which the
+    single-object reader rejected wholesale, silently dropping BOTH overlays'
+    vars (measured 2026-09-09 with net + private-sync). A non-zero exit or
+    unparseable output contributes nothing and is logged by NAME only -- never
+    abort assembly, and never echo the child's stdout (it may carry secret
+    values).
     """
     args = [sys.executable, str(env_py), "--agent", level]
     if global_scope:
@@ -345,14 +354,41 @@ def get_env_from_py(
             logger.warning("env.py failed (exit %s): %s", proc.returncode, env_py)
         return {}
     try:
-        parsed = json.loads(proc.stdout)
-        if not isinstance(parsed, dict):
-            raise ValueError("env.py must output a JSON object")
+        parsed = _parse_env_json(proc.stdout)
     except (json.JSONDecodeError, ValueError) as e:
         if logger:
             logger.warning("env.py output not JSON: %s (%s)", env_py, e)
         return {}
     return {k: str(v) for k, v in parsed.items() if isinstance(k, str)}
+
+
+def _parse_env_json(stdout: str) -> "dict[str, object]":
+    """One JSON object, or one JSON object per non-blank line merged in order.
+
+    Raises ``json.JSONDecodeError`` / ``ValueError`` when any line is not an
+    object, so a partly-broken script still contributes nothing (the caller
+    warns by name) rather than a half-applied change set."""
+    text = stdout.strip()
+    if not text:
+        return {}
+    try:
+        whole = json.loads(text)
+    except json.JSONDecodeError:
+        whole = None
+    if whole is not None:
+        if not isinstance(whole, dict):
+            raise ValueError("env.py must output a JSON object")
+        return whole
+    merged: "dict[str, object]" = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        obj = json.loads(line)
+        if not isinstance(obj, dict):
+            raise ValueError("env.py must output a JSON object per line")
+        merged.update(obj)
+    return merged
 
 
 def get_env_from_file(

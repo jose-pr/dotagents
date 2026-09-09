@@ -386,6 +386,35 @@ def test_py_json_changes_applied(tree):
     assert env["NUM"] == "42"
 
 
+def test_py_one_json_object_per_line_merges_in_order(tree):
+    """Overlay-managed blocks each print their own JSON object into the same
+    env.py, so its stdout is one object PER LINE. They merge in order (later
+    wins). Regression: the single-object reader rejected the whole output and
+    silently dropped every overlay's vars once two overlays were installed."""
+    agents_dir, project_root = tree
+    (agents_dir / "env.py").write_text(
+        "import json\n"
+        "print(json.dumps({'A': '1', 'K': 'first'}))\n"
+        "print(json.dumps({}))\n"
+        "print(json.dumps({'B': '2', 'K': 'second'}))\n",
+        encoding="utf-8",
+    )
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert env["A"] == "1" and env["B"] == "2" and env["K"] == "second"
+
+
+def test_py_partly_broken_output_contributes_nothing(tree):
+    """A non-object line poisons the whole script's output: nothing is applied,
+    not a half set."""
+    agents_dir, project_root = tree
+    (agents_dir / "env.py").write_text(
+        "import json\nprint(json.dumps({'A': '1'}))\nprint('not json')\n",
+        encoding="utf-8",
+    )
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert "A" not in env
+
+
 def test_py_nonzero_is_skipped_not_fatal(tree):
     agents_dir, project_root = tree
     (agents_dir / "env.py").write_text(

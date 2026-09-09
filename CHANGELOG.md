@@ -82,6 +82,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   instances or directories. `_overlays` is a private module, so no public
   version signal.
 
+- fix: an `env.py` may now print its changes as one JSON object **per line**,
+  merged in order (a later line wins), as well as a single object. Each
+  overlay's `setup.py` appends its own managed block to the store's `env.py`
+  and each block prints its own object, so a store with two such overlays
+  (e.g. `net` + `private-sync`) emitted two lines — and the single-object
+  reader rejected the whole output, silently dropping both overlays' vars. A
+  line that is not a JSON object still voids the whole script's contribution,
+  so a half-applied change set is impossible.
 - fix: `init --agents codex` run from a session whose environment already
   carried dotagents' identity vars (which its own env-loader hook exports —
   `AGENT=claude-code` and friends in every command a Claude session runs)
