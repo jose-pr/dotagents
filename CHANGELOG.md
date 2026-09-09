@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-09
+
 ### Security
 
 - `env --format export` (the form the SessionStart hook writes into
@@ -20,6 +22,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `local.env` / `pre.local.env` run at the project levels. Every session start
   ran the chain, so opening a session in a cloned repository with a top-level
   `env.py` was code execution from that checkout.
+
+### Added
+
+- feat: **`dotagents findings`** — a per-scope findings queue, shipped as the
+  one bundled command module (`_overlay/dotagents/cmds/findings.py`). A
+  finding is one markdown file shaped like an agent memory (frontmatter
+  `name`/`description`/`status`/`created` for the index line, details in the
+  body) under `<scope-root>/findings/`: the project's `.agents/findings/` by
+  default, the user store's with `-g`, anywhere with `--dir`. `add` records
+  one (`--body`/`--body-file`, `-` = stdin), `list` prints the active ones
+  (`--all`, `--processed`, `--json`), `show` prints one (`--json`), `done`
+  appends a required `## Resolution` and MOVES the file to `processed/`
+  (never deletes), `reopen` moves it back, `remove` deletes a mistaken one,
+  `index` regenerates `INDEX.md` (active first, then processed — every
+  mutating command rewrites it), `path` prints the queue's location.
+  Hand-written notes without a frontmatter are listed too and gain one when
+  first rewritten. Files are written LF-only on every platform.
+- chore: `init` no longer copies bundled command modules (`*.py`) from the
+  package's `dotagents/cmds/` into the store — only the README. The bundled
+  dir is always a discovery source, so a copy added nothing, and being
+  create-if-absent it would have pinned the first-installed version of
+  `findings` and shadowed every later one. A same-named module dropped into a
+  scope's `dotagents/cmds/` still overrides the bundled one.
+- feat: `env` prepends every level's existing **`lib/`** dir to `PYTHONPATH`,
+  the way it already prepends every level's `bin/` to `PATH` — overlays first,
+  then the store, then the project's `.agents/`, never the project root — and
+  does so before the env-file chain, so an `env.py` (and every subprocess that
+  inherits the env) can `import` an overlay's `lib/` module. Only dirs that
+  exist are added, and `PYTHONPATH` is untouched when there are none. The
+  formatter already converts any `*PATH` variable between Windows and POSIX
+  forms, so `PYTHONPATH` gets the same treatment as `PATH`.
+- feat: `env` emits one **`<NAME>_OVERLAY_ROOT`** per installed overlay (the
+  overlay's install dir), seeded before the env-file chain like the two scope
+  roots and, like them, only if unset. `NAME` is the overlay's directory name
+  upper-cased with every non-alphanumeric character turned into `_`
+  (`my-ov.v2` → `MY_OV_V2_OVERLAY_ROOT`). This is the same name `context`
+  already expanded as a `<NAME_OVERLAY_ROOT>` placeholder; the two now share
+  one naming function, so an env file and a context file name an overlay's
+  install dir identically. The variable is derived from the same normalized
+  name `overlays add` installs under (`Overlay.normalize_name`), so the var
+  for `overlays/<n>/` is always `Overlay.root_var_for(n)`.
 
 ### Changed
 
@@ -66,6 +109,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   scripts any more (PATH, PYTHONPATH and the root var are `env`'s job; an
   overlay's own env belongs in its `env.py`). `tools/cloud-setup.sh` finds
   the private-sync settings snippet inside the installed overlay.
+- The base overlay's findings workflow now goes through the command. The
+  managed `AGENTS.md` rule ("Global-config misses"), `dotagents/DECISIONS.md`
+  ("How findings become config") and the skeleton README say
+  `dotagents findings add -g ...` to record a miss, `list -g` / `show -g` to
+  triage and `done -g <name> -r ...` to close one, instead of "drop a note in
+  `~/.agents/dotagents/findings/`". With that, the user store's queue is
+  **`~/.agents/findings/`** (the command's `-g` default), no longer
+  `~/.agents/dotagents/findings/`. An existing queue at the old path keeps
+  working with `--dir ~/.agents/dotagents/findings`, or move it once:
+  `mv ~/.agents/dotagents/findings ~/.agents/findings`. Re-run `dotagents init`
+  to refresh the managed block.
+- refactor: `dotagents._overlays` is now built around an **`Overlay`** class —
+  one overlay is one directory, and everything that depends on a single
+  overlay is a method or property on it: `.path` / `.name` / `.normalized_name`
+  / `.root_var` / `.is_valid` / `.manifest_path`, `.read_manifest()` /
+  `.priority` / `.sort_key`, `.find_setup_script()` / `.run_setup(...)`,
+  `.files()` / `.rule_blocks(...)` / `.apply_to(...)` / `.install_to(...)` /
+  `.merge_rules_into(...)`. The name rules are static methods
+  (`Overlay.is_valid_name` / `.normalize_name` / `.root_var_for`), so a caller
+  holding only a name uses the same rule as one holding a directory;
+  `Overlay.discover(root)` is the single discovery routine that `_scope`,
+  the contract-A resolver and `env` all share, and `Overlay.sort_by_priority`
+  the single merge order. The module-level functions they replace
+  (`read_manifest`, `find_setup_script`, `run_overlay_setup`, `overlay_files`,
+  `rule_blocks`, `apply_overlay`, `install_overlay_dir`, `merge_overlay_rules`,
+  `overlay_sort_key`, `sort_overlays_by_priority`, `normalize_name`,
+  `overlay_root_var`) are gone, as are `_scope.is_valid_overlay_name` and
+  `_scope.normalize_overlay_name`. `recompose_overlay_block` stays a module
+  function (it works over a set of overlays) and now accepts `Overlay`
+  instances or directories. `_overlays` is a private module, so no public
+  version signal.
+
+- fix: an `env.py` may now print its changes as one JSON object **per line**,
+  merged in order (a later line wins), as well as a single object. Each
+  overlay's `setup.py` appends its own managed block to the store's `env.py`
+  and each block prints its own object, so a store with two such overlays
+  (e.g. `net` + `private-sync`) emitted two lines — and the single-object
+  reader rejected the whole output, silently dropping both overlays' vars. A
+  line that is not a JSON object still voids the whole script's contribution,
+  so a half-applied change set is impossible.
+- fix: `init --agents codex` run from a session whose environment already
+  carried dotagents' identity vars (which its own env-loader hook exports —
+  `AGENT=claude-code` and friends in every command a Claude session runs)
+  wrote a Codex env block with no identity at all: the identity stamp never
+  overrides a value already present, so every key counted as "already set",
+  to Claude's values. When the agent is named explicitly the identity is now
+  that agent's, overriding the base env; without an explicit agent a pinned
+  value is respected as before.
+- fix: the built `.pyz` lost the help text of the umbrella's own `--cmdspath`
+  flag (every subcommand's help survived). The zipapp source-repoint shim
+  covered each `dotagents.cli.<x>` command module but not the `dotagents.cli`
+  package itself, and it resolved a package's source as `cli.py` instead of
+  `cli/__init__.py`, so the umbrella kept its zip-internal `__file__` and duho
+  fell back to a bare flag. Both fixed; the top-level help in a `.pyz` now
+  matches a plain install.
+- fix: `context`'s `<NAME_OVERLAY_ROOT>` placeholder now also maps `.` (and any
+  other non-alphanumeric character) in an overlay name to `_`, not only `-` —
+  the name has to be a legal shell variable to be emitted by `env`, and the
+  placeholder follows the same rule. Overlays whose names contain only letters,
+  digits, `_` and `-` are unaffected.
 
 ### Fixed
 
@@ -236,110 +339,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   bad source path names whether it came from `--source` or the env var.
 - `findings list` / `show` write UTF-8 bytes, so a description with a
   non-Latin-1 character no longer raises on a cp1252 console.
-
-### Added
-
-- feat: **`dotagents findings`** — a per-scope findings queue, shipped as the
-  one bundled command module (`_overlay/dotagents/cmds/findings.py`). A
-  finding is one markdown file shaped like an agent memory (frontmatter
-  `name`/`description`/`status`/`created` for the index line, details in the
-  body) under `<scope-root>/findings/`: the project's `.agents/findings/` by
-  default, the user store's with `-g`, anywhere with `--dir`. `add` records
-  one (`--body`/`--body-file`, `-` = stdin), `list` prints the active ones
-  (`--all`, `--processed`, `--json`), `show` prints one (`--json`), `done`
-  appends a required `## Resolution` and MOVES the file to `processed/`
-  (never deletes), `reopen` moves it back, `remove` deletes a mistaken one,
-  `index` regenerates `INDEX.md` (active first, then processed — every
-  mutating command rewrites it), `path` prints the queue's location.
-  Hand-written notes without a frontmatter are listed too and gain one when
-  first rewritten. Files are written LF-only on every platform.
-- chore: `init` no longer copies bundled command modules (`*.py`) from the
-  package's `dotagents/cmds/` into the store — only the README. The bundled
-  dir is always a discovery source, so a copy added nothing, and being
-  create-if-absent it would have pinned the first-installed version of
-  `findings` and shadowed every later one. A same-named module dropped into a
-  scope's `dotagents/cmds/` still overrides the bundled one.
-- feat: `env` prepends every level's existing **`lib/`** dir to `PYTHONPATH`,
-  the way it already prepends every level's `bin/` to `PATH` — overlays first,
-  then the store, then the project's `.agents/`, never the project root — and
-  does so before the env-file chain, so an `env.py` (and every subprocess that
-  inherits the env) can `import` an overlay's `lib/` module. Only dirs that
-  exist are added, and `PYTHONPATH` is untouched when there are none. The
-  formatter already converts any `*PATH` variable between Windows and POSIX
-  forms, so `PYTHONPATH` gets the same treatment as `PATH`.
-- feat: `env` emits one **`<NAME>_OVERLAY_ROOT`** per installed overlay (the
-  overlay's install dir), seeded before the env-file chain like the two scope
-  roots and, like them, only if unset. `NAME` is the overlay's directory name
-  upper-cased with every non-alphanumeric character turned into `_`
-  (`my-ov.v2` → `MY_OV_V2_OVERLAY_ROOT`). This is the same name `context`
-  already expanded as a `<NAME_OVERLAY_ROOT>` placeholder; the two now share
-  one naming function, so an env file and a context file name an overlay's
-  install dir identically. The variable is derived from the same normalized
-  name `overlays add` installs under (`Overlay.normalize_name`), so the var
-  for `overlays/<n>/` is always `Overlay.root_var_for(n)`.
-
-### Changed
-
-- The base overlay's findings workflow now goes through the command. The
-  managed `AGENTS.md` rule ("Global-config misses"), `dotagents/DECISIONS.md`
-  ("How findings become config") and the skeleton README say
-  `dotagents findings add -g ...` to record a miss, `list -g` / `show -g` to
-  triage and `done -g <name> -r ...` to close one, instead of "drop a note in
-  `~/.agents/dotagents/findings/`". With that, the user store's queue is
-  **`~/.agents/findings/`** (the command's `-g` default), no longer
-  `~/.agents/dotagents/findings/`. An existing queue at the old path keeps
-  working with `--dir ~/.agents/dotagents/findings`, or move it once:
-  `mv ~/.agents/dotagents/findings ~/.agents/findings`. Re-run `dotagents init`
-  to refresh the managed block.
-- refactor: `dotagents._overlays` is now built around an **`Overlay`** class —
-  one overlay is one directory, and everything that depends on a single
-  overlay is a method or property on it: `.path` / `.name` / `.normalized_name`
-  / `.root_var` / `.is_valid` / `.manifest_path`, `.read_manifest()` /
-  `.priority` / `.sort_key`, `.find_setup_script()` / `.run_setup(...)`,
-  `.files()` / `.rule_blocks(...)` / `.apply_to(...)` / `.install_to(...)` /
-  `.merge_rules_into(...)`. The name rules are static methods
-  (`Overlay.is_valid_name` / `.normalize_name` / `.root_var_for`), so a caller
-  holding only a name uses the same rule as one holding a directory;
-  `Overlay.discover(root)` is the single discovery routine that `_scope`,
-  the contract-A resolver and `env` all share, and `Overlay.sort_by_priority`
-  the single merge order. The module-level functions they replace
-  (`read_manifest`, `find_setup_script`, `run_overlay_setup`, `overlay_files`,
-  `rule_blocks`, `apply_overlay`, `install_overlay_dir`, `merge_overlay_rules`,
-  `overlay_sort_key`, `sort_overlays_by_priority`, `normalize_name`,
-  `overlay_root_var`) are gone, as are `_scope.is_valid_overlay_name` and
-  `_scope.normalize_overlay_name`. `recompose_overlay_block` stays a module
-  function (it works over a set of overlays) and now accepts `Overlay`
-  instances or directories. `_overlays` is a private module, so no public
-  version signal.
-
-- fix: an `env.py` may now print its changes as one JSON object **per line**,
-  merged in order (a later line wins), as well as a single object. Each
-  overlay's `setup.py` appends its own managed block to the store's `env.py`
-  and each block prints its own object, so a store with two such overlays
-  (e.g. `net` + `private-sync`) emitted two lines — and the single-object
-  reader rejected the whole output, silently dropping both overlays' vars. A
-  line that is not a JSON object still voids the whole script's contribution,
-  so a half-applied change set is impossible.
-- fix: `init --agents codex` run from a session whose environment already
-  carried dotagents' identity vars (which its own env-loader hook exports —
-  `AGENT=claude-code` and friends in every command a Claude session runs)
-  wrote a Codex env block with no identity at all: the identity stamp never
-  overrides a value already present, so every key counted as "already set",
-  to Claude's values. When the agent is named explicitly the identity is now
-  that agent's, overriding the base env; without an explicit agent a pinned
-  value is respected as before.
-- fix: the built `.pyz` lost the help text of the umbrella's own `--cmdspath`
-  flag (every subcommand's help survived). The zipapp source-repoint shim
-  covered each `dotagents.cli.<x>` command module but not the `dotagents.cli`
-  package itself, and it resolved a package's source as `cli.py` instead of
-  `cli/__init__.py`, so the umbrella kept its zip-internal `__file__` and duho
-  fell back to a bare flag. Both fixed; the top-level help in a `.pyz` now
-  matches a plain install.
-- fix: `context`'s `<NAME_OVERLAY_ROOT>` placeholder now also maps `.` (and any
-  other non-alphanumeric character) in an overlay name to `_`, not only `-` —
-  the name has to be a legal shell variable to be emitted by `env`, and the
-  placeholder follows the same rule. Overlays whose names contain only letters,
-  digits, `_` and `-` are unaffected.
 
 ## [0.3.4] - 2026-08-16
 
