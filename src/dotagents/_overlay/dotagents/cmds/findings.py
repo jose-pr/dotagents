@@ -61,7 +61,7 @@ from typing import Optional
 
 from duho import Cli, LoggingArgs
 
-from dotagents.cli import DotAgentsArgs
+from dotagents.cli import DotAgentsArgs, resolve_user_store
 
 FINDINGS_DIRNAME = "findings"
 PROCESSED_DIRNAME = "processed"
@@ -364,10 +364,12 @@ class FindingsStore:
 
 
 class Findings(LoggingArgs, Cli):
-    """Findings queue for a scope: add / list / show / done / reopen / remove / index / path.
+    """Findings queue for a scope. Scope flags go on the subcommand: `findings list -g`.
 
     Default scope is the project (`<project>/.agents/findings/`); `-g` uses the
-    user store; `--dir` points at any findings directory."""
+    user store, `--agents-dir` overrides it, `--dir` points at any findings
+    directory -- each accepted by every subcommand (`findings add -g ...`,
+    `findings done -g <name> -r ...`), not by `findings` itself."""
 
     _parsername_ = "findings"
 
@@ -379,15 +381,27 @@ class Findings(LoggingArgs, Cli):
         ("--dir",)
 
         def store(self) -> FindingsStore:
+            """The queue root: `--dir`, else `<scope-root>/findings/`.
+
+            The user scope (`-g`) resolves through `resolve_user_store` --
+            `--agents-dir`, then `$AGENTS_HOME`, then `~/.agents` -- the same
+            resolver `env` / `context` use, so a pinned store is honoured.
+            (`resolve_scope` alone defaults `-g` to `~/.agents` and ignores
+            `$AGENTS_HOME`; measured: `findings add -g` under a temp
+            `$AGENTS_HOME` wrote into the real home store.)"""
             if self.dir:
                 root = Path(self.dir).expanduser()
+            elif self.global_scope:
+                root = resolve_user_store(self.agents_dir) / FINDINGS_DIRNAME
             else:
                 root = self.resolve_scope().agents_root / FINDINGS_DIRNAME
             return FindingsStore(root)
 
     class Add(_Base):
-        """Record a new finding: a one-line description (the index line) and,
-        optionally, a body with the details."""
+        """Record a new finding (one-line description; optional body with details).
+
+        The description becomes the index line; `--body` / `--body-file` carry
+        the details."""
 
         _parsername_ = "add"
 
@@ -415,8 +429,10 @@ class Findings(LoggingArgs, Cli):
             return 0
 
     class List(_Base):
-        """List findings: active by default, `--all` for both, `--processed` for
-        only the addressed ones. `--json` for a machine-readable list."""
+        """List findings (active by default; --all, --processed, --json).
+
+        `--all` lists both states, `--processed` only the addressed ones,
+        `--json` gives a machine-readable list."""
 
         _parsername_ = "list"
 
@@ -459,7 +475,7 @@ class Findings(LoggingArgs, Cli):
             return 0
 
     class Show(_Base):
-        """Print one finding (the whole file); `--json` for a structured form."""
+        """Print one finding, the whole file (--json for a structured form)."""
 
         _parsername_ = "show"
 
@@ -480,9 +496,10 @@ class Findings(LoggingArgs, Cli):
             return 0
 
     class Done(_Base):
-        """Mark a finding addressed: append the resolution and move it to
-        `processed/`. The resolution is required -- a processed finding without
-        one is untriaged, not done."""
+        """Mark a finding addressed: append the resolution, move it to processed/.
+
+        The resolution is required -- a processed finding without one is
+        untriaged, not done."""
 
         _parsername_ = "done"
 
@@ -521,8 +538,10 @@ class Findings(LoggingArgs, Cli):
             return 0
 
     class Remove(_Base):
-        """Delete a finding file (active or processed). Prefer `done`: the queue
-        discipline is move-never-delete; this is for a finding recorded by mistake."""
+        """Delete a finding recorded by mistake (prefer `done` for a real one).
+
+        The queue discipline is move-never-delete; this is the exception for a
+        finding that should never have been recorded."""
 
         _parsername_ = "remove"
 

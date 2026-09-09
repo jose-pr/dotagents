@@ -183,6 +183,18 @@ def test_cmd_scope_default_project_and_global(findings_mod, tmp_path, monkeypatc
     assert _run(F.Add, description="Global finding", global_scope=True, agents_dir=home) == 0
     assert (home / "findings" / "global-finding.md").is_file()
     assert not (home / "findings" / "project-finding.md").exists()
+    # -g honours $AGENTS_HOME (the pinned store), like env/context -- it must
+    # never fall through to the real ~/.agents. Regression: it did, because
+    # resolve_scope() alone ignores the variable.
+    pinned = tmp_path / "pinned-store"
+    monkeypatch.setenv("AGENTS_HOME", str(pinned))
+    assert _run(F.Add, description="Pinned finding", global_scope=True) == 0
+    assert (pinned / "findings" / "pinned-finding.md").is_file()
+    assert not (Path.home() / ".agents" / "findings" / "pinned-finding.md").exists()
+    # --agents-dir still beats $AGENTS_HOME.
+    assert _run(F.Add, description="Explicit dir", global_scope=True, agents_dir=home) == 0
+    assert (home / "findings" / "explicit-dir.md").is_file()
+    assert not (pinned / "findings" / "explicit-dir.md").exists()
     # --dir wins over both.
     elsewhere = tmp_path / "elsewhere"
     assert _run(F.Add, description="Elsewhere", dir=elsewhere) == 0
