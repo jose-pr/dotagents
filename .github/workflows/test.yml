@@ -10,6 +10,8 @@ on:
         required: false
         default: ""
   push:
+    branches:
+      - main
     tags:
       - "ci-*"
   pull_request:
@@ -36,6 +38,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install the package (audit's command surface is a duho Cmd)
+        # tools/audit.py imports duho unconditionally for its argument
+        # definition; the audit LOGIC is stdlib-only, but the entrypoint is not.
+        run: python -m pip install -e .
       - name: Audit config structure
         run: python tools/audit.py --root .
       # Personal-leak / hygiene scanning is NOT in CI (D84): it is a personal tool
@@ -72,18 +78,18 @@ jobs:
           python -m pip install pytest
           python -m pytest tests/ -q
       - name: Dry run (minimal base overlay via init)
-        run: python install.py init --dry-run
+        run: python install.py init -g --dry-run
       - name: Init lays down the base overlay only
         run: |
           export HOME="$(mktemp -d)"
-          python install.py init
+          python install.py init -g
           test -f "$HOME/.agents/AGENTS.md"
           test -f "$HOME/.agents/dotagents/DECISIONS.md"
           test ! -e "$HOME/.agents/flows"        # base imposes no flows
       - name: Install base + opt-in overlays by name (overlay dirs)
         run: |
           export HOME="$(mktemp -d)"
-          python install.py init
+          python install.py init -g
           python -m dotagents overlays add flows references python --source overlays-src/overlays -g
           test -f "$HOME/.agents/AGENTS.md"
           test -f "$HOME/.agents/overlays/flows/flows/PLAN.md"
@@ -91,13 +97,13 @@ jobs:
       - name: Re-adding an overlay is idempotent (skips present files)
         run: |
           export HOME="$(mktemp -d)"
-          python install.py init
+          python install.py init -g
           python -m dotagents overlays add flows --source overlays-src/overlays -g
           python -m dotagents overlays add flows --source overlays-src/overlays -g | grep -q "skip (exists)"
       - name: overlays add/list/remove into a scope (discover, not track)
         run: |
           export HOME="$(mktemp -d)"
-          python install.py init                                   # lay the base AGENTS.md
+          python install.py init -g                                   # lay the base AGENTS.md
           # add by name from the bundled source, into the user scope.
           python -m dotagents overlays add python --source overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"     # installed as a dir
@@ -108,15 +114,19 @@ jobs:
           python -m dotagents overlays list --source overlays-src/overlays -g --json | grep -q '"installed"'
           # glob-filtered sync is a no-op-safe refresh.
           python -m dotagents overlays sync 'py*' --source overlays-src/overlays -g
-          # remove deletes the overlay dir (+ warns about the AGENTS.md rules prune).
-          python -m dotagents overlays remove python -g 2>&1 | grep -qi "NOT auto-removed"
+          # remove deletes the overlay dir AND recomposes the managed block over what
+          # remains, so the routing it merged leaves with it (the un-merge).
+          python -m dotagents overlays remove python -g
           test ! -e "$HOME/.agents/overlays/python"
+          ! grep -q "kb/PYTHON.md" "$HOME/.agents/AGENTS.md"
+          # show describes an overlay from the source when it is not installed.
+          python -m dotagents overlays show python --source overlays-src/overlays -g | grep -q "python (source)"
       - name: Link a project into the private store, then sync (git bootstrap)
         run: |
           export HOME="$(mktemp -d)"
           git config --global user.email ci@example.invalid
           git config --global user.name CI
-          python install.py init
+          python install.py init -g
           python -m dotagents overlays add private-sync --source overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/private-sync/kb/PRIVATE_SYNC.md"
           test -f "$HOME/.agents/overlays/private-sync/hooks/private-sync-start.sh"
@@ -138,7 +148,7 @@ jobs:
           export HOME="$(mktemp -d)"
           git config --global user.email ci@example.invalid
           git config --global user.name CI
-          python install.py init
+          python install.py init -g
           # link-project/sync-project come FROM the private-sync overlay (D85), so
           # the overlay MUST be installed before either is used.
           python -m dotagents overlays add private-sync --source overlays-src/overlays -g
@@ -160,7 +170,7 @@ jobs:
           export HOME="$(mktemp -d)"
           git config --global user.email ci@example.invalid
           git config --global user.name CI
-          python install.py init
+          python install.py init -g
           # link-project/sync-project come FROM the private-sync overlay (D85), so
           # the overlay MUST be installed before either is used.
           python -m dotagents overlays add private-sync --source overlays-src/overlays -g
