@@ -11,7 +11,7 @@ import re
 from pathlib import Path, PureWindowsPath
 from typing import Optional
 
-from dotagents.cli._common import DotAgentsArgs, resolve_user_store
+from dotagents.cli._common import DotAgentsArgs, _write_stdout, resolve_user_store
 
 # POSIX shell variable names: a leading letter/underscore, then letters/digits/
 # underscores only (IEEE Std 1003.1 "Name"). Windows env vars like
@@ -169,7 +169,10 @@ def _looks_like_posix_chunk(chunk: str) -> bool:
     path containing a literal `:` beyond its drive prefix (not realistic in
     practice, but the check order makes the function correct regardless).
     """
-    if "\\" in chunk:
+    if "\\" in chunk or re.match(r"^[A-Za-z]:", chunk):
+        # A backslash, or a drive-letter prefix (`C:/a/tools` -- forward
+        # slashes are legal in a native Windows path, and splitting THAT on `:`
+        # would misread `/a/tools` as an MSYS mount and emit `C;A:\tools`).
         return False
     return any(
         _WSL_MOUNT_RE.match(seg) or _MSYS_MOUNT_RE.match(seg)
@@ -239,18 +242,22 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
 
     Shell-sourceable / assignment forms, one var per line:
 
-    * ``export`` (aliases ``posix``/``sh``/``bash``) -- ``export KEY="value"``,
-      value JSON-quoted; the POSIX default a SessionStart hook sources.
+    * ``export`` (aliases ``posix``/``sh``/``bash``) -- ``export KEY='value'``,
+      single-quoted (``'`` -> ``'\\''``, control chars via ``$'...'``) so nothing
+      in a value is expanded or executed when sourced; the POSIX default a
+      SessionStart hook sources.
     * ``dotenv`` (alias ``env``) -- bare ``KEY=value`` (no ``export``), value
       quoted only when it contains whitespace/``#``/``"``/newline (``.env`` /
       ``docker --env-file`` rules). Distinct from ``export``: assigns, doesn't
       source+export.
     * ``powershell`` (aliases ``pwsh``/``ps``) -- ``$env:KEY = 'value'``,
       single-quoted, ``'`` escaped as ``''``.
-    * ``cmd`` (aliases ``bat``/``batch``) -- ``set "KEY=value"``. cmd has NO way
-      to escape a literal ``"`` inside a value; any ``"`` is emitted as ``""``
-      best-effort (documented limitation).
-    * ``fish`` -- ``set -gx KEY value``, single-quoted, ``'`` escaped as ``\\'``.
+    * ``cmd`` (aliases ``bat``/``batch``) -- ``set "KEY=value"``, ``%`` doubled.
+      cmd has NO way to escape a literal ``"`` inside a value (emitted as ``""``
+      best-effort) or to carry a newline (emitted as a space) -- documented
+      limitations.
+    * ``fish`` -- ``set -gx KEY value``, single-quoted, ``\\`` and ``'``
+      backslash-escaped.
 
     Data forms:
 
@@ -326,13 +333,7 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
     if fmt == "ini":
         return "\n".join(["[env]"] + ["%s=%s" % (k, env[k]) for k in keys])
     if fmt == "yaml":
-        lines = []
-        for k in keys:
-            v = env[k]
-            if v == "" or any(c in v for c in ":#'\"\n") or v.strip() != v:
-                v = _json.dumps(v)
-            lines.append("%s: %s" % (k, v))
-        return "\n".join(lines)
+        return "\n".join("%s: %s" % (k, _yaml_value(env[k])) for k in keys)
     if fmt == "dotenv":
         return "\n".join("%s=%s" % (k, _dotenv_value(env[k])) for k in keys)
     if fmt == "powershell":
@@ -349,15 +350,88 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
             "${env:%s} = '%s'" % (k, env[k].replace("'", "''")) for k in keys
         )
     if fmt == "cmd":
-        return "\n".join(
-            'set "%s=%s"' % (k, env[k].replace('"', '""')) for k in keys
-        )
+        return "\n".join('set "%s=%s"' % (k, _cmd_value(env[k])) for k in keys)
     if fmt == "fish":
+        # fish single quotes: only `\` and `'` are escapes, and BOTH must be
+        # escaped -- an unescaped `\\` in the value would collapse to `\`.
         return "\n".join(
-            "set -gx %s '%s'" % (k, env[k].replace("'", "\\'")) for k in keys
+            "set -gx %s '%s'"
+            % (k, env[k].replace("\\", "\\\\").replace("'", "\\'"))
+            for k in keys
         )
     # default / "export"
-    return "\n".join("export %s=%s" % (k, _json.dumps(env[k])) for k in keys)
+    return "\n".join("export %s=%s" % (k, _sh_quote(env[k])) for k in keys)
+
+
+def _sh_quote(v: str) -> str:
+    """POSIX-shell quoting for a value that will be SOURCED by bash.
+
+    Single quotes, with an embedded ``'`` written as ``'\\''``: nothing inside
+    single quotes is ever expanded, so a value containing ``$(...)``, backticks
+    or ``$HOME`` is set verbatim instead of being EXECUTED when the SessionStart
+    hook's output is sourced from ``$CLAUDE_ENV_FILE`` (measured: a JSON-quoted
+    ``export K="a$(echo INJECTED)b"`` came back as ``aINJECTEDb``). A value with a
+    newline or another control character uses bash's ``$'...'`` form instead,
+    since a single-quoted string cannot carry an escape for them (and the old
+    JSON ``\\n`` was set as the two characters ``\\`` ``n``). Non-ASCII passes
+    through as-is -- the file is written and sourced as UTF-8.
+    """
+    if any(ord(c) < 0x20 or c == "\x7f" for c in v):
+        out = []
+        for c in v:
+            if c == "\\":
+                out.append("\\\\")
+            elif c == "'":
+                out.append("\\'")
+            elif ord(c) < 0x20 or c == "\x7f":
+                out.append("\\x%02x" % ord(c))
+            else:
+                out.append(c)
+        return "$'%s'" % "".join(out)
+    return "'%s'" % v.replace("'", "'\\''")
+
+
+def _cmd_value(v: str) -> str:
+    """cmd.exe ``set "K=v"`` value. ``%`` is doubled so a ``%4`` or ``%PATH%``
+    inside a value survives batch-file expansion; a newline cannot be carried
+    by ``set`` at all, so it becomes a space (documented limitation, like the
+    ``"`` -> ``""`` best-effort below)."""
+    return (
+        v.replace("%", "%%")
+        .replace('"', '""')
+        .replace("\r\n", " ")
+        .replace("\n", " ")
+        .replace("\r", " ")
+    )
+
+
+#: A YAML plain scalar that a reader would type as something other than a
+#: string: booleans (YAML 1.1 spellings included), null, numbers, and the
+#: ambiguous forms handled by quoting below.
+_YAML_TYPED_RE = re.compile(
+    r"^(?:true|false|yes|no|on|off|y|n|null|~|"
+    r"[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|"
+    r"0x[0-9a-fA-F_]+|0o[0-7_]+|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$",
+    re.IGNORECASE,
+)
+
+
+def _yaml_value(v: str) -> str:
+    """Quote a value unless a YAML reader would read it back as exactly this
+    string: empty, typed-looking (``true``, ``123``, ``null``), containing a
+    YAML indicator, or with surrounding whitespace all get JSON (double-quote)
+    quoting, which YAML accepts verbatim."""
+    import json as _json
+
+    if (
+        v == ""
+        or _YAML_TYPED_RE.match(v)
+        or any(c in v for c in ":#'\"\n\t")
+        or v.strip() != v
+        or v[0] in "-?[]{}&*!|>%@`,"
+    ):
+        return _json.dumps(v)
+    return v
 
 
 class Env(DotAgentsArgs):
@@ -455,5 +529,9 @@ class Env(DotAgentsArgs):
             env = dict(base)
             env.update(changes)
 
-        print(_format_env(env, output_format))
+        # UTF-8 bytes straight to the buffer: a bare print() encodes with the
+        # console codepage (cp1252 on a default Windows shell) and dies on the
+        # first non-Latin-1 character in any value -- the same failure
+        # `context` already guards against.
+        _write_stdout(_format_env(env, output_format) + "\n")
         return 0

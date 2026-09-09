@@ -9,6 +9,8 @@ Run from repo root: ``python -m pytest tests/``.
 """
 
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -34,12 +36,62 @@ SAMPLE = {
 
 
 def test_export_exact():
+    # Single-quoted: nothing inside is expanded by the shell that sources it.
     assert _format_env(SAMPLE, "export") == "\n".join([
-        'export DQUOTE="a\\"b"',
-        'export EMPTY=""',
-        'export PLAIN="abc"',
-        'export SPACED="a b"',
-        'export SQUOTE="a\'b"',
+        "export DQUOTE='a\"b'",
+        "export EMPTY=''",
+        "export PLAIN='abc'",
+        "export SPACED='a b'",
+        "export SQUOTE='a'\\''b'",
+    ])
+
+
+def test_export_never_expands_shell_syntax():
+    """Regression: JSON quoting put values inside DOUBLE quotes, so `$(...)`,
+    backticks and `$VAR` were EXECUTED/expanded when the SessionStart hook's
+    output was sourced from $CLAUDE_ENV_FILE (measured: `a$(echo INJECTED)b`
+    came back as `aINJECTEDb`). Single quotes carry them verbatim."""
+    out = _format_env({"K": "a$(echo X)b `echo Y` $HOME \\ 'q'"}, "export")
+    assert out == "export K='a$(echo X)b `echo Y` $HOME \\ '\\''q'\\'''"
+
+
+def test_export_control_chars_use_ansi_c_quoting():
+    """A newline cannot live in a single-quoted value; bash's $'...' form can
+    carry it (the old JSON form emitted a literal backslash-n)."""
+    assert _format_env({"NL": "a\nb"}, "export") == "export NL=$'a\\x0ab'"
+    assert _format_env({"T": "a\tb'c"}, "export") == "export T=$'a\\x09b\\'c'"
+
+
+def test_export_non_ascii_passes_through():
+    assert _format_env({"U": "café"}, "export") == "export U='café'"
+
+
+def test_cmd_doubles_percent_and_flattens_newlines():
+    out = _format_env({"P": "100%", "U": "u:p%40ss", "N": "a\nb"}, "cmd")
+    assert out == "\n".join([
+        'set "N=a b"',
+        'set "P=100%%"',
+        'set "U=u:p%%40ss"',
+    ])
+
+
+def test_fish_escapes_backslashes():
+    # fish single quotes: `\\` -> `\`, so a literal backslash must be doubled.
+    assert _format_env({"U": r"\\srv\share"}, "fish") == r"set -gx U '\\\\srv\\share'"
+
+
+def test_yaml_quotes_typed_looking_values():
+    out = _format_env(
+        {"B": "true", "N": "123", "Z": "null", "F": "1e3", "S": "plain", "D": "-x"},
+        "yaml",
+    )
+    assert out == "\n".join([
+        'B: "true"',
+        'D: "-x"',
+        'F: "1e3"',
+        'N: "123"',
+        'S: plain',
+        'Z: "null"',
     ])
 
 
@@ -181,6 +233,22 @@ def test_detect_shell_format_win_finds_powershell(monkeypatch):
     assert _env._detect_shell_format_win() == "powershell"
 
 
+def test_detect_shell_format_win_skips_the_batch_wrapper(monkeypatch):
+    """`dotagents.cmd` cannot exec, so from PowerShell the chain is
+    python <- cmd.exe <- pwsh. That cmd is the wrapper, not the caller's shell:
+    stopping there handed PowerShell users `set "K=v"` lines."""
+    import os
+
+    me = os.getpid()
+    fake = {me: (100, "python"), 100: (200, "cmd"), 200: (300, "pwsh"), 300: (0, "explorer")}
+    monkeypatch.setattr(_env, "_win_ppid_exe_map", lambda: fake)
+    assert _env._detect_shell_format_win() == "powershell"
+    # A cmd whose parent is NOT a shell is a real interactive cmd.
+    fake = {me: (100, "python"), 100: (200, "cmd"), 200: (0, "windowsterminal")}
+    monkeypatch.setattr(_env, "_win_ppid_exe_map", lambda: fake)
+    assert _env._detect_shell_format_win() == "cmd"
+
+
 def test_detect_shell_format_win_snapshot_failure(monkeypatch):
     # A raising snapshot must degrade to the default, not propagate.
     def boom():
@@ -270,8 +338,8 @@ WINDOWS_PATH = {
 def test_export_converts_windows_path_to_posix():
     out = _format_env(WINDOWS_PATH, "export")
     assert (
-        'export PATH="/c/Users/devuser/.agents/bin:/c/Program Files/Git/usr/bin:'
-        '.agents/bin"' in out
+        "export PATH='/c/Users/devuser/.agents/bin:/c/Program Files/Git/usr/bin:"
+        ".agents/bin'" in out
     )
 
 
@@ -298,9 +366,8 @@ def test_export_leaves_single_path_values_untouched():
     """Only PATH-LIST vars (name ends in PATH, value looks OS-native) convert --
     a plain single-path value must not be mangled."""
     out = _format_env(WINDOWS_PATH, "export")
-    # export JSON-quotes values, so a literal backslash is doubled on the wire;
-    # this is exactly what json.dumps(WINDOWS_PATH["AGENTS_HOME"]) produces.
-    assert json.dumps(WINDOWS_PATH["AGENTS_HOME"]) in out
+    # export single-quotes values, so the backslashes are on the wire verbatim.
+    assert "'%s'" % WINDOWS_PATH["AGENTS_HOME"] in out
 
 
 def test_dotenv_and_fish_also_convert_path():
@@ -342,6 +409,13 @@ WSL_PATH = {
 # The MSYS2/Git-Bash mount form (`/c/...`, what `_to_posix_path` itself
 # produces) rather than WSL's `/mnt/c/...` -- both must convert.
 MSYS_PATH = {"PATH": "/c/Users/devuser/.agents/bin:/c/Program Files/Git/cmd"}
+
+
+def test_powershell_keeps_a_forward_slash_drive_path_whole():
+    """`C:/a/tools` is a native path with forward slashes; splitting it on `:`
+    misread `/a/tools` as an MSYS mount and emitted `C;A:\\tools`."""
+    out = _format_env({"PATH": r"C:/a/tools;D:\x;/mnt/c/y"}, "powershell")
+    assert out == r"${env:PATH} = 'C:/a/tools;D:\x;C:\y'"
 
 
 def test_powershell_converts_wsl_mount_path_to_native():
@@ -500,3 +574,57 @@ def test_export_output_actually_sources_in_real_bash(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert "OK" in proc.stdout
+
+
+ROUNDTRIP = {
+    "DOLLAR": "a$(echo X)b `echo Y` $HOME",
+    "QUOTES": "it's \"quoted\"",
+    "BACKSLASH": r"C:\Users\x\.agents",
+    "NEWLINE": "line1\nline2",
+    "UNICODE": "café — ≥",
+    "HASH": "a #b",
+}
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_export_values_roundtrip_through_real_bash(tmp_path):
+    """Sourcing the export output must set EXACTLY the values given -- no
+    expansion, no escape mangling, no encoding damage."""
+    import subprocess
+
+    script = tmp_path / "env.sh"
+    script.write_text(_format_env(ROUNDTRIP, "export") + "\n", encoding="utf-8")
+    probe = "; ".join(
+        "printf '%%s\\0' \"$%s\"" % k for k in sorted(ROUNDTRIP)
+    )
+    proc = subprocess.run(
+        ["bash", "-c", ". %s && %s" % (json.dumps(str(script)), probe)],
+        capture_output=True, env={**os.environ, "LANG": "C.UTF-8"},
+    )
+    assert proc.returncode == 0, proc.stderr
+    got = proc.stdout.decode("utf-8").split("\0")[:-1]
+    assert got == [ROUNDTRIP[k] for k in sorted(ROUNDTRIP)]
+
+
+@pytest.mark.skipif(
+    shutil.which("pwsh") is None and shutil.which("powershell") is None,
+    reason="needs PowerShell",
+)
+def test_powershell_values_roundtrip_through_real_powershell(tmp_path):
+    import subprocess
+
+    exe = shutil.which("pwsh") or shutil.which("powershell")
+    script = tmp_path / "env.ps1"
+    body = _format_env(ROUNDTRIP, "powershell") + "\n"
+    probe = "\n".join(
+        "[Console]::Out.Write(${env:%s} + [char]0)" % k for k in sorted(ROUNDTRIP)
+    )
+    utf8 = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n"
+    script.write_text(utf8 + body + probe + "\n", encoding="utf-8-sig")
+    proc = subprocess.run(
+        [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+        capture_output=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    got = proc.stdout.decode("utf-8").replace("\r\n", "\n").split("\0")[:-1]
+    assert got == [ROUNDTRIP[k] for k in sorted(ROUNDTRIP)]

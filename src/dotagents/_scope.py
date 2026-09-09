@@ -8,7 +8,7 @@ only wires args) to match ``_overlays.py`` / ``_skills.py``:
   An overlay installs into ``<scope>/overlays/<name>/`` and skills publish into the
   shared ``<scope>/skills/``. There is no registry file: installed overlays are
   **discovered** by their presence under ``overlays/`` (the locked "discover, don't
-  track" decision). A ``system`` tier (``/etc/agents``) is designed-for but not built.
+  track" decision).
 
 * **Source** -- *where an overlay to install comes from*. ``resolve_source`` returns
   an ``OverlaySource`` whose ``.root`` is a local directory of ``<name>/`` overlay
@@ -18,6 +18,10 @@ only wires args) to match ``_overlays.py`` / ``_skills.py``:
   *later* swap of the resolver's default -- ``resolve_source`` is the single
   extension point (clone/pull into a cache, then hand back a local ``.root``), so a
   repo source drops in with **no** change to the command classes.
+
+The ``system`` tier (``/etc/agents``) is walked by the Contract-A resolver
+(``_resolve.get_file_paths``) for env/context/bin/cmds, but nothing installs
+into it -- there is no ``--system`` scope for ``init`` / ``overlays``.
 
 Never print ``DOTAGENTS_*`` values (Leakage): this module reads the env var but
 only ever reports the resolved path, never the raw value.
@@ -57,10 +61,11 @@ class Scope:
         """Directory of discovered command modules for this scope (D76).
 
         ``<agents_root>/dotagents/cmds`` -- a seam alongside ``overlays``/``skills``.
-        ``init``/``install`` lay the bundled command modules here, and
-        ``dotagents.cli._discover`` runs ``duho.discover_commands`` over it (per
-        scope, user + project) so a user's own ``*.py`` command modules dropped
-        beside them are picked up with zero config."""
+        ``init`` creates it (with the README only; the bundled modules are always
+        discovered from the package itself), and ``dotagents.cli._discover`` runs
+        ``duho.discover_commands`` over it (per scope, user + project) so a
+        user's own ``*.py`` command modules dropped here are picked up with zero
+        config."""
         return self.agents_root / "dotagents" / "cmds"
 
     def overlay_dir(self, name: str) -> Path:
@@ -78,20 +83,55 @@ def resolve_scope(
 ) -> Scope:
     """Pick the install scope.
 
-    ``-g/--global`` forces the **user** scope (``agents_dir``, default ``~/.agents``).
-    Otherwise the scope is **project**, rooted at (in precedence order): an explicit
-    ``project_root`` argument, else ``$AGENTS_PROJECT_ROOT`` if set, else the current
-    directory. ``$AGENTS_PROJECT_ROOT`` lets a harness (or ``dotagents env``) pin the
-    project root once so every command agrees on it regardless of the cwd a subprocess
-    happens to run in; ``<root>/.agents/`` is where this project's overlays live. The
-    store location is configurable (D58): ``agents_dir`` comes from the caller
-    (``--agents-dir``) or defaults to ``~/.agents``; never hardcoded past that default.
+    ``-g/--global`` forces the **user** scope: ``agents_dir`` (``--agents-dir``)
+    if given, else the configurable store -- ``$AGENTS_HOME``, the legacy
+    ``$DOTAGENTS_AGENTS_DIR``, then ``~/.agents`` (:func:`resolve_user_store`,
+    the same chain ``env`` / ``context`` use, so a session that pinned the store
+    installs into it rather than into the literal home dir).
+    Otherwise the scope is **project**: ``agents_dir`` if given (the store root
+    override applies to either scope), else ``<project_root>/.agents`` where the
+    root is (in precedence order) an explicit ``project_root`` argument, else
+    ``$AGENTS_PROJECT_ROOT`` if set, else the current directory.
+    ``$AGENTS_PROJECT_ROOT`` lets a harness (or ``dotagents env``) pin the project
+    root once so every command agrees on it regardless of the cwd a subprocess
+    happens to run in; ``<root>/.agents/`` is where this project's overlays live.
     """
-    root = Path(agents_dir).expanduser() if agents_dir else (Path.home() / ".agents")
     if global_scope:
-        return Scope("user", root)
+        return Scope("user", resolve_user_store(agents_dir))
+    if agents_dir:
+        return Scope("project", Path(agents_dir).expanduser())
     proj = Path(project_root).expanduser() if project_root else project_root_default()
     return Scope("project", proj / ".agents")
+
+
+#: The configurable user-scope store (D58). Every reader of the user store
+#: resolves it through this var (default `~/.agents`) rather than hardcoding the
+#: home path -- this is the same var `dotagents env` emits (D79). Re-exported by
+#: `dotagents.cli` for command modules.
+AGENTS_DIR_ENV = "AGENTS_HOME"
+#: back-compat: DOTAGENTS_AGENTS_DIR is deprecated, removable next release.
+AGENTS_DIR_ENV_LEGACY = "DOTAGENTS_AGENTS_DIR"
+
+
+def resolve_user_store(agents_dir: "str | os.PathLike | None" = None) -> Path:
+    """The USER store root, in precedence order: an explicit ``agents_dir``
+    (``--agents-dir``) -> ``$AGENTS_HOME`` -> the legacy
+    ``$DOTAGENTS_AGENTS_DIR`` -> ``~/.agents`` (D58/D79/D80).
+
+    :func:`resolve_scope` defaults its ``-g`` store through this; ``env`` and
+    ``context`` -- whose Contract-A walk takes the user store as ``agents_dir``
+    and the project root separately, and whose ``-g`` only *skips* the project
+    tiers -- call it directly, so the store never becomes the project dir.
+
+    Never logs or prints the raw env value (Leakage rule); only the resolved path
+    is ever reported.
+    """
+    if agents_dir:
+        return Path(agents_dir).expanduser()
+    value = os.environ.get(AGENTS_DIR_ENV) or os.environ.get(AGENTS_DIR_ENV_LEGACY)
+    if value:
+        return Path(value).expanduser()
+    return Path.home() / ".agents"
 
 
 #: Agent-native project-root vars, consulted (in order) as a fallback for
@@ -151,13 +191,10 @@ class OverlaySource:
         self.root = Path(root)
 
     def available(self) -> "list[str]":
-        if not self.root.is_dir():
-            return []
-        return sorted(
-            p.name
-            for p in self.root.iterdir()
-            if p.is_dir() and not p.name.startswith(".")
-        )
+        """Overlay names the source offers -- the ONE discovery rule
+        (:meth:`Overlay.discover`), so ``__pycache__`` / ``2fast`` / dotdirs are
+        never listed as installable."""
+        return [overlay.name for overlay in Overlay.discover(self.root)]
 
     def overlay_dir(self, name: str) -> Path:
         candidate = self.root / name
@@ -223,7 +260,12 @@ def resolve_source(source: "Optional[str]" = None) -> OverlaySource:
         # (extension point) a URI/git ``raw`` would branch to a cached clone here.
         root = Path(raw).expanduser()
         if not root.is_dir():
-            raise SystemExit("error: --source path is not a directory: %s" % raw)
+            origin = "--source" if source else "$" + (
+                SOURCE_ENV if os.environ.get(SOURCE_ENV) else SOURCE_ENV_LEGACY
+            )
+            raise SystemExit(
+                "error: %s path is not a directory: %s" % (origin, raw)
+            )
         return OverlaySource(root)
 
     bundled = bundled_overlays_root()

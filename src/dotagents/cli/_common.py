@@ -21,37 +21,38 @@ from duho import Cmd, LoggingArgs
 
 _extracted_dirs_cache: "dict[str, Path]" = {}
 
-#: The configurable user-scope store (D58). Every reader of the user store
-#: resolves it through this var (default `~/.agents`) rather than hardcoding the
-#: home path -- this is the same var `dotagents env` emits (D79). Defined HERE
-#: rather than in `cli/__init__` so command modules can use it without importing
-#: the umbrella (import cycle); `cli/__init__` re-exports both names.
-AGENTS_DIR_ENV = "AGENTS_HOME"
-#: back-compat: DOTAGENTS_AGENTS_DIR is deprecated, removable next release.
-AGENTS_DIR_ENV_LEGACY = "DOTAGENTS_AGENTS_DIR"
+# The user-store resolver and its env-var names live in `dotagents._scope` (so
+# `resolve_scope` -- a non-CLI module -- can default the `-g` store through the
+# same chain without importing the CLI package); re-exported here because
+# command modules and the umbrella import them from `dotagents.cli`.
+from dotagents._scope import (  # noqa: E402
+    AGENTS_DIR_ENV,
+    AGENTS_DIR_ENV_LEGACY,
+    resolve_user_store,
+)
 
 
-def resolve_user_store(agents_dir: "Optional[Path]" = None) -> Path:
-    """The USER store root, in precedence order: an explicit ``agents_dir``
-    (``--agents-dir``) -> ``$AGENTS_HOME`` -> the legacy
-    ``$DOTAGENTS_AGENTS_DIR`` -> ``~/.agents`` (D58/D79/D80).
+def _write_stdout(text: str) -> None:
+    """Write to stdout as UTF-8, whatever the console's encoding claims to be.
 
-    Distinct from :meth:`DotAgentsArgs.resolve_scope`, which answers "which scope
-    do I install INTO" and returns ``<project>/.agents`` for the project scope.
-    Commands that always walk from the user store and merely *include or skip*
-    project-level files -- ``env`` and ``context``, whose Contract-A walk takes
-    the user store as ``agents_dir`` and the project root separately -- want this
-    instead: the store never becomes the project dir, whatever ``-g`` says.
-
-    Never logs or prints the raw env value (Leakage rule); only the resolved path
-    is ever reported.
+    A bare `print()` encodes with the console codepage -- cp1252 on a default
+    Windows shell -- so a single character outside Latin-1 (an arrow, a
+    box-drawing rule, a curly quote, any emoji) raises UnicodeEncodeError and
+    the command dies having emitted nothing. Context files routinely contain
+    such characters, env values and finding descriptions can, and `context` is
+    the SessionStart hook's payload, so the failure is both likely and silent.
+    Write bytes through the underlying buffer instead, replacing anything even
+    UTF-8 cannot represent rather than aborting.
     """
-    if agents_dir:
-        return Path(agents_dir).expanduser()
-    value = os.environ.get(AGENTS_DIR_ENV) or os.environ.get(AGENTS_DIR_ENV_LEGACY)
-    if value:
-        return Path(value).expanduser()
-    return Path.home() / ".agents"
+    import sys
+
+    data = text.encode("utf-8", errors="replace")
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:  # pragma: no cover -- captured/replaced stdout in tests
+        sys.stdout.write(text)
+        return
+    buffer.write(data)
+    buffer.flush()
 
 
 class DotAgentsArgs(LoggingArgs, Cmd):

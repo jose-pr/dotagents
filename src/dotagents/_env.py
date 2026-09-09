@@ -16,7 +16,10 @@ Contract B, the exact sequence :func:`get_environment` performs:
      ``lib/<module>.py`` beside its ``cmds/``).
   2. **Two tiers, in order**: ALL ``pre.env.py`` / ``pre.env`` / ``pre.local.env``
      first, THEN ALL ``env.py`` / ``env`` / ``local.env`` -- the concatenation of
-     two contract-A resolutions (:func:`resolve_env_files`).
+     two contract-A resolutions (:func:`resolve_env_files`). Amended
+     2026-09-09: the project-root level resolves ONLY ``pre.local.env`` /
+     ``local.env`` -- a checkout's own top-level ``env.py`` / ``env`` is never
+     executed or sourced (see :func:`resolve_env_files`).
   3. **Within each tier**, files are in the contract-A precedence order
      (overlays -> system -> user -> project -> project-root).
   4. **Chained, later-overrides-earlier**: each file is evaluated against the
@@ -52,7 +55,8 @@ Plan-08 identity/proxy model is wired into the output around the file chain:
     NOT fanned out into the global ``HTTP_PROXY``.
 
 Security (Leakage rule): ``env.py`` runs arbitrary code, but only from files
-resolved under the store/overlay/project locations by contract A. Never log the
+resolved under the store/overlay/``<project>/.agents`` locations by contract A
+-- never from the project root itself. Never log the
 resulting ``DOTAGENTS_*``/``AGENTS_*`` secret VALUES -- callers that print the
 diff must treat it as sensitive; this module logs var NAMES only.
 """
@@ -196,6 +200,13 @@ def _detect_shell_format_win():  # pragma: no cover - exercised only on win32
 
     Returns a canonical format, defaulting to ``"powershell"`` when no shell is
     found in the chain (the common Windows case). Never raises.
+
+    A ``cmd.exe`` whose OWN parent is another shell is skipped: that is the
+    `dotagents.cmd` wrapper `_wrappers.py` writes (a batch file cannot `exec`,
+    so the chain from PowerShell is `python <- cmd.exe <- pwsh`). Stopping at
+    that `cmd` handed every PowerShell user `set "K=v"` lines -- measured with
+    a probe wrapper. A `cmd` whose parent is not a shell (Windows Terminal,
+    explorer, a scheduler) is a real interactive cmd and still wins.
     """
     try:
         pmap = _win_ppid_exe_map()
@@ -209,6 +220,11 @@ def _detect_shell_format_win():  # pragma: no cover - exercised only on win32
             parent_pid, name = entry
             fmt = _SHELL_EXE_FORMAT.get(name)
             if fmt is not None:
+                if fmt == "cmd":
+                    grand = pmap.get(parent_pid)
+                    if grand is not None and grand[1] in _SHELL_EXE_FORMAT:
+                        pid = parent_pid
+                        continue  # the batch wrapper; keep walking
                 return fmt
             if parent_pid == pid or parent_pid == 0:
                 break
@@ -301,16 +317,34 @@ def detect_shell_format() -> str:
 # --------------------------------------------------------------------------- #
 
 
+#: Vars bash itself sets in the child that sources a plain env file. They are
+#: bash's, not the file's, and must not be reported as the file's changes:
+#: measured (Git Bash, `env -i`): `_`, `PWD` (in POSIX `/c/...` form -- emitted
+#: into a PowerShell session it is simply wrong), `OLDPWD`, `SHLVL`, and
+#: MSYS2's `MSYSTEM*` family.
+_BASH_OWN_VARS = frozenset({"_", "PWD", "OLDPWD", "SHLVL"})
+_BASH_OWN_PREFIXES = ("MSYSTEM", "MINGW_", "MSYS2_")
+
+
+def _is_bash_own_var(key: str) -> bool:
+    return key in _BASH_OWN_VARS or key.startswith(_BASH_OWN_PREFIXES)
+
+
 def _changed_env(env_dump: bytes, base_env: "dict[str, str]") -> "dict[str, str]":
-    """Parse a NUL-delimited ``env -0`` dump into the vars that changed vs base."""
+    """Parse a NUL-delimited ``env -0`` dump into the vars that changed vs base.
+
+    Bytes that are not valid UTF-8 are kept via ``surrogateescape`` rather than
+    aborting the whole assembly on one odd value (Python's own ``os.environ``
+    uses the same trick on POSIX)."""
     sourced: "dict[str, str]" = {}
     for entry in env_dump.split(b"\0"):
         if not entry or b"=" not in entry:
             continue
         key, value = entry.split(b"=", 1)
-        if key == b"_":
+        name = key.decode("utf-8", "surrogateescape")
+        if _is_bash_own_var(name):
             continue
-        sourced[key.decode()] = value.decode()
+        sourced[name] = value.decode("utf-8", "surrogateescape")
     return {
         k: v for k, v in sourced.items() if k not in base_env or base_env[k] != v
     }
@@ -396,9 +430,11 @@ def get_env_from_file(
 ) -> "dict[str, str]":
     """Source a plain env file in bash and return the vars it changed.
 
-    Runs ``set -a; source <file>; env -0`` so exported assignments are captured.
-    If ``bash`` is unavailable (or the source errors) the file contributes
-    nothing -- logged by name, never fatal.
+    Runs ``set -a; source <file> || exit 1; env -0`` so exported assignments
+    are captured. If ``bash`` is unavailable, or the source FAILS (a missing
+    file, a directory, a syntax error -- ``|| exit 1`` is what makes that
+    visible; a bare ``;`` list would run ``env -0`` regardless and report rc 0),
+    the file contributes nothing -- logged by name, never fatal.
     """
     quoted = json.dumps(str(env_file))
     spawn = _spawn_env(base_env)
@@ -416,7 +452,7 @@ def get_env_from_file(
     bash = shutil.which("bash", path=os.environ.get("PATH")) or "bash"
     try:
         proc = subprocess.run(
-            [bash, "-c", "set -a; source %s >/dev/null 2>&1; env -0" % quoted],
+            [bash, "-c", "set -a; source %s >/dev/null 2>&1 || exit 1; env -0" % quoted],
             capture_output=True,
             text=False,
             check=False,
@@ -446,10 +482,13 @@ def get_bin_paths(
 ) -> "list[Path]":
     """Each level's ``bin`` dir in contract-A precedence order, EXCEPT project-root.
 
-    Uses ``include_missing=True`` (precursor semantics) so a bin dir is offered
-    for every level even if absent -- the caller prepends only real dirs where it
-    matters. project-root's ``bin`` is explicitly excluded (``{"project-root":
-    None}``): a project's own top-level ``bin`` is not an agent bin.
+    Uses ``include_missing=True`` (precursor semantics, frozen contract B): a
+    bin dir is offered for every level even if absent, and
+    :func:`get_environment` prepends ALL of them to ``PATH`` -- including the
+    ones that do not exist (so a later-created ``<store>/bin`` is found without
+    re-running ``env``). project-root's ``bin`` is explicitly excluded
+    (``{"project-root": ""}``): a project's own top-level ``bin`` is not an
+    agent bin.
     """
     resolved = get_file_paths(
         {"default": "bin", "project-root": ""},
@@ -526,25 +565,34 @@ def resolve_env_files(
 
     Each tier is one contract-A resolution (:func:`get_file_paths`). Per-level
     filename resolution (contract A point 2): ``pre.env.py``/``pre.env`` and
-    ``env.py``/``env`` resolve everywhere; the project + project-root levels use
-    ``pre.local.env`` / ``local.env`` instead. Only existing files are returned.
+    ``env.py``/``env`` resolve at every level EXCEPT project-root; the project
+    (``<project>/.agents``) and project-root levels ADDITIONALLY resolve
+    ``pre.local.env`` / ``local.env``. Only existing regular FILES are returned
+    (a directory named ``env`` -- a common virtualenv name -- is not an env file).
+
+    **Amendment to contract B (2026-09-09):** project-root ``env.py`` / ``env``
+    are no longer resolved. Every session start ran the env chain, so a cloned
+    repository with a top-level ``env.py`` was executed the moment a session
+    opened in it -- code execution from an untrusted checkout. The
+    ``.agents/``-level files and the user-local ``local.env`` (which a checkout
+    does not normally carry) keep their behaviour.
     """
     common = dict(
         agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
     )
     pre_tier = get_file_paths(
-        "pre.env.py",
-        "pre.env",
+        {"default": "pre.env.py", "project-root": ""},
+        {"default": "pre.env", "project-root": ""},
         {"project": "pre.local.env", "project-root": "pre.local.env"},
         **common,
     )
     main_tier = get_file_paths(
-        "env.py",
-        "env",
+        {"default": "env.py", "project-root": ""},
+        {"default": "env", "project-root": ""},
         {"project": "local.env", "project-root": "local.env"},
         **common,
     )
-    return pre_tier + main_tier
+    return [item for item in pre_tier + main_tier if item[1].is_file()]
 
 
 # --------------------------------------------------------------------------- #
@@ -641,7 +689,8 @@ def get_environment(
     # (`Overlay.root_var` is the single naming rule). Seeded before the chain so
     # env files can reference an overlay's install dir; only-if-unset, like the
     # scope roots, so an upstream pin holds.
-    for overlay in Overlay.discover(agents_dir / "overlays"):
+    for root in get_overlay_roots(agents_dir=agents_dir):
+        overlay = Overlay(root)
         if not osenv.get(overlay.root_var):
             _apply({overlay.root_var: str(overlay.path)})
 

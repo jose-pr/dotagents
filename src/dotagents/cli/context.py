@@ -4,27 +4,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from dotagents.cli._common import DotAgentsArgs, resolve_user_store
-
-
-def _write_stdout(text: str) -> None:
-    """Write to stdout as UTF-8, whatever the console's encoding claims to be.
-
-    A bare `print()` encodes with the console codepage -- cp1252 on a default
-    Windows shell -- so a single character outside Latin-1 (an arrow, a box-drawing
-    rule, a curly quote, any emoji) raises UnicodeEncodeError and the command dies
-    having emitted nothing. Context files routinely contain such characters, and
-    this is the SessionStart hook's payload, so the failure is both likely and
-    silent. Write bytes through the underlying buffer instead, replacing anything
-    even UTF-8 cannot represent rather than aborting.
-    """
-    data = text.encode("utf-8", errors="replace")
-    buffer = getattr(sys.stdout, "buffer", None)
-    if buffer is None:  # pragma: no cover -- captured/replaced stdout in tests
-        sys.stdout.write(text)
-        return
-    buffer.write(data)
-    buffer.flush()
+from dotagents.cli._common import (  # noqa: F401  (_write_stdout re-exported for tests)
+    DotAgentsArgs,
+    _write_stdout,
+    resolve_user_store,
+)
 
 
 class Context(DotAgentsArgs):

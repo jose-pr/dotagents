@@ -61,7 +61,7 @@ from typing import Optional
 
 from duho import Cli, LoggingArgs
 
-from dotagents.cli import DotAgentsArgs, resolve_user_store
+from dotagents.cli import DotAgentsArgs, _write_stdout
 
 FINDINGS_DIRNAME = "findings"
 PROCESSED_DIRNAME = "processed"
@@ -383,16 +383,11 @@ class Findings(LoggingArgs, Cli):
         def store(self) -> FindingsStore:
             """The queue root: `--dir`, else `<scope-root>/findings/`.
 
-            The user scope (`-g`) resolves through `resolve_user_store` --
-            `--agents-dir`, then `$AGENTS_HOME`, then `~/.agents` -- the same
-            resolver `env` / `context` use, so a pinned store is honoured.
-            (`resolve_scope` alone defaults `-g` to `~/.agents` and ignores
-            `$AGENTS_HOME`; measured: `findings add -g` under a temp
-            `$AGENTS_HOME` wrote into the real home store.)"""
+            `resolve_scope` defaults the `-g` store through `resolve_user_store`
+            (`--agents-dir`, then `$AGENTS_HOME`, then `~/.agents`), so a pinned
+            store is honoured here exactly as in `env` / `context`."""
             if self.dir:
                 root = Path(self.dir).expanduser()
-            elif self.global_scope:
-                root = resolve_user_store(self.agents_dir) / FINDINGS_DIRNAME
             else:
                 root = self.resolve_scope().agents_root / FINDINGS_DIRNAME
             return FindingsStore(root)
@@ -457,13 +452,13 @@ class Findings(LoggingArgs, Cli):
             else:
                 findings = store.active()
             if self.as_json:
-                print(json.dumps({
+                _write_stdout(json.dumps({
                     "dir": str(store.root),
                     "findings": [
                         {k: v for k, v in f.as_dict().items() if k != "body"}
                         for f in findings
                     ],
-                }, indent=2))
+                }, indent=2) + "\n")
                 return 0
             if not findings:
                 self._logger_.info("no findings under %s", store.root)
@@ -471,7 +466,7 @@ class Findings(LoggingArgs, Cli):
             show_status = self.all
             for f in findings:
                 prefix = "[%s] " % f.status if show_status else ""
-                print("%s%s: %s" % (prefix, f.name, f.description))
+                _write_stdout("%s%s: %s\n" % (prefix, f.name, f.description))
             return 0
 
     class Show(_Base):
@@ -490,9 +485,9 @@ class Findings(LoggingArgs, Cli):
         def __call__(self) -> int:
             finding = self.store().require(self.name)
             if self.as_json:
-                print(json.dumps(finding.as_dict(), indent=2))
+                _write_stdout(json.dumps(finding.as_dict(), indent=2) + "\n")
             else:
-                sys.stdout.write(finding.render())
+                _write_stdout(finding.render())
             return 0
 
     class Done(_Base):

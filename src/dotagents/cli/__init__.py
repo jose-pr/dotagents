@@ -62,6 +62,7 @@ from dotagents.cli._common import (  # noqa: F401
     _package_data_dir,
     _resolve_from,
     _run_overlay_setup,
+    _write_stdout,
     resolve_user_store,
 )
 
