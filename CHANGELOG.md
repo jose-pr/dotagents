@@ -23,6 +23,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The store's rules now reach Claude on a fresh install.** `init` writes the
+  `@` include where Claude Code reads it -- `~/.claude/CLAUDE.md` for the user
+  store, `<project>/.claude/CLAUDE.md` for a project -- as an appended managed
+  block, skipped when the include line is already there by hand. Before, it
+  wrote `<store>/CLAUDE.md` (which Claude never reads) while `context`
+  subtracted `~/.agents/AGENTS.md` as "already loaded" on a static assumption,
+  so nothing delivered the base rules. `context` now subtracts exactly what
+  the harness's entry files actually `@`-include (`Agent.loaded_paths`),
+  recursively, on this machine.
+- `context` no longer inlines every `.md` file the sources mention. Inlining is
+  opt-in (`--inline` / `inline=True`): the base rules say to read those files
+  only when a task needs them, and inlining every mention made a 100 KB
+  SessionStart payload, most of it a changelog and an API header that
+  happened to be named in prose. With `--inline`, sources and harness-loaded
+  files are never inlined a second time, and placeholders inside inlined
+  files expand.
+- Overlay priority ordering and `<NAME_OVERLAY_ROOT>` placeholder expansion in
+  `context` never worked: the resolver labels an overlay entry with the
+  overlay's name and the code compared it to the literal `"overlay"`. Every
+  installed overlay now gets a placeholder (matching `env`), not only one that
+  ships a `CONTEXT.md`.
+- `context --write-agent` merges the context into the harness's own
+  instruction file under the PROJECT root -- Claude `.claude/CLAUDE.md`, Codex
+  `AGENTS.md`, Gemini `GEMINI.md`, Cursor `.cursorrules`, Copilot
+  `.github/copilot-instructions.md`, Antigravity `.agents/rules/dotagents.md`
+  -- as a managed `dotagents:context` block that is refreshed in place. It
+  used to overwrite a file under the user STORE; for Codex that was
+  `<store>/AGENTS.md`, a context source, so every run re-inlined the previous
+  run's output. `--format` is validated, and `--write-agent` refuses `--format
+  json` or an output path instead of silently ignoring one.
+- Project-scope overlays (`<project>/.agents/overlays/`, where `overlays add`
+  installs by default) are now part of the contract-A walk: their `bin`,
+  `lib`, env files, `cmds` and `CONTEXT.md` resolve, after the user store's,
+  and each gets a `<NAME>_OVERLAY_ROOT` (a project overlay wins a name clash).
+  Nothing consumed them before except the `AGENTS.md` recompose.
+- Managed-block markers must be a line of their own: a prose MENTION of the
+  markers (the base `AGENTS.md` carries one) was matched as the block, so the
+  sentence around it was replaced and a second block appeared. A begin marker
+  with no end after it is refused with a clear error instead of gaining a
+  second block; a `--from` base without markers is a usage error, not a
+  traceback.
+- Every managed file (`AGENTS.md`, the includes, `settings.json`, `hooks.json`,
+  context targets) is written LF-only on every platform; `settings.json` /
+  `hooks.json` are written atomically and keep non-ASCII values as-is.
+- The user scope is recognized by the configurable store (`$AGENTS_HOME`), not
+  the literal `~/.agents`: `init -g` with a custom store used to wire Claude's
+  hooks into `<store-parent>/.claude/settings.local.json`, which nothing reads.
+- `CODEX_HOME` no longer marks a running Codex session (it is the user's
+  persistent state-dir override, exported from a shell profile); the
+  `CODEX_SANDBOX*` vars still do, and `CODEX_HOME` still locates the config.
+- An unknown `--agents` name no longer overrides a pinned identity in `env`.
+- An overlay cannot be named like a contract-A level (`user`, `project`,
+  `system`, `project-root`, `default`, `overlay`); its dir name is its level
+  label in the walk and would collide with the per-level filename keys.
 - A directory named `env` (a common virtualenv name) is no longer "sourced" as
   an env file; only regular files resolve.
 - Sourcing a plain env file that fails (missing, a directory, a syntax error)

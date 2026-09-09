@@ -69,8 +69,18 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   Installed overlays are **discovered** by presence (`discover_overlays(scope)` →
   names, via `Overlay.discover`), not tracked in a registry. Nothing overlay-only
   lives here any more (the name regex / `is_valid_overlay_name` moved to `Overlay`).
-- `_context` — assemble the effective per-agent context (Plan 04); reads overlay
-  `priority` from the manifest (lower sorts earlier).
+- `_context` — assemble the effective per-agent context (Plan 04):
+  `assemble_context(agent, agents_dir, project_root, global_scope=False,
+  inline=False)` / `assemble_context_data(...)`. Sources are the contract-A
+  walk (overlay `CONTEXT.md`s first, sorted by manifest `priority`, lower
+  first; then the store / project `AGENTS.md` + `AGENTS.local.md`), minus what
+  the harness loads itself (`Agent.loaded_paths(project_root)` — for Claude,
+  whatever its entry files actually `@`-include, recursively). `<PROJECT_ROOT>`
+  and one `<NAME_OVERLAY_ROOT>` per installed overlay (user store + project)
+  expand. **Inlining the on-demand `.md` files a source mentions is opt-in**
+  (`inline=True` / `context --inline`): the base rules say to read them only
+  when a task needs them, and inlining every mention made a 100 KB session
+  payload. Skills are listed, never inlined.
 - `_env` — chained env-file assembly + `env.py` execution (frozen contract B):
   `get_environment` / `get_diff` / `resolve_env_files` / `get_env_from_py` /
   `get_env_from_file`. Bins onto PATH first (`get_bin_paths`, every level's `bin`
@@ -86,14 +96,38 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   contributes nothing (`source F || exit 1`, so the failure is visible); bash's
   own `PWD`/`OLDPWD`/`SHLVL`/`MSYSTEM*` are never reported as a file's changes.
 - `_resolve` — `get_file_paths(*names, agents_dir, project_root, global_scope=False,
-  include_missing=False)`: the Contract-A precedence walk / filename resolution.
+  include_missing=False)`: the Contract-A precedence walk / filename resolution:
+  user-store overlays → system → user → **project overlays** (since 2026-09-09:
+  `<project>/.agents/overlays/*`, where `overlays add` installs by default) →
+  project → project-root; the last three skipped with `global_scope`. Each
+  tuple is `(level, path, root)`; an overlay entry's `level` is the overlay's
+  dir name and `root` its dir (`root is None` for every other level — that is
+  the overlay test). `LEVEL_NAMES` are reserved as overlay names.
 - `_merge` — managed-block merge for `init`'s `AGENTS.md` / `CLAUDE.md`, delimited by
-  `<!-- dotagents:begin -->` / `<!-- dotagents:end -->`. Detection is by marker
-  presence only, so it survives user reformatting. `begin_marker`/`end_marker`
-  override the pair for other comment syntaxes (`#` for TOML), and `append=True`
-  puts a first-time block at the END of the file — required for TOML, where a
-  `[table]` header captures every key line after it and a prepended block would
-  swallow the user's top-level keys.
+  `<!-- dotagents:begin -->` / `<!-- dotagents:end -->` marker LINES (a prose
+  mention of a marker is not a marker; `find_block` returns the span). A begin
+  with no end after it is refused; a base without markers is a usage error.
+  `begin_marker`/`end_marker` override the pair for other comment syntaxes
+  (`#` for TOML), and `append=True` puts a first-time block at the END of the
+  file — required for TOML, where a `[table]` header captures every key line
+  after it and a prepended block would swallow the user's top-level keys.
+  `merge_include_line(target, "@path")` is the harness-entry-file include
+  (skipped when the line is already present anywhere), `merge_context_block`
+  the `dotagents:context` block `context --write-agent` uses. All writes go
+  through `_fs.write_text_lf` (LF-only everywhere; `atomic=True` for JSON
+  settings).
+- `_agents.Agent` — per adapter: `harness_loads` (static: what the harness
+  reads by itself, relative = project root), `loaded_paths(project_root)`
+  (resolved; Claude adds its real `@` includes), `context_target` (the
+  harness's instruction file under the project root that `write_context`
+  merges a managed context block into — Claude `.claude/CLAUDE.md`, Codex
+  `AGENTS.md`, Gemini `GEMINI.md`, Cursor `.cursorrules`, Copilot
+  `.github/copilot-instructions.md`, Antigravity `.agents/rules/dotagents.md`),
+  `write_base_config(dest, ...)` (Claude also writes the `@` include into
+  `~/.claude/CLAUDE.md` or `<project>/.claude/CLAUDE.md` — THE last mile; the
+  store's own `CLAUDE.md` is kept for the skeleton but no harness reads it).
+  The user scope is whatever `resolve_user_store()` returns, never the literal
+  `~/.agents`.
 - `_skills` — publish an overlay's `skills/<name>/` into a scope's shared skills dir
   (symlink-preferred, copy fallback); unpublish removes only what the overlay
   published, then sweeps broken symlinks. Pure stdlib.
