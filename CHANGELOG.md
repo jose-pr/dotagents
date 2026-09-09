@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- refactor: `dotagents._overlays` is now built around an **`Overlay`** class —
+  one overlay is one directory, and everything that depends on a single
+  overlay is a method or property on it: `.path` / `.name` / `.normalized_name`
+  / `.root_var` / `.is_valid` / `.manifest_path`, `.read_manifest()` /
+  `.priority` / `.sort_key`, `.find_setup_script()` / `.run_setup(...)`,
+  `.files()` / `.rule_blocks(...)` / `.apply_to(...)` / `.install_to(...)` /
+  `.merge_rules_into(...)`. The name rules are static methods
+  (`Overlay.is_valid_name` / `.normalize_name` / `.root_var_for`), so a caller
+  holding only a name uses the same rule as one holding a directory;
+  `Overlay.discover(root)` is the single discovery routine that `_scope`,
+  the contract-A resolver and `env` all share, and `Overlay.sort_by_priority`
+  the single merge order. The module-level functions they replace
+  (`read_manifest`, `find_setup_script`, `run_overlay_setup`, `overlay_files`,
+  `rule_blocks`, `apply_overlay`, `install_overlay_dir`, `merge_overlay_rules`,
+  `overlay_sort_key`, `sort_overlays_by_priority`, `normalize_name`,
+  `overlay_root_var`) are gone, as are `_scope.is_valid_overlay_name` and
+  `_scope.normalize_overlay_name`. `recompose_overlay_block` stays a module
+  function (it works over a set of overlays) and now accepts `Overlay`
+  instances or directories. `_overlays` is a private module, so no public
+  version signal.
+
+- fix: `context`'s `<NAME_OVERLAY_ROOT>` placeholder now also maps `.` (and any
+  other non-alphanumeric character) in an overlay name to `_`, not only `-` —
+  the name has to be a legal shell variable to be emitted by `env`, and the
+  placeholder follows the same rule. Overlays whose names contain only letters,
+  digits, `_` and `-` are unaffected.
+
 ## [0.3.4] - 2026-08-16
 
 ### Changed

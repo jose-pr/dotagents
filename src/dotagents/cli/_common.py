@@ -160,7 +160,7 @@ BASE_PLAIN_FILES = [
 ]
 
 
-def _compose_block(base_text: str, overlays: "list[Path]", logger) -> str:
+def _compose_block(base_text: str, overlays, logger) -> str:
     """Fold each overlay's `rules`/`routing` contributions into the base block.
 
     Rules append to "Always-on rules" and routing to "Load on demand", after the
@@ -172,14 +172,14 @@ def _compose_block(base_text: str, overlays: "list[Path]", logger) -> str:
     is the tiebreaker, so equal-priority overlays produce a stable, deterministic
     block regardless of add-invocation or discovery order. Returns `base_text`
     unchanged when nothing contributes, so `init` (which takes no overlays) is
-    completely unaffected."""
-    from dotagents._overlays import read_manifest, rule_blocks, sort_overlays_by_priority
+    completely unaffected. `overlays` are `Overlay` instances or overlay dirs."""
+    from dotagents._overlays import Overlay
 
     rules: "list[str]" = []
     routing: "list[str]" = []
-    for overlay_dir in sort_overlays_by_priority(overlays):
-        manifest = read_manifest(overlay_dir)
-        blocks, warnings = rule_blocks(overlay_dir, manifest["rules"])  # type: ignore[arg-type]
+    for overlay in Overlay.sort_by_priority(overlays):
+        manifest = overlay.read_manifest()
+        blocks, warnings = overlay.rule_blocks(manifest["rules"])  # type: ignore[arg-type]
         for warning in warnings:
             logger.warning("overlay %s: %s", manifest["name"], warning)
         rules.extend(blocks)
@@ -388,18 +388,17 @@ def _resolve_from(from_arg: "str | None", default: Path) -> Path:
 def _run_overlay_setup(dest_dir, name, *, scope, no_setup, dry_run, logger):
     """Run an installed overlay's `setup` script, honoring `--no-setup`.
 
-    Thin wrapper over `_overlays.run_overlay_setup` that resolves the store path
-    from the scope (D58 configurable store, passed as `AGENTS_HOME`) and
-    short-circuits when `--no-setup` is given or the overlay ships no script.
-    Returns the setup exit code (0 when skipped / absent), so a non-zero result
-    surfaces as a clear error rather than a silent skip."""
-    from dotagents import _overlays
+    Thin wrapper over `Overlay.run_setup` that resolves the store path from the
+    scope (D58 configurable store, passed as `AGENTS_HOME`) and short-circuits
+    when `--no-setup` is given or the overlay ships no script. Returns the setup
+    exit code (0 when skipped / absent), so a non-zero result surfaces as a
+    clear error rather than a silent skip."""
+    from dotagents._overlays import Overlay
 
+    overlay = Overlay(dest_dir)
     if no_setup:
-        if _overlays.find_setup_script(dest_dir) is not None:
+        if overlay.find_setup_script() is not None:
             logger.info("skipping setup for %s (--no-setup)", name)
         return 0
-    rc = _overlays.run_overlay_setup(
-        dest_dir, name, agents_dir=scope.agents_root, dry_run=dry_run, logger=logger,
-    )
+    rc = overlay.run_setup(agents_dir=scope.agents_root, dry_run=dry_run, logger=logger)
     return rc or 0

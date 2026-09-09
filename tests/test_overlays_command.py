@@ -35,6 +35,92 @@ BASE_AGENTS = (
 )
 
 
+# --------------------------------------------------------------------------- #
+# Overlay: name rules (valid / normalized / env var) and the instance surface
+# --------------------------------------------------------------------------- #
+
+Overlay = _overlays.Overlay
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["flows", "private-sync", "my_overlay", "net", "My-Overlay", "foo.bar", "v1.2"],
+)
+def test_valid_overlay_names(name):
+    # A dot mid-name is allowed (foo.bar, v1.2); only a LEADING dot is excluded.
+    assert Overlay.is_valid_name(name)
+
+
+@pytest.mark.parametrize("name", [".git", ".hidden", "__pycache__", "2fast", ""])
+def test_invalid_overlay_names(name):
+    # Leading dot / underscore / digit are all excluded.
+    assert not Overlay.is_valid_name(name)
+
+
+def test_normalize_name():
+    """THE canonical overlay name (install dir + env var derive from it)."""
+    assert Overlay.normalize_name("My_Overlay") == "my-overlay"
+    assert Overlay.normalize_name("my-overlay") == "my-overlay"
+    assert Overlay.normalize_name("NET") == "net"
+    # Dots are part of the install path and are kept.
+    assert Overlay.normalize_name("v1.2") == "v1.2"
+
+
+def test_root_var_derives_from_normalized_name():
+    """Two spellings that install to the same `overlays/<n>/` get the same var,
+    and the var for an install dir is always root_var_for(dir.name)."""
+    assert Overlay.root_var_for("my-overlay") == "MY_OVERLAY_OVERLAY_ROOT"
+    assert Overlay.root_var_for("My_Overlay") == "MY_OVERLAY_OVERLAY_ROOT"
+    assert Overlay.root_var_for("net") == "NET_OVERLAY_ROOT"
+    # A dot is legal in the dir name but not in a shell variable -> `_`.
+    assert Overlay.root_var_for("v1.2") == "V1_2_OVERLAY_ROOT"
+    for raw in ("My_Overlay", "my-overlay"):
+        installed = Overlay.normalize_name(raw)
+        assert Overlay.root_var_for(raw) == Overlay.root_var_for(installed)
+
+
+@pytest.mark.parametrize("name", ["flows", "my_overlay", "foo.bar", "v1.2", "a-b_c.d"])
+def test_root_var_of_valid_name_is_identifier(name):
+    assert Overlay.is_valid_name(name)
+    assert Overlay.root_var_for(name).isidentifier()
+
+
+def test_overlay_instance_surface(tmp_path):
+    """`.path`/`.name`/`.normalized_name`/`.root_var`/`.is_valid`/`.manifest_path`
+    are all derived from the directory; nothing is read at construction."""
+    d = tmp_path / "My_Ov.v2"
+    ov = Overlay(d)  # dir does not exist yet
+    assert ov.path == d
+    assert ov.name == "My_Ov.v2"
+    assert ov.normalized_name == "my-ov.v2"
+    assert ov.root_var == "MY_OV_V2_OVERLAY_ROOT"
+    assert ov.is_valid
+    assert ov.manifest_path == d / "overlay.toml"
+    assert ov.read_manifest()["priority"] == _overlays.DEFAULT_PRIORITY
+    assert ov.priority == _overlays.DEFAULT_PRIORITY
+    assert ov.find_setup_script() is None
+    # Files written after construction are seen (no caching).
+    d.mkdir()
+    (d / "overlay.toml").write_text('name = "ov"\npriority = 7\n', encoding="utf-8")
+    assert ov.priority == 7
+    assert ov.sort_key == (7, "ov")
+    # os.PathLike: usable wherever a path is, and Overlay(Overlay) is identity.
+    assert Path(ov) == d
+    assert Overlay(ov) == ov
+    assert not Overlay(tmp_path / ".git").is_valid
+
+
+def test_overlay_discover(tmp_path):
+    overlays = tmp_path / "overlays"
+    for d in ("flows", "my_overlay", ".git", "__pycache__"):
+        (overlays / d).mkdir(parents=True)
+    (overlays / "README.md").write_text("x", encoding="utf-8")  # a file, not a dir
+    found = Overlay.discover(overlays)
+    assert [o.name for o in found] == ["flows", "my_overlay"]
+    assert all(isinstance(o, Overlay) for o in found)
+    assert Overlay.discover(tmp_path / "absent") == []
+
+
 def make_source(root: Path):
     """A source dir holding two overlays: `py-demo` (routing + a skill) and
     `plain` (files only, no manifest)."""
@@ -165,7 +251,7 @@ def test_glob_filter():
 def test_install_overlay_dir_copies_files_and_manifest(tmp_path):
     src = make_source(tmp_path)
     dest = tmp_path / "dest" / "py-demo"
-    copied, skipped, _lines = _overlays.install_overlay_dir(src / "py-demo", dest, False)
+    copied, skipped, _lines = Overlay(src / "py-demo").install_to(dest, False)
     assert (dest / "kb" / "PY.md").is_file()
     assert (dest / "overlay.toml").is_file()
     assert copied >= 2 and skipped == 0
@@ -174,19 +260,30 @@ def test_install_overlay_dir_copies_files_and_manifest(tmp_path):
 def test_install_overlay_dir_no_clobber(tmp_path):
     src = make_source(tmp_path)
     dest = tmp_path / "dest" / "py-demo"
-    _overlays.install_overlay_dir(src / "py-demo", dest, False)
+    Overlay(src / "py-demo").install_to(dest, False)
     # Hand-edit an installed file; re-install must not clobber it.
     (dest / "kb" / "PY.md").write_text("EDITED\n", encoding="utf-8")
-    copied, skipped, _ = _overlays.install_overlay_dir(src / "py-demo", dest, False)
+    copied, skipped, _ = Overlay(src / "py-demo").install_to(dest, False)
     assert (dest / "kb" / "PY.md").read_text(encoding="utf-8") == "EDITED\n"
     assert copied == 0 and skipped >= 1
+
+
+def test_overlay_files_excludes_manifest_and_caches(tmp_path):
+    src = make_source(tmp_path)
+    ov = Overlay(src / "py-demo")
+    (ov.path / "__pycache__").mkdir()
+    (ov.path / "__pycache__" / "x.pyc").write_bytes(b"")
+    names = {p.relative_to(ov.path).as_posix() for p in ov.files()}
+    assert "kb/PY.md" in names
+    assert "overlay.toml" not in names
+    assert not any("__pycache__" in n for n in names)
 
 
 def test_merge_overlay_rules_into_agents_md(tmp_path):
     src = make_source(tmp_path)
     scope = make_scope(tmp_path)
     agents_md = scope.agents_root / "AGENTS.md"
-    changed = _overlays.merge_overlay_rules(agents_md, src / "py-demo", False, logger())
+    changed = Overlay(src / "py-demo").merge_rules_into(agents_md, False, logger())
     assert changed
     text = agents_md.read_text(encoding="utf-8")
     assert "~/.agents/kb/PY.md" in text
@@ -198,7 +295,7 @@ def test_merge_overlay_rules_noop_when_no_contributions(tmp_path):
     src = make_source(tmp_path)
     scope = make_scope(tmp_path)
     agents_md = scope.agents_root / "AGENTS.md"
-    assert _overlays.merge_overlay_rules(agents_md, src / "plain", False, logger()) is False
+    assert Overlay(src / "plain").merge_rules_into(agents_md, False, logger()) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -515,7 +612,7 @@ def _make_rules_overlay(src_root: Path, name: str, marker: str, priority=None):
 
 def test_overlay_sort_key_default_priority_when_absent(tmp_path):
     ov = _make_rules_overlay(tmp_path, "no-prio", "NP")  # no priority key
-    prio, name = _overlays.overlay_sort_key(ov)
+    prio, name = Overlay(ov).sort_key
     assert prio == _overlays.DEFAULT_PRIORITY
     assert name == "no-prio"
 
@@ -524,16 +621,17 @@ def test_sort_overlays_by_priority_orders_low_first_regardless_of_input(tmp_path
     hi = _make_rules_overlay(tmp_path, "zeta", "HI", priority=900)   # sorts last
     lo = _make_rules_overlay(tmp_path, "alpha", "LO", priority=100)  # sorts first
     mid = _make_rules_overlay(tmp_path, "mid", "MID")               # default 500
-    # Feed in a deliberately unsorted order.
-    ordered = _overlays.sort_overlays_by_priority([hi, mid, lo])
-    assert [p.name for p in ordered] == ["alpha", "mid", "zeta"]
+    # Feed in a deliberately unsorted order -- plain dirs are accepted too.
+    ordered = Overlay.sort_by_priority([hi, mid, lo])
+    assert [o.name for o in ordered] == ["alpha", "mid", "zeta"]
+    assert all(isinstance(o, Overlay) for o in ordered)
 
 
 def test_sort_overlays_name_tiebreaker_on_equal_priority(tmp_path):
     b = _make_rules_overlay(tmp_path, "bravo", "B", priority=300)
     a = _make_rules_overlay(tmp_path, "alfa", "A", priority=300)
-    ordered = _overlays.sort_overlays_by_priority([b, a])
-    assert [p.name for p in ordered] == ["alfa", "bravo"]
+    ordered = Overlay.sort_by_priority([Overlay(b), Overlay(a)])
+    assert [o.name for o in ordered] == ["alfa", "bravo"]
 
 
 def test_compose_block_orders_multiple_overlays_by_priority(tmp_path):
@@ -609,7 +707,7 @@ def test_existing_bundled_overlay_manifests_still_parse(tmp_path):
     manifests = sorted(repo_overlays.glob("*/overlay.toml"))
     assert manifests, "expected bundled overlays to exist"
     for manifest in manifests:
-        parsed = _overlays.read_manifest(manifest.parent)
+        parsed = Overlay(manifest.parent).read_manifest()
         assert isinstance(parsed["priority"], int)
         # None of the shipped overlays sets priority yet -> all default.
         assert parsed["priority"] == _overlays.DEFAULT_PRIORITY

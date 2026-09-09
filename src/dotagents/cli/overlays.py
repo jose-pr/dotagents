@@ -64,12 +64,12 @@ class OverlayAdd(DotAgentsArgs):
         # front rather than creating a junk dir under overlays/.
         names = []
         for raw in self.name:
-            if not _scope.is_valid_overlay_name(raw):
+            if not _overlays.Overlay.is_valid_name(raw):
                 raise SystemExit(
                     "error: %r is not a valid overlay name (must start with a "
                     "letter, then letters/digits/_/-)" % raw
                 )
-            names.append(_scope.normalize_overlay_name(raw))
+            names.append(_overlays.Overlay.normalize_name(raw))
 
         source = _scope.resolve_source(self.source)
         scope = self.resolve_scope()
@@ -79,8 +79,8 @@ class OverlayAdd(DotAgentsArgs):
         for name in names:
             overlay_src = source.overlay_dir(name)
             dest_dir = scope.overlay_dir(name)
-            copied, skipped, lines = _overlays.install_overlay_dir(
-                overlay_src, dest_dir, self.dry_run
+            copied, skipped, lines = _overlays.Overlay(overlay_src).install_to(
+                dest_dir, self.dry_run
             )
             for line in lines:
                 self._logger_.info(line)
@@ -156,7 +156,7 @@ class OverlayRemove(DotAgentsArgs):
             if not overlay_dir.is_dir():
                 self._logger_.warning("overlay %r not installed at %s", name, overlay_dir)
                 continue
-            manifest = _overlays.read_manifest(overlay_dir)
+            manifest = _overlays.Overlay(overlay_dir).read_manifest()
             has_rules = bool(manifest["routing"] or manifest["rules"])
             if not self.dry_run:
                 removed = _skills.remove_overlay_skills(
@@ -288,8 +288,8 @@ class OverlaySync(DotAgentsArgs):
                 self._logger_.warning("overlay %r not in source; skipping", name)
                 continue
             dest_dir = scope.overlay_dir(name)
-            copied, skipped, lines = _overlays.install_overlay_dir(
-                overlay_src, dest_dir, self.dry_run
+            copied, skipped, lines = _overlays.Overlay(overlay_src).install_to(
+                dest_dir, self.dry_run
             )
             self._logger_.info(
                 "synced %s: %d new file(s), %d unchanged%s",

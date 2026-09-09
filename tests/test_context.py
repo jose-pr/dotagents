@@ -205,12 +205,14 @@ def test_manifest_reports_priority(tmp_path):
     ov = tmp_path / "ov"
     ov.mkdir()
     (ov / "overlay.toml").write_text('name = "ov"\npriority = 42\n', encoding="utf-8")
-    assert _overlays.read_manifest(ov)["priority"] == 42
+    assert _overlays.Overlay(ov).read_manifest()["priority"] == 42
+    assert _overlays.Overlay(ov).priority == 42
     # Missing priority -> default.
     ov2 = tmp_path / "ov2"
     ov2.mkdir()
     (ov2 / "overlay.toml").write_text('name = "ov2"\n', encoding="utf-8")
-    assert _overlays.read_manifest(ov2)["priority"] == _overlays.DEFAULT_PRIORITY
+    assert _overlays.Overlay(ov2).read_manifest()["priority"] == _overlays.DEFAULT_PRIORITY
+    assert _overlays.Overlay(ov2).priority == _overlays.DEFAULT_PRIORITY
 
 
 # --------------------------------------------------------------------------

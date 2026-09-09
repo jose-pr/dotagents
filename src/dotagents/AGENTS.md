@@ -39,14 +39,27 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
 
 - `_agents` — `Agent` base type + per-agent adapters; `stamp_identity(...)` emits the
   standardized `AGENTS_*` / `AGENT` identity vars.
-- `_overlays` — `install_overlay_dir` (copy an overlay into a scope, self-describing)
-  / `apply_overlay` (lay its files down) / `read_manifest` / `find_setup_script` /
-  `run_overlay_setup`; installs an overlay's files and collects its `routing` / `rules`
-  contributions to the managed `AGENTS.md` block. `DEFAULT_PRIORITY = 500`.
+- `_overlays` — the **`Overlay`** type: one overlay = one directory, `Overlay(path)`.
+  Everything that depends on a single overlay is on it. Name rules are static so a
+  bare name works: `Overlay.is_valid_name(n)` / `.normalize_name(n)` (THE canonical
+  name, lowercase `_`→`-`, = the install dir `overlays/<n>/`) / `.root_var_for(n)`
+  (`<NAME>_OVERLAY_ROOT`). Instance: `.path` / `.name` / `.normalized_name` /
+  `.root_var` / `.is_valid` / `.manifest_path`, `.read_manifest()` / `.priority` /
+  `.sort_key`, `.find_setup_script()` / `.run_setup(agents_dir=, dry_run=, logger=)`,
+  `.files()` / `.rule_blocks(rel_paths)` / `.apply_to(dest, dry_run)` /
+  `.install_to(dest_overlay_dir, dry_run)` (self-describing: ships the manifest) /
+  `.merge_rules_into(agents_md, dry_run, logger)`. `Overlay.discover(root)` is the
+  ONE discovery rule (valid-named dirs under an `overlays/` root; `_scope`,
+  `_resolve` and `env` all call it), `Overlay.sort_by_priority(items)` the one
+  merge order. It is `os.PathLike`, so it goes anywhere a path does.
+  `recompose_overlay_block(...)` (over a *set* of overlays) is the only module
+  function. `DEFAULT_PRIORITY = 500`.
 - `_scope` — `resolve_scope(global_scope, agents_dir=None)` and `resolve_source(...)`;
   scope = *where installed overlays live* (user = the configurable store, project =
   `<project>/.agents`), source = *where an overlay comes from* (bundled by default).
-  Installed overlays are **discovered** by presence, not tracked in a registry.
+  Installed overlays are **discovered** by presence (`discover_overlays(scope)` →
+  names, via `Overlay.discover`), not tracked in a registry. Nothing overlay-only
+  lives here any more (the name regex / `is_valid_overlay_name` moved to `Overlay`).
 - `_context` — assemble the effective per-agent context (Plan 04); reads overlay
   `priority` from the manifest (lower sorts earlier).
 - `_env` — chained env-file assembly + `env.py` execution (frozen contract B):

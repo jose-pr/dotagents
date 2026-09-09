@@ -8,8 +8,6 @@ import pytest
 from dotagents._scope import (
     Scope,
     discover_overlays,
-    is_valid_overlay_name,
-    normalize_overlay_name,
     project_root_default,
     resolve_scope,
 )
@@ -76,27 +74,6 @@ def test_global_scope_ignores_project_root_env(tmp_path, monkeypatch):
 # valid; names normalize lowercase-dash. One shared rule, mirrored by the
 # get_file_paths overlay gate.
 # --------------------------------------------------------------------------
-
-@pytest.mark.parametrize(
-    "name",
-    ["flows", "private-sync", "my_overlay", "net", "My-Overlay", "foo.bar", "v1.2"],
-)
-def test_valid_overlay_names(name):
-    # A dot mid-name is allowed (foo.bar, v1.2); only a LEADING dot is excluded.
-    assert is_valid_overlay_name(name)
-
-
-@pytest.mark.parametrize("name", [".git", ".hidden", "__pycache__", "2fast", ""])
-def test_invalid_overlay_names(name):
-    # Leading dot / underscore / digit are all excluded.
-    assert not is_valid_overlay_name(name)
-
-
-def test_normalize_overlay_name():
-    assert normalize_overlay_name("My_Overlay") == "my-overlay"
-    assert normalize_overlay_name("my-overlay") == "my-overlay"
-    assert normalize_overlay_name("NET") == "net"
-
 
 def test_discover_overlays_includes_valid_excludes_junk(tmp_path):
     overlays = tmp_path / "overlays"

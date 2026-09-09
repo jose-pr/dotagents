@@ -11,26 +11,15 @@ from dotagents import _agents
 from dotagents import _overlays
 
 
-def _get_overlay_priority(overlay_dir: Path) -> int:
-    """Overlay merge priority (plan 02), read from the manifest.
-
-    The manifest reader owns priority parsing (`_overlays.read_manifest`), so
-    this just consumes its value -- no duplicate ad-hoc regex. Lower sorts
-    earlier; the unprioritized default is `_overlays.DEFAULT_PRIORITY` (500)."""
-    manifest = _overlays.read_manifest(overlay_dir)
-    value = manifest.get("priority", _overlays.DEFAULT_PRIORITY)
-    try:
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return _overlays.DEFAULT_PRIORITY
-
-
 def _expand_placeholders(text: str, project_root: Path, overlay_roots: list[Path]) -> str:
-    """Expand <PROJECT_ROOT> and <OVERLAY_NAME_OVERLAY_ROOT> placeholders."""
+    """Expand <PROJECT_ROOT> and <OVERLAY_NAME_OVERLAY_ROOT> placeholders.
+
+    The placeholder name is exactly the env var ``dotagents env`` emits for the
+    same overlay (:attr:`_overlays.Overlay.root_var`), so a context file and an
+    env file refer to an overlay's install dir by one name."""
     text = text.replace("<PROJECT_ROOT>", str(project_root))
     for ov in overlay_roots:
-        env_name = ov.name.upper().replace("-", "_")
-        text = text.replace(f"<{env_name}_OVERLAY_ROOT>", str(ov))
+        text = text.replace(f"<{_overlays.Overlay(ov).root_var}>", str(ov))
     return text
 
 
@@ -176,15 +165,17 @@ def _resolve_and_filter_sources(
     )
 
     # Apply overlay priority (plan 02): overlays sort among themselves by their
-    # declared priority (lower first); non-overlay levels (system/user/project)
-    # keep the resolver's precedence order, placed after all overlays via a high
-    # sentinel. Stable sort preserves resolver order within equal keys.
+    # declared priority (lower first, read from the manifest by
+    # `Overlay.priority`; the unprioritized default is `DEFAULT_PRIORITY`, 500);
+    # non-overlay levels (system/user/project) keep the resolver's precedence
+    # order, placed after all overlays via a high sentinel. Stable sort preserves
+    # resolver order within equal keys.
     _NON_OVERLAY_SENTINEL = 10_000
 
     def _sort_key(item):
         level, path, root = item
         if level == "overlay" and root:
-            return (_get_overlay_priority(root), path.name)
+            return (_overlays.Overlay(root).priority, path.name)
         return (_NON_OVERLAY_SENTINEL, "")
 
     sources.sort(key=_sort_key)
