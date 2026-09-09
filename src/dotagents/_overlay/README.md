@@ -17,10 +17,12 @@ no opinionated flows, model-routing, or repo-standards content.
 - `dotagents/DECISIONS.md` + `dotagents/decisions/` — a design log for this config
   itself (why a rule exists, what changed and when), as a lean index + one file per
   decision. Not loaded in normal sessions.
-- `dotagents/findings/` — where agents drop short notes when the config caused a
-  mistake or gap, instead of editing the config mid-task. `dotagents/findings/
-  processed/` is where triaged notes land (moved, never deleted) once folded into
-  `dotagents/DECISIONS.md`.
+- `findings/` — the findings queue, managed by the bundled `dotagents findings`
+  command (`add -g` records one when the config caused a mistake or gap, instead of
+  editing the config mid-task; `list -g` / `show -g` read it). `findings/processed/`
+  is where triaged findings land (`done -g <name> -r "<resolution>"` — moved, never
+  deleted) once folded into `dotagents/DECISIONS.md`. A project's own queue is
+  `<project>/.agents/findings/`, same command without `-g`.
 
 ## Growing your own config
 

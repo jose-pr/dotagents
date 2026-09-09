@@ -225,6 +225,9 @@ dotagents findings path                     # where this scope's queue lives
   with `-g` / `--agents-dir` (`<store>/findings/`), or any directory with `--dir`
   (e.g. a queue kept at an older config's `dotagents/findings/`). Roots resolve as
   for every other scope-aware command (`$AGENTS_PROJECT_ROOT`, `$AGENTS_HOME`).
+- The base config's own rules use it: a global-config miss is
+  `dotagents findings add -g ...`, triage reads `list -g` / `show -g` and closes
+  with `done -g` (see the installed `AGENTS.md` and `dotagents/DECISIONS.md`).
 - Layout is the queue discipline: active findings at the top level; `done`
   appends a `## Resolution` section and **moves** the file to `processed/`
   (never deletes). The resolution is required — a processed finding without one

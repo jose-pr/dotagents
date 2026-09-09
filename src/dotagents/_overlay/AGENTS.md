@@ -17,9 +17,11 @@ Startup: annotate that you read `~/.agents/AGENTS.md`.
   first is cheaper than rediscovering it from the source. How `.agents/` is
   populated — real directory, symlink, committed or not — is yours to decide.
 - **Global-config misses**: if these instructions caused a mistake or rework, or you
-  have an improvement idea, drop a note in `~/.agents/dotagents/findings/` and move on
-  — don't edit the config. Triage later folds them into `.../dotagents/DECISIONS.md`
-  and moves each (never deletes) to `.../findings/processed/`.
+  have an improvement idea, record it and move on — don't edit the config:
+  `dotagents findings add -g "<one line>" -b "<what happened, evidence>"`. Read the
+  active queue with `dotagents findings list -g` (project queue: drop `-g`). Triage
+  later folds each into `dotagents/DECISIONS.md` and closes it with
+  `dotagents findings done -g <name> -r "<resolution>"` (moved, never deleted).
 - **This file**: everything between the `dotagents:begin`/`dotagents:end` markers is
   managed — `dotagents init` refreshes it and leaves anything outside untouched. Add
   your own rules and routing below the end marker, not inside.

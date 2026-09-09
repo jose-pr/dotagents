@@ -42,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The base overlay's findings workflow now goes through the command. The
+  managed `AGENTS.md` rule ("Global-config misses"), `dotagents/DECISIONS.md`
+  ("How findings become config") and the skeleton README say
+  `dotagents findings add -g ...` to record a miss, `list -g` / `show -g` to
+  triage and `done -g <name> -r ...` to close one, instead of "drop a note in
+  `~/.agents/dotagents/findings/`". With that, the user store's queue is
+  **`~/.agents/findings/`** (the command's `-g` default), no longer
+  `~/.agents/dotagents/findings/`. An existing queue at the old path keeps
+  working with `--dir ~/.agents/dotagents/findings`, or move it once:
+  `mv ~/.agents/dotagents/findings ~/.agents/findings`. Re-run `dotagents init`
+  to refresh the managed block.
 - refactor: `dotagents._overlays` is now built around an **`Overlay`** class —
   one overlay is one directory, and everything that depends on a single
   overlay is a method or property on it: `.path` / `.name` / `.normalized_name`
