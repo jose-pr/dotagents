@@ -50,9 +50,10 @@ class BuildPyz(LoggingArgs, Cmd):
         # package dir is parents[1].
         #
         # The repo's `tools/` is NOT bundled. It used to ride along as
-        # `dotagents/_tools` for compiled `audit`/`leak-check` wrappers that
-        # shelled out to it; both wrappers are gone (audit is repo CI tooling,
-        # leak-check is a personal command module), nothing reads `_tools`, and
+        # `dotagents/_tools` for compiled wrappers (`audit`, and a personal
+        # scanner) that shelled out to it; both wrappers are gone (audit is repo
+        # CI tooling, the scanner is a personal command module the user keeps in
+        # their own `.agents/`), nothing reads `_tools`, and
         # `tools/audit.py`'s own docstring says it is not shipped in the .pyz --
         # which is only true now that this stopped copying it.
         repo_root = Path(__file__).resolve().parents[3]

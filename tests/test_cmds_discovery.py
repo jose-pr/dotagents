@@ -3,9 +3,10 @@ built-in commands plus command modules from the bundled cmds dir, each installed
 overlay's `cmds/`, the per-scope cmds dirs (user + project), `$AGENTS_CMDS_PATH`,
 and `--cmdspath`.
 
-Since D85 dotagents bundles NO command module: `link`/`sync` became the
-private-sync overlay's `link-project`/`sync-project`, so the baseline surface is
-built-ins only and an OVERLAY's cmds dir is what adds a private-sync command.
+dotagents bundles ONE command module, `findings`. Since D85 `link`/`sync` are
+the private-sync overlay's `link-project`/`sync-project`, so the baseline
+surface is the built-ins plus `findings`, and an OVERLAY's cmds dir is what adds
+a private-sync command.
 
 Filesystem-only (tmp_path); no network. NEVER exports HOME/USERPROFILE -- the
 user scope is redirected via `$AGENTS_HOME` and the project scope via
@@ -79,7 +80,7 @@ def _write(path: Path, text: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Baseline: built-ins only -- dotagents bundles no command module (D85)
+# Baseline: built-ins + the bundled `findings` module, nothing else
 # --------------------------------------------------------------------------- #
 
 
@@ -103,10 +104,12 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
     # plain dotagents (no overlay installed) offers no private-sync command.
     for gone in ("link", "sync", "link-project", "sync-project"):
         assert gone not in names
-    # leak-check is GONE from the repo entirely (D84): it is a personal command
-    # module the user drops into their private `.agents/cmds/`, discovered only
-    # when present -- never a default of a fresh install.
-    assert "leak-check" not in names
+    # A personal command module is discovered only when the user has dropped it
+    # into their own `<scope>/dotagents/cmds/` (D84) -- never a default of a
+    # fresh install. So a fresh install offers EXACTLY the built-ins plus the
+    # bundled findings module, and nothing else.
+    assert "my-personal-tool" not in names
+    assert set(names) == {"init", "build-pyz", "context", "env", "overlays", "findings"}
     # Built-ins are handed to `duho.app` via `commands=`, never `_subcommands_`.
     assert cli.Dotagents._subcommands_ == []
 

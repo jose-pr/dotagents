@@ -119,8 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **`build-pyz` no longer bundles the repo's `tools/`** as `dotagents/_tools`
   inside the built `.pyz`, and the `--tools-dir` flag is gone with it. Nothing
-  read `_tools`: the compiled `audit`/`leak-check` wrappers that shelled out to
-  it no longer exist. Every shipped artifact carried the dead weight while
+  read `_tools`: the compiled `audit` wrapper and a personal scanner's wrapper that
+  shelled out to it no longer exist. Every shipped artifact carried the dead weight while
   `tools/audit.py` claimed it was "not shipped in the `.pyz`" — now true.
 - **`dotagents._sync`** — a `pathlib_next.PathSyncer` wrapper that existed only
   to back the `install` subcommand's backup/copy report. `install` was removed
@@ -135,8 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   no longer claims to ship as a bundled `audit` command module (it is repo CI
   tooling and there is no `dotagents audit`) and its `--root` help names the
   real default; `install.py`'s usage line drops the removed `install` and the
-  never-existing `audit`; the README's `tools/` row says where `leak-check`
-  actually lives; the API header names the real `_overlays` exports
+  never-existing `audit`; the README's `tools/` row says where a personal
+  command module actually lives; the API header names the real `_overlays` exports
   (`install_overlay_dir` / `apply_overlay` / `run_overlay_setup`) and the real
   package-data dirs (`_overlay` / `_overlays_src`, never a `skeleton/`); and
   `_merge._extract_block`'s docstring now says it returns the block *including*
@@ -321,7 +321,7 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   directory. Symlink where the OS permits, copy otherwise (a copy is a snapshot;
   re-run `init` to refresh).
 
-- feat: `tools/leak_check.py` now also scans commit messages (current branch history)
+- feat: the personal leak scanner (then in `tools/`) now also scans commit messages (current branch history)
   for agent-session trailers/URLs — a `Claude-Session:` trailer or `claude.ai/code/session`
   link — and exits 1 on any hit. The trailer is auto-added by the agent harness and
   exposes a session id in public history if it slips through; the pre-existing tracked-file
@@ -460,7 +460,7 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   `recovery`, `references`, `python`/`node`/`rust`, `agents`, `tools`. Each carries
   an `overlay.toml` manifest for a future `dotagents overlays` subcommand.
 - Repo layout: the CLI in `src/dotagents/`, config overlays in `overlays/`, required
-  tooling in top-level `tools/` (`audit_config.py`, `leak_check.py`); repo root holds
+  tooling in top-level `tools/` (`audit_config.py` and a personal leak scanner); repo root holds
   the installer, CI, repo-development directives, and the tracked, sanitized
   `.agents/` design log (index + per-decision files) + plans. `audit_config.py` has
   `--repo-hygiene` (scans tracked files for personal/machine-specific leftovers).

@@ -28,8 +28,8 @@ worth knowing:
 - `link-project` / `sync-project` (the per-project private-store workflow) come from
   the opt-in **`private-sync` overlay**, which ships the commands and their logic
   together — install it and they appear (see [link-project / sync-project](#link-project-sync-project)).
-- `leak-check` is a personal command module you drop into your private
-  `<scope>/dotagents/cmds/`, where it is discovered like any other.
+- A personal command module dropped into a scope's `dotagents/cmds/` is discovered
+  like any other, so tooling you keep private never has to live in this repo.
 
 Your own commands work the same way: drop a `*.py` defining a `duho` command class
 into `<scope>/dotagents/cmds/` (`init` creates that dir) and it becomes a subcommand,
@@ -248,18 +248,13 @@ There is no `dotagents audit`. The dotagents source repo has its own
 it is not a validator for an installed `~/.agents` and is deliberately not shipped
 in the package or the `.pyz`.
 
-### leak-check (personal, not in this repo)
+### Personal pre-push scanning (not in this repo)
 
-`leak-check` scans any repo before publishing it — personal machine paths, private
-plan names, `.agents/` refs, `Phase N` phrasing, and `Claude-Session` trailers. It
-enforces personal conventions rather than dotagents' own mechanism, so it is **not**
-shipped here: it lives as a discovered command module in your own private
-`<scope>/dotagents/cmds/`, run locally before a push.
-
-```bash
-python -m dotagents leak-check .                # tracked files + commit messages
-python -m dotagents leak-check --commits-only . # commit messages only
-```
+Scanning a repo for personal leaks before publishing it — machine paths, private
+plan names, `.agents/` refs, agent-session trailers in commit messages — enforces
+personal conventions rather than dotagents' own mechanism, so no such tool is
+shipped here. Keep one as a discovered command module in your own private
+`<scope>/dotagents/cmds/` and run it locally before a push.
 
 ## link-project / sync-project
 

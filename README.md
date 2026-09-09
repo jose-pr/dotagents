@@ -41,7 +41,7 @@ them. Everything else is repo infrastructure.
 | --- | --- |
 | `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`) — that is the whole shipped surface; commands beyond it come from overlays or your own `cmds/` modules |
 | `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index), and an empty `dotagents/cmds/` dir — your drop-in point for your own command modules. Neutral — imposes no flows, ships no command |
-| `tools/` | Repo tooling, not shipped: `audit.py` (CI structure check) and `cloud-setup.sh`. `leak-check` is not here either — it is a personal command module you keep in your own private `.agents/dotagents/cmds/` |
+| `tools/` | Repo tooling, not shipped: `audit.py` (CI structure check) and `cloud-setup.sh`. Personal scanning tools are not here either — keep them as command modules in your own private `.agents/dotagents/cmds/` |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
 
 The **example overlays** — the `flows` workflow set, per-language `kb/` + templates,
@@ -222,8 +222,8 @@ committed — so what's public here is only the CLI, the base overlay, and the o
 overlays. If you fork, keep the tracked surface free of personal paths and private
 project names. `dotagents audit` validates config *structure* only; personal-leak
 scanning (machine paths, private plan names, session trailers) is a separate,
-personal `leak-check` tool you run locally before a push — it lives in your private
-`.agents/`, not shipped in this repo.
+personal tool you run locally before a push — it lives in your private `.agents/`,
+not shipped in this repo.
 
 ## Documentation
 

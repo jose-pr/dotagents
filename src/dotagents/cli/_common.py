@@ -93,11 +93,12 @@ class DotAgentsArgs(LoggingArgs, Cmd):
         )
 
 
-# NOTE: `_resolve_required_tool` was removed. It existed so a compiled `audit` /
-# `leak-check` wrapper could locate a standalone script under `tools/`. Neither
-# wrapper exists now: `audit` is CI tooling for THIS repo (`tools/audit.py`, not a
-# dotagents command, not shipped), and `leak-check` is a personal command module in
-# the user's private `.agents/`. Nothing in the package shells out to `tools/`.
+# NOTE: `_resolve_required_tool` was removed. It existed so a compiled wrapper
+# (`audit`, and a personal scanner) could locate a standalone script under
+# `tools/`. Neither wrapper exists now: `audit` is CI tooling for THIS repo
+# (`tools/audit.py`, not a dotagents command, not shipped), and personal tooling
+# lives in the user's own `.agents/` as a discovered command module. Nothing in
+# the package shells out to `tools/`.
 
 
 def _package_data_dir(name: str) -> "Path | None":

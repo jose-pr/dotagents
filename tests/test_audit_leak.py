@@ -9,8 +9,9 @@ Covered here:
   1. it lives in `tools/` and runs standalone, PASSing on this repo (what CI does);
   2. running it standalone exposes its flags (--root/--probe/--check-templates);
   3. `audit` is NOT in the dotagents command surface;
-  4. `leak-check` is not in the repo either (personal -- the user's private
-     `.agents/`, D84).
+  4. no personal scanning tool is in the repo either -- `tools/` holds exactly
+     the two repo-tooling files, and personal command modules live in the
+     user's private `.agents/` (D84).
 
 Run from repo root: ``PYTHONPATH=src python -m pytest tests/test_audit_leak.py``.
 """
@@ -65,7 +66,13 @@ def test_audit_is_not_a_dotagents_command():
     assert "audit" not in names
 
 
-def test_leak_check_is_not_in_the_repo():
-    """leak-check is personal (D84): the user's private `.agents/`, not here."""
-    assert not (REPO / "tools" / "leak_check.py").exists()
-    assert not (SRC / "dotagents" / "cli" / "leak_check.py").exists()
+def test_no_personal_tooling_is_in_the_repo():
+    """Personal tooling lives in the user's private `.agents/` (D84), not here:
+    `tools/` is exactly the two repo-tooling files, and the CLI package ships
+    only its known modules."""
+    assert sorted(p.name for p in (REPO / "tools").iterdir()) == ["audit.py", "cloud-setup.sh"]
+    cli_modules = sorted(p.name for p in (SRC / "dotagents" / "cli").glob("*.py"))
+    assert cli_modules == [
+        "__init__.py", "_common.py", "build_pyz.py", "context.py", "env.py",
+        "init.py", "overlays.py",
+    ]

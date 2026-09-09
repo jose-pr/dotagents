@@ -30,10 +30,10 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   does not copy it into the store — the bundled dir is always a discovery
   source). `link` / `sync` left the package with their logic (D85): the
   opt-in **private-sync** overlay ships them, renamed `link-project` /
-  `sync-project`, from its own `cmds/` + `lib/_link.py`. `leak-check` is likewise
-  not in the repo — a personal command module the user keeps in their private
-  `<scope>/dotagents/cmds/` (D84). `audit` is repo CI tooling (`tools/audit.py`),
-  not a command.
+  `sync-project`, from its own `cmds/` + `lib/_link.py`. A personal command module
+  dropped into a scope's `dotagents/cmds/` is discovered like any other, so private
+  tooling never has to live in the repo (D84). `audit` is repo CI tooling
+  (`tools/audit.py`), not a command.
 - Command discovery layers sources, later wins: built-ins < bundled `cmds` <
   overlay `cmds` (`<overlay-root>/cmds`) < scope `cmds` dirs (user + project) <
   `$AGENTS_CMDS_PATH` < `--cmdspath`. The overlay + scope tiers come from one

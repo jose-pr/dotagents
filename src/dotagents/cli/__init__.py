@@ -2,14 +2,14 @@
 subcommands, plus any user or overlay command modules discovered from a `cmds`
 directory (D76/D84).
 
-dotagents bundles NO command module of its own (D85). `link`/`sync` used to ship
-in `_overlay/dotagents/cmds/`; they are now `link-project`/`sync-project`,
-shipped -- together with their logic -- by the opt-in **private-sync** overlay,
-so plain dotagents carries no private-sync workflow. The bundled cmds DIR still
-exists and is still laid down by `init`: it is the user's documented drop-in
-point for their own commands. `leak-check` is likewise not in the repo: it
-enforces personal plan-naming conventions, so it lives in the user's private
-`.agents/dotagents/cmds/` as a discovered command module (D84).
+dotagents bundles ONE command module of its own, `findings`
+(`_overlay/dotagents/cmds/findings.py`). `link`/`sync` used to ship there too;
+they are now `link-project`/`sync-project`, shipped -- together with their logic
+-- by the opt-in **private-sync** overlay, so plain dotagents carries no
+private-sync workflow (D85). The bundled cmds DIR is still laid down by `init`
+(README only): it is the user's documented drop-in point for their own commands,
+and a personal command module dropped there is discovered like any other, so
+private tooling never has to live in the repo (D84).
 
 The per-command classes live in sibling modules (`cli/init.py`, `cli/overlays.py`,
 ...); this package base holds the shared helpers (in `cli/_common.py`, re-exported
@@ -21,7 +21,7 @@ repo root is the entrypoint shim, unrelated to the removed `install` subcommand 
 
 Dispatch (D76): `main()` routes through `duho.app`, not `duho.main`, so command
 discovery runs. Command MODULES are discovered from the bundled
-`_overlay/dotagents/cmds/` dir (empty by default since D85, but still a source),
+`_overlay/dotagents/cmds/` dir (which ships `findings`),
 from each installed overlay's `<overlay-root>/cmds/` -- this is how the
 private-sync overlay supplies `link-project`/`sync-project` -- and from a
 per-scope `cmds` dir (one `get_file_paths` Contract-A walk, `_cmds_dirs`).
@@ -85,10 +85,11 @@ from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
 
 _LOGGER = logging.getLogger("dotagents")
 
-# The compiled built-in command classes, in --help order. This is dotagents' WHOLE
-# shipped surface: link/sync left the package with their logic (D85 -- the
-# private-sync overlay supplies link-project/sync-project), leak-check is personal
-# (D84 -- the user's private `.agents/dotagents/cmds/`), and audit is repo CI
+# The compiled built-in command classes, in --help order. Together with the one
+# bundled command module (`findings`) this is dotagents' WHOLE shipped surface:
+# link/sync left the package with their logic (D85 -- the private-sync overlay
+# supplies link-project/sync-project), personal tooling stays in the user's own
+# `<scope>/dotagents/cmds/` as discovered modules (D84), and audit is repo CI
 # tooling (`tools/audit.py`), not a command. `_discover` seeds the command set
 # with these, then layers discovered commands over them (later source wins on a
 # name clash).
@@ -252,8 +253,8 @@ def _discover(argv=None) -> "list":
        `<overlay-root>/cmds`, then system/user/project `<scope>/dotagents/cmds`,
        in Contract-A precedence (overlays < system < user < project). This is what
        lets an installed overlay SHIP a command, or a user drop a personal command
-       module into their private `<scope>/dotagents/cmds` (e.g. `leak-check`), while
-       a user/project cmd still overrides a same-named overlay cmd;
+       module into their private `<scope>/dotagents/cmds`, while a user/project
+       cmd still overrides a same-named overlay cmd;
     4. `$AGENTS_CMDS_PATH` entries (os.pathsep-split);
     5. `--cmdspath` entries, read via `duho.parse_globals` before the full parser.
 

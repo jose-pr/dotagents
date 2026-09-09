@@ -12,7 +12,7 @@ is **not** a `dotagents` subcommand, not bundled in the package, and not shipped
 the `.pyz`: a user of dotagents has no use for it.
 
 Personal-leak / hygiene scanning (machine paths, usernames, private repo names) is
-NOT this tool's job (D84) -- that is `leak-check`, a personal command in the user's
+NOT this tool's job (D84) -- that is a personal command module in the user's
 private `.agents/`, run locally before a push.
 
 Usage (what CI runs):
@@ -50,15 +50,15 @@ SCAN = [
     "src/dotagents/_overlay/dotagents/DECISIONS.md",
 ]
 REFS = []
-# leak_check.py is no longer a required tool of main: it moved to the opt-in
-# `leak-check` overlay as a command module (D84), so main's tree no longer ships
-# it and it is not in this manifest.
+# The personal leak scanner is no longer a required tool of main: it is a personal
+# command module in the user's private `.agents/` (D84), so main's tree does not
+# ship it and it is not in this manifest.
 # The auditor itself is repo CI tooling only: this file is BOTH the script (run it
 # directly, which is what CI does) and a duho command class defined at the bottom of
 # it -- but it is NOT shipped. There is no `dotagents audit` command, nothing bundles
-# it into `src/dotagents/_overlay/dotagents/cmds/` (that dir holds only its README),
-# and the `.pyz` CI job asserts `audit` is absent from the built artifact's help.
-# leak_check.py is personal (D84) and not shipped here either.
+# it into `src/dotagents/_overlay/dotagents/cmds/` (that dir holds the README and
+# the bundled `findings` module), and the `.pyz` CI job asserts `audit` is absent
+# from the built artifact's help.
 EXIST_ONLY = [
     "tools/audit.py",
     "tools/cloud-setup.sh",
@@ -70,8 +70,8 @@ EXIST_ONLY = [
 EXAMPLES = []
 
 # Generic, structural forbidden patterns only (D84). No personal/machine markers
-# live here -- that is leak-check's concern, run locally, from the user's private
-# `.agents/`. `file:///~` is a broken tilde-in-file-URI that should never ship.
+# live here -- that is the personal scanner's concern, run locally, from the user's
+# private `.agents/`. `file:///~` is a broken tilde-in-file-URI that should never ship.
 BASE_PATTERNS = ["file:///" + "~"]
 REF_PATTERNS = BASE_PATTERNS
 
@@ -225,7 +225,7 @@ from duho import Cmd, LoggingArgs  # noqa: E402
 class Audit(LoggingArgs, Cmd):
     """Audit dotagents-config structure (manifest, forbidden patterns, budgets).
 
-    Structural only -- personal-leak/hygiene scanning is `leak-check`'s job (D84).
+    Structural only -- personal-leak/hygiene scanning is a personal tool's job (D84).
     """
 
     _parsername_ = "audit"
