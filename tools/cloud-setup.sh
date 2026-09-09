@@ -106,7 +106,7 @@ dg_git() {
 _DG_RECOVERY_DIR="$HOME/.dotagents"
 _DG_RECOVERY_SCRIPT="$_DG_RECOVERY_DIR/cloud-setup.sh"
 # Stored literally (unexpanded) so the harness expands $HOME at hook-run time,
-# matching how the private-sync hooks reference "$HOME/.agents/...".
+# matching how the private-sync hooks reference "${AGENTS_HOME:-$HOME/.agents}/...".
 _DG_RECOVERY_CMD='sh "$HOME/.dotagents/cloud-setup.sh"'
 
 # Edit ~/.claude/settings.json: optionally merge a private-sync snippet, and add or
@@ -132,8 +132,9 @@ changed = False
 def cmds(entry):
     return [h.get("command") for h in entry.get("hooks", [])]
 
-# Merge the private-sync snippet when one was given and exists (i.e. after a
-# successful clone made $AGENTS_DIR/hooks/settings.snippet.json available).
+# Merge the private-sync snippet when one was given and exists (i.e. after the
+# private-sync overlay was installed into the store, which ships it under
+# $AGENTS_DIR/overlays/private-sync/hooks/settings.snippet.json).
 if snip_path and os.path.isfile(snip_path):
     with open(snip_path) as f:
         snip_hooks = json.load(f).get("hooks", {})
@@ -282,12 +283,15 @@ fi
 # step the clone above would go stale and session changes would never push back.
 # Reaching this point means the clone succeeded, so we also drop any recovery hook
 # a prior failed run left behind. Idempotent; unrelated settings are preserved.
-_snippet="$AGENTS_DIR/hooks/settings.snippet.json"
+# The snippet ships inside the installed private-sync overlay; a store laid out
+# before overlays installed as directories may still carry it at hooks/.
+_snippet="$AGENTS_DIR/overlays/private-sync/hooks/settings.snippet.json"
+[ -f "$_snippet" ] || _snippet="$AGENTS_DIR/hooks/settings.snippet.json"
 if [ -f "$_snippet" ]; then
     _dg_settings absent "$_snippet" \
-        || echo "dotagents: hook wiring failed; register hooks/settings.snippet.json manually"
+        || echo "dotagents: hook wiring failed; register $_snippet manually"
 else
-    echo "dotagents: no hooks/settings.snippet.json in the repo; skipping hook wiring"
+    echo "dotagents: no private-sync settings.snippet.json in the store; skipping hook wiring"
 fi
 
 echo "dotagents cloud-setup: done"

@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ran the chain, so opening a session in a cloned repository with a top-level
   `env.py` was code execution from that checkout.
 
+### Changed
+
+- Overlay routing lines refer to overlay files through `$<NAME>_OVERLAY_ROOT`
+  (the variable `env` exports per installed overlay), not a hard `~/.agents/`
+  path; when a merged block carries such lines, `AGENTS.md` gets one line
+  above them saying what the token is and how to resolve it. The example
+  overlays on the `overlays` branch follow this convention and ship no setup
+  scripts any more (PATH, PYTHONPATH and the root var are `env`'s job; an
+  overlay's own env belongs in its `env.py`). `tools/cloud-setup.sh` finds
+  the private-sync settings snippet inside the installed overlay.
+
 ### Fixed
 
 - **One broken command module no longer breaks every `dotagents` call.**

@@ -56,8 +56,23 @@ store). Each overlay:
   reads that dir sees the same skills.
 
 Removing an overlay deletes only its directory and unpublishes only the skills **it**
-published. Its lines in `AGENTS.md`'s managed block are **not** auto-pruned — a warning
-points at the manual edit (or re-run `install`).
+published (a copy the user edited is left alone). Its lines in `AGENTS.md`'s managed
+block leave with it: the block is recomposed from the pristine base over the overlays
+that remain.
+
+## What `dotagents env` wires for every overlay
+
+Nothing in an overlay has to set up its own paths. For every installed overlay,
+`dotagents env` prepends `bin/` to `PATH`, every existing `lib/` to `PYTHONPATH`, and
+exports **`$<NAME>_OVERLAY_ROOT`** — the overlay's installed directory (`NAME` is the
+directory name upper-cased, `-`/`.` → `_`: `private-sync` → `PRIVATE_SYNC_OVERLAY_ROOT`).
+That variable is how overlay content refers to itself and to other overlays: a
+routing line reads `$FLOWS_OVERLAY_ROOT/flows/PLAN.md`, never `~/.agents/flows/PLAN.md`
+— overlays install under `overlays/<name>/`, and the store itself can live anywhere
+(`$AGENTS_HOME`). In a `CONTEXT.md` the angle-bracket form `<FLOWS_OVERLAY_ROOT>` is
+expanded by `dotagents context` at assembly time. An overlay that needs to export
+something of its own ships an `env.py` at its root: `dotagents env` runs it and reads a
+JSON object of env changes from its stdout.
 
 ## `overlay.toml`
 
@@ -83,13 +98,14 @@ only the skills it published, then sweeps any now-broken symlinks.
 
 An overlay may ship an **idempotent** `setup.py` at its root — the recommended,
 OS-agnostic form: it runs under the same Python that runs dotagents, so it works on
-every platform (the bundled `net` overlay uses exactly this). An extensionless `setup`
-(a POSIX shell script) is still honored as a **legacy fallback**, but discouraged — a
-shell script isn't portable to Windows without a shell. When both are present, `setup.py`
-wins. After `add` / `sync` copies the overlay in, dotagents runs the script
-automatically — so anything a human would otherwise hand-follow (PATH/lib wiring,
-self-registration) is one script the tool runs, not a doc. Presence of a script is the
-opt-in; skip it with `--no-setup`. The author contract:
+every platform. An extensionless `setup` (a POSIX shell script) is still honored as a
+**legacy fallback**, but discouraged — a shell script isn't portable to Windows without
+a shell. When both are present, `setup.py` wins. After `add` / `sync` copies the overlay
+in, dotagents runs the script automatically. Reserve it for real install-time work:
+PATH / PYTHONPATH / `$<NAME>_OVERLAY_ROOT` are `dotagents env`'s job (above), and an
+overlay's own env vars belong in its `env.py`, not in a script that writes one into the
+store — none of the example overlays ship a setup script any more. Presence of a script
+is the opt-in; skip it with `--no-setup`. The author contract:
 
 - **Idempotent** — safe on every `add` / `sync`; check-then-act, never blindly append.
 - **cwd** is the installed overlay dir, so reference your own files by relative path.
