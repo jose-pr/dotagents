@@ -288,51 +288,57 @@ class OverlayList(DotAgentsArgs):
         from dotagents._overlays import Overlay
 
         scope = self.resolve_scope()
-        # `Overlay.installed`: the user store's overlays, plus the project's when
-        # this is a project scope (every walk starts from the store, so both are
-        # in play; a same-named project overlay shadows the store's copy). With
-        # -g there is only the user store.
-        user_store = scope.agents_root if scope.level == "user" else _scope.resolve_user_store()
-        active = Overlay.installed(
-            user_store, scope.agents_root if scope.level == "project" else None
-        )
-        installed = [o.name for o in active if o.store == scope.agents_root]
-        user_installed = [
-            o.name for o in active if o.store == Path(user_store) and scope.level == "project"
-        ]
-        # Shadowed store copies are not in `active` at all; list them for the eye.
-        shadowed = [
-            o.name for o in Overlay.discover(Path(user_store) / "overlays")
-            if o.name in installed
-        ] if scope.level == "project" else []
+        # `scope.overlays`: every store in play (system, user, and the project's
+        # in a project scope), a same-named overlay in a later store shadowing
+        # the earlier copies. With -g there is no project store.
+        active = scope.overlays
+        by_store = {store: [o.name for o in active if o.store == store] for store in scope.stores}
+        # Shadowed copies are not in `active` at all; list them for the eye.
+        shadowed = {
+            store: [
+                o.name for o in Overlay.discover(store / "overlays")
+                if o.name not in by_store[store]
+            ]
+            for store in scope.stores
+        }
         try:
             available = _scope.resolve_source(self.source).available()
         except SystemExit:
             available = []
         names = {o.name for o in active}
 
+        # Listed most-specific first: the scope's own store, then the stores
+        # beneath it (user, then system); a store with nothing is shown only
+        # when it is the scope's own.
+        listing = []
+        for store in reversed(scope.stores):
+            level = scope.store_level(store)
+            if store != scope.agents_root and not by_store[store] and not shadowed[store]:
+                continue
+            listing.append((level, store, by_store[store], shadowed[store]))
+
         if self.json:
             payload = {
                 "scope": scope.level,
                 "root": str(scope.overlay_root),
-                "installed": installed,
+                "installed": by_store[scope.agents_root],
+                "stores": [
+                    {"level": level, "root": str(store / "overlays"),
+                     "installed": names_, "shadowed": shadowed_}
+                    for level, store, names_, shadowed_ in listing
+                ],
                 "available": available,
             }
-            if scope.level == "project":
-                payload["user_root"] = str(Path(user_store) / "overlays")
-                payload["user_installed"] = user_installed
-                payload["shadowed"] = shadowed
             _write_stdout(_json.dumps(payload, indent=2) + "\n")
             return 0
 
         self._logger_.info("scope: %s (%s)", scope.level, scope.overlay_root)
-        lines = ["installed (%s):" % scope.level]
-        lines += ["  %s" % n for n in installed] or ["  (none)"]
-        if scope.level == "project":
-            lines.append("installed (user):")
-            lines += ["  %s" % n for n in user_installed]
-            lines += ["  %s  (shadowed by the project's)" % n for n in shadowed]
-            if not user_installed and not shadowed:
+        lines = []
+        for level, store, names_, shadowed_ in listing:
+            lines.append("installed (%s):" % level)
+            lines += ["  %s" % n for n in names_]
+            lines += ["  %s  (shadowed by a more specific store's)" % n for n in shadowed_]
+            if not names_ and not shadowed_:
                 lines.append("  (none)")
         lines.append("available (source):")
         lines += ["  %s%s" % (n, " *" if n in names else "") for n in available] or ["  (none)"]
@@ -370,13 +376,13 @@ class OverlayShow(DotAgentsArgs):
         if not name:
             raise SystemExit("error: overlays show needs an overlay name")
         scope = self.resolve_scope()
-        where = "installed"
-        path = scope.overlay_dir(name)
-        if not path.is_dir() and scope.level == "project":
-            # The user store's copy is what a project session would use.
-            where = "installed (user)"
-            path = _scope.Scope("user", _scope.resolve_user_store()).overlay_dir(name)
-        if not path.is_dir():
+        # The copy a session in this scope would use (the most specific store's),
+        # else the source's.
+        active = [o for o in scope.overlays if o.name == name]
+        if active:
+            path = active[0].path
+            where = "installed (%s)" % scope.store_level(active[0].store)
+        else:
             where = "source"
             path = _scope.resolve_source(self.source).overlay_dir(name)
         overlay = _overlays.Overlay(path)

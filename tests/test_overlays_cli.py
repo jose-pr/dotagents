@@ -226,7 +226,7 @@ def test_show_describes_installed_then_source(world, capsys):
     _add(src, scope_root, "shown")
     _run(OverlayShow, name="shown", source=str(src), global_scope=True, agents_dir=scope_root, json=False)
     out = capsys.readouterr().out
-    assert out.startswith("shown (installed)")
+    assert out.startswith("shown (installed (user))")
 
 
 def test_list_shows_both_scopes_unless_global(tmp_path, monkeypatch, capsys):
@@ -241,6 +241,8 @@ def test_list_shows_both_scopes_unless_global(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(project))
     monkeypatch.delenv("AGENTS_OVERLAYS_SRC", raising=False)
 
+    monkeypatch.setenv("AGENTS_SYSTEM_ROOT", str(tmp_path / "no-system-store"))
+
     _run(OverlayList, json=False, source=str(tmp_path / "nosrc"))
     out = capsys.readouterr().out
     assert out.splitlines()[:6] == [
@@ -249,12 +251,28 @@ def test_list_shows_both_scopes_unless_global(tmp_path, monkeypatch, capsys):
         "  only-proj",
         "installed (user):",
         "  only-user",
-        "  common  (shadowed by the project's)",
+        "  common  (shadowed by a more specific store's)",
     ]
     _run(OverlayList, json=True, global_scope=True, source=str(tmp_path / "nosrc"))
     data = json.loads(capsys.readouterr().out)
     assert data["scope"] == "user" and data["installed"] == ["common", "only-user"]
-    assert "user_installed" not in data
+    assert [s["level"] for s in data["stores"]] == ["user"]
+
+
+def test_system_store_is_walked_first_and_shadowed_by_user(tmp_path, monkeypatch):
+    from dotagents._scope import Scope
+
+    system = tmp_path / "etc-agents"
+    store = tmp_path / "store"
+    for d in ("etc-agents/overlays/common/bin", "etc-agents/overlays/sys-only/bin",
+              "store/overlays/common/bin"):
+        (tmp_path / d).mkdir(parents=True)
+    monkeypatch.setenv("AGENTS_SYSTEM_ROOT", str(system))
+    scope = Scope.of(agents_dir=store)
+    assert scope.stores == [system, store]
+    assert [(o.name, o.store) for o in scope.overlays] == [("sys-only", system), ("common", store)]
+    levels = [lvl for lvl, _p, _r in scope.files({"default": "bin"}, include_missing=True)]
+    assert levels == ["sys-only", "system", "common", "user"]
 
 
 def test_umbrella_without_subcommand_exits_2():

@@ -22,29 +22,25 @@ def get_file_paths(
     """Resolve file paths across the precedence hierarchy (Contract A) for a
     :class:`~dotagents._scope.Scope` (``scope.files(*names)`` is the same call).
 
-    Precedence order:
-    1. user-store overlays (`<agents_dir>/overlays/<name>/`)
-    2. system (/etc/agents)
-    3. user (agents_dir)
-    4. project overlays (`<project_root>/.agents/overlays/<name>/`) -- skipped if
-       global_scope. Added 2026-09-09: `overlays add` installs into the PROJECT
-       scope by default, and nothing consumed those overlays' bin/lib/env/cmds/
-       CONTEXT.md before -- only the AGENTS.md recompose saw them.
-    5. project (project_root / .agents) -- skipped if global_scope
-    6. project-root (project_root) -- skipped if global_scope
+    Precedence order -- each of the scope's :attr:`~dotagents._scope.Scope.stores`
+    in turn, its overlays first, then the store itself; finally the project root:
+    1. system overlays, then system (`Scope.system_root`: `/etc/agents`)
+    2. user-store overlays, then user (`Scope.user_root`)
+    3. project overlays (`<project_root>/.agents/overlays/<name>/`), then project
+       (`<project_root>/.agents`) -- a project scope only. Added 2026-09-09:
+       `overlays add` installs into the PROJECT scope by default, and nothing
+       consumed those overlays' bin/lib/env/cmds/CONTEXT.md before.
+    4. project-root (`project_root`) -- a project scope only
 
-    An overlay installed in BOTH scopes under the same name is one overlay, the
-    project's: it SHADOWS the store's copy entirely (:meth:`Overlay.installed`,
-    the one discovery function), so its bin/lib/env/cmds/CONTEXT.md are the only
-    ones that resolve -- not both copies stacked.
+    An overlay installed in more than one store under the same name is one
+    overlay, the later store's: it SHADOWS the earlier copies entirely
+    (:meth:`Overlay.installed`, the one discovery function), so its
+    bin/lib/env/cmds/CONTEXT.md are the only ones that resolve -- not stacked.
 
     Each returned tuple is ``(level, path, root)``: for an overlay, ``level`` is
     the overlay's directory name and ``root`` its directory; for every other
     level ``root`` is ``None`` -- that is how callers tell overlays apart.
     """
-    agents_dir = scope.user_root
-    project_root = scope.project_root
-    global_scope = scope.global_scope
     files: list[tuple[str, Path, Path | None]] = []
 
     def add_name_paths(
@@ -69,26 +65,16 @@ def get_file_paths(
     # No manifest of any kind is required for an overlay to count -- not
     # ``CONTEXT.md``, not ``overlay.toml`` (the old ``CONTEXT.md`` gate was a
     # precursor leftover that silently excluded EVERY real overlay, D84).
-    overlays = scope.overlays
+    overlays = scope.overlays  # shadowing already applied, store-stamped
 
-    # 1. User-store overlays (minus the ones a same-named project overlay shadows)
-    for overlay in overlays:
-        if overlay.store == scope.user_root:
-            add_name_paths(overlay.path, overlay.name, root=overlay.path, is_overlay=True)
-
-    # 2. System
-    add_name_paths(Path("/etc/agents"), "system")
-
-    # 3. User
-    add_name_paths(agents_dir, "user")
-
-    # 4, 5 & 6. Project (if not global)
-    if not global_scope:
+    for store in scope.stores:
         for overlay in overlays:
-            if overlay.store == scope.project_store:
+            if overlay.store == store:
                 add_name_paths(overlay.path, overlay.name, root=overlay.path, is_overlay=True)
-        add_name_paths(scope.project_store, "project")
-        add_name_paths(project_root, "project-root")
+        add_name_paths(store, scope.store_level(store))
+
+    if not scope.global_scope:
+        add_name_paths(scope.project_root, "project-root")
 
     if include_missing:
         return files

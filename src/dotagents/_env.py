@@ -20,8 +20,9 @@ Contract B, the exact sequence :func:`get_environment` performs:
      2026-09-09: the project-root level resolves ONLY ``pre.local.env`` /
      ``local.env`` -- a checkout's own top-level ``env.py`` / ``env`` is never
      executed or sourced (see :func:`resolve_env_files`).
-  3. **Within each tier**, files are in the contract-A precedence order
-     (overlays -> system -> user -> project -> project-root).
+  3. **Within each tier**, files are in the contract-A precedence order: each
+     store in ``Scope.stores`` -- system, user, project -- with its overlays
+     first and itself second, then project-root.
   4. **Chained, later-overrides-earlier**: each file is evaluated against the
      ACCUMULATED environment of every file before it; the result also
      accumulates. Later files win on conflicting keys.

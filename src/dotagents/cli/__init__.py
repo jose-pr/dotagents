@@ -246,7 +246,8 @@ def _cmds_dirs(argv=None) -> "list[Path]":
     The per-level name-dict maps overlay levels to `<overlay-root>/cmds` and every
     other level (system/user/project) to `<agents_root>/dotagents/cmds` (the
     `Scope.cmds_dir` layout, D76). `get_file_paths` returns them in Contract-A
-    precedence: overlays first, then system, user, project. Discovery layers later
+    precedence: per store (system, user, project), each store's overlays' `cmds`
+    first and then the store's own `dotagents/cmds`. Discovery layers later
     sources over earlier ones (see `_discover_dir`), so a project cmd overrides a
     user cmd overrides an overlay cmd of the same name -- the intended precedence
     (an overlay may SHIP a command; a user/project can still override it).

@@ -337,10 +337,10 @@ class Overlay:
 
     @classmethod
     def installed(cls, *stores: "str | os.PathLike[str] | None") -> "list[Overlay]":
-        """Every overlay a session uses, across ``stores`` (``.agents`` roots)
-        given in precedence order -- the user store, then the project's
-        ``<project>/.agents``; ``-g`` passes the user store alone. A ``None``
-        store is skipped, so a caller can pass an optional project store as-is.
+        """Every overlay a session uses, across ``stores`` (``.agents``-shaped
+        roots) given in precedence order -- ``Scope.stores``: the system store,
+        the user store, then the project's ``<project>/.agents`` (a user scope
+        has no project store). A ``None`` store is skipped.
 
         The overlays come back store by store, each store's sorted by name,
         with every result stamped with the :attr:`store` it came from.

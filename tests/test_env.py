@@ -7,7 +7,9 @@ any refactor of `_env.py`'s shape:
   1. bins prepended to PATH FIRST, before any env eval (`get_bin_paths`);
   2. tier order -- ALL `pre.env(.py)` / `pre.local.env` first, THEN ALL
      `env(.py)` / `local.env`;
-  3. within a tier, the contract-A precedence walk (overlays -> system -> user
+  3. within a tier, the contract-A precedence walk (per store -- system, user,
+     project -- its overlays then itself; then project-root; historically
+     "overlays -> system -> user
      -> project -> project-root), reusing `_resolve.py`;
   4. chained eval: each file sees the accumulated env of prior files and LATER
      OVERRIDES EARLIER;

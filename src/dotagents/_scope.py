@@ -19,9 +19,11 @@ only wires args) to match ``_overlays.py`` / ``_skills.py``:
   extension point (clone/pull into a cache, then hand back a local ``.root``), so a
   repo source drops in with **no** change to the command classes.
 
-The ``system`` tier (``/etc/agents``) is walked by the Contract-A resolver
-(``_resolve.get_file_paths``) for env/context/bin/cmds, but nothing installs
-into it -- there is no ``--system`` scope for ``init`` / ``overlays``.
+The ``system`` store (``Scope.system_root``: ``/etc/agents``, or
+``$AGENTS_SYSTEM_ROOT``) is walked by the Contract-A resolver
+(``_resolve.get_file_paths``) for overlays/env/context/bin/cmds like any store,
+first in precedence, but nothing installs into it -- there is no ``--system``
+scope for ``init`` / ``overlays``.
 
 Never print ``DOTAGENTS_*`` values (Leakage): this module reads the env var but
 only ever reports the resolved path, never the raw value.
@@ -61,9 +63,14 @@ class Scope:
         *,
         user_root: "str | os.PathLike[str] | None" = None,
         project_root: "str | os.PathLike[str] | None" = None,
+        system_root: "str | os.PathLike[str] | None" = None,
     ):
         self.level = level
         self.agents_root = Path(agents_root)
+        #: The machine-wide store (``/etc/agents``, or ``$AGENTS_SYSTEM_ROOT``):
+        #: walked for overlays/bin/lib/env/cmds/AGENTS.md like any store, first
+        #: in precedence; nothing installs into it (no ``--system`` scope).
+        self.system_root = Path(system_root) if system_root else system_root_default()
         if level == "user":
             self.user_root = self.agents_root
             self.project_root: "Optional[Path]" = None
@@ -97,17 +104,35 @@ class Scope:
         return self.level == "user"
 
     @property
+    def system_store(self) -> Path:
+        """Alias of :attr:`system_root`, for symmetry with :attr:`project_store`."""
+        return self.system_root
+
+    @property
     def project_store(self) -> "Optional[Path]":
         """The project's store (``agents_root``) -- ``None`` in the user scope."""
         return None if self.global_scope else self.agents_root
 
     @property
     def stores(self) -> "list[Path]":
-        """The stores in play, in precedence order: the user store, then the
-        project's."""
-        if self.global_scope:
-            return [self.user_root]
-        return [self.user_root, self.agents_root]
+        """The stores in play, in precedence order: the system store, the user
+        store, then (in a project scope) the project's."""
+        stores = [self.system_root, self.user_root]
+        if not self.global_scope:
+            stores.append(self.agents_root)
+        return stores
+
+    def store_level(self, store: "str | os.PathLike[str]") -> str:
+        """The contract-A level name of one of :attr:`stores`: ``system``,
+        ``user`` or ``project``."""
+        store = Path(store)
+        if store == self.system_root:
+            return "system"
+        if store == self.user_root:
+            return "user"
+        if store == self.project_store:
+            return "project"
+        raise ValueError("%s is not a store of %r" % (store, self))
 
     @property
     def overlays(self) -> "list[Overlay]":
@@ -178,6 +203,17 @@ def resolve_scope(
     if agents_dir:
         return Scope("project", Path(agents_dir).expanduser(), project_root=proj)
     return Scope("project", proj / ".agents", project_root=proj)
+
+
+#: The machine-wide store's location; read, never printed. Defaults to
+#: ``/etc/agents`` (a Windows path when set on Windows).
+SYSTEM_ROOT_ENV = "AGENTS_SYSTEM_ROOT"
+
+
+def system_root_default() -> Path:
+    """``$AGENTS_SYSTEM_ROOT`` if set, else ``/etc/agents``."""
+    value = os.environ.get(SYSTEM_ROOT_ENV)
+    return Path(value).expanduser() if value else Path("/etc/agents")
 
 
 #: The configurable user-scope store (D58). Every reader of the user store
