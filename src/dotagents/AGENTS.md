@@ -22,8 +22,13 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
 - Compiled command classes live in `dotagents.cli.<name>` (`init`, `overlays`,
   `context`, `env`, `build_pyz`); each is a `class X(LoggingArgs, Cmd)` — or
   `class X(DotAgentsArgs)`, which is that pair transitively — with a
-  `__call__`. That is the WHOLE shipped surface — dotagents bundles no command
-  module of its own. `link` / `sync` left the package with their logic (D85): the
+  `__call__`. Plus ONE bundled command module,
+  `_overlay/dotagents/cmds/findings.py` (`dotagents findings`: a per-scope
+  findings queue at `<scope-root>/findings/` — add / list / show / done / reopen /
+  remove / index / path; its subcommands are classes NESTED in the `Findings`
+  umbrella so discovery does not register them as top-level commands, and `init`
+  does not copy it into the store — the bundled dir is always a discovery
+  source). `link` / `sync` left the package with their logic (D85): the
   opt-in **private-sync** overlay ships them, renamed `link-project` /
   `sync-project`, from its own `cmds/` + `lib/_link.py`. `leak-check` is likewise
   not in the repo — a personal command module the user keeps in their private

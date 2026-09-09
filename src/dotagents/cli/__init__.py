@@ -160,11 +160,12 @@ class Dotagents(LoggingArgs, Cli):
 def _bundled_cmds_dir() -> "Path | None":
     """The bundled command-module dir shipped inside the package (D76).
 
-    `<package>/_overlay/dotagents/cmds` is that dir. dotagents bundles no command
-    module of its own since D85 (link/sync moved to the private-sync overlay), so
-    it normally holds only its README -- but it stays a discovery source, and
-    `init` still lays it down as the user's drop-in point. Resolved `.pyz`-safe
-    via `_package_data_dir`, which
+    `<package>/_overlay/dotagents/cmds` is that dir. It ships `findings.py`
+    (the per-scope findings queue) plus its README; `link`/`sync` left it for
+    the private-sync overlay (D85). It is always a discovery source -- `init`
+    lays down only the README as the user's drop-in point, never a copy of the
+    bundled modules (a create-if-absent copy would pin the first-installed
+    version). Resolved `.pyz`-safe via `_package_data_dir`, which
     extracts a zip-backed `_overlay` to a real temp dir once -- so the modules
     `discover_commands` imports from here always have a real on-disk `__file__`,
     and the zipapp AST-introspection shim (`_repoint_zipapp_sources`) does NOT
@@ -246,7 +247,7 @@ def _discover(argv=None) -> "list":
 
     1. the compiled built-in command classes (`_BUILTIN_COMMANDS`);
     2. the bundled command-module dir `<package>/_overlay/dotagents/cmds` --
-       always available, even before an install (empty of commands since D85);
+       always available, even before an install (ships `findings`);
     3. the Contract-A `cmds` dirs (`_cmds_dirs`): each installed overlay's
        `<overlay-root>/cmds`, then system/user/project `<scope>/dotagents/cmds`,
        in Contract-A precedence (overlays < system < user < project). This is what
@@ -266,7 +267,7 @@ def _discover(argv=None) -> "list":
         name = getattr(command, "_parsername_", None) or command.__name__
         by_name[name] = command
 
-    # 2. bundled cmds dir (ships no command of its own since D85)
+    # 2. bundled cmds dir (ships `findings`)
     bundled = _bundled_cmds_dir()
     if bundled is not None:
         _discover_dir(bundled, by_name)

@@ -36,11 +36,10 @@ Discovery layers sources so a later one overrides a same-named command:
 So a command you drop here (user scope) overrides one an overlay ships, and a
 project's `.agents/dotagents/cmds/` overrides yours.
 
-## dotagents itself ships none
+## What dotagents ships here
 
-This directory is intentionally empty in a fresh install (D85). `link`/`sync`
-used to ship here; they are now `link-project`/`sync-project`, shipped by the
-opt-in **private-sync** overlay together with their logic — so plain dotagents
-carries no private-sync workflow. Install it with:
-
-    dotagents overlays add private-sync --source <overlays-checkout>
+One bundled command, **`findings`** — a per-scope findings queue
+(`dotagents findings --help`: add / list / show / done / reopen / remove /
+index / path, over `<scope>/findings/`). It is discovered from the package
+itself, so `init` does not copy it into this directory; drop a same-named
+`findings.py` here to override it.

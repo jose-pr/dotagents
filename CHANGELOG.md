@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- feat: **`dotagents findings`** — a per-scope findings queue, shipped as the
+  one bundled command module (`_overlay/dotagents/cmds/findings.py`). A
+  finding is one markdown file shaped like an agent memory (frontmatter
+  `name`/`description`/`status`/`created` for the index line, details in the
+  body) under `<scope-root>/findings/`: the project's `.agents/findings/` by
+  default, the user store's with `-g`, anywhere with `--dir`. `add` records
+  one (`--body`/`--body-file`, `-` = stdin), `list` prints the active ones
+  (`--all`, `--processed`, `--json`), `show` prints one (`--json`), `done`
+  appends a required `## Resolution` and MOVES the file to `processed/`
+  (never deletes), `reopen` moves it back, `remove` deletes a mistaken one,
+  `index` regenerates `INDEX.md` (active first, then processed — every
+  mutating command rewrites it), `path` prints the queue's location.
+  Hand-written notes without a frontmatter are listed too and gain one when
+  first rewritten. Files are written LF-only on every platform.
+- chore: `init` no longer copies bundled command modules (`*.py`) from the
+  package's `dotagents/cmds/` into the store — only the README. The bundled
+  dir is always a discovery source, so a copy added nothing, and being
+  create-if-absent it would have pinned the first-installed version of
+  `findings` and shadowed every later one. A same-named module dropped into a
+  scope's `dotagents/cmds/` still overrides the bundled one.
 - feat: `env` emits one **`<NAME>_OVERLAY_ROOT`** per installed overlay (the
   overlay's install dir), seeded before the env-file chain like the two scope
   roots and, like them, only if unset. `NAME` is the overlay's directory name

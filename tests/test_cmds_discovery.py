@@ -93,6 +93,11 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
     # The compiled built-ins survive the app switch.
     for builtin in ("init", "build-pyz", "context", "env", "overlays"):
         assert builtin in names
+    # The one bundled command module: the findings queue. Its subcommands are
+    # nested classes, so none of them leaks out as a top-level command.
+    assert "findings" in names
+    for nested in ("add", "list", "show", "done", "reopen", "remove", "index", "path"):
+        assert nested not in names
     # D85: link/sync left the package. They are `link-project`/`sync-project`,
     # shipped by the opt-in private-sync overlay together with their logic, so a
     # plain dotagents (no overlay installed) offers no private-sync command.
@@ -106,12 +111,13 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
     assert cli.Dotagents._subcommands_ == []
 
 
-def test_bundled_cmds_dir_ships_no_command_module(monkeypatch, tmp_path):
-    # The bundled cmds DIR still exists (it stays a discovery source and `init`
-    # lays it down as the user's drop-in point) but ships no *.py command.
+def test_bundled_cmds_dir_ships_only_findings(monkeypatch, tmp_path):
+    # The bundled cmds DIR is a discovery source and `init` lays its README
+    # down as the user's drop-in point. The only *.py it ships is `findings`
+    # (link/sync left for the private-sync overlay, D85).
     bundled = cli._bundled_cmds_dir()
     assert bundled is not None and bundled.is_dir()
-    assert [p.name for p in bundled.glob("*.py") if not p.name.startswith("_")] == []
+    assert [p.name for p in bundled.glob("*.py") if not p.name.startswith("_")] == ["findings.py"]
 
 
 def test_overlay_supplies_link_project(monkeypatch, tmp_path):
