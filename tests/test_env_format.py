@@ -579,7 +579,7 @@ def test_export_output_actually_sources_in_real_bash(tmp_path):
 ROUNDTRIP = {
     "DOLLAR": "a$(echo X)b `echo Y` $HOME",
     "QUOTES": "it's \"quoted\"",
-    "BACKSLASH": r"C:\Users\x\.agents",
+    "BACKSLASH": r"C:\Users\devuser\.agents",
     "NEWLINE": "line1\nline2",
     "UNICODE": "café — ≥",
     "HASH": "a #b",
