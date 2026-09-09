@@ -16,12 +16,11 @@ LEVEL_NAMES = frozenset({"default", "overlay", "system", "user", "project", "pro
 
 def get_file_paths(
     *names: str | dict[str, str],
-    agents_dir: Path,
-    project_root: Path,
-    global_scope: bool = False,
+    scope,
     include_missing: bool = False,
 ) -> list[tuple[str, Path, Path | None]]:
-    """Resolve file paths across the precedence hierarchy (Contract A).
+    """Resolve file paths across the precedence hierarchy (Contract A) for a
+    :class:`~dotagents._scope.Scope` (``scope.files(*names)`` is the same call).
 
     Precedence order:
     1. user-store overlays (`<agents_dir>/overlays/<name>/`)
@@ -43,6 +42,9 @@ def get_file_paths(
     the overlay's directory name and ``root`` its directory; for every other
     level ``root`` is ``None`` -- that is how callers tell overlays apart.
     """
+    agents_dir = scope.user_root
+    project_root = scope.project_root
+    global_scope = scope.global_scope
     files: list[tuple[str, Path, Path | None]] = []
 
     def add_name_paths(
@@ -67,14 +69,11 @@ def get_file_paths(
     # No manifest of any kind is required for an overlay to count -- not
     # ``CONTEXT.md``, not ``overlay.toml`` (the old ``CONTEXT.md`` gate was a
     # precursor leftover that silently excluded EVERY real overlay, D84).
-    from dotagents._overlays import Overlay
-
-    project_store = None if global_scope else Path(project_root) / ".agents"
-    overlays = Overlay.installed(agents_dir, project_store)
+    overlays = scope.overlays
 
     # 1. User-store overlays (minus the ones a same-named project overlay shadows)
     for overlay in overlays:
-        if overlay.store == Path(agents_dir):
+        if overlay.store == scope.user_root:
             add_name_paths(overlay.path, overlay.name, root=overlay.path, is_overlay=True)
 
     # 2. System
@@ -86,9 +85,9 @@ def get_file_paths(
     # 4, 5 & 6. Project (if not global)
     if not global_scope:
         for overlay in overlays:
-            if overlay.store == project_store:
+            if overlay.store == scope.project_store:
                 add_name_paths(overlay.path, overlay.name, root=overlay.path, is_overlay=True)
-        add_name_paths(project_root / ".agents", "project")
+        add_name_paths(scope.project_store, "project")
         add_name_paths(project_root, "project-root")
 
     if include_missing:

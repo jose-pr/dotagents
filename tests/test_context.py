@@ -19,6 +19,12 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from dotagents import _agents, _context, _overlays  # noqa: E402
+from dotagents._scope import Scope  # noqa: E402
+
+
+def S(agents_dir, project_root, global_scope=False):
+    """The walk's scope from the old (agents_dir, project_root, global_scope) triple."""
+    return Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=global_scope)
 
 
 # --------------------------------------------------------------------------
@@ -115,13 +121,13 @@ def test_harness_loads_subtracts_user_agents_md(layout, monkeypatch):
     # Fresh install, no include yet: NOTHING loads the store's AGENTS.md, so
     # `context` must emit it (the old static assumption dropped it here, and
     # the base rules never reached a session -- review 2026-09-09, 1.5).
-    text = _context.assemble_context(claude, dotagents_dir, project_root, global_scope=True)
+    text = _context.assemble_context(claude, S(dotagents_dir, project_root, True))
     assert "# User rules" in text
 
     # With the include `init` writes, the harness loads it -> subtracted.
     (fake_home / ".claude").mkdir()
     (fake_home / ".claude" / "CLAUDE.md").write_text("@../.agents/AGENTS.md\n", encoding="utf-8")
-    text = _context.assemble_context(claude, dotagents_dir, project_root, global_scope=True)
+    text = _context.assemble_context(claude, S(dotagents_dir, project_root, True))
     assert "# User rules" not in text
     # But the overlays (never loaded by the harness) ARE emitted.
     assert "ALPHA-CONTEXT" in text
@@ -145,14 +151,14 @@ def test_relative_harness_load_matches_project_root_only(layout):
     codex = _agents.CodexAgent()
     assert codex.harness_loads == ["AGENTS.md"]  # relative, no ~/ or / prefix
 
-    text = _context.assemble_context(codex, agents_dir, project_root, global_scope=True)
+    text = _context.assemble_context(codex, S(agents_dir, project_root, True))
     assert "# User rules" in text, (
         "a same-named file OUTSIDE project_root must not be wrongly suppressed"
     )
 
     # Now put a real AGENTS.md AT project_root -- THAT one must be suppressed.
     (project_root / "AGENTS.md").write_text("# Project root rules\n", encoding="utf-8")
-    text2 = _context.assemble_context(codex, agents_dir, project_root, global_scope=True)
+    text2 = _context.assemble_context(codex, S(agents_dir, project_root, True))
     assert "# Project root rules" not in text2, "the actual project-root file IS the harness load"
     assert "# User rules" in text2, "the unrelated same-named file is still not suppressed"
 
@@ -162,7 +168,7 @@ def test_non_claude_agent_keeps_agents_md(layout):
     # Gemini's harness_loads is GEMINI.md only, so the user AGENTS.md is NOT
     # subtracted for Gemini -- it appears.
     gemini = _agents.GeminiAgent()
-    text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True)
+    text = _context.assemble_context(gemini, S(agents_dir, project_root, True))
     assert "# User rules" in text
 
 
@@ -173,7 +179,7 @@ def test_non_claude_agent_keeps_agents_md(layout):
 def test_inlines_bare_and_backticked_refs(layout):
     agents_dir, project_root = layout
     gemini = _agents.GeminiAgent()  # keeps AGENTS.md so the refs are present
-    text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True, inline=True)
+    text = _context.assemble_context(gemini, S(agents_dir, project_root, True), inline=True)
     assert "PYTHON-KB-BODY" in text   # bare "read kb/PYTHON.md"
     assert "GIT-KB-BODY" in text      # backticked `kb/GIT.md`
     assert "On-Demand Files (Inlined)" in text
@@ -184,7 +190,7 @@ def test_inlining_is_opt_in(layout):
     preemptively"; inlining every mention made a 100 KB SessionStart payload."""
     agents_dir, project_root = layout
     gemini = _agents.GeminiAgent()
-    text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True)
+    text = _context.assemble_context(gemini, S(agents_dir, project_root, True))
     assert "read kb/PYTHON.md" in text          # the pointer is still there
     assert "PYTHON-KB-BODY" not in text         # the body is not
     assert "On-Demand Files (Inlined)" not in text
@@ -198,7 +204,7 @@ def test_inlining_never_double_sends_sources_or_harness_files(layout):
     (project_root / "CLAUDE.md").write_text("CLAUDE-ENTRY", encoding="utf-8")
     (project_root / ".agents" / "AGENTS.md").write_text("PROJECT-RULES", encoding="utf-8")
     gemini = _agents.GeminiAgent()
-    text = _context.assemble_context(gemini, agents_dir, project_root, inline=True)
+    text = _context.assemble_context(gemini, S(agents_dir, project_root, False), inline=True)
     assert "GIT-KB-BODY" in text
     assert text.count("PROJECT-RULES") == 1       # a source, emitted once
     assert "CLAUDE-ENTRY" not in text             # a harness entry file, never inlined
@@ -210,7 +216,7 @@ def test_overlay_placeholders_expand(layout):
     NAME and the code compared against the literal "overlay"."""
     agents_dir, project_root = layout
     gemini = _agents.GeminiAgent()
-    text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True)
+    text = _context.assemble_context(gemini, S(agents_dir, project_root, True))
     assert "<ZETA_OVERLAY_ROOT>" not in text
     assert "root=%s" % (agents_dir / "overlays" / "zeta") in text
 
@@ -221,7 +227,7 @@ def test_project_overlay_shadows_the_store_copy_in_context(layout):
     pov.mkdir(parents=True)
     (pov / "CONTEXT.md").write_text("ZETA-FROM-PROJECT", encoding="utf-8")
     gemini = _agents.GeminiAgent()
-    text = _context.assemble_context(gemini, agents_dir, project_root)
+    text = _context.assemble_context(gemini, S(agents_dir, project_root, False))
     assert "ZETA-FROM-PROJECT" in text and "ZETA-CONTEXT" not in text
     assert "ALPHA-CONTEXT" in text  # an unshadowed store overlay still contributes
 
@@ -234,10 +240,8 @@ def test_project_scope_overlays_are_context_sources(layout):
     pov.mkdir(parents=True)
     (pov / "CONTEXT.md").write_text("PROJECT-OVERLAY-CONTEXT", encoding="utf-8")
     gemini = _agents.GeminiAgent()
-    assert "PROJECT-OVERLAY-CONTEXT" in _context.assemble_context(gemini, agents_dir, project_root)
-    assert "PROJECT-OVERLAY-CONTEXT" not in _context.assemble_context(
-        gemini, agents_dir, project_root, global_scope=True
-    )
+    assert "PROJECT-OVERLAY-CONTEXT" in _context.assemble_context(gemini, S(agents_dir, project_root, False))
+    assert "PROJECT-OVERLAY-CONTEXT" not in _context.assemble_context(gemini, S(agents_dir, project_root, True))
 
 
 # --------------------------------------------------------------------------
@@ -247,7 +251,7 @@ def test_project_scope_overlays_are_context_sources(layout):
 def test_skills_listed_not_inlined(layout):
     agents_dir, project_root = layout
     gemini = _agents.GeminiAgent()
-    text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True)
+    text = _context.assemble_context(gemini, S(agents_dir, project_root, True))
     assert "Available Skills (Opt-in)" in text
     assert "myskill" in text
     assert "does a thing" in text
@@ -261,7 +265,7 @@ def test_skills_listed_not_inlined(layout):
 def test_overlay_priority_orders_by_manifest(layout):
     agents_dir, project_root = layout
     gemini = _agents.GeminiAgent()
-    text = _context.assemble_context(gemini, agents_dir, project_root, global_scope=True)
+    text = _context.assemble_context(gemini, S(agents_dir, project_root, True))
     # zeta (priority 100) must appear before alpha (priority 900) despite zeta
     # sorting later alphabetically -- proves priority, not name, drives order.
     assert text.index("ZETA-CONTEXT") < text.index("ALPHA-CONTEXT")
@@ -292,9 +296,7 @@ def test_manifest_reports_priority(tmp_path):
 def test_json_payload_shape(layout):
     agents_dir, project_root = layout
     gemini = _agents.GeminiAgent()
-    data = _context.assemble_context_data(
-        gemini, agents_dir, project_root, global_scope=True, inline=True
-    )
+    data = _context.assemble_context_data(gemini, S(agents_dir, project_root, True), inline=True)
     # Round-trips as JSON.
     json.dumps(data)
     assert data["agent"] == "gemini"
@@ -308,7 +310,7 @@ def test_json_payload_shape(layout):
 def test_json_context_excludes_skills_listing(layout):
     agents_dir, project_root = layout
     gemini = _agents.GeminiAgent()
-    data = _context.assemble_context_data(gemini, agents_dir, project_root, global_scope=True)
+    data = _context.assemble_context_data(gemini, S(agents_dir, project_root, True))
     # The skills listing markdown heading is NOT baked into the context field
     # (skills are a separate structured field in JSON).
     assert "Available Skills (Opt-in)" not in data["context"]

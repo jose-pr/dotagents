@@ -6,9 +6,9 @@ import re
 from pathlib import Path
 from typing import Iterable, Optional
 
-from dotagents import _resolve
 from dotagents import _agents
 from dotagents import _overlays
+from dotagents import _scope
 
 
 def _expand_placeholders(text: str, project_root: Path, overlay_roots: list[Path]) -> str:
@@ -23,18 +23,12 @@ def _expand_placeholders(text: str, project_root: Path, overlay_roots: list[Path
     return text
 
 
-def _installed_overlay_roots(
-    agents_dir: Path, project_root: Path, global_scope: bool
-) -> "list[Path]":
-    """Every installed overlay's dir -- user store first, then (unless
-    ``global_scope``) the project's -- the same set ``dotagents env`` names with
-    a ``<NAME>_OVERLAY_ROOT`` var, so a placeholder resolves for ANY installed
-    overlay, not only one that happens to ship a ``CONTEXT.md``."""
-    from dotagents._env import get_overlay_roots
-
-    return get_overlay_roots(
-        agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
-    )
+def _overlay_roots(scope: _scope.Scope) -> "list[Path]":
+    """Every installed overlay's dir (:attr:`Scope.overlays`: the user store's,
+    then the project's, shadowing applied) -- the same set ``dotagents env``
+    names with a ``<NAME>_OVERLAY_ROOT`` var, so a placeholder resolves for ANY
+    installed overlay, not only one that happens to ship a ``CONTEXT.md``."""
+    return [overlay.path for overlay in scope.overlays]
 
 
 # A relative path token ending in .md: one or more path segments, no spaces,
@@ -136,18 +130,15 @@ def _inline_referenced_files(
     return text
 
 
-def _collect_skills(agents_dir: Path, project_root: Path, global_scope: bool) -> "list[tuple[str, str]]":
+def _collect_skills(scope: _scope.Scope) -> "list[tuple[str, str]]":
     """Discover available skills as (name, description) pairs.
 
     Skills are OPT-IN: the generator lists them so the user can choose to invoke
     one, but never inlines a skill body (that would defeat the user's
-    'skills I decide to use' model). Deterministic order: the store, the
-    project's ``.agents``, then every installed overlay (the one discovery rule,
-    :meth:`Overlay.discover` -- ``.git`` / ``__pycache__`` never count)."""
-    roots = [agents_dir]
-    if not global_scope:
-        roots.append(project_root / ".agents")
-    roots.extend(_installed_overlay_roots(agents_dir, project_root, global_scope))
+    'skills I decide to use' model). Deterministic order: the scope's stores
+    (the user store, then the project's ``.agents``), then every installed
+    overlay (:attr:`Scope.overlays` -- ``.git`` / ``__pycache__`` never count)."""
+    roots = list(scope.stores) + _overlay_roots(scope)
 
     skills: "list[tuple[str, str]]" = []
     seen: "set[str]" = set()
@@ -176,9 +167,9 @@ def _collect_skills(agents_dir: Path, project_root: Path, global_scope: bool) ->
     return skills
 
 
-def _get_skills_listing(agents_dir: Path, project_root: Path, global_scope: bool) -> str:
+def _get_skills_listing(scope: _scope.Scope) -> str:
     """Formatted opt-in skills listing (markdown), or '' if none."""
-    skills = _collect_skills(agents_dir, project_root, global_scope)
+    skills = _collect_skills(scope)
     if not skills:
         return ""
     lines = ["- **%s**: %s" % (n, d) for n, d in skills]
@@ -186,10 +177,7 @@ def _get_skills_listing(agents_dir: Path, project_root: Path, global_scope: bool
 
 
 def _resolve_and_filter_sources(
-    agent: _agents.Agent,
-    agents_dir: Path,
-    project_root: Path,
-    global_scope: bool,
+    agent: _agents.Agent, scope: _scope.Scope
 ) -> "tuple[list[tuple[str, Path, Path | None]], list[Path]]":
     """Resolve context sources (contract A), priority-order them, and subtract
     what the active agent's harness already loads so nothing already in the
@@ -197,14 +185,11 @@ def _resolve_and_filter_sources(
 
     Returns ``(sources, harness_loaded)`` -- the second is the resolved list of
     files the harness loads itself, so the inliner can skip them too."""
-    sources = _resolve.get_file_paths(
+    sources = scope.files(
         {"overlay": "CONTEXT.md", "default": "AGENTS.md"},
         {"project": "AGENTS.local.md", "project-root": "AGENTS.local.md"},
-        agents_dir=agents_dir,
-        project_root=project_root,
-        global_scope=global_scope,
-        include_missing=False,
     )
+    project_root = scope.project_root or _scope.project_root_default()
 
     # Apply overlay priority (plan 02): overlays sort among themselves by their
     # declared priority (lower first, read from the manifest by
@@ -252,19 +237,14 @@ def _resolve_and_filter_sources(
 
 
 def _assemble(
-    agent: _agents.Agent,
-    agents_dir: Path,
-    project_root: Path,
-    global_scope: bool,
-    inline: bool,
+    agent: _agents.Agent, scope: _scope.Scope, inline: bool
 ) -> "tuple[str, list[str]]":
     """The shared body of both assemblers: ``(text, source_paths)``."""
-    filtered_sources, harness_loaded = _resolve_and_filter_sources(
-        agent, agents_dir, project_root, global_scope
-    )
+    filtered_sources, harness_loaded = _resolve_and_filter_sources(agent, scope)
+    project_root = scope.project_root or _scope.project_root_default()
 
     assembled_parts = []
-    search_roots = [project_root, agents_dir]
+    search_roots = [project_root, scope.user_root]
     source_paths: "list[str]" = []
     emitted: "list[Path]" = []
 
@@ -286,37 +266,30 @@ def _assemble(
         )
     # Placeholders last, so ones inside inlined files expand too; every
     # installed overlay gets a root, matching `dotagents env`.
-    overlay_roots = _installed_overlay_roots(agents_dir, project_root, global_scope)
-    text = _expand_placeholders(text, project_root, overlay_roots)
+    text = _expand_placeholders(text, project_root, _overlay_roots(scope))
     return text, source_paths
 
 
 def assemble_context(
-    agent: _agents.Agent,
-    agents_dir: Path,
-    project_root: Path,
-    global_scope: bool = False,
-    inline: bool = False,
+    agent: _agents.Agent, scope: _scope.Scope, *, inline: bool = False
 ) -> str:
-    """Assemble the effective context text (markdown) for the given agent.
+    """Assemble the effective context text (markdown) for the given agent in a
+    :class:`~dotagents._scope.Scope` (``Scope.of(agents_dir=, project_root=,
+    global_scope=)`` from the old triple).
 
     Returns '' if, after subtracting what the agent's harness already loads,
     there is nothing new to emit (no empty double of already-loaded content).
     ``inline=True`` appends the on-demand files the sources reference (see
     :func:`_inline_referenced_files` for why that is opt-in)."""
-    text, source_paths = _assemble(agent, agents_dir, project_root, global_scope, inline)
+    text, source_paths = _assemble(agent, scope, inline)
     if not source_paths:
         return ""
-    text += _get_skills_listing(agents_dir, project_root, global_scope)
+    text += _get_skills_listing(scope)
     return text
 
 
 def assemble_context_data(
-    agent: _agents.Agent,
-    agents_dir: Path,
-    project_root: Path,
-    global_scope: bool = False,
-    inline: bool = False,
+    agent: _agents.Agent, scope: _scope.Scope, *, inline: bool = False
 ) -> "dict[str, object]":
     """Structured form of the assembled context, for ``--format json``.
 
@@ -332,12 +305,9 @@ def assemble_context_data(
     markdown format emits, but WITHOUT the skills listing appended -- skills are
     their own structured field so a consumer can render them separately and
     keep the opt-in distinction."""
-    text, source_paths = _assemble(agent, agents_dir, project_root, global_scope, inline)
+    text, source_paths = _assemble(agent, scope, inline)
 
-    skills = [
-        {"name": n, "description": d}
-        for n, d in _collect_skills(agents_dir, project_root, global_scope)
-    ]
+    skills = [{"name": n, "description": d} for n, d in _collect_skills(scope)]
 
     return {
         "agent": agent.name,

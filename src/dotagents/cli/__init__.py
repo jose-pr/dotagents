@@ -257,15 +257,13 @@ def _cmds_dirs(argv=None) -> "list[Path]":
     reader agrees; the project scope is `<cwd>/.agents`.
     `include_missing=True` (precursor semantics): every level's cmds dir is offered
     and the caller's `_discover_dir` skips the ones that don't exist."""
-    from dotagents import _resolve, _scope
+    from dotagents import _scope
 
-    resolved = _resolve.get_file_paths(
-        {"default": "dotagents/cmds", "overlay": "cmds"},
+    scope = _scope.Scope.of(
         agents_dir=resolve_user_store(_agents_dir_from_argv(argv)),
         project_root=_scope.project_root_default(),
-        global_scope=False,
-        include_missing=True,
     )
+    resolved = scope.files({"default": "dotagents/cmds", "overlay": "cmds"}, include_missing=True)
     return [path for _level, path, _root in resolved]
 
 

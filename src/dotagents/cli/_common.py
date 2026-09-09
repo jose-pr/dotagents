@@ -315,8 +315,7 @@ def _resolved_env(dest: Path, logger, agent_name: str) -> "dict[str, str]":
 
     try:
         return _env.get_environment(
-            agents_dir=Path(dest),
-            project_root=_scope.project_root_default(),
+            _scope.Scope.of(agents_dir=Path(dest), project_root=_scope.project_root_default()),
             base_env=dict(os.environ),
             explicit=agent_name,
             logger=logger,

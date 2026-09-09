@@ -16,6 +16,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from dotagents import _env  # noqa: E402
+from dotagents._scope import Scope  # noqa: E402
 from dotagents import _scope  # noqa: E402
 
 HAVE_BASH = shutil.which("bash") is not None
@@ -34,9 +35,9 @@ def roots(tmp_path):
     return agents_dir, project_root
 
 
-def _run(agents_dir, project_root, **kw):
+def _run(agents_dir, project_root, global_scope=False, **kw):
     return _env.get_environment(
-        agents_dir=agents_dir, project_root=project_root,
+        Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=global_scope),
         base_env={"PATH": "/usr/bin"}, **kw,
     )
 
@@ -66,7 +67,7 @@ def test_project_root_local_env_still_resolves(roots):
     (project_root / "pre.local.env").write_text("", encoding="utf-8")
     (project_root / "env").write_text("", encoding="utf-8")
     (project_root / "pre.env").write_text("", encoding="utf-8")
-    resolved = _env.resolve_env_files(agents_dir=agents_dir, project_root=project_root)
+    resolved = _env.resolve_env_files(scope=Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=False))
     names = [(lvl, p.name) for lvl, p, _ in resolved]
     assert ("project-root", "local.env") in names
     assert ("project-root", "pre.local.env") in names
@@ -79,7 +80,7 @@ def test_directory_named_env_is_not_an_env_file(roots):
     agents_dir, project_root = roots
     (project_root / ".agents" / "env").mkdir()
     (agents_dir / "env.py").mkdir()
-    resolved = _env.resolve_env_files(agents_dir=agents_dir, project_root=project_root)
+    resolved = _env.resolve_env_files(scope=Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=False))
     assert resolved == []
 
 
@@ -181,7 +182,7 @@ def test_project_overlay_shadows_a_same_named_store_overlay(roots):
     # A session that already pinned the STORE's root (the SessionStart env)
     # gets re-pointed at the project's copy, not left stale.
     env_pinned = _env.get_environment(
-        agents_dir=agents_dir, project_root=project_root,
+        scope=Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=False),
         base_env={"PATH": "/usr/bin", "SAME_OVERLAY_ROOT": str(store)},
     )
     assert env_pinned["SAME_OVERLAY_ROOT"] == str(proj)

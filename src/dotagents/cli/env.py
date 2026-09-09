@@ -501,8 +501,14 @@ class Env(DotAgentsArgs):
 
         from dotagents import _env, _scope
 
-        project_root = _scope.project_root_default()
-        agents_dir = resolve_user_store(self.agents_dir)
+        # The walk's scope: the user store always, plus the project's tier
+        # unless -g (which here means "skip the project tiers", not "another
+        # store" -- see the class docstring).
+        scope = _scope.Scope.of(
+            agents_dir=resolve_user_store(self.agents_dir),
+            project_root=_scope.project_root_default(),
+            global_scope=self.global_scope,
+        )
         base = dict(os.environ)
 
         if self.format not in _env.KNOWN_FORMATS:
@@ -517,15 +523,9 @@ class Env(DotAgentsArgs):
             output_format = _env.detect_shell_format()
 
         if self.diff:
-            env = _env.get_diff(
-                agents_dir=agents_dir, project_root=project_root,
-                base_env=base, global_scope=self.global_scope, logger=self._logger_,
-            )
+            env = _env.get_diff(scope, base_env=base, logger=self._logger_)
         else:
-            changes = _env.get_environment(
-                agents_dir=agents_dir, project_root=project_root,
-                base_env=base, global_scope=self.global_scope, logger=self._logger_,
-            )
+            changes = _env.get_environment(scope, base_env=base, logger=self._logger_)
             env = dict(base)
             env.update(changes)
 

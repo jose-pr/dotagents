@@ -37,19 +37,89 @@ from typing import Optional
 from dotagents._overlays import Overlay
 
 class Scope:
-    """A resolved install scope: the roots overlays and skills live under.
+    """Where a session's config lives -- the one object every walk takes.
 
-    ``user`` -> ``<agents_dir>/`` (the configurable store, default ``~/.agents``).
-    ``project`` -> ``<project_root>/.agents/``. The ``overlays/`` and ``skills/``
-    subdirs beneath ``agents_root`` are the discover-and-publish surfaces. The
-    overlays installed in ONE scope are ``Overlay.discover(scope.overlay_root)``;
-    the ones a session in the scope actually uses (user store + project, the
-    project's shadowing same-named store copies) are :meth:`Overlay.installed`.
+    ``level`` is ``"user"`` or ``"project"`` and ``agents_root`` the scope's own
+    store (the install target of ``overlays add`` / ``init``): ``<agents_dir>/``
+    (the configurable store, default ``~/.agents``) for the user scope,
+    ``<project_root>/.agents/`` for a project. A project scope also knows the
+    ``user_root`` (the user store -- every walk starts from it) and the
+    ``project_root``; ``stores`` is the pair in precedence order, and
+    :attr:`overlays` is :meth:`Overlay.installed` over them (a same-named
+    project overlay shadows the store's copy). The user scope has one store.
+    ``files(*names)`` is the contract-A walk for this scope; ``env``, ``context``
+    and ``cli._cmds_dirs`` all go through it.
+
+    The ``overlays/`` and ``skills/`` subdirs beneath ``agents_root`` are the
+    discover-and-publish surfaces of THIS scope (``Overlay.discover(scope.overlay_root)``).
     """
 
-    def __init__(self, level: str, agents_root: Path):
+    def __init__(
+        self,
+        level: str,
+        agents_root: "str | os.PathLike[str]",
+        *,
+        user_root: "str | os.PathLike[str] | None" = None,
+        project_root: "str | os.PathLike[str] | None" = None,
+    ):
         self.level = level
         self.agents_root = Path(agents_root)
+        if level == "user":
+            self.user_root = self.agents_root
+            self.project_root: "Optional[Path]" = None
+        else:
+            self.user_root = Path(user_root) if user_root else resolve_user_store()
+            self.project_root = (
+                Path(project_root) if project_root else self.agents_root.parent
+            )
+
+    @classmethod
+    def of(
+        cls,
+        *,
+        agents_dir: "str | os.PathLike[str]",
+        project_root: "str | os.PathLike[str] | None" = None,
+        global_scope: bool = False,
+    ) -> "Scope":
+        """The walk's scope from its parts: ``agents_dir`` (the user store),
+        ``project_root`` and ``global_scope`` -- what ``env`` / ``context`` build
+        after resolving each part (``resolve_user_store``,
+        ``project_root_default``, ``-g``)."""
+        if global_scope or project_root is None:
+            return cls("user", agents_dir)
+        return cls(
+            "project", Path(project_root) / ".agents",
+            user_root=agents_dir, project_root=project_root,
+        )
+
+    @property
+    def global_scope(self) -> bool:
+        return self.level == "user"
+
+    @property
+    def project_store(self) -> "Optional[Path]":
+        """The project's store (``agents_root``) -- ``None`` in the user scope."""
+        return None if self.global_scope else self.agents_root
+
+    @property
+    def stores(self) -> "list[Path]":
+        """The stores in play, in precedence order: the user store, then the
+        project's."""
+        if self.global_scope:
+            return [self.user_root]
+        return [self.user_root, self.agents_root]
+
+    @property
+    def overlays(self) -> "list[Overlay]":
+        """Every overlay a session in this scope uses (:meth:`Overlay.installed`
+        over :attr:`stores`: the project's copy shadows a same-named store copy)."""
+        return Overlay.installed(*self.stores)
+
+    def files(self, *names, include_missing: bool = False):
+        """The contract-A walk for this scope (:func:`dotagents._resolve.get_file_paths`)."""
+        from dotagents._resolve import get_file_paths
+
+        return get_file_paths(*names, scope=self, include_missing=include_missing)
 
     @property
     def overlay_root(self) -> Path:
@@ -75,7 +145,10 @@ class Scope:
         return self.overlay_root / name
 
     def __repr__(self) -> str:
-        return "Scope(%s, root=%s)" % (self.level, self.agents_root)
+        if self.global_scope:
+            return "Scope(user, root=%s)" % self.agents_root
+        return "Scope(project, root=%s, user_root=%s)" % (self.agents_root, self.user_root)
+
 
 
 def resolve_scope(
@@ -101,10 +174,10 @@ def resolve_scope(
     """
     if global_scope:
         return Scope("user", resolve_user_store(agents_dir))
-    if agents_dir:
-        return Scope("project", Path(agents_dir).expanduser())
     proj = Path(project_root).expanduser() if project_root else project_root_default()
-    return Scope("project", proj / ".agents")
+    if agents_dir:
+        return Scope("project", Path(agents_dir).expanduser(), project_root=proj)
+    return Scope("project", proj / ".agents", project_root=proj)
 
 
 #: The configurable user-scope store (D58). Every reader of the user store

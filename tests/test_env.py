@@ -35,6 +35,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from dotagents import _env  # noqa: E402
+from dotagents._scope import Scope  # noqa: E402
 from dotagents import _resolve  # noqa: E402
 
 
@@ -59,9 +60,7 @@ def test_get_file_paths_resolves_bare_overlay_dir(tmp_path):
 
     resolved = _resolve.get_file_paths(
         {"default": "bin", "project-root": ""},
-        agents_dir=agents_dir,
-        project_root=project_root,
-        global_scope=False,
+        scope=Scope.of(agents_dir=agents_dir, project_root=project_root),
         include_missing=True,
     )
     paths = [p for _lvl, p, _root in resolved]
@@ -117,10 +116,9 @@ def tree(tmp_path):
     return agents_dir, project_root
 
 
-def _run(agents_dir, project_root, base_env, **kw):
+def _run(agents_dir, project_root, base_env, global_scope=False, **kw):
     return _env.get_environment(
-        agents_dir=agents_dir,
-        project_root=project_root,
+        Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=global_scope),
         base_env=dict(base_env),
         **kw,
     )
@@ -310,7 +308,7 @@ def test_resolved_file_order(tree):
     touch(project_root / "local.env")
 
     resolved = _env.resolve_env_files(
-        agents_dir=agents_dir, project_root=project_root, global_scope=False
+        Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=False)
     )
     order = [(lvl, p.name) for lvl, p, _ in resolved]
 
@@ -332,7 +330,7 @@ def test_global_scope_drops_project_levels(tree):
     (project_root / ".agents" / "env").write_text("", encoding="utf-8")
     (agents_dir / "env").write_text("", encoding="utf-8")
     resolved = _env.resolve_env_files(
-        agents_dir=agents_dir, project_root=project_root, global_scope=True
+        Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=True)
     )
     levels = {lvl for lvl, _p, _r in resolved}
     assert "project" not in levels and "project-root" not in levels
@@ -450,7 +448,7 @@ def test_get_diff_only_changed(tree):
     )
     base = {"PATH": "/usr/bin", "SAME": "keep"}
     diff = _env.get_diff(
-        agents_dir=agents_dir, project_root=project_root, base_env=base
+        scope=Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=False), base_env=base
     )
     assert diff.get("NEWVAR") == "new"
     # SAME already equals base -> excluded from the diff.

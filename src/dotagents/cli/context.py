@@ -89,7 +89,11 @@ class Context(DotAgentsArgs):
             raise SystemExit("error: --write-agent and an output path are mutually exclusive")
 
         project_root = _scope.project_root_default()
-        agents_dir = resolve_user_store(self.agents_dir)
+        scope = _scope.Scope.of(
+            agents_dir=resolve_user_store(self.agents_dir),
+            project_root=project_root,
+            global_scope=self.global_scope,
+        )
 
         agent_names = []
         if self.agents:
@@ -115,10 +119,7 @@ class Context(DotAgentsArgs):
         #     never writes native config files. ---
         if self.format == "json":
             payloads = [
-                _context.assemble_context_data(
-                    agent, agents_dir, project_root, global_scope=self.global_scope,
-                    inline=self.inline,
-                )
+                _context.assemble_context_data(agent, scope, inline=self.inline)
                 for agent in active_agents
             ]
             out_obj = payloads[0] if len(payloads) == 1 else payloads
@@ -137,10 +138,7 @@ class Context(DotAgentsArgs):
 
         # --- markdown / system-reminder text paths ---
         for agent in active_agents:
-            text = _context.assemble_context(
-                agent, agents_dir, project_root, global_scope=self.global_scope,
-                inline=self.inline,
-            )
+            text = _context.assemble_context(agent, scope, inline=self.inline)
 
             if self.format == "system-reminder":
                 text = (

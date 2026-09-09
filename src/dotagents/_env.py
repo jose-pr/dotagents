@@ -70,8 +70,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from dotagents._overlays import Overlay
-from dotagents._resolve import get_file_paths
+from dotagents._overlays import Overlay  # noqa: F401  (re-exported; tests patch through here)
+from dotagents._scope import Scope, project_root_default
 
 
 # OS-bootstrap vars a spawned interpreter needs to even start (Windows
@@ -477,9 +477,7 @@ def get_env_from_file(
 # --------------------------------------------------------------------------- #
 
 
-def get_bin_paths(
-    *, agents_dir: Path, project_root: Path, global_scope: bool = False
-) -> "list[Path]":
+def get_bin_paths(scope: Scope) -> "list[Path]":
     """Each level's ``bin`` dir in contract-A precedence order, EXCEPT project-root.
 
     Uses ``include_missing=True`` (precursor semantics, frozen contract B): a
@@ -490,41 +488,20 @@ def get_bin_paths(
     (``{"project-root": ""}``): a project's own top-level ``bin`` is not an
     agent bin.
     """
-    resolved = get_file_paths(
-        {"default": "bin", "project-root": ""},
-        agents_dir=agents_dir,
-        project_root=project_root,
-        global_scope=global_scope,
-        include_missing=True,
-    )
+    resolved = scope.files({"default": "bin", "project-root": ""}, include_missing=True)
     return [path for _level, path, _root in resolved]
 
 
-def get_overlay_roots(
-    *,
-    agents_dir: Path,
-    project_root: "Optional[Path]" = None,
-    global_scope: bool = False,
-) -> "list[Path]":
-    """The installed overlay dirs: ``<agents_dir>/overlays/*`` sorted by name,
-    then (when ``project_root`` is given and not ``global_scope``)
-    ``<project_root>/.agents/overlays/*`` -- the same order and the same
-    presence-by-directory rule (:meth:`Overlay.discover`) as the contract-A walk
-    in :func:`dotagents._resolve.get_file_paths`, so the set of overlays that
-    get a ``<NAME>_OVERLAY_ROOT`` var is exactly the set whose ``bin``/``env``
-    files the chain resolves. A project overlay with the same name as a store
-    overlay SHADOWS it (:meth:`Overlay.installed`): only the project's dir is
-    returned, so its root var is the one emitted.
-    """
-    project_store = (
-        None if project_root is None or global_scope else Path(project_root) / ".agents"
-    )
-    return [overlay.path for overlay in Overlay.installed(agents_dir, project_store)]
+def get_overlay_roots(scope: Scope) -> "list[Path]":
+    """The installed overlay dirs of the scope (:attr:`Scope.overlays` -- the
+    user store's, then the project's, a same-named project overlay shadowing
+    the store's copy): the set of overlays that get a ``<NAME>_OVERLAY_ROOT``
+    var is exactly the set whose ``bin``/``env`` files the contract-A walk
+    resolves."""
+    return [overlay.path for overlay in scope.overlays]
 
 
-def get_lib_paths(
-    *, agents_dir: Path, project_root: Path, global_scope: bool = False
-) -> "list[Path]":
+def get_lib_paths(scope: Scope) -> "list[Path]":
     """Each level's ``lib`` dir in contract-A precedence order, EXCEPT project-root
     -- the ``PYTHONPATH`` counterpart of :func:`get_bin_paths`.
 
@@ -534,13 +511,7 @@ def get_lib_paths(
     rule out. project-root's ``lib`` is excluded for the same reason as its
     ``bin``: a project's own top-level ``lib`` is not an agent library.
     """
-    resolved = get_file_paths(
-        {"default": "lib", "project-root": ""},
-        agents_dir=agents_dir,
-        project_root=project_root,
-        global_scope=global_scope,
-        include_missing=False,
-    )
+    resolved = scope.files({"default": "lib", "project-root": ""}, include_missing=False)
     return [path for _level, path, _root in resolved if path.is_dir()]
 
 
@@ -569,10 +540,9 @@ def _prepended_path_var(osenv: "dict[str, str]", var: str, entries: "list[str]")
 # --------------------------------------------------------------------------- #
 
 
-def resolve_env_files(
-    *, agents_dir: Path, project_root: Path, global_scope: bool = False
-) -> "list[tuple[str, Path, Optional[Path]]]":
-    """The ordered, existing env files: ALL pre-tier then ALL main-tier.
+def resolve_env_files(scope: Scope) -> "list[tuple[str, Path, Optional[Path]]]":
+    """The ordered, existing env files: ALL pre-tier then ALL main-tier, for a
+    :class:`Scope`.
 
     Each tier is one contract-A resolution (:func:`get_file_paths`). Per-level
     filename resolution (contract A point 2): ``pre.env.py``/``pre.env`` and
@@ -588,20 +558,15 @@ def resolve_env_files(
     ``.agents/``-level files and the user-local ``local.env`` (which a checkout
     does not normally carry) keep their behaviour.
     """
-    common = dict(
-        agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
-    )
-    pre_tier = get_file_paths(
+    pre_tier = scope.files(
         {"default": "pre.env.py", "project-root": ""},
         {"default": "pre.env", "project-root": ""},
         {"project": "pre.local.env", "project-root": "pre.local.env"},
-        **common,
     )
-    main_tier = get_file_paths(
+    main_tier = scope.files(
         {"default": "env.py", "project-root": ""},
         {"default": "env", "project-root": ""},
         {"project": "local.env", "project-root": "local.env"},
-        **common,
     )
     return [item for item in pre_tier + main_tier if item[1].is_file()]
 
@@ -661,21 +626,26 @@ def apply_proxy_model(osenv: "dict[str, str]") -> "dict[str, str]":
 
 
 def get_environment(
+    scope: Scope,
     *,
-    agents_dir: Path,
-    project_root: Path,
     base_env: "Optional[dict[str, str]]" = None,
-    global_scope: bool = False,
     explicit: "Optional[str]" = None,
     logger=None,
 ) -> "dict[str, str]":
-    """Assemble the env CHANGES (vars this adds/overrides vs ``base_env``).
+    """Assemble the env CHANGES (vars this adds/overrides vs ``base_env``) for a
+    :class:`Scope`.
 
     Follows frozen contract B: identity seeded, PATH bins first, the two tiers
     chained (later overrides earlier), then proxy normalization. Returns only
     what changed -- mirrors the precursor's ``env={}`` accumulator.
     """
     from dotagents._agents import stamp_identity
+
+    agents_dir = scope.user_root
+    # The project root a user-scope walk pins: the resolved default, so the
+    # emitted AGENTS_PROJECT_ROOT still names the project the session is in.
+    project_root = scope.project_root or project_root_default()
+    global_scope = scope.global_scope
 
     osenv = dict(base_env if base_env is not None else os.environ)
     env: "dict[str, str]" = {}
@@ -700,10 +670,7 @@ def get_environment(
     # (`Overlay.root_var` is the single naming rule). Seeded before the chain so
     # env files can reference an overlay's install dir; only-if-unset, like the
     # scope roots, so an upstream pin holds.
-    for root in get_overlay_roots(
-        agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
-    ):
-        overlay = Overlay(root)
+    for overlay in scope.overlays:
         pinned = osenv.get(overlay.root_var)
         store_copy = str(Path(agents_dir) / "overlays" / overlay.name)
         if not pinned:
@@ -716,9 +683,7 @@ def get_environment(
             _apply({overlay.root_var: str(overlay.path)})
 
     # --- Contract B step 1: bins onto PATH FIRST. ---
-    bin_paths = [str(p) for p in get_bin_paths(
-        agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
-    )]
+    bin_paths = [str(p) for p in get_bin_paths(scope)]
     updated = _prepended_path_var(osenv, "PATH", bin_paths)
     if updated is not None:
         _apply({"PATH": updated})
@@ -726,18 +691,14 @@ def get_environment(
     # --- Libs onto PYTHONPATH, same shape, same moment --- so the env.py chain
     # below (and every subprocess inheriting the env) can import an overlay's
     # `lib/`. Existing dirs only (see `get_lib_paths`).
-    lib_paths = [str(p) for p in get_lib_paths(
-        agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
-    )]
+    lib_paths = [str(p) for p in get_lib_paths(scope)]
     if lib_paths:
         updated = _prepended_path_var(osenv, "PYTHONPATH", lib_paths)
         if updated is not None:
             _apply({"PYTHONPATH": updated})
 
     # --- Contract B steps 2-5: the two tiers, chained, later-overrides-earlier. ---
-    for level, path, _root in resolve_env_files(
-        agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
-    ):
+    for level, path, _root in resolve_env_files(scope):
         if path.suffix == ".py":
             changes = get_env_from_py(
                 path, osenv, project_root, level, global_scope, logger=logger
@@ -754,11 +715,9 @@ def get_environment(
 
 
 def get_diff(
+    scope: Scope,
     *,
-    agents_dir: Path,
-    project_root: Path,
     base_env: "Optional[dict[str, str]]" = None,
-    global_scope: bool = False,
     explicit: "Optional[str]" = None,
     logger=None,
 ) -> "dict[str, str]":
@@ -770,10 +729,8 @@ def get_diff(
     """
     base = dict(base_env if base_env is not None else os.environ)
     full = get_environment(
-        agents_dir=agents_dir,
-        project_root=project_root,
+        scope,
         base_env=base,
-        global_scope=global_scope,
         explicit=explicit,
         logger=logger,
     )
