@@ -5,7 +5,7 @@ Do not re-plan, second-guess recorded decisions, or silently downgrade required 
 
 ## Load Once
 
-1. Read `$FLOWS_OVERLAY_ROOT/MODELS.md`; resolve the exact `Executor: family/subrole`
+1. Read `$ENGINEERING_OVERLAY_ROOT/kb/MODELS.md`; resolve the exact `Executor: family/subrole`
    using the calling host's native lane (Codex/OpenAI, Claude/Anthropic, Gemini/Google).
    Verify callability, apply settings, and record host/provider/model before edits.
    A permitted fallback and its settings are a recorded deviation.

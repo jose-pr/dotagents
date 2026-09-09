@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Diff two benchmark result files and print a verdict, so no model has to eyeball JSON.
 
-Consumes the structured benchmark JSON described in `$FLOWS_OVERLAY_ROOT/flows/REPO.md`
+Consumes the structured benchmark JSON described in `$ENGINEERING_OVERLAY_ROOT/flows/REPO.md`
 (min/median/max ms per metric, one file per version+interpreter):
 
-    py -3.12 $TOOLS_OVERLAY_ROOT/tools/compare_bench.py benchmarks/results/old.json new.json
-    py -3.12 $TOOLS_OVERLAY_ROOT/tools/compare_bench.py --threshold 10 old.json new.json
+    py -3.12 $ENGINEERING_OVERLAY_ROOT/tools/compare_bench.py benchmarks/results/old.json new.json
+    py -3.12 $ENGINEERING_OVERLAY_ROOT/tools/compare_bench.py --threshold 10 old.json new.json
 
 Compares on median, flags any metric that regressed by more than --threshold
 percent, and exits non-zero if any did — so it works as a release gate.

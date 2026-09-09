@@ -1,6 +1,6 @@
 <!-- COPY this file to <project>/.agents/plans/<snake_case_name>.md and fill every
      <placeholder>; delete these comments. This skeleton IS the required shape from
-     $FLOWS_OVERLAY_ROOT/flows/PLAN.md — do not add, drop, or reorder sections. If a filled
+     $ENGINEERING_OVERLAY_ROOT/flows/PLAN.md — do not add, drop, or reorder sections. If a filled
      example disagrees with this shape, this file wins. -->
 
 # <Plan Title>

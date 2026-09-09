@@ -1,7 +1,7 @@
 # Node/TypeScript Directives
 
 Node/TypeScript-specific extras/overrides on top of the generic repo standard in
-`$FLOWS_OVERLAY_ROOT/flows/REPO.md` — read that first. Only Node-specific content here.
+`$ENGINEERING_OVERLAY_ROOT/flows/REPO.md` — read that first. Only Node-specific content here.
 
 ## Packaging and Layout
 

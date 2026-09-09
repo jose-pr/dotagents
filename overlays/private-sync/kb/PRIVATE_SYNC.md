@@ -66,7 +66,7 @@ touch a project directory.
 # 1. Lay down the per-user base into ~/.agents, then the overlays you want (from a
 #    checkout of the dotagents `overlays` branch, or $AGENTS_OVERLAYS_SRC).
 dotagents init -g
-dotagents overlays add flows private-sync --source <overlays-checkout>/overlays -g
+dotagents overlays add engineering private-sync --source <overlays-checkout>/overlays -g
 # 2. Make ~/.agents a git repo pointing at your private remote, and push.
 dotagents sync-project --remote git@github.com:<you>/.agents.git -m "init: agents repo"
 git -C ~/.agents push -u origin HEAD

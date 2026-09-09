@@ -15,7 +15,7 @@ Everything from the first `## ` heading down is documentation, not merged.
   `dotagents link` creates). Linking it to a per-project store in one private repo is
   the sync workflow; a plain untracked directory works just as well.
 - **`AGENTS.md`, three kinds** (placement rule and per-language answers:
-  `$FLOWS_OVERLAY_ROOT/flows/REPO.md`):
+  `$ENGINEERING_OVERLAY_ROOT/flows/REPO.md`):
   - **shipped API header** — COMMITTED, at the root of whatever the packaging tool
     ships, beside `README.md` (Python `src/<pkg>/`, Rust the crate root; per-module
     below that for large surfaces): public API header-file-style (exports with
@@ -63,7 +63,7 @@ Everything from the first `## ` heading down is documentation, not merged.
   new methods, new optional kwargs and fixes are all PATCH, so a `~=0.9.0`
   subscriber gets additions without a re-read and a minor bump stays a real
   signal. Additive API is *not* a minor before 1.0 (it is after). Full rule and
-  rationale: `$FLOWS_OVERLAY_ROOT/flows/REPO.md` "Versioning".
+  rationale: `$ENGINEERING_OVERLAY_ROOT/flows/REPO.md` "Versioning".
   **Release under exactly the version or release type the user named** — consent to
   release is not consent to a number. A change set that argues for a different one is
   worth *one question before acting* ("this renames a public subpackage — still
@@ -75,7 +75,7 @@ Everything from the first `## ` heading down is documentation, not merged.
 - **Don't pay tokens for what a script can decide**: never dump a whole log into
   context to learn one bit ("did it pass?") — pipe it through something that prints a
   verdict, keeping the log on disk.
-  `$TOOLS_OVERLAY_ROOT/tools/summarize_run.py --log build.log -- <cmd>` does exactly
+  `$ENGINEERING_OVERLAY_ROOT/tools/summarize_run.py --log build.log -- <cmd>` does exactly
   this (the flag is `--log`, not `--log-file`). Doing the same manual scan twice? Write
   the script.
 - **Draft follow-ups**: adjacent work found mid-execution gets a `Status: draft` plan

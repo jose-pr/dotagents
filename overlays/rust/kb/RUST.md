@@ -1,7 +1,7 @@
 # Rust Directives
 
 Rust-specific extras/overrides on top of the generic repo standard in
-`$FLOWS_OVERLAY_ROOT/flows/REPO.md` — read that first. Only Rust-specific content here.
+`$ENGINEERING_OVERLAY_ROOT/flows/REPO.md` — read that first. Only Rust-specific content here.
 
 Written 2026-07-27 from the first substantial Rust project under these rules: a
 14-crate workspace with a hand-written C ABI, three plugin backends, and a forked
@@ -58,7 +58,7 @@ Templates: `$RUST_OVERLAY_ROOT/references/workflows/rust/{test,release}.yaml`.
 
 ## Documentation: follow `flows/REPO.md`, which already covers this
 
-**`$FLOWS_OVERLAY_ROOT/flows/REPO.md` is the standard — read it, do not re-derive it.** Its rule
+**`$ENGINEERING_OVERLAY_ROOT/flows/REPO.md` is the standard — read it, do not re-derive it.** Its rule
 is the **packaging boundary**: the shipped agent header sits at the root of whatever
 the packaging tool ships, beside the human `README.md`. Cargo packages the **crate
 root** (`cargo package --list` shows `README.md` and everything beside it), so:

@@ -22,15 +22,15 @@ deviation triggers, and never defer questions to execution.
 
 ## Executor Kickoff
 
-> Read `$FLOWS_OVERLAY_ROOT/flows/EXEC.md` and, if present,
+> Read `$ENGINEERING_OVERLAY_ROOT/flows/EXEC.md` and, if present,
 > `$<LANG>_OVERLAY_ROOT/kb/<LANG>.md`. Execute `<path>` precisely; `EXEC.md` resolves
 > its `Executor:` role and provider. Keep `## Progress` live (`[/]` when started,
 > `[x]` when done); record blockers and continue independent work without asking the
 > user.
 
-Start every plan by **copying** `$REFERENCES_OVERLAY_ROOT/references/plan_template.md`
+Start every plan by **copying** `$ENGINEERING_OVERLAY_ROOT/references/plan_template.md`
 — imitating from memory or an old plan is how shapes drift. The shape reference
-`$REFERENCES_OVERLAY_ROOT/references/master_refactoring_plan.md` illustrates tone and
+`$ENGINEERING_OVERLAY_ROOT/references/master_refactoring_plan.md` illustrates tone and
 detail only; the template wins any disagreement.
 
 ## Persistence

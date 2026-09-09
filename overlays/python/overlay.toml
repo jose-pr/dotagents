@@ -1,6 +1,6 @@
 name = "python"
 description = "Python repo conventions: kb, pyproject/mkdocs templates, CI workflows. Ships `dotagents pyvenv` to create a shared venv under the scope's .pyvenv/ store."
-requires = ["references"]
+requires = ["engineering"]
 routing = [
   """- Python work → $PYTHON_OVERLAY_ROOT/kb/PYTHON.md""",
   """- Need a shared, version-pinned venv (not a per-project one) → `dotagents pyvenv [version]`""",

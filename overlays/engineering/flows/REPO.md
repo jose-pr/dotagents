@@ -22,7 +22,7 @@ file restates the other.
 - `examples/`: runnable scripts/configs, not scratch files.
 - `docs/` + a docs site: hand-written landing page (never a verbatim `README.md`
   embed — its relative links break once served from a docs-site root; see
-  `$REFERENCES_OVERLAY_ROOT/references/docs-index.md`) plus auto-generated API
+  `$ENGINEERING_OVERLAY_ROOT/references/docs-index.md`) plus auto-generated API
   reference where the ecosystem supports it (language doc names the generator, and
   whether a deploy step is even needed).
 
@@ -106,7 +106,7 @@ release (so it stays current between them).
   so tagging is the only thing left, then ask the user — per release; a yes once is not
   standing consent. (`ci-*` is always safe — see core `AGENTS.md`.)
 
-## Meta files (skeletons in `$REFERENCES_OVERLAY_ROOT/references/`; language doc adds specifics on top)
+## Meta files (skeletons in `$ENGINEERING_OVERLAY_ROOT/references/`; language doc adds specifics on top)
 - `README.md`, `.gitignore`: from `references/`. `README.md` is the package
   long-description (`readme=` in the manifest) and MUST ship in the built package
   (sdist + wheel). `.gitignore` opens with the root-anchored category rule
@@ -243,7 +243,7 @@ says anything goes at `0.x`, which is not a policy — this is the policy:
   additive functionality is a minor, breaks are a major.
 
 Same discipline as the release-consent rule in
-`$ENGINEERING_OVERLAY_ROOT/engineering/rules.md`: the user names the version or
+`$ENGINEERING_OVERLAY_ROOT/rules/ENGINEERING.md`: the user names the version or
 release type, and a change set arguing for a different one is worth *one question
 before acting*, never a correction afterwards. Under this policy the answer to "these
 are new features, shouldn't it be a minor?" is **no** — check the documented API for

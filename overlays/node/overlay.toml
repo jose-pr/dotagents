@@ -1,6 +1,6 @@
 name = "node"
 description = "Node repo conventions: kb, package.json template, CI workflows."
-requires = ["references"]
+requires = ["engineering"]
 routing = [
   """- Node/JavaScript work → $NODE_OVERLAY_ROOT/kb/NODE.md""",
 ]
