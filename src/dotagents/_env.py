@@ -29,6 +29,12 @@ Plan-08 identity/proxy model is wired into the output around the file chain:
     file chain, so env files can branch on ``AGENTS_HARNESS`` and override the
     stamped ``AGENTS_MODEL`` etc. (chained: a later file wins). Never clobbers a
     value already present in the base env.
+  * **Roots** are seeded right after identity, also before the chain and also
+    only-if-unset: the two scope roots ``AGENTS_HOME`` / ``AGENTS_PROJECT_ROOT``
+    and one ``<NAME>_OVERLAY_ROOT`` per installed overlay
+    (:func:`get_overlay_roots`, named by :attr:`_overlays.Overlay.root_var` --
+    the same name ``dotagents context`` expands as a placeholder), so an env
+    file can reference an overlay's install dir by name.
   * **Proxy** is normalized AFTER the file chain: ``AGENTS_PROXY`` is seeded if
     unset (from ``AGENTS_WEBFETCH_PROXY_URL`` else the global
     HTTPS/HTTP/ALL_PROXY, either case); any proxy var that *already exists* is
@@ -51,6 +57,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from dotagents._overlays import Overlay
 from dotagents._resolve import get_file_paths
 
 
@@ -411,6 +418,17 @@ def get_bin_paths(
     return [path for _level, path, _root in resolved]
 
 
+def get_overlay_roots(*, agents_dir: Path) -> "list[Path]":
+    """The installed overlay dirs under ``<agents_dir>/overlays/``, sorted by name.
+
+    :meth:`Overlay.discover` -- the same presence-by-directory rule as the
+    contract-A walk in :func:`dotagents._resolve.get_file_paths` (no manifest
+    required), so the set of overlays that get a ``<NAME>_OVERLAY_ROOT`` var is
+    exactly the set whose ``bin``/``env`` files the chain resolves.
+    """
+    return [overlay.path for overlay in Overlay.discover(agents_dir / "overlays")]
+
+
 def _prepend_missing(path_entries: "list[str]", new_entries: "list[str]") -> "list[str]":
     """Prepend each new entry not already present, preserving precursor order.
 
@@ -544,6 +562,15 @@ def get_environment(
         _apply({"AGENTS_HOME": str(agents_dir)})
     if not osenv.get("AGENTS_PROJECT_ROOT"):
         _apply({"AGENTS_PROJECT_ROOT": str(project_root)})
+
+    # --- Overlay roots --- one `<NAME>_OVERLAY_ROOT` per installed overlay, the
+    # same name `dotagents context` expands as a `<NAME_OVERLAY_ROOT>` placeholder
+    # (`Overlay.root_var` is the single naming rule). Seeded before the chain so
+    # env files can reference an overlay's install dir; only-if-unset, like the
+    # scope roots, so an upstream pin holds.
+    for overlay in Overlay.discover(agents_dir / "overlays"):
+        if not osenv.get(overlay.root_var):
+            _apply({overlay.root_var: str(overlay.path)})
 
     # --- Contract B step 1: bins onto PATH FIRST. ---
     bin_paths = [str(p) for p in get_bin_paths(

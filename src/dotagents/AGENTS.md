@@ -198,8 +198,20 @@ Emitted by the identity/env layer (safe to branch on in env files):
 `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENTS_MODEL`, `AGENT`, `AGENTS_PROXY`,
 `AGENTS_WEBFETCH_PROXY_URL`, plus the two
 scope roots — `AGENTS_HOME` (the user store, `agents_dir`/`~/.agents`) and
-`AGENTS_PROJECT_ROOT` (this project's root). Both are seeded only if unset, so a
-harness/env can pin them. Deliberately NOT emitted, despite looking like they
+`AGENTS_PROJECT_ROOT` (this project's root) — and one **`<NAME>_OVERLAY_ROOT`**
+per installed overlay under `<store>/overlays/` (`_env.get_overlay_roots`, the
+same presence-by-directory rule as the contract-A walk). `NAME` is the overlay's
+directory name upper-cased with every non-alphanumeric character turned into `_`
+(`my-ov.v2` → `MY_OV_V2_OVERLAY_ROOT`). `Overlay.normalize_name(name)` is THE
+canonical overlay name (lowercase, `_`→`-`): it names the install dir
+`overlays/<normalize_name(name)>/` and the source lookup, and
+`Overlay.root_var_for(name)` (`Overlay(dir).root_var`) derives the env var from
+it (upper-case, `-`/`.`→`_`, suffix), so the var for `overlays/<n>/` is always
+`root_var_for(n)`. `context`'s `<NAME_OVERLAY_ROOT>` placeholder goes through the
+same property, so an env file and a context file name an overlay's install dir
+identically. All of these
+roots are seeded before the file chain and only if unset, so a harness/env can
+pin them. Deliberately NOT emitted, despite looking like they
 would be: `AGENTS_AGENT` (a named persona — nothing derives one, so there is
 nothing to emit) and `AGENTS_CODE_SESSION_ID` (dropped with the precursor's
 blanket `CLAUDE_*`→`AGENTS_*` rewrite). Do not branch on either. `resolve_scope` READS `AGENTS_PROJECT_ROOT` (then the

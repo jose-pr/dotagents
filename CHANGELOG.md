@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- feat: `env` emits one **`<NAME>_OVERLAY_ROOT`** per installed overlay (the
+  overlay's install dir), seeded before the env-file chain like the two scope
+  roots and, like them, only if unset. `NAME` is the overlay's directory name
+  upper-cased with every non-alphanumeric character turned into `_`
+  (`my-ov.v2` → `MY_OV_V2_OVERLAY_ROOT`). This is the same name `context`
+  already expanded as a `<NAME_OVERLAY_ROOT>` placeholder; the two now share
+  one naming function, so an env file and a context file name an overlay's
+  install dir identically. The variable is derived from the same normalized
+  name `overlays add` installs under (`Overlay.normalize_name`), so the var
+  for `overlays/<n>/` is always `Overlay.root_var_for(n)`.
+
 ### Changed
 
 - refactor: `dotagents._overlays` is now built around an **`Overlay`** class —

@@ -127,6 +127,78 @@ def _run(agents_dir, project_root, base_env, **kw):
 
 
 # --------------------------------------------------------------------------
+# Overlay roots: one <NAME>_OVERLAY_ROOT per installed overlay, named exactly
+# as the `context` placeholder (`_overlays.Overlay.root_var`), seeded before
+# the file chain, only-if-unset.
+# --------------------------------------------------------------------------
+
+def test_overlay_root_var_emitted_per_overlay(tree):
+    agents_dir, project_root = tree
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert env["AA_OVERLAY_ROOT"] == str(agents_dir / "overlays" / "aa")
+    assert env["BB_OVERLAY_ROOT"] == str(agents_dir / "overlays" / "bb")
+
+
+def test_overlay_root_var_name_matches_context_placeholder(tree):
+    """The env var name and the `context` placeholder come from ONE rule:
+    `-`/`.` (illegal in a shell variable name) become `_`, and the name is
+    upper-cased. `my-ov.v2` -> `MY_OV_V2_OVERLAY_ROOT`."""
+    from dotagents import _context, _overlays
+
+    agents_dir, project_root = tree
+    dotted = agents_dir / "overlays" / "my-ov.v2"
+    dotted.mkdir()
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert env["MY_OV_V2_OVERLAY_ROOT"] == str(dotted)
+    assert _overlays.Overlay(dotted).root_var == "MY_OV_V2_OVERLAY_ROOT"
+    # `context` expands the same name to the same path.
+    expanded = _context._expand_placeholders(
+        "root=<MY_OV_V2_OVERLAY_ROOT>", project_root, [dotted]
+    )
+    assert expanded == "root=%s" % dotted
+
+
+def test_overlay_root_var_skips_invalid_overlay_dirs(tree):
+    """`.git` / `__pycache__` under overlays/ are not overlays (same rule as the
+    contract-A walk) and get no var."""
+    agents_dir, project_root = tree
+    (agents_dir / "overlays" / ".git").mkdir()
+    (agents_dir / "overlays" / "__pycache__").mkdir()
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert set(k for k in env if k.endswith("_OVERLAY_ROOT")) == {
+        "AA_OVERLAY_ROOT", "BB_OVERLAY_ROOT"
+    }
+
+
+def test_overlay_root_var_respects_upstream_pin(tree):
+    agents_dir, project_root = tree
+    base = {"PATH": "/usr/bin", "AA_OVERLAY_ROOT": "/pinned/aa"}
+    env = _run(agents_dir, project_root, base)
+    # Already set upstream -> not re-seeded (absent from the change set).
+    assert "AA_OVERLAY_ROOT" not in env
+    assert env["BB_OVERLAY_ROOT"] == str(agents_dir / "overlays" / "bb")
+
+
+def test_env_py_sees_overlay_root_var(tree):
+    """Seeded BEFORE the chain: an env.py can read its overlay's root."""
+    agents_dir, project_root = tree
+    (agents_dir / "overlays" / "aa" / "env.py").write_text(
+        _py_echo_seen("AA_OVERLAY_ROOT", "SEEN_AA_ROOT"), encoding="utf-8"
+    )
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert env["SEEN_AA_ROOT"] == str(agents_dir / "overlays" / "aa")
+
+
+def test_no_overlays_dir_emits_no_overlay_root_vars(tmp_path):
+    agents_dir = tmp_path / "agents"
+    project_root = tmp_path / "proj"
+    agents_dir.mkdir()
+    project_root.mkdir()
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert not [k for k in env if k.endswith("_OVERLAY_ROOT")]
+
+
+# --------------------------------------------------------------------------
 # 1. Bins prepended to PATH FIRST (before any env eval).
 # --------------------------------------------------------------------------
 

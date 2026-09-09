@@ -186,7 +186,13 @@ python -m dotagents env --diff --format json   # only vars that differ from the 
 
 Roots resolve exactly as for `context` above (`$AGENTS_HOME` /
 `$AGENTS_PROJECT_ROOT`, both of which `env` also emits — so a subprocess reading
-them agrees with the parent that wrote them).
+them agrees with the parent that wrote them). `env` also emits one
+`<NAME>_OVERLAY_ROOT` per installed overlay, where `NAME` is the overlay's
+directory name upper-cased with `-`/`.` turned into `_` (`my-ov` →
+`MY_OV_OVERLAY_ROOT`). It is the same name `context` expands as a
+`<NAME_OVERLAY_ROOT>` placeholder, so an env file and a context file refer to
+an overlay's install dir by one name. Every root is seeded before the env-file
+chain and only if unset, so a value pinned upstream holds.
 
 !!! warning
     `env` output is sensitive by design — it prints resolved values. Treat the
