@@ -82,20 +82,29 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   so it goes anywhere a path does.
   `recompose_overlay_block(...)` (over a *set* of overlays) is the only module
   function. `DEFAULT_PRIORITY = 500`.
-- `_scope` — `resolve_scope(global_scope, agents_dir=None, project_root=None)`,
-  `resolve_user_store(agents_dir=None)` (the home of the chain `dotagents.cli`
-  re-exports) and `resolve_source(...)`; scope = *where installed overlays live*
-  (user = the configurable store, project = `<project>/.agents`), source = *where
-  an overlay comes from* (bundled by default). `-g` resolves the store through
-  `resolve_user_store` (`--agents-dir` → `$AGENTS_HOME` → legacy → `~/.agents`),
-  never the literal home dir; `--agents-dir` overrides the store in EITHER scope.
+- `_scope` — **`Scope`**, the one object every walk takes: `level` (`user` /
+  `project`), `agents_root` (the scope's own store, the install target),
+  `user_root` (the user store — every walk starts from it), `project_root`,
+  `stores` (in precedence order), `overlays` (`Overlay.installed(*stores)`),
+  `project_store`, `global_scope`, and `files(*names, include_missing=False)`
+  (the contract-A walk). `Scope.of(agents_dir=, project_root=, global_scope=)`
+  builds one from resolved parts (what `env` / `context` / `_cmds_dirs` do);
+  `resolve_scope(global_scope, agents_dir=None, project_root=None)` is the
+  install-command form; `resolve_user_store(agents_dir=None)` (the home of the
+  chain `dotagents.cli` re-exports) and `resolve_source(...)`. Scope = *where
+  installed overlays live*, source = *where an overlay comes from* (bundled by
+  default). `-g` resolves the store through `resolve_user_store`
+  (`--agents-dir` → `$AGENTS_HOME` → legacy → `~/.agents`), never the literal
+  home dir; `--agents-dir` overrides the store in EITHER scope. The library
+  functions take a `Scope` only — no keyword-triple compatibility form: the CLI
+  is the public surface, the package internals have one caller.
   Installed overlays are **discovered** by presence (`Overlay.discover(scope.overlay_root)`
   for one scope, `Overlay.installed(...)` for what a session uses), not tracked in
   a registry. Nothing overlay-only lives here (name rules and discovery are
   `Overlay`'s).
 - `_context` — assemble the effective per-agent context (Plan 04):
-  `assemble_context(agent, agents_dir, project_root, global_scope=False,
-  inline=False)` / `assemble_context_data(...)`. Sources are the contract-A
+  `assemble_context(agent, scope, *, inline=False)` /
+  `assemble_context_data(agent, scope, *, inline=False)`. Sources are the contract-A
   walk (overlay `CONTEXT.md`s first, sorted by manifest `priority`, lower
   first; then the store / project `AGENTS.md` + `AGENTS.local.md`), minus what
   the harness loads itself (`Agent.loaded_paths(project_root)` — for Claude,
@@ -106,8 +115,10 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   when a task needs them, and inlining every mention made a 100 KB session
   payload. Skills are listed, never inlined.
 - `_env` — chained env-file assembly + `env.py` execution (frozen contract B):
-  `get_environment` / `get_diff` / `resolve_env_files` / `get_env_from_py` /
-  `get_env_from_file`. Bins onto PATH first (`get_bin_paths`, every level's `bin`
+  `get_environment(scope, *, base_env, explicit, logger)` / `get_diff(scope, ...)`
+  / `resolve_env_files(scope)` / `get_bin_paths(scope)` / `get_lib_paths(scope)`
+  / `get_overlay_roots(scope)` / `get_env_from_py` / `get_env_from_file`. Bins
+  onto PATH first (`get_bin_paths`, every level's `bin`
   except project-root, missing dirs included — frozen), and each level's EXISTING
   `lib` onto PYTHONPATH the same way (`get_lib_paths`; not part of contract B), so
   an `env.py` and every subprocess can import an overlay's `lib/`; then two tiers
@@ -119,8 +130,8 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   dir named `env` is not an env file); a plain file whose `source` fails
   contributes nothing (`source F || exit 1`, so the failure is visible); bash's
   own `PWD`/`OLDPWD`/`SHLVL`/`MSYSTEM*` are never reported as a file's changes.
-- `_resolve` — `get_file_paths(*names, agents_dir, project_root, global_scope=False,
-  include_missing=False)`: the Contract-A precedence walk / filename resolution:
+- `_resolve` — `get_file_paths(*names, scope, include_missing=False)` (=
+  `scope.files(*names)`): the Contract-A precedence walk / filename resolution:
   user-store overlays → system → user → **project overlays** (since 2026-09-09:
   `<project>/.agents/overlays/*`, where `overlays add` installs by default) →
   project → project-root; the last three skipped with `global_scope`. Each

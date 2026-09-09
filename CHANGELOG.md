@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The library walk takes one object. `Scope` now carries the whole picture
+  (`user_root`, `project_root`, `stores`, `overlays`, `files(*names)`), and
+  `get_file_paths`, `get_environment`, `get_diff`, `resolve_env_files`,
+  `get_bin_paths`, `get_lib_paths`, `get_overlay_roots`, `assemble_context` and
+  `assemble_context_data` take a `Scope` instead of the
+  `(agents_dir, project_root, global_scope)` keyword triple ported from the
+  precursor. `Scope.of(agents_dir=, project_root=, global_scope=)` builds one
+  from resolved parts. No compatibility form: the CLI is the public surface.
 - **One overlay name, two scopes = one overlay, the project's.** A project
   session uses the user store's overlays AND the project's (`<project>/.agents/
   overlays/`); an overlay installed in both under the same name is the
