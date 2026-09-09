@@ -82,6 +82,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   instances or directories. `_overlays` is a private module, so no public
   version signal.
 
+- fix: `init --agents codex` run from a session whose environment already
+  carried dotagents' identity vars (which its own env-loader hook exports —
+  `AGENT=claude-code` and friends in every command a Claude session runs)
+  wrote a Codex env block with no identity at all: the identity stamp never
+  overrides a value already present, so every key counted as "already set",
+  to Claude's values. When the agent is named explicitly the identity is now
+  that agent's, overriding the base env; without an explicit agent a pinned
+  value is respected as before.
 - fix: `context`'s `<NAME_OVERLAY_ROOT>` placeholder now also maps `.` (and any
   other non-alphanumeric character) in an overlay name to `_`, not only `-` —
   the name has to be a legal shell variable to be emitted by `env`, and the

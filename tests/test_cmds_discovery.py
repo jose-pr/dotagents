@@ -79,6 +79,20 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _clear_project_root_vars(monkeypatch):
+    """The project scope must come from `monkeypatch.chdir`, so the pinned
+    project-root vars have to be cleared first (same as `test_scope.py`):
+    `project_root_default()` reads `$AGENTS_PROJECT_ROOT`, then
+    `$CLAUDE_PROJECT_DIR`, BEFORE the cwd. In an agent session dotagents' own
+    env-loader hook pins `$AGENTS_PROJECT_ROOT` to the real checkout, and then
+    the real repo's private `.agents/dotagents/cmds/` leaked into every
+    "fresh install" assertion here (measured 2026-09-09: three failures from
+    the harness's PowerShell tool, none from a shell without the hook)."""
+    for var in ("AGENTS_PROJECT_ROOT", "CLAUDE_PROJECT_DIR"):
+        monkeypatch.delenv(var, raising=False)
+
+
 # --------------------------------------------------------------------------- #
 # Baseline: built-ins + the bundled `findings` module, nothing else
 # --------------------------------------------------------------------------- #

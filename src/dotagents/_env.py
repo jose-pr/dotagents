@@ -33,7 +33,9 @@ Plan-08 identity/proxy model is wired into the output around the file chain:
   * **Identity** (:func:`dotagents._agents.stamp_identity`) is seeded BEFORE the
     file chain, so env files can branch on ``AGENTS_HARNESS`` and override the
     stamped ``AGENTS_MODEL`` etc. (chained: a later file wins). Never clobbers a
-    value already present in the base env.
+    value already present in the base env -- unless ``explicit`` names the
+    agent, in which case the identity is that agent's regardless (the static
+    Codex env block is written FOR Codex, from whichever harness runs ``init``).
   * **Roots** are seeded right after identity, also before the chain and also
     only-if-unset: the two scope roots ``AGENTS_HOME`` / ``AGENTS_PROJECT_ROOT``
     and one ``<NAME>_OVERLAY_ROOT`` per installed overlay

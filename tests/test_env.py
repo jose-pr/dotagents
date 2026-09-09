@@ -458,6 +458,27 @@ def test_identity_does_not_clobber_user_value(tree):
     assert env.get("AGENTS_HARNESS", "custom") == "custom"
 
 
+def test_explicit_agent_overrides_injected_identity(tree):
+    """`explicit` wins over identity vars already in the base env. The base is
+    what the RUNNING harness exported (dotagents' own env-loader hook puts
+    AGENT=claude-code into every command a Claude session runs); a snapshot
+    written FOR Codex must still say codex. Regression: it said nothing at
+    all, because every key was 'already set'."""
+    agents_dir, project_root = tree
+    base = {
+        "PATH": "/usr/bin", "CLAUDECODE": "1",
+        "AGENTS_HARNESS": "claude-code", "AGENTS_VENDOR": "anthropic",
+        "AGENT": "claude-code",
+    }
+    env = _run(agents_dir, project_root, base, explicit="codex")
+    assert env["AGENT"] == "codex"
+    assert env["AGENTS_HARNESS"] == "codex"
+    assert env["AGENTS_VENDOR"] == "openai"
+    # Without `explicit`, the base's values are respected as before.
+    env = _run(agents_dir, project_root, base)
+    assert "AGENT" not in env and "AGENTS_HARNESS" not in env
+
+
 def test_env_files_win_over_identity(tree):
     """An env file that sets AGENTS_MODEL should override the stamped default --
     identity is seeded, files run in the chain and can override."""

@@ -976,7 +976,14 @@ def stamp_identity(
 
     Never emits a var it cannot source (no empty ``AGENTS_MODEL=``). Does NOT
     clobber a value already set in ``environ`` -- an explicit user/harness value
-    wins. The deliberate curated mapping replaces the precursor's blanket
+    wins -- UNLESS ``explicit`` names the agent: then the identity describes
+    THAT agent and overrides whatever ``environ`` carries. The caller asked for
+    it, and a base-env identity is the *running* harness's (dotagents' own
+    env-loader hook exports ``AGENT=claude-code`` into every command a Claude
+    session runs), not a pin. Measured 2026-09-09: ``init --agents codex`` from
+    such a session produced a Codex env block with NO identity at all, because
+    every ``AGENTS_*`` key was "already set" -- to Claude's values. The
+    deliberate curated mapping replaces the precursor's blanket
     ``CLAUDE_*``->``AGENTS_*`` rewrite (no ``AGENTS_CODE_SESSION_ID`` junk).
 
     ``AGENTS_AGENT`` (a named persona) is NOT emitted and never was: the line
@@ -987,11 +994,12 @@ def stamp_identity(
     it is, nothing may branch on this var.
     """
     active = resolve_active_agent(environ, explicit=explicit, root=root)
+    override = explicit is not None
 
     identity: dict[str, str] = {}
 
     def _set(key: str, value: "Optional[str]") -> None:
-        if value and not environ.get(key):
+        if value and (override or not environ.get(key)):
             identity[key] = value
 
     _set("AGENTS_HARNESS", active.harness_id or active.name)
