@@ -259,6 +259,22 @@ def test_manifest_reader_handles_comments_indentation_and_quotes(tmp_path):
     assert m["requires"] == ["multi\nline"]
 
 
+def test_compose_block_explains_overlay_root_vars_once(tmp_path):
+    """Routing lines point at `$<NAME>_OVERLAY_ROOT/...` (what `dotagents env`
+    exports), not `~/.agents/...`; the block says so once, above them."""
+    from dotagents.cli import _compose_block
+    from dotagents.cli._common import OVERLAY_ROOT_NOTE
+
+    a = _overlay(tmp_path, "a", routing=["- Plan -> $A_OVERLAY_ROOT/flows/PLAN.md"])
+    b = _overlay(tmp_path, "b", routing=["- Rust -> $B_OVERLAY_ROOT/kb/RUST.md"])
+    out = _compose_block(BASE_AGENTS, [a, b], _logger())
+    assert out.count(OVERLAY_ROOT_NOTE) == 1
+    assert out.index(OVERLAY_ROOT_NOTE) < out.index("$A_OVERLAY_ROOT")
+    # No overlay-root vars -> no note.
+    c = _overlay(tmp_path, "c", routing=["- Plain -> `dotagents foo`"])
+    assert OVERLAY_ROOT_NOTE not in _compose_block(BASE_AGENTS, [c], _logger())
+
+
 def test_compose_block_without_load_on_demand_heading_keeps_rules(tmp_path):
     from dotagents.cli import _compose_block
 

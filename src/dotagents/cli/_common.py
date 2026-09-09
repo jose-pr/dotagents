@@ -236,10 +236,24 @@ def _compose_block(base_text: str, overlays, logger) -> str:
             "",
             text,
         )
+        # Overlay routing points at `$<NAME>_OVERLAY_ROOT/...` (the var
+        # `dotagents env` exports per installed overlay) rather than a hard
+        # store path; say so once, so an agent reading the file knows the
+        # token is an environment variable it can resolve, not a literal path.
+        if any("_OVERLAY_ROOT" in line for line in routing):
+            routing = [OVERLAY_ROOT_NOTE] + routing
         end = re.search(r"(?m)^[ \t]*<!-- dotagents:end -->", text)
         insert_at = end.start() if end else len(text)
         text = text[:insert_at] + "\n".join(routing) + "\n" + text[insert_at:]
     return text
+
+
+#: Emitted once above overlay routing lines that use the per-overlay root vars.
+OVERLAY_ROOT_NOTE = (
+    "Overlay paths below use `$<NAME>_OVERLAY_ROOT` -- an environment variable "
+    "`dotagents env` exports per installed overlay (its install dir); resolve it "
+    "in a shell (`echo $FLOWS_OVERLAY_ROOT`) before opening the file with a file tool."
+)
 
 
 def _no_subcommand(cmd, hint: str) -> int:
