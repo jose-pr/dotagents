@@ -23,6 +23,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **SessionStart context is no longer injected twice.** The PowerShell
+  variants of Claude's `SessionStart` / `CwdChanged` handlers run only when
+  `bash` is not on PATH. Both handlers fire on every session, and on a Windows
+  box that has both Git Bash and PowerShell both succeeded, so the same
+  payload landed twice at every session start (two identical 100 KB
+  payloads, measured).
+- The Codex `PreToolUse` env-loader prefix is quoted correctly: inside
+  `"$(...)"` its `\"` were literal quote characters, so `PATH` became
+  `".agents/bin:...:<last>"` with the quotes, the project `.agents/bin` was
+  never found and the last original entry was broken. The rewritten command
+  is now executed in bash by a test.
+- Hook merging keeps a user's hook that shares a matcher-object with an older
+  shape of ours (the whole object used to be dropped), and a revised `shell`
+  / `matcher` / `commandWindows` / status on an unchanged command text now
+  reaches existing users instead of being kept as-is.
+- Claude's skills link is per skill into `<config>/skills/<name>`: linking the
+  whole directory failed with "conflict" for anyone who already had their own
+  `~/.claude/skills`, so overlay skills never reached them. A same-named skill
+  the user placed there stays.
+- Every hook command resolves the store as `$AGENTS_HOME` when set (bash:
+  `${AGENTS_HOME:-$HOME/.agents}`), so a custom store gets hooks that can find
+  `dotagents`; the PowerShell SessionStart variant prefers the project's own
+  `.agents\bin` like the bash one. The PowerShell tool env-loader runs
+  `env --diff` instead of re-assigning the whole environment on every call.
+- The bash `CwdChanged` handler re-pins `AGENTS_PROJECT_ROOT` into
+  `$CLAUDE_ENV_FILE` when the new directory carries a `.agents/`; the
+  SessionStart pin is only-if-unset, so a `cd` into another project used to
+  keep the first project's root for the rest of the session.
+- The Antigravity hook pins the project root from `workspacePaths` (cwd and
+  `AGENTS_PROJECT_ROOT` of the `dotagents context` spawn), as its docstring
+  already claimed, honours `$AGENTS_HOME` when locating `dotagents`, and
+  injects nothing when the assembly exits non-zero. Its constant is
+  `PREINVOCATION_HOOK_SCRIPT` (it wires a `PreInvocation` hook).
+- Unpublishing an overlay's skills compares file CONTENT, not just names: a
+  copy the user had edited (same file set, different bytes) was deleted as
+  the overlay's.
 - **The store's rules now reach Claude on a fresh install.** `init` writes the
   `@` include where Claude Code reads it -- `~/.claude/CLAUDE.md` for the user
   store, `<project>/.claude/CLAUDE.md` for a project -- as an appended managed

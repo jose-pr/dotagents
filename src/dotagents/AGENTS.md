@@ -130,12 +130,21 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `~/.agents`.
 - `_skills` — publish an overlay's `skills/<name>/` into a scope's shared skills dir
   (symlink-preferred, copy fallback); unpublish removes only what the overlay
-  published, then sweeps broken symlinks. Pure stdlib.
+  published — a copy counts as the overlay's only when its file set AND bytes
+  match the source, so a user-edited copy is kept — then sweeps broken
+  symlinks. Pure stdlib. `ClaudeAgent.wire_hooks` links the scope's skills
+  into `<config>/skills/<name>` PER SKILL (a same-named skill the user placed
+  there is a conflict and stays), never the whole directory.
 - `_hooks` — additive, idempotent merge of our hooks into an agent's `settings.json`.
   `hooks.<Event>` is a **list of matcher-objects** each holding its own `hooks` list,
-  not a flat command list. Foreign hooks are preserved verbatim, malformed entries
-  are dropped rather than raising, and invalid JSON raises `SystemExit` instead of
-  silently overwriting the user's file. `shell` (Claude: `"bash"`/`"powershell"`,
+  not a flat command list. Foreign hooks are preserved verbatim (a foreign hook
+  sharing a matcher-object with an older shape of ours keeps its object; ours
+  moves to its own), an entry that is exactly what we would write is left
+  alone and any other shape of ours (revised command, `shell`, `matcher`,
+  `commandWindows`, status) is replaced in place, malformed entries are
+  dropped rather than raising, and invalid JSON raises `SystemExit` instead of
+  silently overwriting the user's file. Writes are LF-only and atomic, with
+  non-ASCII kept as-is. `shell` (Claude: `"bash"`/`"powershell"`,
   picks the interpreter for the hook's own command) and `command_windows`
   (Codex: emitted as `commandWindows`, a separate Windows-only command OVERRIDE,
   not an interpreter choice) are both supported. Pure stdlib. Consumed by
@@ -178,12 +187,20 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   isn't installed" — verified directly that bash syntax fed to `powershell
   -Command` on such a machine is a hard parse error, not a soft failure, so
   every session there would silently get neither env nor context. Every handler
-  in a matched group fires unconditionally (hooks.md), so both always run; the
-  one whose interpreter is absent fails harmlessly. The PowerShell
+  in a matched group fires unconditionally (hooks.md), so both always run —
+  and on a box with BOTH interpreters both used to succeed, injecting the same
+  context twice per session (two identical 100 KB payloads, measured
+  2026-09-09). The PowerShell variants therefore **select themselves: they run
+  only when `bash` is not on PATH** (`Get-Command bash`). The PowerShell
   `SessionStart` variant is context-only (`dotagents context`), not
   env+context: `$CLAUDE_ENV_FILE`'s documented effect is "subsequent BASH
   commands" regardless of which shell wrote it, so writing to it from a
-  PowerShell-shelled hook would feed nothing.
+  PowerShell-shelled hook would feed nothing. Every hook command resolves the
+  store as `$AGENTS_HOME`, else `~/.agents` (bash: `${AGENTS_HOME:-$HOME/.agents}`),
+  and the bash `CwdChanged` handler re-pins `AGENTS_PROJECT_ROOT` into
+  `$CLAUDE_ENV_FILE` when the new cwd carries a `.agents/` (the SessionStart pin
+  is only-if-unset, so without this a `cd` into another project kept the first
+  project's root for the rest of the session).
 - **Windows only**: `ClaudeAgent._wire_powershell_pretooluse` additionally wires
   a no-matcher `PreToolUse` hook (fires on every tool call), `shell:
   "powershell"`, running `PRETOOLUSE_POWERSHELL_COMMAND` INLINE — deliberately
@@ -197,8 +214,10 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `updatedInput` to prepend a guarded env-loader (`AGENTS_RUNTIME_SET`,
   matching the precursor's convention) to a `PowerShell` tool call's own
   command — not by trying to persist state across hook invocations, which are
-  each their own fresh process and cannot. Whether the guard is visible across
-  separate PowerShell tool calls is UNVERIFIED. Every literal `\` in the
+  each their own fresh process and cannot. Each PowerShell TOOL call is a fresh
+  process too, so the guard never carries over and the loader runs on every
+  call: it therefore runs `env --diff` (the change set), not the whole
+  environment through `Invoke-Expression`. Every literal `\` in the
   command constant must be a raw string — a bare `\b` in a normal Python string
   literal silently becomes a backspace character, corrupting the emitted path;
   caught once by testing a draft through a real PowerShell spawn.
