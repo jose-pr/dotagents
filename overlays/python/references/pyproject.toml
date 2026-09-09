@@ -15,10 +15,13 @@ requires-python = ">=3.9"
 license = "MIT"
 license-files = ["LICENSE"]
 classifiers = [
+    # EXECUTOR: no "License ::" classifier — the license/license-files fields above
+    # (PEP 639) supersede it; declaring both makes modern build backends warn.
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
-    "Typing :: Typed",
     "Operating System :: OS Independent",
+    # Ship src/<package_name>/py.typed alongside this (kb/PYTHON.md).
+    "Typing :: Typed",
 ]
 # Zero required runtime deps where feasible; integrations go in extras (kb/PYTHON.md).
 dependencies = []

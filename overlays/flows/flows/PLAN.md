@@ -22,12 +22,16 @@ deviation triggers, and never defer questions to execution.
 
 ## Executor Kickoff
 
-> Read `$FLOWS_OVERLAY_ROOT/flows/EXEC.md` and, if present, `$<LANG>_OVERLAY_ROOT/kb/<LANG>.md`. Execute
-> `<path>` precisely; `EXEC.md` resolves its `Executor:` role and provider. Keep
-> `## Progress` live (`[/]` when started, `[x]` when done); record blockers and
-> continue independent work without asking the user.
+> Read `$FLOWS_OVERLAY_ROOT/flows/EXEC.md` and, if present,
+> `$<LANG>_OVERLAY_ROOT/kb/<LANG>.md`. Execute `<path>` precisely; `EXEC.md` resolves
+> its `Executor:` role and provider. Keep `## Progress` live (`[/]` when started,
+> `[x]` when done); record blockers and continue independent work without asking the
+> user.
 
-Shape reference: `$REFERENCES_OVERLAY_ROOT/references/master_refactoring_plan.md`.
+Start every plan by **copying** `$REFERENCES_OVERLAY_ROOT/references/plan_template.md`
+— imitating from memory or an old plan is how shapes drift. The shape reference
+`$REFERENCES_OVERLAY_ROOT/references/master_refactoring_plan.md` illustrates tone and
+detail only; the template wins any disagreement.
 
 ## Persistence
 
@@ -35,6 +39,10 @@ Use descriptive snake_case filenames. Plans live under the project checkout at
 `<project>/.agents/plans/`, never `~/.agents/plans/`. Resolve the project root before
 the first write; move approved harness drafts there with `Status: ready` and delete
 the scratch copy. Peer review uses `Status: review` and `REVIEW.md`.
+
+The `plans/` top level holds only live plans (`draft`/`ready`/`review`/`executing`);
+finished ones move to `plans/completed/` in the same edit that sets `Status: done`.
+A `done` plan at top level is drift — whoever sees one moves it.
 
 ## Ready Checklist
 

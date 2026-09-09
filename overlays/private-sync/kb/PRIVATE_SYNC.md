@@ -29,11 +29,12 @@ For each checked-out project, `<project>/.agents` is a **symlink** →
 `~/code/app` and a cloud checkout at `/home/user/app` both resolve to
 `projects/app`. Override with `--name` when two different repos share a basename.
 
-Everything below is **one way to use `link`/`sync`, not what dotagents requires**.
-Two knobs make that concrete: `--store-dir` / `$DOTAGENTS_STORE_DIR` moves the
-stores anywhere (relative to the agents dir, or an absolute path outside it), and
-a `hooks/sync` script replaces git entirely. Both `link` and `sync` are optional
-subcommands — `init`/`install` never touch a project directory.
+Everything below is **one way to use `link-project`/`sync-project`, not what
+dotagents requires**. Two knobs make that concrete: `--store-dir` /
+`$DOTAGENTS_STORE_DIR` moves the stores anywhere (relative to the agents dir, or an
+absolute path outside it), and a `hooks/sync` script replaces git entirely. Both
+`link-project` and `sync-project` are optional subcommands — `init`/`install` never
+touch a project directory.
 
 ## Commands
 
@@ -62,8 +63,10 @@ subcommands — `init`/`install` never touch a project directory.
 ## First-time setup
 
 ```bash
-# 1. Lay down the per-user base (and any overlays you want) into ~/.agents.
-python install.py install --overlays overlays/flows --overlays overlays/private-sync
+# 1. Lay down the per-user base into ~/.agents, then the overlays you want (from a
+#    checkout of the dotagents `overlays` branch, or $AGENTS_OVERLAYS_SRC).
+dotagents init -g
+dotagents overlays add flows private-sync --source <overlays-checkout>/overlays -g
 # 2. Make ~/.agents a git repo pointing at your private remote, and push.
 dotagents sync-project --remote git@github.com:<you>/.agents.git -m "init: agents repo"
 git -C ~/.agents push -u origin HEAD

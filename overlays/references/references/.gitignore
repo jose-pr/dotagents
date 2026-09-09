@@ -1,10 +1,19 @@
+# Category rule: nothing dot-prefixed at the repo root gets tracked except the
+# git config files re-included below (a category beats a list — same philosophy
+# as Cargo's exclude = [".*"]). Root-anchored on purpose; nested dotfiles are
+# governed by the specific rules below. If CI lands, re-include it with: !/.github/
+/.*
+!/.gitignore
+!/.gitattributes
+
 # Private agent config (always excluded — see the flows overlay, $FLOWS_OVERLAY_ROOT/flows/REPO.md).
-# No trailing slash on purpose: `dotagents link` makes .agents a symlink, which git
-# treats as a file, so a directory-only `.agents/` would NOT ignore it.
-# *.local.md is the unshared override (machine- or user-specific) — it takes
+# No trailing slash on purpose: `dotagents link-project` makes .agents a symlink, which git
+# treats as a file, so a directory-only `.agents/` would NOT ignore it. These stay
+# even though /.* already covers them at the root: they also catch nested copies.
+# *.local.* is the unshared override (machine- or user-specific) — it takes
 # precedence over its non-local sibling and must never be committed.
 .agents
-*.local.md
+*.local.*
 CLAUDE*
 .claude
 

@@ -16,14 +16,25 @@ Python-specific extras/overrides on top of the generic repo standard in
 - **Typing**: ship `src/<package_name>/py.typed` in the wheel. Hatchling includes it
   automatically for standard `src/` layouts; avoid explicit packages config — it can
   break editable metadata builds.
-- **Ship the consumer's docs in the package**: both `README.md` (`readme = "README.md"`
-  → long-description) and the root `AGENTS.md` (agent-facing library-interface doc, see
-  REPO.md) must land in the built sdist AND wheel. Hatchling puts `README.md` in the
-  sdist by default; to ship them as real files inside the installed package (so a
-  consuming agent can read them via `importlib.resources` from site-packages),
-  force-include into the wheel, e.g.
+- **Ship the consumer's docs in the package** [D40]: `README.md` (`readme = "README.md"`
+  → long-description) and `src/<pkg>/AGENTS.md` (the agent-facing library-interface
+  doc, see REPO.md) must land in the built sdist AND wheel.
+
+  Python's answer to REPO.md's packaging-boundary rule: the wheel ships
+  `src/<pkg>/` only, so the API header lives **inside the package dir** — a
+  repo-root file would not ship. (Contrast Rust, where the crate root *is* the
+  shipped root.) The optional repo-root `AGENTS.md` is REPO.md's contributor-
+  orientation file — layout, venvs, CI, release — never the API header.
+
+  Because `src/<pkg>/AGENTS.md` ships, it must be **self-contained**: no
+  repo-relative links (`src/...`, `CHANGELOG.md`, `LICENSE`), since an installed
+  consumer has no repo. Point at the project URL instead. The root `AGENTS.md`
+  may link freely — it is only ever read in a checkout. Hatchling
+  puts `README.md` in the sdist by default; to ship them as real files inside the
+  installed package (so a consuming agent can read them via `importlib.resources` from
+  site-packages), force-include into the wheel, e.g.
   `[tool.hatch.build.targets.wheel.force-include]` with
-  `"AGENTS.md" = "<package_name>/AGENTS.md"` (and the same for `README.md` if you want it
+  `"AGENTS.md" = "<package_name>/AGENTS.md"` (same for `README.md` if you want it
   importable-adjacent). Verify with `python -m build` + `unzip -l dist/*.whl`.
 - **Optional Dependencies**: zero *required* runtime deps where feasible. One extra
   per integration (`pkg[s3]`, never a catch-all bucket), guarded in code by
@@ -41,12 +52,21 @@ Python-specific extras/overrides on top of the generic repo standard in
   — that catches version-specific breakage (e.g. APIs added after the floor). Keep one
   venv per version you test against, named per the scheme below. CI runs the full matrix;
   locally, at minimum smoke-test latest + floor.
-- **Virtual Environments**: use `dotagents pyvenv` (this overlay's own command)
-  to create them — never `python -m venv` by hand. It creates
-  `<scope>/.pyvenv/<version>-<os>-<arch>/` (a sibling of `.agents`; project
-  scope by default, `-g` for the user-wide store shared across projects) and
-  no-ops if it already exists, so re-running it is always safe. `<os>` is
-  `nt`/`posix`/`darwin`, `<arch>` is `platform.machine().lower()` (e.g.
+- **Virtual Environments**: project-local `.venv/<version>-<os>-<arch>/`, gitignored,
+  where `<os>` is `os.name` (`nt`/`posix`) or `sys.platform` (`darwin`) and `<arch>` is
+  the machine (e.g. `.venv/3.9-nt-amd64`, `.venv/3.14-posix-x86_64`). The os/arch suffix
+  lets multiple interpreters and platforms coexist under one `.venv/` (e.g. a 3.9 floor
+  and 3.14 side by side) — needed whenever a repo tests more than one Python. A bare
+  `.venv/<version>/` is acceptable only for a single-interpreter, single-platform repo.
+  **Never** install to system/user Python unless explicitly told. Create:
+  `python --version` then `python -m venv .venv/<version>-<os>-<arch>`; always invoke the
+  venv-scoped executables (Windows `.venv\<...>\Scripts\{python,pip,pytest}`, Unix `bin/`).
+- **Shared venvs: `dotagents pyvenv`** (this overlay's own command). For a shared,
+  version-pinned venv rather than a per-project one, use it instead of creating one
+  by hand. It creates `<scope>/.pyvenv/<version>-<os>-<arch>/` (a sibling of
+  `.agents`; project scope by default, `-g` for the user-wide store shared across
+  projects) and no-ops if it already exists, so re-running it is always safe. `<os>`
+  is `nt`/`posix`/`darwin`, `<arch>` is `platform.machine().lower()` (e.g.
   `3.14.6-nt-amd64`) — the name is derived from the interpreter's actual probed
   version, not trusted from a filename, so the same version+os+arch always
   names the same dir regardless of which install produced it.
@@ -59,8 +79,7 @@ Python-specific extras/overrides on top of the generic repo standard in
     test suite against it. This is what actually catches version-specific
     breakage before it ships, not a per-commit ritual.
   - Always invoke venv-scoped executables from the created dir (Windows
-    `.pyvenv\<tag>\Scripts\{python,pip,pytest}`, Unix `bin/`). **Never** install
-    to system/user Python unless explicitly told.
+    `.pyvenv\<tag>\Scripts\{python,pip,pytest}`, Unix `bin/`).
 - **Running one-off Python: `dotagents py`**. If you need to actually run
   something (not just create the venv), use `dotagents py` — it creates the
   venv first if missing (same logic/naming as `pyvenv` above, not a second
@@ -83,9 +102,9 @@ Python-specific extras/overrides on top of the generic repo standard in
   having installed nothing, no output past pip's startup line). A
   pymanager/python.org build under a real path (`py -0p` shows one) does not
   have this problem.
-- **Install**: `<pyvenv-dir>/<Scripts|bin>/pip install -e ".[dev,<extras-with-tests>]"`
-  — include every extra that has tests depending on it, or those tests silently skip
-  instead of running.
+- **Install**: `.venv/<version>/<Scripts|bin>/pip install -e ".[dev,<extras-with-tests>]"`
+  (or the `.pyvenv/<tag>/` equivalent) — include every extra that has tests depending
+  on it, or those tests silently skip instead of running.
 - **Test config**: `pythonpath = ["src"]` + `testpaths` under
   `[tool.pytest.ini_options]` (in the template).
 - **Optional-extra tests guard their imports**: the module starts with
@@ -93,13 +112,25 @@ Python-specific extras/overrides on top of the generic repo standard in
   top-level import of a missing extra breaks *collection for the whole suite*. Verify
   with `pytest -rs` so skips are visible; "0 failures" with targeted tests skipped is
   not verification.
+- **Formatting**: **black**, on by default. Add `black` to the `dev` extra and pin
+  `[tool.black] target-version = ["py<floor>"]` in `pyproject.toml` to the project's
+  *minimum* supported Python, so it never emits syntax the floor cannot parse.
+  Format with `<venv>/black src/ tests/`; `--check` is the CI/verify form. Run it
+  before committing, and re-run tests after — black is safe but a reformat of a file
+  mid-edit can expose a genuine mistake (e.g. a missing blank line masking a lost
+  function boundary).
 - **Linting/type-checking**: none by default (no per-push CI, no ruff/mypy) — only if
-  the project deliberately opts in.
+  the project deliberately opts in. (Formatting is the exception: black is standard.)
 - **`.gitignore` language block** (source for the template placeholder):
   `__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.hypothesis/`, `.mypy_cache/`,
-  `.ruff_cache/`, `.coverage*`, `htmlcov/`, `*.egg-info/`, `.pyvenv/` (project-scope
-  `dotagents pyvenv` output; no trailing content to gitignore for `-g` runs, they
+  `.ruff_cache/`, `.coverage*`, `htmlcov/`, `*.egg-info/`, `.venv/`, `.pyvenv/`
+  (project-scope `dotagents pyvenv` output; nothing to gitignore for `-g` runs, they
   land outside the repo entirely).
+  Include the **whole** list even when a tool is not in use yet: these dirs
+  appear the first time anyone runs mypy/ruff/hypothesis, which is exactly when
+  a hand-written `.gitignore` turns out to be missing them. A global
+  `core.excludesFile` (`~/.config/git/ignore`) backstops a developer machine, but it
+  does not travel with the repo — so the repo block still has to be complete.
 
 ## CI/CD: Implementing the Three-Workflow Split
 
@@ -142,6 +173,12 @@ redeployed without cutting a release).
   `CHANGELOG.md` keep SemVer (`v1.0.0-rc.1`). Same release, two syntaxes — never
   "fix" one to match the other.
 - Bump `version` in the same commit as the changelog entry.
+- **Pre-1.0, additive API is a PATCH, not a minor** — the minor slot is reserved
+  for breaking the *documented* API (see `flows/REPO.md` "Versioning"). Worth
+  repeating here because a Keep-a-Changelog `### Added` section reads like a
+  minor and is not one: three new public methods under "Added", with no "Fixed"
+  and no removals, is still `0.9.0` → `0.9.1`. Consumers pin `~=0.9.0` precisely
+  so additions arrive without a re-read.
 - **Release-prep checklist** (assert before tagging, not after):
   - `src/<package_name>/py.typed` **exists** (a typed package MUST ship it — an
     absent marker means consumers get no types from the wheel) AND the
@@ -165,4 +202,5 @@ redeployed without cutting a release).
 - MkDocs strict-nav errors on repo-level markdown when snippets `base_path: ["."]` →
   set `docs_dir: docs` (the template does).
 - Windows/PowerShell venv console script resolving outside the venv →
-  `.\.pyvenv\<tag>\Scripts\python.exe -m <module>` instead of the direct script.
+  `.\.venv\<version>\Scripts\python.exe -m <module>` (or the `.pyvenv\<tag>` equivalent)
+  instead of the direct script.
