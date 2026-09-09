@@ -4,14 +4,14 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "sh \"$HOME/.agents/hooks/private-sync-start.sh\"" }
+          { "type": "command", "command": "sh \"${AGENTS_HOME:-$HOME/.agents}/overlays/private-sync/hooks/private-sync-start.sh\"" }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "sh \"$HOME/.agents/hooks/private-sync-stop.sh\"" }
+          { "type": "command", "command": "sh \"${AGENTS_HOME:-$HOME/.agents}/overlays/private-sync/hooks/private-sync-stop.sh\"" }
         ]
       }
     ]

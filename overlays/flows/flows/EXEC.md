@@ -5,11 +5,11 @@ Do not re-plan, second-guess recorded decisions, or silently downgrade required 
 
 ## Load Once
 
-1. Read `~/.agents/MODELS.md`; resolve the exact `Executor: family/subrole` using
+1. Read `$FLOWS_OVERLAY_ROOT/MODELS.md`; resolve the exact `Executor: family/subrole` using
    the calling host's native lane (Codex/OpenAI, Claude/Anthropic, Gemini/Google).
    Verify callability, apply settings, and record host/provider/model before edits.
    A permitted fallback and its settings are a recorded deviation.
-2. Read the matching `~/.agents/kb/<LANG>.md`, if present; its environment commands
+2. Read the matching `$<LANG>_OVERLAY_ROOT/kb/<LANG>.md` (the language overlay's kb, e.g. `$PYTHON_OVERLAY_ROOT/kb/PYTHON.md`), if present; its environment commands
    override generic habits.
 3. Read the project's working knowledge — `.agents/AGENTS.md` (repo-root and any
    intervening subtree `.agents/AGENTS.md`; deeper scope wins). A repo's root

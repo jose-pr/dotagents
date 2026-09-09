@@ -1,14 +1,14 @@
 # Rust Directives
 
 Rust-specific extras/overrides on top of the generic repo standard in
-`~/.agents/flows/REPO.md` — read that first. Only Rust-specific content here.
+`$FLOWS_OVERLAY_ROOT/flows/REPO.md` — read that first. Only Rust-specific content here.
 
 ## Packaging and Layout
 
 - **Source Layout**: Cargo's default layout (`src/lib.rs`/`src/main.rs`, `tests/`,
   `examples/`, `benches/`) already satisfies REPO.md's layout rule — don't invent
   extra nesting Cargo doesn't ask for. Build backend is Cargo itself.
-  Literal manifest: `~/.agents/references/Cargo.toml`.
+  Literal manifest: `$RUST_OVERLAY_ROOT/references/Cargo.toml`.
 - **MSRV**: `rust-version` in `Cargo.toml` (the `requires-python` equivalent) —
   cargo *refuses* to build below it, unlike npm's warn-only `engines.node`.
 - **Optional Dependencies**: zero *required* runtime deps where feasible. The
@@ -30,7 +30,7 @@ Rust-specific extras/overrides on top of the generic repo standard in
 
 ## CI/CD: Implementing the Two-Workflow Split
 
-Templates: `~/.agents/references/workflows/rust/{test,release}.yaml`.
+Templates: `$RUST_OVERLAY_ROOT/references/workflows/rust/{test,release}.yaml`.
 - Toolchain via `dtolnay/rust-toolchain` (not unmaintained `actions-rs`) +
   `Swatinem/rust-cache`. Matrix over OS × {`stable`, declared MSRV} — both must pass.
 - **Publish**: `cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}` baseline;

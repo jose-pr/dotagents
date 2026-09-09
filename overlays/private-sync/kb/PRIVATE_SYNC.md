@@ -78,8 +78,9 @@ On a second machine: `git clone git@github.com:<you>/.agents.git ~/.agents`, the
 
 ## Cloud sessions
 
-Cloud containers start from a fresh clone with no `~/.agents`. Two hooks (installed by
-this overlay to `~/.agents/hooks/`) make a cloud session identical to local:
+Cloud containers start from a fresh clone with no `~/.agents`. Two hooks (shipped in
+this overlay's `hooks/`, i.e. `$PRIVATE_SYNC_OVERLAY_ROOT/hooks/` once installed) make
+a cloud session identical to local:
 
 - `private-sync-start.sh` (SessionStart): clones the private repo to `~/.agents` on
   first run (or `git pull --rebase` if present), then `dotagents link-project`s the project.
@@ -88,12 +89,12 @@ this overlay to `~/.agents/hooks/`) make a cloud session identical to local:
 
 Wire them into your runner. For Claude Code, register them in **`~/.claude/settings.json`**
 (NOT the project's `.claude/`, which is git-ignored) — see
-`~/.agents/hooks/settings.snippet.json` for the exact block. On a hosted runner
+`$PRIVATE_SYNC_OVERLAY_ROOT/hooks/settings.snippet.json` for the exact block. On a hosted runner
 `tools/cloud-setup.sh` (below) merges that snippet into `~/.claude/settings.json`
 automatically at container start; on a local machine merge it in once by hand.
 
-**Fresh cloud containers (first clone).** The SessionStart hook lives at
-`~/.agents/hooks/…`, which doesn't exist until `~/.agents` is first cloned — so the
+**Fresh cloud containers (first clone).** The SessionStart hook lives in the
+installed overlay under `~/.agents/`, which doesn't exist until `~/.agents` is first cloned — so the
 initial clone can't come from the hook. Use `tools/cloud-setup.sh` from the **public**
 dotagents repo: a self-contained bootstrap (inlines its own token auth + rewrite bypass,
 so it runs before `~/.agents` exists) that clones-or-pulls the repo, installs the CLI,
@@ -128,7 +129,8 @@ Auth for the clone/push comes from the environment, never a committed file:
   it from the environment at auth time, so the secret is never written to `.git/config`
   or any file on disk. A token embedded directly in `DOTAGENTS_AGENTS_REMOTE` also works
   but is then persisted in `.git/config` — avoid it.
-- `DOTAGENTS_AGENTS_DIR` — where the repo lives (default `$HOME/.agents`).
+- `AGENTS_HOME` — where the repo lives (default `$HOME/.agents`; the legacy
+  `DOTAGENTS_AGENTS_DIR` is still read).
 
 Why a PAT (not the session's own GitHub auth): a hosted agent runner authenticates git
 through a per-session, repo-scoped credential, and a repo whose name starts with `.`

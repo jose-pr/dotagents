@@ -5,8 +5,8 @@ Run a build/test/lint command through this instead of reading its raw output.
 It prints a short verdict plus only the lines that matter, and writes the full
 log to a file you can grep if the verdict isn't enough.
 
-    py -3.12 ~/.agents/tools/summarize_run.py -- pytest -q
-    py -3.12 ~/.agents/tools/summarize_run.py --log build.log -- npm run build
+    py -3.12 $TOOLS_OVERLAY_ROOT/tools/summarize_run.py -- pytest -q
+    py -3.12 $TOOLS_OVERLAY_ROOT/tools/summarize_run.py --log build.log -- npm run build
 
 Exits with the wrapped command's exit code, so it drops into CI unchanged.
 

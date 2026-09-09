@@ -22,12 +22,12 @@ deviation triggers, and never defer questions to execution.
 
 ## Executor Kickoff
 
-> Read `~/.agents/flows/EXEC.md` and, if present, `~/.agents/kb/<LANG>.md`. Execute
+> Read `$FLOWS_OVERLAY_ROOT/flows/EXEC.md` and, if present, `$<LANG>_OVERLAY_ROOT/kb/<LANG>.md`. Execute
 > `<path>` precisely; `EXEC.md` resolves its `Executor:` role and provider. Keep
 > `## Progress` live (`[/]` when started, `[x]` when done); record blockers and
 > continue independent work without asking the user.
 
-Shape reference: `~/.agents/references/master_refactoring_plan.md`.
+Shape reference: `$REFERENCES_OVERLAY_ROOT/references/master_refactoring_plan.md`.
 
 ## Persistence
 

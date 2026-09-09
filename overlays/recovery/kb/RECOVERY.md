@@ -50,7 +50,7 @@ config's design log).
    where, what remains lossy, what should be regenerated later.
 6. Only delete the quarantine dir once everything worth keeping is merged and the
    provenance note exists.
-7. After restoring, run `py -3.12 ~/.agents/tools/audit_config.py` — it checks the
+7. After restoring, run your config's own audit tool, if it has one — it checks the
    full config manifest, forbidden patterns, and prints the size table.
 
 ## Gotchas

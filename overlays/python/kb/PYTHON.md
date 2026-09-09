@@ -1,7 +1,7 @@
 # Python Directives
 
 Python-specific extras/overrides on top of the generic repo standard in
-`~/.agents/flows/REPO.md` — read that first. Only Python-specific content here.
+`$FLOWS_OVERLAY_ROOT/flows/REPO.md` — read that first. Only Python-specific content here.
 
 ## Packaging and Layout
 
@@ -9,7 +9,7 @@ Python-specific extras/overrides on top of the generic repo standard in
   `import <package_name>` from silently resolving to the checkout instead of the
   installed artifact).
 - **Build Backend**: `hatchling` via `pyproject.toml` (no `setup.py`). Literal config:
-  `~/.agents/references/pyproject.toml`.
+  `$PYTHON_OVERLAY_ROOT/references/pyproject.toml`.
 - **Python Version**: modern floor (e.g. `requires-python = ">=3.9"`). Add
   `from __future__ import annotations` to every file using bare `X | Y` unions in a
   runtime-evaluated position — omitting it breaks the older end of the range.
@@ -103,7 +103,7 @@ Python-specific extras/overrides on top of the generic repo standard in
 
 ## CI/CD: Implementing the Three-Workflow Split
 
-Templates: `~/.agents/references/workflows/python/{test,release,docs}.yml` (D52 —
+Templates: `$PYTHON_OVERLAY_ROOT/references/workflows/python/{test,release,docs}.yml` (D52 —
 test, release, and docs are three separate workflows; docs deploys on its own so a
 release is never the first exercise of the docs build, and the site can be
 redeployed without cutting a release).
@@ -153,7 +153,7 @@ redeployed without cutting a release).
 ## Documentation Site
 
 - MkDocs + Material + `mkdocstrings[python]`; literal config:
-  `~/.agents/references/mkdocs.yml`. Plain-prose docstrings render fine —
+  `$PYTHON_OVERLAY_ROOT/references/mkdocs.yml`. Plain-prose docstrings render fine —
   mkdocstrings just won't build per-parameter tables without `:param:` sections.
 - `docs/changelog.md` may snippet-embed `CHANGELOG.md` (`pymdownx.snippets`) since its
   only links are absolute URLs — safe where a verbatim README embed isn't (REPO.md).

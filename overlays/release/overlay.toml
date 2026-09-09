@@ -3,5 +3,5 @@ description = "VCS-host-agnostic release helper: agent-driven commit-plan loop (
 requires = []
 routing = [
   """- Cut a release, build/apply a per-commit plan, or monitor CI after a release
-  tag (GitHub or GitLab) → ~/.agents/kb/RELEASE.md""",
+  tag (GitHub or GitLab) → $RELEASE_OVERLAY_ROOT/kb/RELEASE.md""",
 ]

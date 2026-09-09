@@ -3,10 +3,11 @@
 # For a symlinked project this just commits/pushes ~/.agents; for a copy-mode
 # project it copies .agents back into the store first. Never fails the session.
 #
-# Env: DOTAGENTS_AGENTS_DIR (default $HOME/.agents), CLAUDE_PROJECT_DIR (or PWD),
+# Env: AGENTS_HOME (default $HOME/.agents; legacy DOTAGENTS_AGENTS_DIR read too),
+# CLAUDE_PROJECT_DIR (or PWD),
 # DOTAGENTS_AGENTS_TOKEN (optional PAT; wired as a credential helper for the push).
 
-AGENTS_DIR="${DOTAGENTS_AGENTS_DIR:-$HOME/.agents}"
+AGENTS_DIR="${AGENTS_HOME:-${DOTAGENTS_AGENTS_DIR:-$HOME/.agents}}"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 
 dotagents_cmd() {

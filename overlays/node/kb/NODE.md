@@ -1,13 +1,13 @@
 # Node/TypeScript Directives
 
 Node/TypeScript-specific extras/overrides on top of the generic repo standard in
-`~/.agents/flows/REPO.md` — read that first. Only Node-specific content here.
+`$FLOWS_OVERLAY_ROOT/flows/REPO.md` — read that first. Only Node-specific content here.
 
 ## Packaging and Layout
 
 - **Source Layout**: `src/` (TypeScript) compiled to `dist/` (gitignored, published);
   `main`/`types`/`exports` all point into `dist/`, never `src/`. Literal manifest:
-  `~/.agents/references/package.json`.
+  `$NODE_OVERLAY_ROOT/references/package.json`.
 - **Build**: `tsc` alone for a simple single-entry library; a bundler (`tsup`/
   `esbuild`) only when dual ESM+CJS or multiple entry points are actually needed.
 - **Node Version**: floor via `engines.node` (e.g. `">=18"`) — Python's
@@ -34,7 +34,7 @@ Node/TypeScript-specific extras/overrides on top of the generic repo standard in
 
 ## CI/CD: Implementing the Two-Workflow Split
 
-Templates: `~/.agents/references/workflows/node/{test,release}.yaml`.
+Templates: `$NODE_OVERLAY_ROOT/references/workflows/node/{test,release}.yaml`.
 - Matrix over Node LTS versions (plus OS edges) the same way Python matrices over
   Python versions — oldest supported must pass.
 - **Publish**: `npm publish --provenance --access public` (OIDC provenance,

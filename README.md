@@ -17,13 +17,17 @@ Point `dotagents overlays add` at this directory as the source:
 dotagents overlays add flows python --source overlays
 
 # or set it once
-export DOTAGENTS_OVERLAYS_SRC=/path/to/overlays
+export AGENTS_OVERLAYS_SRC=/path/to/overlays
 dotagents overlays add flows
 ```
 
-Each overlay installs into your scope's `overlays/<name>/`, merges its always-on
-rules/routing into `AGENTS.md`, publishes any skills to the shared skills dir, and runs
-its `setup` script if it ships one. See the dotagents docs for the full overlay model:
+Each overlay installs into your scope's `overlays/<name>/` (what its manifest
+`requires` first), merges its always-on rules/routing into `AGENTS.md`, publishes any
+skills to the shared skills dir, and runs its `setup.py` if it ships one (none of
+these do). `dotagents env` then puts every installed overlay's `bin/` on `PATH`, its
+`lib/` on `PYTHONPATH`, and exports one `$<NAME>_OVERLAY_ROOT` per overlay -- the
+variable every routing line and cross-reference here uses instead of a hard path, so
+the store can live anywhere (`$AGENTS_HOME`) and nothing breaks when it moves. See the dotagents docs for the full overlay model:
 <https://jose-pr.github.io/dotagents/guide/overlays/>.
 
 ## The overlays
@@ -48,10 +52,18 @@ same relative path in your scope. Minimal shape:
 ```
 <name>/
   overlay.toml     # name, description, requires, routing lines, optional priority
-  kb/…             # knowledge-base files the routing points at
-  setup            # optional idempotent setup script, run on install
+  kb/…             # knowledge-base files the routing points at ($<NAME>_OVERLAY_ROOT/kb/…)
+  bin/, lib/       # optional; put on PATH / PYTHONPATH by `dotagents env`
+  cmds/            # optional duho command modules, discovered as `dotagents <name>`
+  env.py           # optional; run by `dotagents env`, prints a JSON object of env changes
+  CONTEXT.md       # optional; emitted by `dotagents context` (<NAME_OVERLAY_ROOT> expands)
   skills/<skill>/  # optional skills, published to the shared skills dir
+  setup.py         # optional idempotent install-time script -- only for real install work
 ```
+
+Reference another overlay's file as `$<NAME>_OVERLAY_ROOT/<path>` (e.g.
+`$FLOWS_OVERLAY_ROOT/flows/REPO.md`), never `~/.agents/<path>`: overlays install under
+`overlays/<name>/`, and the variable is what `dotagents env` exports for that dir.
 
 ## License
 

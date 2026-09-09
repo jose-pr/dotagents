@@ -13,10 +13,11 @@
 #                            (Contents: read/write). Wired via a git credential
 #                            helper that reads it from the environment at auth
 #                            time, so it is never written to .git/config or disk.
-#   DOTAGENTS_AGENTS_DIR     where the private repo lives (default: $HOME/.agents)
+#   AGENTS_HOME              where the private repo lives (default: $HOME/.agents;
+#                            the legacy DOTAGENTS_AGENTS_DIR is still read)
 #   CLAUDE_PROJECT_DIR       project checkout (set by the harness; falls back to PWD)
 
-AGENTS_DIR="${DOTAGENTS_AGENTS_DIR:-$HOME/.agents}"
+AGENTS_DIR="${AGENTS_HOME:-${DOTAGENTS_AGENTS_DIR:-$HOME/.agents}}"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 
 dotagents_cmd() {

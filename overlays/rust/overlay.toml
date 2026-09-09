@@ -2,5 +2,5 @@ name = "rust"
 description = "Rust repo conventions: kb, Cargo.toml template, CI workflows."
 requires = ["references"]
 routing = [
-  """- Rust work → ~/.agents/kb/RUST.md""",
+  """- Rust work → $RUST_OVERLAY_ROOT/kb/RUST.md""",
 ]

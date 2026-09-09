@@ -4,5 +4,5 @@ requires = []
 routing = [
   """- Set up or understand private-agents git sync — make ~/.agents a private repo,
   link a project's .agents to ~/.agents/projects/<name>, or wire cloud auto-linking →
-  ~/.agents/kb/PRIVATE_SYNC.md""",
+  $PRIVATE_SYNC_OVERLAY_ROOT/kb/PRIVATE_SYNC.md""",
 ]

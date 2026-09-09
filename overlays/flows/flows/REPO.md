@@ -1,9 +1,9 @@
 # Flow: Repository Standard (language-agnostic)
 
 Applies when creating a repo or bringing one up to standard — a gap against this list
-gets flagged or fixed, never silently skipped. If `~/.agents/kb/<LANG>.md` exists it
+gets flagged or fixed, never silently skipped. If `$<LANG>_OVERLAY_ROOT/kb/<LANG>.md` exists it
 supplies the concrete toolchain and may override specifics (copy it in from
-`~/.agents/examples/kb/<LANG>.md` first if missing and the user wants one); neither
+the `<lang>` overlay's `kb/<LANG>.md` first if missing and the user wants one); neither
 file restates the other.
 
 ## Layout
@@ -20,7 +20,7 @@ file restates the other.
 - `examples/`: runnable scripts/configs, not scratch files.
 - `docs/` + a docs site: hand-written landing page (never a verbatim `README.md`
   embed — its relative links break once served from a docs-site root; see
-  `~/.agents/references/docs-index.md`) plus auto-generated API reference where the
+  `$REFERENCES_OVERLAY_ROOT/references/docs-index.md`) plus auto-generated API reference where the
   ecosystem supports it (language doc names the generator, and whether a deploy step is
   even needed).
 
@@ -56,7 +56,7 @@ release (so it stays current between them).
   so tagging is the only thing left, then ask the user — per release; a yes once is not
   standing consent. (`ci-*` is always safe — see core `AGENTS.md`.)
 
-## Meta files (skeletons in `~/.agents/references/`; language doc adds specifics on top)
+## Meta files (skeletons in `$REFERENCES_OVERLAY_ROOT/references/`; language doc adds specifics on top)
 - `README.md`, `.gitignore`: from `references/`. `README.md` is the package
   long-description (`readme=` in the manifest) and MUST ship in the built package
   (sdist + wheel). `.gitignore` excludes `.agents` (slashless — `dotagents link` makes
@@ -94,4 +94,4 @@ SemVer for git tags and `CHANGELOG.md`. The package manifest's own version synta
 legitimately differ (the language doc says how, e.g. PEP 440) — never "fix" one to
 match the other.
 
-Per-language CI templates (opt-in examples): `~/.agents/examples/references/workflows/<lang>/`.
+Per-language CI templates (opt-in examples): `$<LANG>_OVERLAY_ROOT/references/workflows/<lang>/`.
