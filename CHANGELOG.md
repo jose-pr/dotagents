@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- `env --format export` (the form the SessionStart hook writes into
+  `$CLAUDE_ENV_FILE`) now single-quotes every value (`'` → `'\''`, control
+  characters via bash's `$'...'`). Values were JSON-quoted, i.e. inside DOUBLE
+  quotes, so `$(...)`, backticks and `$VAR` in any env value were executed or
+  expanded when the file was sourced, while `\n` and non-ASCII (`\u00e9`)
+  arrived as literal escape text.
+- The env chain no longer executes or sources a project's own top-level
+  `env.py` / `env`: only `<project>/.agents/*` and the user-local
+  `local.env` / `pre.local.env` run at the project levels. Every session start
+  ran the chain, so opening a session in a cloned repository with a top-level
+  `env.py` was code execution from that checkout.
+
+### Fixed
+
+- A directory named `env` (a common virtualenv name) is no longer "sourced" as
+  an env file; only regular files resolve.
+- Sourcing a plain env file that fails (missing, a directory, a syntax error)
+  now contributes nothing and warns, as documented. The bash command was a
+  `;` list, so `env -0` ran regardless and reported rc 0 with whatever had
+  been assigned before the error.
+- Bash's own `PWD` (in `/c/...` form), `OLDPWD`, `SHLVL` and `MSYSTEM*` are no
+  longer reported as a sourced file's changes; a non-UTF-8 byte in a sourced
+  value no longer aborts the whole assembly.
+- `env --format auto` returned `cmd` when invoked through the `dotagents.cmd`
+  wrapper from PowerShell (the wrapper cannot exec, so `cmd.exe` sits between
+  Python and the shell); a `cmd` whose own parent is a shell is now skipped.
+- `env` formats: `fish` escapes backslashes; `cmd` doubles `%` and flattens
+  newlines; `yaml` quotes values a reader would type (`true`, `123`, `null`,
+  `1e3`, leading indicators); `powershell`/`cmd` no longer mangle a
+  forward-slash native path (`C:/a/tools` became `C;A:\tools`); output is
+  written as UTF-8 bytes so a non-Latin-1 value cannot crash on a cp1252
+  console.
+- `init -g`, `overlays ... -g` and every other `resolve_scope` caller honour
+  `$AGENTS_HOME` (the var `env` itself emits) instead of the literal `~/.agents`,
+  and `--agents-dir` overrides the store in the project scope too (it was
+  silently ignored without `-g`). `resolve_user_store` moved to `_scope`
+  (still re-exported from `dotagents.cli`); the `findings` command's local
+  workaround is gone.
+- `overlays list` / `overlays add` apply the one overlay-name rule when listing
+  a source (`__pycache__`, `2fast`, dotdirs are no longer "available"), and a
+  bad source path names whether it came from `--source` or the env var.
+- `findings list` / `show` write UTF-8 bytes, so a description with a
+  non-Latin-1 character no longer raises on a cp1252 console.
+
 ### Added
 
 - feat: **`dotagents findings`** — a per-scope findings queue, shipped as the

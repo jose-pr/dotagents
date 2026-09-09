@@ -59,9 +59,13 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   merge order. It is `os.PathLike`, so it goes anywhere a path does.
   `recompose_overlay_block(...)` (over a *set* of overlays) is the only module
   function. `DEFAULT_PRIORITY = 500`.
-- `_scope` — `resolve_scope(global_scope, agents_dir=None)` and `resolve_source(...)`;
-  scope = *where installed overlays live* (user = the configurable store, project =
-  `<project>/.agents`), source = *where an overlay comes from* (bundled by default).
+- `_scope` — `resolve_scope(global_scope, agents_dir=None, project_root=None)`,
+  `resolve_user_store(agents_dir=None)` (the home of the chain `dotagents.cli`
+  re-exports) and `resolve_source(...)`; scope = *where installed overlays live*
+  (user = the configurable store, project = `<project>/.agents`), source = *where
+  an overlay comes from* (bundled by default). `-g` resolves the store through
+  `resolve_user_store` (`--agents-dir` → `$AGENTS_HOME` → legacy → `~/.agents`),
+  never the literal home dir; `--agents-dir` overrides the store in EITHER scope.
   Installed overlays are **discovered** by presence (`discover_overlays(scope)` →
   names, via `Overlay.discover`), not tracked in a registry. Nothing overlay-only
   lives here any more (the name regex / `is_valid_overlay_name` moved to `Overlay`).
@@ -74,7 +78,13 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `lib` onto PYTHONPATH the same way (`get_lib_paths`; not part of contract B), so
   an `env.py` and every subprocess can import an overlay's `lib/`; then two tiers
   (`pre.env*` then `env*`), later-overrides-earlier. Identity seeded before the
-  chain; proxy vars applied after.
+  chain; proxy vars applied after. **Amended 2026-09-09:** the project-root level
+  resolves only `pre.local.env` / `local.env` — a checkout's own top-level
+  `env.py` / `env` is never executed or sourced (it ran at every session start,
+  i.e. code execution from any cloned repo); only regular files count (a venv
+  dir named `env` is not an env file); a plain file whose `source` fails
+  contributes nothing (`source F || exit 1`, so the failure is visible); bash's
+  own `PWD`/`OLDPWD`/`SHLVL`/`MSYSTEM*` are never reported as a file's changes.
 - `_resolve` — `get_file_paths(*names, agents_dir, project_root, global_scope=False,
   include_missing=False)`: the Contract-A precedence walk / filename resolution.
 - `_merge` — managed-block merge for `init`'s `AGENTS.md` / `CLAUDE.md`, delimited by
