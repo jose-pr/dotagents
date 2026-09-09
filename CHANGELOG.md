@@ -90,6 +90,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to Claude's values. When the agent is named explicitly the identity is now
   that agent's, overriding the base env; without an explicit agent a pinned
   value is respected as before.
+- fix: the built `.pyz` lost the help text of the umbrella's own `--cmdspath`
+  flag (every subcommand's help survived). The zipapp source-repoint shim
+  covered each `dotagents.cli.<x>` command module but not the `dotagents.cli`
+  package itself, and it resolved a package's source as `cli.py` instead of
+  `cli/__init__.py`, so the umbrella kept its zip-internal `__file__` and duho
+  fell back to a bare flag. Both fixed; the top-level help in a `.pyz` now
+  matches a plain install.
 - fix: `context`'s `<NAME_OVERLAY_ROOT>` placeholder now also maps `.` (and any
   other non-alphanumeric character) in an overlay name to `_`, not only `-` —
   the name has to be a legal shell variable to be emitted by `env`, and the

@@ -118,6 +118,7 @@ _BUILTIN_COMMANDS = [
 # `_common` must be repointed here too, even though it ships no command class
 # of its own and is never in `_BUILTIN_COMMANDS`.
 _COMMAND_MODULES = (
+    "dotagents.cli",  # the umbrella itself: `Dotagents.cmdspath` lives here
     "dotagents.cli.init",
     "dotagents.cli.context",
     "dotagents.cli.env",
@@ -331,7 +332,16 @@ def _repoint_zipapp_sources() -> None:
         if current and Path(current).exists():
             continue  # plain install: source already readable
         top, _sep, rest = modname.partition(".")
-        rel = (rest.replace(".", "/") or "__init__") + ".py"
+        # A package's source is its `__init__.py` (`dotagents.cli` ->
+        # `cli/__init__.py`), a plain module's is `<name>.py`. Getting this
+        # wrong is silent: the resource is simply not found and the module
+        # keeps its zip-internal `__file__` -- which is how the umbrella's
+        # `--cmdspath` help vanished from the .pyz while every subcommand's
+        # help survived.
+        if hasattr(mod, "__path__"):
+            rel = (rest.replace(".", "/") + "/" if rest else "") + "__init__.py"
+        else:
+            rel = rest.replace(".", "/") + ".py"
         try:
             resource = _ir.files(top).joinpath(rel)
             if not resource.is_file():
