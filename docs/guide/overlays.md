@@ -42,7 +42,8 @@ your own. Point `--source` at a checkout of that branch to install any with
 dotagents overlays add python flows    # install into the scope, publish skills, merge rules/routing
 dotagents overlays list                # installed (discovered) + available (from source)
 dotagents overlays sync 'py*'          # refresh installed overlays matching a glob
-dotagents overlays remove python       # delete the overlay dir + unpublish its skills
+dotagents overlays remove python       # delete the overlay dir, unpublish its skills, un-merge its rules
+dotagents overlays show python         # describe one (manifest, requires, setup, skills)
 ```
 
 Scope is **project** by default, or **user** with `-g` / `--global` (the configurable

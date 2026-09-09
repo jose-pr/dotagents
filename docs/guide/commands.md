@@ -12,7 +12,7 @@ by default (the `<cwd>/.agents` store, when run inside a project) or **user** wi
 | Command | What it does |
 | --- | --- |
 | `init` | Lay down the neutral base config; block-merge `AGENTS.md`/`CLAUDE.md`; `--bin-dir` also writes a PATH wrapper. |
-| `overlays` | Manage opt-in overlays by name: `add` / `remove` / `list` / `sync`. |
+| `overlays` | Manage opt-in overlays by name: `add` / `remove` / `list` / `sync` / `show`. |
 | `context` | Assemble the effective context for one or more agents. |
 | `env` | Assemble the chained env-file layers + identity vars, in a chosen format. |
 | `build-pyz` | Build the self-contained `dotagents.pyz` zipapp. |
@@ -137,24 +137,45 @@ Manages opt-in overlays **by name**. See [Overlays](overlays.md) for the full mo
 dotagents overlays add python flows        # install into the scope, publish skills
 dotagents overlays list                    # installed (discovered) + available
 dotagents overlays sync 'py*'              # refresh installed overlays matching a glob
-dotagents overlays remove python           # delete the overlay dir + unpublish its skills
+dotagents overlays remove python           # delete the overlay dir, unpublish its skills, un-merge its rules
+dotagents overlays sync --overwrite        # also replace installed files whose content changed upstream
+dotagents overlays show python             # describe one: manifest, requires, setup, skills (--json)
 ```
+
+`add` installs what each manifest's `requires` names first (`--no-requires` to skip),
+validates every name before touching anything, and publishes skills from the installed
+copy. `remove` recomposes `AGENTS.md`'s managed block over the overlays that remain, so
+an overlay's rules and routing leave with it. `sync` never clobbers an installed file
+unless `--overwrite`.
 
 ## context
 
-Assembles the effective context an agent should load and prints it to **stdout** by
-default (POSIX convention); pass a path to write a file, or `--write-agent` to write each
-agent's native config file.
+Assembles the effective context an agent should load — the overlay `CONTEXT.md`s
+(by priority), then the store's and the project's `AGENTS.md` / `AGENTS.local.md`,
+minus whatever the harness already loads by itself (for Claude Code, whatever its
+`CLAUDE.md` files really `@`-include) — and prints it to **stdout** by default
+(POSIX convention); pass a path to write a file, or `--write-agent` to merge it into
+each agent's own instruction file.
 
 ```bash
 dotagents context                              # print the active agent's context to stdout
 dotagents context out.md                       # write it to out.md (positional path)
 dotagents context --format json --agents claude   # JSON to stdout
-dotagents context --write-agent                # write each agent's native config file
+dotagents context --inline                     # also inline the on-demand .md files it points at
+dotagents context --write-agent --agents codex # merge a managed block into <project>/AGENTS.md
 ```
 
 - `[output]` — positional destination. Default `-` (stdout); a path writes that file.
-- `--write-agent` — write each agent's native config file instead of `[output]`.
+- `--write-agent` — merge the context into each agent's own instruction file under
+  the project root, as a managed `dotagents:context` block refreshed in place:
+  Claude `.claude/CLAUDE.md`, Codex `AGENTS.md`, Gemini `GEMINI.md`, Cursor
+  `.cursorrules`, Copilot `.github/copilot-instructions.md`, Antigravity
+  `.agents/rules/dotagents.md`. Prefer the hook where the harness has one; this is
+  the static alternative. Mutually exclusive with `[output]` and `--format json`.
+- `--inline` — also append the on-demand `.md` files the sources reference (bare or
+  backticked relative paths). Off by default: the base rules say to read those
+  only when a task needs them, and inlining every mention makes a very large
+  session payload.
 - `--agents <a,b>` — which agents to generate for (default: the active agent).
 - `--format markdown|system-reminder|json` — output shape.
 - `-g` / `--global` — skip the project-level context files (the store is unaffected).
