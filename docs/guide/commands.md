@@ -196,6 +196,12 @@ directory name upper-cased with `-`/`.` turned into `_` (`my-ov` →
 an overlay's install dir by one name. Every root is seeded before the env-file
 chain and only if unset, so a value pinned upstream holds.
 
+`PATH` and `PYTHONPATH` are built the same way, also before the chain: every
+level's `bin/` (overlays, then the store, then the project's `.agents/`) is
+prepended to `PATH`, and every level's `lib/` that exists is prepended to
+`PYTHONPATH` — so an `env.py`, and every subprocess that inherits the env, can
+call an overlay's helpers by name and `import` an overlay's `lib/` module.
+
 !!! warning
     `env` output is sensitive by design — it prints resolved values. Treat the
     output as secret. The command itself never logs `DOTAGENTS_*` / `AGENTS_*`

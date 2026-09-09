@@ -8,7 +8,12 @@ Contract B, the exact sequence :func:`get_environment` performs:
 
   1. **Bins onto PATH FIRST**, before any env eval. Each level's ``bin`` dir
      (contract-A precedence order, *except* project-root) is prepended to
-     ``PATH`` so env scripts can call overlay helpers by name.
+     ``PATH`` so env scripts can call overlay helpers by name. **Libs onto
+     PYTHONPATH the same way** (added after contract B was frozen, so not part
+     of it): each level's ``lib`` dir that EXISTS is prepended to ``PYTHONPATH``
+     (:func:`get_lib_paths`), so an ``env.py`` -- and every subprocess that
+     inherits the env -- can ``import`` an overlay's library (an overlay ships
+     ``lib/<module>.py`` beside its ``cmds/``).
   2. **Two tiers, in order**: ALL ``pre.env.py`` / ``pre.env`` / ``pre.local.env``
      first, THEN ALL ``env.py`` / ``env`` / ``local.env`` -- the concatenation of
      two contract-A resolutions (:func:`resolve_env_files`).
@@ -429,6 +434,28 @@ def get_overlay_roots(*, agents_dir: Path) -> "list[Path]":
     return [overlay.path for overlay in Overlay.discover(agents_dir / "overlays")]
 
 
+def get_lib_paths(
+    *, agents_dir: Path, project_root: Path, global_scope: bool = False
+) -> "list[Path]":
+    """Each level's ``lib`` dir in contract-A precedence order, EXCEPT project-root
+    -- the ``PYTHONPATH`` counterpart of :func:`get_bin_paths`.
+
+    Only dirs that EXIST are returned (unlike ``bin``, whose include-missing
+    behaviour is frozen contract B): ``PYTHONPATH`` is read by every Python the
+    session spawns, and a dozen absent entries on it are noise a reader has to
+    rule out. project-root's ``lib`` is excluded for the same reason as its
+    ``bin``: a project's own top-level ``lib`` is not an agent library.
+    """
+    resolved = get_file_paths(
+        {"default": "lib", "project-root": ""},
+        agents_dir=agents_dir,
+        project_root=project_root,
+        global_scope=global_scope,
+        include_missing=False,
+    )
+    return [path for _level, path, _root in resolved if path.is_dir()]
+
+
 def _prepend_missing(path_entries: "list[str]", new_entries: "list[str]") -> "list[str]":
     """Prepend each new entry not already present, preserving precursor order.
 
@@ -439,6 +466,14 @@ def _prepend_missing(path_entries: "list[str]", new_entries: "list[str]") -> "li
         if entry not in path_entries:
             path_entries.insert(0, entry)
     return path_entries
+
+
+def _prepended_path_var(osenv: "dict[str, str]", var: str, entries: "list[str]") -> "Optional[str]":
+    """The new value of an ``os.pathsep``-joined path var with ``entries``
+    prepended (:func:`_prepend_missing` order), or ``None`` if nothing changes."""
+    current = osenv.get(var, "").split(os.pathsep) if osenv.get(var) else []
+    updated = os.pathsep.join(_prepend_missing(current, entries))
+    return updated if updated != osenv.get(var, "") else None
 
 
 # --------------------------------------------------------------------------- #
@@ -576,10 +611,20 @@ def get_environment(
     bin_paths = [str(p) for p in get_bin_paths(
         agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
     )]
-    current = osenv.get("PATH", "").split(os.pathsep) if osenv.get("PATH") else []
-    updated = os.pathsep.join(_prepend_missing(current, bin_paths))
-    if updated != osenv.get("PATH", ""):
+    updated = _prepended_path_var(osenv, "PATH", bin_paths)
+    if updated is not None:
         _apply({"PATH": updated})
+
+    # --- Libs onto PYTHONPATH, same shape, same moment --- so the env.py chain
+    # below (and every subprocess inheriting the env) can import an overlay's
+    # `lib/`. Existing dirs only (see `get_lib_paths`).
+    lib_paths = [str(p) for p in get_lib_paths(
+        agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
+    )]
+    if lib_paths:
+        updated = _prepended_path_var(osenv, "PYTHONPATH", lib_paths)
+        if updated is not None:
+            _apply({"PYTHONPATH": updated})
 
     # --- Contract B steps 2-5: the two tiers, chained, later-overrides-earlier. ---
     for level, path, _root in resolve_env_files(

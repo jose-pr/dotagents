@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   create-if-absent it would have pinned the first-installed version of
   `findings` and shadowed every later one. A same-named module dropped into a
   scope's `dotagents/cmds/` still overrides the bundled one.
+- feat: `env` prepends every level's existing **`lib/`** dir to `PYTHONPATH`,
+  the way it already prepends every level's `bin/` to `PATH` — overlays first,
+  then the store, then the project's `.agents/`, never the project root — and
+  does so before the env-file chain, so an `env.py` (and every subprocess that
+  inherits the env) can `import` an overlay's `lib/` module. Only dirs that
+  exist are added, and `PYTHONPATH` is untouched when there are none. The
+  formatter already converts any `*PATH` variable between Windows and POSIX
+  forms, so `PYTHONPATH` gets the same treatment as `PATH`.
 - feat: `env` emits one **`<NAME>_OVERLAY_ROOT`** per installed overlay (the
   overlay's install dir), seeded before the env-file chain like the two scope
   roots and, like them, only if unset. `NAME` is the overlay's directory name

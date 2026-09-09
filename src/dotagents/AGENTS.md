@@ -69,8 +69,12 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `priority` from the manifest (lower sorts earlier).
 - `_env` — chained env-file assembly + `env.py` execution (frozen contract B):
   `get_environment` / `get_diff` / `resolve_env_files` / `get_env_from_py` /
-  `get_env_from_file`. Bins onto PATH first, then two tiers (`pre.env*` then `env*`),
-  later-overrides-earlier. Identity seeded before the chain; proxy vars applied after.
+  `get_env_from_file`. Bins onto PATH first (`get_bin_paths`, every level's `bin`
+  except project-root, missing dirs included — frozen), and each level's EXISTING
+  `lib` onto PYTHONPATH the same way (`get_lib_paths`; not part of contract B), so
+  an `env.py` and every subprocess can import an overlay's `lib/`; then two tiers
+  (`pre.env*` then `env*`), later-overrides-earlier. Identity seeded before the
+  chain; proxy vars applied after.
 - `_resolve` — `get_file_paths(*names, agents_dir, project_root, global_scope=False,
   include_missing=False)`: the Contract-A precedence walk / filename resolution.
 - `_merge` — managed-block merge for `init`'s `AGENTS.md` / `CLAUDE.md`, delimited by
@@ -216,7 +220,10 @@ it (upper-case, `-`/`.`→`_`, suffix), so the var for `overlays/<n>/` is always
 same property, so an env file and a context file name an overlay's install dir
 identically. All of these
 roots are seeded before the file chain and only if unset, so a harness/env can
-pin them. Deliberately NOT emitted, despite looking like they
+pin them. `PATH` is emitted with every level's `bin` prepended, and `PYTHONPATH`
+with every level's existing `lib` prepended (both except project-root; the
+formatter treats any `*PATH` var as a path list for Windows/POSIX conversion).
+Deliberately NOT emitted, despite looking like they
 would be: `AGENTS_AGENT` (a named persona — nothing derives one, so there is
 nothing to emit) and `AGENTS_CODE_SESSION_ID` (dropped with the precursor's
 blanket `CLAUDE_*`→`AGENTS_*` rewrite). Do not branch on either. `resolve_scope` READS `AGENTS_PROJECT_ROOT` (then the

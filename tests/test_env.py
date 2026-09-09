@@ -234,6 +234,59 @@ def test_bin_paths_excludes_project_root(tree):
 
 
 # --------------------------------------------------------------------------
+# Libs onto PYTHONPATH: the PATH/bin mechanism, for each level's `lib` dir.
+# Existing dirs only; project-root excluded; seeded before the env chain.
+# --------------------------------------------------------------------------
+
+def test_lib_dirs_prepended_to_pythonpath(tree):
+    agents_dir, project_root = tree
+    (agents_dir / "overlays" / "aa" / "lib").mkdir()
+    (agents_dir / "lib").mkdir()
+    (project_root / ".agents" / "lib").mkdir()
+    base = {"PATH": "/usr/bin", "PYTHONPATH": "/site/extra"}
+    env = _run(agents_dir, project_root, base)
+    parts = env["PYTHONPATH"].split(os.pathsep)
+    assert str(agents_dir / "overlays" / "aa" / "lib") in parts
+    assert str(agents_dir / "lib") in parts
+    assert str(project_root / ".agents" / "lib") in parts
+    # The inherited entry survives, AFTER the prepended libs.
+    assert parts[-1] == "/site/extra"
+    # Absent lib dirs (overlay bb has none) are NOT added -- existing only.
+    assert str(agents_dir / "overlays" / "bb" / "lib") not in parts
+
+
+def test_no_lib_dirs_leaves_pythonpath_alone(tree):
+    agents_dir, project_root = tree
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert "PYTHONPATH" not in env
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin", "PYTHONPATH": "/keep"})
+    assert "PYTHONPATH" not in env  # unchanged -> not in the change set
+
+
+def test_lib_paths_exclude_project_root(tree):
+    agents_dir, project_root = tree
+    (project_root / "lib").mkdir()  # a project-ROOT lib must NOT be picked up
+    (agents_dir / "lib").mkdir()
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert str(project_root / "lib") not in env["PYTHONPATH"].split(os.pathsep)
+
+
+def test_env_py_can_import_from_overlay_lib(tree):
+    """The whole point: an env.py (and any subprocess) imports an overlay's
+    lib/ module by name, because PYTHONPATH is set BEFORE the chain runs."""
+    agents_dir, project_root = tree
+    lib = agents_dir / "overlays" / "aa" / "lib"
+    lib.mkdir()
+    (lib / "aa_helper.py").write_text("VALUE = 'from-aa-lib'\n", encoding="utf-8")
+    (agents_dir / "env.py").write_text(
+        "import json, aa_helper\nprint(json.dumps({'SEEN_LIB': aa_helper.VALUE}))\n",
+        encoding="utf-8",
+    )
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert env["SEEN_LIB"] == "from-aa-lib"
+
+
+# --------------------------------------------------------------------------
 # 2 + 3. Tier order (all pre.* then all env.*) and within-tier precedence walk.
 # --------------------------------------------------------------------------
 
