@@ -230,11 +230,36 @@ def test_resolve_scope_default_is_project(tmp_path):
 
 def test_discover_overlays_by_presence(tmp_path):
     scope = make_scope(tmp_path)
-    assert _scope.discover_overlays(scope) == []
+    assert Overlay.discover(scope.overlay_root) == []
     (scope.overlay_root / "alpha").mkdir(parents=True)
     (scope.overlay_root / "beta").mkdir()
     (scope.overlay_root / ".hidden").mkdir()
-    assert _scope.discover_overlays(scope) == ["alpha", "beta"]
+    assert [o.name for o in Overlay.discover(scope.overlay_root)] == ["alpha", "beta"]
+
+
+def test_installed_is_user_plus_project_with_project_shadowing(tmp_path):
+    """The ONE two-scope discovery: user store first, then the project's; a
+    same-named project overlay replaces the store's copy; no project store
+    (`-g`) = the user store alone."""
+    store = tmp_path / "store"
+    proj = tmp_path / "proj" / ".agents"
+    for d in ("store/overlays/common", "store/overlays/only-user",
+              "proj/.agents/overlays/common", "proj/.agents/overlays/only-proj"):
+        (tmp_path / d).mkdir(parents=True)
+    both = Overlay.installed(store, proj)
+    assert [(o.name, o.store) for o in both] == [
+        ("only-user", store), ("common", proj), ("only-proj", proj),
+    ]
+    assert [o.path for o in both if o.name == "common"] == [proj / "overlays" / "common"]
+    assert [(o.name, o.store) for o in Overlay.installed(store)] == [
+        ("common", store), ("only-user", store),
+    ]
+    # Variadic: any number of stores, a None is skipped, the LAST wins a name.
+    third = tmp_path / "third"
+    (third / "overlays" / "common").mkdir(parents=True)
+    names = [(o.name, o.store) for o in Overlay.installed(store, None, proj, third)]
+    assert names == [("only-user", store), ("only-proj", proj), ("common", third)]
+    assert Overlay.installed() == []
 
 
 def test_glob_filter():

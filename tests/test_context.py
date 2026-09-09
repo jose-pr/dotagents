@@ -215,6 +215,17 @@ def test_overlay_placeholders_expand(layout):
     assert "root=%s" % (agents_dir / "overlays" / "zeta") in text
 
 
+def test_project_overlay_shadows_the_store_copy_in_context(layout):
+    agents_dir, project_root = layout
+    pov = project_root / ".agents" / "overlays" / "zeta"   # same name as the store's
+    pov.mkdir(parents=True)
+    (pov / "CONTEXT.md").write_text("ZETA-FROM-PROJECT", encoding="utf-8")
+    gemini = _agents.GeminiAgent()
+    text = _context.assemble_context(gemini, agents_dir, project_root)
+    assert "ZETA-FROM-PROJECT" in text and "ZETA-CONTEXT" not in text
+    assert "ALPHA-CONTEXT" in text  # an unshadowed store overlay still contributes
+
+
 def test_project_scope_overlays_are_context_sources(layout):
     """`overlays add` installs into the PROJECT scope by default; its CONTEXT.md
     must be a source (only the store's overlays were walked before)."""

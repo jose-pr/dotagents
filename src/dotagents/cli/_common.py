@@ -282,10 +282,10 @@ def _installed_overlay_dirs(scope, source, *, adding=None, dry_run=False) -> "li
     from the scope like any other installed overlay. Order here is irrelevant --
     `_compose_block` sorts by `(priority, name)`.
     """
-    from dotagents import _scope
+    from dotagents._overlays import Overlay
 
     adding = list(adding or [])
-    installed = set(_scope.discover_overlays(scope))
+    installed = {overlay.name for overlay in Overlay.discover(scope.overlay_root)}
     names = sorted(installed | set(adding))
     dirs: "list[Path]" = []
     for name in names:

@@ -245,9 +245,9 @@ class OverlayRemove(DotAgentsArgs):
 
         if removed_names:
             remaining = [
-                scope.overlay_dir(n)
-                for n in _scope.discover_overlays(scope)
-                if n not in removed_names
+                overlay.path
+                for overlay in _overlays.Overlay.discover(scope.overlay_root)
+                if overlay.name not in removed_names
             ]
             base_block = (BASE_ROOT / "AGENTS.md").read_text(encoding="utf-8")
             if _overlays.recompose_overlay_block(
@@ -262,11 +262,13 @@ class OverlayRemove(DotAgentsArgs):
 
 
 class OverlayList(DotAgentsArgs):
-    """List overlays: those installed in the scope, and those available from source.
+    """List overlays: those installed in the scope (plus, in the project scope,
+    the user store's -- both are in play for a project session; a same-named
+    project overlay shadows the store's copy), and those available from source.
 
     ``installed`` is discovered by presence under ``<scope>/.agents/overlays/``; no
-    registry file. ``available`` is what the source offers. ``--json`` emits both as
-    a machine-readable object."""
+    registry file. ``available`` is what the source offers (``*`` = installed in
+    either scope). ``--json`` emits everything as a machine-readable object."""
 
     _parsername_ = "list"
 
@@ -283,27 +285,57 @@ class OverlayList(DotAgentsArgs):
 
         from dotagents import _scope
 
+        from dotagents._overlays import Overlay
+
         scope = self.resolve_scope()
-        installed = _scope.discover_overlays(scope)
+        # `Overlay.installed`: the user store's overlays, plus the project's when
+        # this is a project scope (every walk starts from the store, so both are
+        # in play; a same-named project overlay shadows the store's copy). With
+        # -g there is only the user store.
+        user_store = scope.agents_root if scope.level == "user" else _scope.resolve_user_store()
+        active = Overlay.installed(
+            user_store, scope.agents_root if scope.level == "project" else None
+        )
+        installed = [o.name for o in active if o.store == scope.agents_root]
+        user_installed = [
+            o.name for o in active if o.store == Path(user_store) and scope.level == "project"
+        ]
+        # Shadowed store copies are not in `active` at all; list them for the eye.
+        shadowed = [
+            o.name for o in Overlay.discover(Path(user_store) / "overlays")
+            if o.name in installed
+        ] if scope.level == "project" else []
         try:
             available = _scope.resolve_source(self.source).available()
         except SystemExit:
             available = []
+        names = {o.name for o in active}
 
         if self.json:
-            _write_stdout(_json.dumps({
+            payload = {
                 "scope": scope.level,
                 "root": str(scope.overlay_root),
                 "installed": installed,
                 "available": available,
-            }, indent=2) + "\n")
+            }
+            if scope.level == "project":
+                payload["user_root"] = str(Path(user_store) / "overlays")
+                payload["user_installed"] = user_installed
+                payload["shadowed"] = shadowed
+            _write_stdout(_json.dumps(payload, indent=2) + "\n")
             return 0
 
         self._logger_.info("scope: %s (%s)", scope.level, scope.overlay_root)
         lines = ["installed (%s):" % scope.level]
         lines += ["  %s" % n for n in installed] or ["  (none)"]
+        if scope.level == "project":
+            lines.append("installed (user):")
+            lines += ["  %s" % n for n in user_installed]
+            lines += ["  %s  (shadowed by the project's)" % n for n in shadowed]
+            if not user_installed and not shadowed:
+                lines.append("  (none)")
         lines.append("available (source):")
-        lines += ["  %s%s" % (n, " *" if n in installed else "") for n in available] or ["  (none)"]
+        lines += ["  %s%s" % (n, " *" if n in names else "") for n in available] or ["  (none)"]
         _write_stdout("\n".join(lines) + "\n")
         return 0
 
@@ -312,7 +344,8 @@ class OverlayShow(DotAgentsArgs):
     """Describe one overlay: where it is, what its manifest declares (description,
     priority, requires, routing, rules), its setup script, skills and file count.
 
-    Looks at the INSTALLED copy in the scope first, else the source's."""
+    Looks at the INSTALLED copy in the scope first (in the project scope, then
+    the user store's -- the one a project session would use), else the source's."""
 
     _parsername_ = "show"
 
@@ -339,6 +372,10 @@ class OverlayShow(DotAgentsArgs):
         scope = self.resolve_scope()
         where = "installed"
         path = scope.overlay_dir(name)
+        if not path.is_dir() and scope.level == "project":
+            # The user store's copy is what a project session would use.
+            where = "installed (user)"
+            path = _scope.Scope("user", _scope.resolve_user_store()).overlay_dir(name)
         if not path.is_dir():
             where = "source"
             path = _scope.resolve_source(self.source).overlay_dir(name)
@@ -421,7 +458,7 @@ class OverlaySync(DotAgentsArgs):
 
         scope = self.resolve_scope()
         source = _scope.resolve_source(self.source)
-        installed = _scope.discover_overlays(scope)
+        installed = [o.name for o in _overlays.Overlay.discover(scope.overlay_root)]
         names = _scope.filter_names(installed, self.pattern)
         if not names:
             self._logger_.info(

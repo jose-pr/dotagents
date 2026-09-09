@@ -192,7 +192,7 @@ class Overlay:
     #: allowed MID-name (``foo.bar``, ``v1.2``) but not as the first char, so
     #: ``.git``/``.hidden`` are excluded; a leading underscore (``__pycache__``) and
     #: a leading digit (``2fast``) are excluded too. One shared rule for
-    #: :meth:`discover` (which backs ``_scope.discover_overlays``, the contract-A
+    #: :meth:`discover` (which backs :meth:`installed`, the contract-A
     #: overlay walk in ``_resolve.py`` and the ``env`` overlay roots) and
     #: ``overlays add`` (D84). (Whether a path IS a directory is checked separately
     #: with ``is_dir()``, which follows symlinks -- a symlink-to-dir is a valid
@@ -214,10 +214,16 @@ class Overlay:
 
     DEFAULT_PRIORITY = DEFAULT_PRIORITY
 
-    __slots__ = ("path",)
+    __slots__ = ("path", "store")
 
-    def __init__(self, path: "str | os.PathLike[str]"):
+    def __init__(
+        self, path: "str | os.PathLike[str]", store: "str | os.PathLike[str] | None" = None
+    ):
         self.path = Path(path)
+        #: The store (an ``.agents`` root) this overlay was discovered in, when it
+        #: came from :meth:`installed`; ``None`` for a bare directory. Not part
+        #: of identity (``__eq__`` / ``__hash__`` are the path only).
+        self.store: "Optional[Path]" = Path(store) if store is not None else None
 
     # -- identity: the plain object protocol ---------------------------------
 
@@ -307,24 +313,54 @@ class Overlay:
     # -- discovery ------------------------------------------------------------
 
     @classmethod
-    def discover(cls, root: "str | os.PathLike[str]") -> "list[Overlay]":
-        """The overlays under an ``overlays/`` root, sorted by name.
+    def discover(
+        cls, root: "str | os.PathLike[str]", store: "str | os.PathLike[str] | None" = None
+    ) -> "list[Overlay]":
+        """The overlays under ONE ``overlays/`` root, sorted by name.
 
         No registry, no manifest required: a directory under ``root`` *is* an
         overlay as long as its name passes :meth:`is_valid_name` (so ``.git``/
         ``__pycache__``/dotfiles are skipped). ``is_dir()`` follows symlinks, so a
         symlink-to-dir counts. Empty if ``root`` is absent. This is the ONE
-        discovery rule -- ``_scope.discover_overlays``, the contract-A overlay
-        walk (``_resolve.get_file_paths``) and ``env``'s overlay roots all call it,
-        so they can never disagree about what is installed (D84)."""
+        discovery rule (D84): :meth:`installed` folds it over several stores,
+        and the ``overlays`` command's ``add``/``remove``/``sync`` use it directly
+        for the single scope they install into. ``store`` is stamped on each
+        result (see :attr:`store`)."""
         root = Path(root)
         if not root.is_dir():
             return []
         return [
-            cls(p)
+            cls(p, store)
             for p in sorted(root.iterdir())
             if p.is_dir() and cls.is_valid_name(p.name)
         ]
+
+    @classmethod
+    def installed(cls, *stores: "str | os.PathLike[str] | None") -> "list[Overlay]":
+        """Every overlay a session uses, across ``stores`` (``.agents`` roots)
+        given in precedence order -- the user store, then the project's
+        ``<project>/.agents``; ``-g`` passes the user store alone. A ``None``
+        store is skipped, so a caller can pass an optional project store as-is.
+
+        The overlays come back store by store, each store's sorted by name,
+        with every result stamped with the :attr:`store` it came from.
+        **Shadowing:** an overlay whose name also appears in a LATER store is
+        dropped -- the later store's copy REPLACES it, so the project's bin/lib/
+        env/cmds/CONTEXT.md/root var are the only ones that resolve, not both
+        stacked. This is the one function behind the contract-A walk
+        (``_resolve.get_file_paths``), ``env``'s overlay roots, ``context``'s
+        sources/placeholders/skills and ``overlays list``/``show``, so they can
+        never disagree about what is installed."""
+        per_store = [
+            cls.discover(Path(store) / "overlays", store)
+            for store in stores
+            if store is not None
+        ]
+        result: "list[Overlay]" = []
+        for i, found in enumerate(per_store):
+            later = {o.name for rest in per_store[i + 1 :] for o in rest}
+            result.extend(o for o in found if o.name not in later)
+        return result
 
     # -- manifest -------------------------------------------------------------
 

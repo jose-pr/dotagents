@@ -229,6 +229,34 @@ def test_show_describes_installed_then_source(world, capsys):
     assert out.startswith("shown (installed)")
 
 
+def test_list_shows_both_scopes_unless_global(tmp_path, monkeypatch, capsys):
+    from dotagents.cli import OverlayList
+
+    store = tmp_path / "store"
+    project = tmp_path / "proj"
+    for d in ("store/overlays/common", "store/overlays/only-user",
+              "proj/.agents/overlays/common", "proj/.agents/overlays/only-proj"):
+        (tmp_path / d).mkdir(parents=True)
+    monkeypatch.setenv("AGENTS_HOME", str(store))
+    monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(project))
+    monkeypatch.delenv("AGENTS_OVERLAYS_SRC", raising=False)
+
+    _run(OverlayList, json=False, source=str(tmp_path / "nosrc"))
+    out = capsys.readouterr().out
+    assert out.splitlines()[:6] == [
+        "installed (project):",
+        "  common",
+        "  only-proj",
+        "installed (user):",
+        "  only-user",
+        "  common  (shadowed by the project's)",
+    ]
+    _run(OverlayList, json=True, global_scope=True, source=str(tmp_path / "nosrc"))
+    data = json.loads(capsys.readouterr().out)
+    assert data["scope"] == "user" and data["installed"] == ["common", "only-user"]
+    assert "user_installed" not in data
+
+
 def test_umbrella_without_subcommand_exits_2():
     assert cli.Overlays()() == 2
     assert cli.Dotagents()() == 2

@@ -161,12 +161,30 @@ def test_project_scope_overlays_are_walked(roots):
     assert "FROM_PROJECT_OVERLAY" not in env_g and "PROJOV_OVERLAY_ROOT" not in env_g
 
 
-def test_project_overlay_root_wins_over_a_same_named_store_overlay(roots):
+def test_project_overlay_shadows_a_same_named_store_overlay(roots):
+    """One name, two scopes = ONE overlay, the project's: its root var, bin and
+    env.py are the only ones in play; the store's copy contributes nothing."""
     agents_dir, project_root = roots
-    (agents_dir / "overlays" / "same").mkdir(parents=True)
-    (project_root / ".agents" / "overlays" / "same").mkdir(parents=True)
+    store = agents_dir / "overlays" / "same"
+    proj = project_root / ".agents" / "overlays" / "same"
+    for ov, tag in ((store, "store"), (proj, "project")):
+        (ov / "bin").mkdir(parents=True)
+        (ov / "env.py").write_text(_py_emit({"WHICH": tag, tag.upper(): "1"}), encoding="utf-8")
     env = _run(agents_dir, project_root)
-    assert env["SAME_OVERLAY_ROOT"] == str(project_root / ".agents" / "overlays" / "same")
+    assert env["SAME_OVERLAY_ROOT"] == str(proj)
+    assert env["WHICH"] == "project" and "STORE" not in env
+    path = env["PATH"].split(os.pathsep)
+    assert str(proj / "bin") in path and str(store / "bin") not in path
+    # -g: no project scope, so the store's copy is back.
+    env_g = _run(agents_dir, project_root, global_scope=True)
+    assert env_g["SAME_OVERLAY_ROOT"] == str(store) and env_g["WHICH"] == "store"
+    # A session that already pinned the STORE's root (the SessionStart env)
+    # gets re-pointed at the project's copy, not left stale.
+    env_pinned = _env.get_environment(
+        agents_dir=agents_dir, project_root=project_root,
+        base_env={"PATH": "/usr/bin", "SAME_OVERLAY_ROOT": str(store)},
+    )
+    assert env_pinned["SAME_OVERLAY_ROOT"] == str(proj)
 
 
 def test_level_names_are_not_valid_overlay_names():

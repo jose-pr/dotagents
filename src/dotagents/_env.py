@@ -512,16 +512,14 @@ def get_overlay_roots(
     presence-by-directory rule (:meth:`Overlay.discover`) as the contract-A walk
     in :func:`dotagents._resolve.get_file_paths`, so the set of overlays that
     get a ``<NAME>_OVERLAY_ROOT`` var is exactly the set whose ``bin``/``env``
-    files the chain resolves. A project overlay comes LATER, so on a name clash
-    its root wins (later-overrides-earlier, like the rest of the chain).
+    files the chain resolves. A project overlay with the same name as a store
+    overlay SHADOWS it (:meth:`Overlay.installed`): only the project's dir is
+    returned, so its root var is the one emitted.
     """
-    roots = [overlay.path for overlay in Overlay.discover(agents_dir / "overlays")]
-    if project_root is not None and not global_scope:
-        roots.extend(
-            overlay.path
-            for overlay in Overlay.discover(Path(project_root) / ".agents" / "overlays")
-        )
-    return roots
+    project_store = (
+        None if project_root is None or global_scope else Path(project_root) / ".agents"
+    )
+    return [overlay.path for overlay in Overlay.installed(agents_dir, project_store)]
 
 
 def get_lib_paths(
@@ -702,12 +700,19 @@ def get_environment(
     # (`Overlay.root_var` is the single naming rule). Seeded before the chain so
     # env files can reference an overlay's install dir; only-if-unset, like the
     # scope roots, so an upstream pin holds.
-    pinned_upstream = {k for k, v in osenv.items() if k.endswith("_OVERLAY_ROOT") and v}
     for root in get_overlay_roots(
         agents_dir=agents_dir, project_root=project_root, global_scope=global_scope
     ):
         overlay = Overlay(root)
-        if overlay.root_var not in pinned_upstream:
+        pinned = osenv.get(overlay.root_var)
+        store_copy = str(Path(agents_dir) / "overlays" / overlay.name)
+        if not pinned:
+            _apply({overlay.root_var: str(overlay.path)})
+        elif pinned == store_copy and str(overlay.path) != store_copy:
+            # The session pinned the STORE's copy (the SessionStart env did), and
+            # a same-named PROJECT overlay now shadows it: re-point to the copy
+            # that is actually in play. Any other pin (a harness's own value) is
+            # respected as before.
             _apply({overlay.root_var: str(overlay.path)})
 
     # --- Contract B step 1: bins onto PATH FIRST. ---

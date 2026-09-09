@@ -41,7 +41,10 @@ class Scope:
 
     ``user`` -> ``<agents_dir>/`` (the configurable store, default ``~/.agents``).
     ``project`` -> ``<project_root>/.agents/``. The ``overlays/`` and ``skills/``
-    subdirs beneath ``agents_root`` are the discover-and-publish surfaces.
+    subdirs beneath ``agents_root`` are the discover-and-publish surfaces. The
+    overlays installed in ONE scope are ``Overlay.discover(scope.overlay_root)``;
+    the ones a session in the scope actually uses (user store + project, the
+    project's shadowing same-named store copies) are :meth:`Overlay.installed`.
     """
 
     def __init__(self, level: str, agents_root: Path):
@@ -60,7 +63,7 @@ class Scope:
     def cmds_dir(self) -> Path:
         """Directory of discovered command modules for this scope (D76).
 
-        ``<agents_root>/dotagents/cmds`` -- a seam alongside ``overlays``/``skills``.
+            ``<agents_root>/dotagents/cmds`` -- a seam alongside ``overlays``/``skills``.
         ``init`` creates it (with the README only; the bundled modules are always
         discovered from the package itself), and ``dotagents.cli._discover`` runs
         ``duho.discover_commands`` over it (per scope, user + project) so a
@@ -157,17 +160,6 @@ def project_root_default() -> Path:
         if value:
             return Path(value).expanduser()
     return Path.cwd()
-
-
-def discover_overlays(scope: Scope) -> "list[str]":
-    """Installed overlay names in this scope -- the presence of ``overlays/<name>/``.
-
-    No registry: a directory under ``<scope>/overlays/`` *is* an installed overlay
-    (manifest or not) as long as its name is a valid overlay name
-    (:meth:`Overlay.discover` -- so ``.git``/``__pycache__``/dotfiles are
-    skipped). Returns sorted names; empty if the root is absent.
-    """
-    return [overlay.name for overlay in Overlay.discover(scope.overlay_root)]
 
 
 def filter_names(names: "list[str]", pattern: "Optional[str]") -> "list[str]":

@@ -5,12 +5,17 @@ from pathlib import Path
 
 import pytest
 
+from dotagents._overlays import Overlay
 from dotagents._scope import (
     Scope,
-    discover_overlays,
     project_root_default,
     resolve_scope,
 )
+
+
+def discover_overlays(scope):
+    """Names of the overlays installed in ONE scope (the former _scope helper)."""
+    return [o.name for o in Overlay.discover(scope.overlay_root)]
 
 _ROOT_VARS = ("AGENTS_PROJECT_ROOT", "CLAUDE_PROJECT_DIR")
 

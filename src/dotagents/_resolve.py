@@ -34,6 +34,11 @@ def get_file_paths(
     5. project (project_root / .agents) -- skipped if global_scope
     6. project-root (project_root) -- skipped if global_scope
 
+    An overlay installed in BOTH scopes under the same name is one overlay, the
+    project's: it SHADOWS the store's copy entirely (:meth:`Overlay.installed`,
+    the one discovery function), so its bin/lib/env/cmds/CONTEXT.md are the only
+    ones that resolve -- not both copies stacked.
+
     Each returned tuple is ``(level, path, root)``: for an overlay, ``level`` is
     the overlay's directory name and ``root`` its directory; for every other
     level ``root`` is ``None`` -- that is how callers tell overlays apart.
@@ -59,20 +64,18 @@ def get_file_paths(
 
             files.append((level, location / template, root))
 
-    def add_overlays(overlays_root: Path) -> None:
-        # An installed overlay is any directory under ``overlays/`` whose name is
-        # a valid overlay name -- ``Overlay.discover``, the SAME routine
-        # ``_scope.discover_overlays`` uses (the two must agree on what counts).
-        # No manifest of any kind is required -- not ``CONTEXT.md``, not
-        # ``overlay.toml``. The old ``CONTEXT.md`` gate was a precursor leftover
-        # that silently excluded EVERY real dotagents overlay from the walk (D84).
-        from dotagents._overlays import Overlay
+    # No manifest of any kind is required for an overlay to count -- not
+    # ``CONTEXT.md``, not ``overlay.toml`` (the old ``CONTEXT.md`` gate was a
+    # precursor leftover that silently excluded EVERY real overlay, D84).
+    from dotagents._overlays import Overlay
 
-        for overlay in Overlay.discover(overlays_root):
+    project_store = None if global_scope else Path(project_root) / ".agents"
+    overlays = Overlay.installed(agents_dir, project_store)
+
+    # 1. User-store overlays (minus the ones a same-named project overlay shadows)
+    for overlay in overlays:
+        if overlay.store == Path(agents_dir):
             add_name_paths(overlay.path, overlay.name, root=overlay.path, is_overlay=True)
-
-    # 1. User-store overlays
-    add_overlays(agents_dir / "overlays")
 
     # 2. System
     add_name_paths(Path("/etc/agents"), "system")
@@ -82,7 +85,9 @@ def get_file_paths(
 
     # 4, 5 & 6. Project (if not global)
     if not global_scope:
-        add_overlays(project_root / ".agents" / "overlays")
+        for overlay in overlays:
+            if overlay.store == project_store:
+                add_name_paths(overlay.path, overlay.name, root=overlay.path, is_overlay=True)
         add_name_paths(project_root / ".agents", "project")
         add_name_paths(project_root, "project-root")
 
