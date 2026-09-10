@@ -107,7 +107,7 @@ managed block into `config.toml`:
 ```toml
 # dotagents:begin
 [shell_environment_policy]
-set = {AGENT = "codex", AGENTS_HARNESS = "codex", AGENTS_VENDOR = "openai", AGENTS_HOME = "...", AGENTS_PROJECT_ROOT = "..."}
+set = {AGENT = "codex", AGENTS_HARNESS = "codex", AGENTS_VENDOR = "openai", AGENTS_HOME = "...", AGENTS_PROJECT_ROOT = "...", AGENTS_PYTHON = "..."}
 # dotagents:end
 ```
 

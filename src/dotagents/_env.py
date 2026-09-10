@@ -43,8 +43,10 @@ Plan-08 identity/proxy model is wired into the output around the file chain:
     agent, in which case the identity is that agent's regardless (the static
     Codex env block is written FOR Codex, from whichever harness runs ``init``).
   * **Roots** are seeded right after identity, also before the chain and also
-    only-if-unset: the two scope roots ``AGENTS_HOME`` / ``AGENTS_PROJECT_ROOT``
-    and one ``<NAME>_OVERLAY_ROOT`` per installed overlay
+    only-if-unset: the two scope roots ``AGENTS_HOME`` / ``AGENTS_PROJECT_ROOT``,
+    the interpreter ``AGENTS_PYTHON`` (``sys.executable`` -- the Python the CLI
+    is running under, a default any shim or helper can trust), and one
+    ``<NAME>_OVERLAY_ROOT`` per installed overlay
     (:func:`get_overlay_roots`, named by :attr:`_overlays.Overlay.root_var` --
     the same name ``dotagents context`` expands as a placeholder), so an env
     file can reference an overlay's install dir by name.
@@ -665,6 +667,14 @@ def get_environment(
         _apply({"AGENTS_HOME": str(agents_dir)})
     if not osenv.get("AGENTS_PROJECT_ROOT"):
         _apply({"AGENTS_PROJECT_ROOT": str(project_root)})
+
+    # --- Interpreter --- AGENTS_PYTHON = the Python dotagents itself is running
+    # under, so shims and helper scripts have a known-good default: a bare
+    # `python`/`python3` on PATH may be a Store alias stub, an emulated build,
+    # a venv's, or absent, while this one demonstrably runs the CLI. Only-if-
+    # unset, like the roots, so a user or harness pin holds.
+    if not osenv.get("AGENTS_PYTHON"):
+        _apply({"AGENTS_PYTHON": sys.executable})
 
     # --- Overlay roots --- one `<NAME>_OVERLAY_ROOT` per installed overlay, the
     # same name `dotagents context` expands as a `<NAME_OVERLAY_ROOT>` placeholder

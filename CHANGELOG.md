@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `env` exports `AGENTS_PYTHON`: the interpreter `dotagents` itself is running
+  under (`sys.executable`), seeded only if unset like the scope roots. Shims
+  and helper scripts now have a default Python they can trust, where a bare
+  `python`/`python3` on PATH may be a Store alias stub, an emulated build, a
+  venv's, or missing.
+
 ### Fixed
 
 - `init` no longer registers the PowerShell hook variants on POSIX hosts. A

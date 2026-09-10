@@ -311,7 +311,10 @@ Emitted by the identity/env layer (safe to branch on in env files):
 `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENTS_MODEL`, `AGENT`, `AGENTS_PROXY`,
 `AGENTS_WEBFETCH_PROXY_URL`, plus the two
 scope roots — `AGENTS_HOME` (the user store, `agents_dir`/`~/.agents`) and
-`AGENTS_PROJECT_ROOT` (this project's root) — and one **`<NAME>_OVERLAY_ROOT`**
+`AGENTS_PROJECT_ROOT` (this project's root) — **`AGENTS_PYTHON`** (the
+interpreter `dotagents` itself runs under, `sys.executable`; the default a
+shim or helper script should run Python with, since a bare `python`/`python3`
+on PATH may be a stub, emulated, or missing; only-if-unset) and one **`<NAME>_OVERLAY_ROOT`**
 per installed overlay under `<store>/overlays/` (`_env.get_overlay_roots`, the
 same presence-by-directory rule as the contract-A walk). `NAME` is the overlay's
 directory name upper-cased with every non-alphanumeric character turned into `_`

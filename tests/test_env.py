@@ -468,6 +468,23 @@ def test_identity_stamped_claude(tree):
     assert env["AGENTS_MODEL"] == "claude-opus-4-8"
 
 
+def test_agents_python_is_the_running_interpreter(tree):
+    """Shims and helpers need a Python they can trust: the one running the CLI.
+    A bare `python`/`python3` on PATH may be a Store stub, an emulated build or
+    absent (all three seen on one Windows ARM64 box), so `env` exports it."""
+    import sys
+
+    agents_dir, project_root = tree
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert env["AGENTS_PYTHON"] == sys.executable
+
+
+def test_agents_python_pin_is_respected(tree):
+    agents_dir, project_root = tree
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin", "AGENTS_PYTHON": "/opt/py/bin/python3"})
+    assert "AGENTS_PYTHON" not in env, "only-if-unset: an upstream pin is not re-stamped"
+
+
 def test_identity_no_blanket_rewrite_artifacts(tree):
     agents_dir, project_root = tree
     base = {"PATH": "/usr/bin", "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "abc"}
