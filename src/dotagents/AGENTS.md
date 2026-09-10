@@ -303,7 +303,9 @@ Config / path / sync vars (`AGENTS_*`, non-secret — read, and some emitted):
 - `AGENTS_OVERLAYS_REPO` — the default overlay repo for `overlays` (always a
   collection: a directory of overlays or a registry file, at a local path, an
   http(s) URL, or inside a git `<repo>[@ref][#path]`; a registry's values are
-  sources, one overlay each, a git path being the overlay's root), and
+  sources, one overlay each, a git path being the overlay's root, a relative
+  path being relative to the registry file -- same repo and ref for a
+  registry inside a checkout, `_sources.resolve_relative`), and
   `AGENTS_OVERLAYS_REPO_<KEY>` — one repo per variable, ordered by KEY, consulted
   before the default; both after `--repo` and before the stores'
   `dotagents.{json,toml,yaml}` registries and the bundled `overlays/`.

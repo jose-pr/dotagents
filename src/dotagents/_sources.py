@@ -27,6 +27,14 @@ and an ``http(s)://`` location is a registry file, fetched; for a **source**
 it is the overlay's root directory, and when absent *the repository root is
 the overlay*.
 
+A source written as a **relative path** (``./python``, ``../shared/net``,
+``overlays/rust``) is relative to the registry it is in: the registry file's
+directory for a local file, and for a registry inside a git checkout the
+same repository at the same ref, the path joined onto the registry file's
+directory (``overlays/reg.toml`` saying ``./rust`` means
+``<repo>@<ref>#overlays/rust``). A registry fetched over http(s) has no
+overlays beside it, so a relative entry there is an error.
+
 Repos are consulted in order, and **the first that offers a name wins**:
 ``--repo`` values as given, then ``$AGENTS_OVERLAYS_REPO_<KEY>`` sorted by
 ``KEY``, then ``$AGENTS_OVERLAYS_REPO`` (the default repo), then
@@ -43,6 +51,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 import os
 import re
 import subprocess
@@ -308,12 +317,17 @@ class DirRepo(object):
 
 class RegistryRepo(object):
     """A registry: ``entries`` map names (or aliases) to specs, materialized on
-    demand through ``cache``."""
+    demand through ``cache``. ``base`` is where the registry document lives
+    (see :func:`resolve_relative`); ``None`` leaves a relative entry as the
+    process sees it."""
 
-    def __init__(self, origin: str, entries: "dict[str, str]", cache: GitCache):
+    def __init__(
+        self, origin: str, entries: "dict[str, str]", cache: GitCache, base: "Optional[Spec]" = None,
+    ):
         self.origin = origin
         self.entries = entries
         self.cache = cache
+        self.base = base
         self._by_normalized = {Overlay.normalize_name(k): k for k in entries}
 
     @property
@@ -341,6 +355,7 @@ class RegistryRepo(object):
                 "error: registry %s: %r is an http(s) URL, which can only be a registry; "
                 "an overlay needs a directory or a git spec" % (self.origin, key)
             )
+        spec = resolve_relative(spec, self.base, origin=self.origin, key=key)
         target = locate(spec, self.cache)
         if not target.is_dir():
             raise SystemExit("error: registry %s: %r resolves to %s, not a directory" % (self.origin, key, spec.display()))
@@ -353,6 +368,48 @@ class RegistryRepo(object):
 
     def __repr__(self) -> str:
         return "RegistryRepo(%s)" % self.origin
+
+
+def is_relative(spec: Spec) -> bool:
+    """A ``dir`` spec whose location is a relative path (not absolute, not
+    rooted, not ``~``-prefixed): meaningful only against the registry it came
+    from. Rooted (``/x``) is spelled out because on Windows ``os.path.isabs``
+    stopped counting a drive-less root as absolute in 3.13."""
+    return spec.kind == "dir" and not (
+        os.path.isabs(spec.location) or spec.location.startswith(("~", "/", "\\"))
+    )
+
+
+def resolve_relative(spec: Spec, base: "Optional[Spec]", *, origin: str, key: str) -> Spec:
+    """``spec`` made absolute against ``base``, the place its registry lives,
+    when it is a relative path; any other spec, or no base, comes back as is.
+
+    ``base`` is a ``dir`` spec (the registry file's directory), a ``git`` spec
+    (the repository, ref and the registry file's directory inside it -- the
+    entry stays in the same repository at the same ref), or a ``url`` spec
+    (an http(s) registry, which has no overlays beside it: an error)."""
+    if base is None or not is_relative(spec):
+        return spec
+    if base.kind == "dir":
+        location = os.path.normpath(os.path.join(base.location, spec.location))
+        return Spec("dir", location, None, spec.path)
+    if base.kind == "git":
+        parts = [base.path or "", spec.location.replace("\\", "/")]
+        if spec.path:
+            parts.append(spec.path)
+        rel = posixpath.normpath(posixpath.join(*parts)).strip("/")
+        if rel == "..":
+            rel = "../"
+        if rel.startswith("../"):
+            raise SystemExit(
+                "error: registry %s: %r (%s) leaves the repository it is in"
+                % (origin, key, spec.location)
+            )
+        return Spec("git", base.location, base.ref, None if rel in ("", ".") else rel)
+    raise SystemExit(
+        "error: registry %s: %r (%s) is a relative path, but an http(s) registry has "
+        "no overlays beside it; use an absolute path or a git spec" % (origin, key, spec.location)
+    )
 
 
 def locate(spec: Spec, cache: GitCache) -> Path:
@@ -384,11 +441,20 @@ def load_repo(spec_text: str, cache: GitCache) -> Any:
         from urllib.parse import urlsplit
 
         suffix = Path(urlsplit(spec.location).path).suffix
-        return RegistryRepo(origin, parse_document(_read_url(spec.location), suffix, origin), cache)
+        entries = parse_document(_read_url(spec.location), suffix, origin)
+        return RegistryRepo(origin, entries, cache, base=Spec("url", spec.location))
     target = locate(spec, cache)
     if target.is_dir():
         return DirRepo(target, origin)
-    return RegistryRepo(origin, parse_document(target.read_text(encoding="utf-8"), target.suffix, origin), cache)
+    entries = parse_document(target.read_text(encoding="utf-8"), target.suffix, origin)
+    # Relative entries resolve against the registry FILE: its directory, or
+    # for a file inside a git checkout, the same repository and ref with the
+    # file's directory as the path prefix.
+    if spec.kind == "git":
+        base = Spec("git", spec.location, spec.ref, posixpath.dirname(spec.path or "") or None)
+    else:
+        base = Spec("dir", str(target.parent))
+    return RegistryRepo(origin, entries, cache, base=base)
 
 
 def registry_files(*stores: "Optional[Path]") -> "list[Path]":

@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `<repo>[@<branch|tag|commit>][#<path>]`, the path picking the directory or
   registry file in the checkout. A source is one overlay: a local directory,
   or a git spec whose path is the overlay's root (no path: the repository root
-  is the overlay). Checkouts are cached under `<user store>/.cache/overlays/`
+  is the overlay); a relative path is relative to the registry file, and for a
+  registry inside a git checkout it names the same repository at the same
+  ref. Checkouts are cached under `<user store>/.cache/overlays/`
   and refreshed on every use; credentials in a repo URL never reach a log line.
 - `dotagents launch [<agent>] [-- <the agent's arguments>]`, a bundled command
   module like `findings`: starts an agent's CLI (`claude`, `codex`, `gemini`,

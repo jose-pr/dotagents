@@ -108,7 +108,8 @@ JSON/TOML/YAML registry file mapping names to **sources**. It lives at a local p
 `<repo>[@<branch|tag|commit>][#<path>]`, where the path picks the directory or registry
 file in the checkout (no path: the checkout root). A source names **one** overlay: a
 local directory, or a git spec whose path is the overlay's root directory (no path: the
-repository root is the overlay). Name repos with `--repo`,
+repository root is the overlay); a relative path is relative to the registry file, and
+inside a git checkout stays in the same repository at the same ref. Name repos with `--repo`,
 `$AGENTS_OVERLAYS_REPO_<KEY>` / `$AGENTS_OVERLAYS_REPO`, or a `dotagents.{json,toml,yaml}`
 in the project or user store.
 Installed overlays are *discovered* by their presence under `<scope>/.agents/overlays/`.

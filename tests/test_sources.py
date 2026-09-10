@@ -191,6 +191,86 @@ def test_a_directory_repo_looks_up_the_overlay_by_name(tmp_path):
         _sources.load_repo(str(tmp_path / "missing"), GitCache(tmp_path / "cache"))
 
 
+def test_relative_entries_resolve_against_the_registry_file(tmp_path, monkeypatch):
+    """A relative source is relative to the registry FILE it is in, never to
+    the process's cwd (the file may be the store's, read from anywhere)."""
+    cache = GitCache(tmp_path / "cache")
+    _write(tmp_path / "reg" / "sub" / "r.json", json.dumps({
+        "one": "../one",            # a sibling of the registry's directory
+        "two": "./many",            # a directory of overlays holding two/
+        "three": "many/three",      # no ./ needed
+    }))
+    _write(tmp_path / "reg" / "one" / "overlay.toml", 'name = "one"\n')
+    _write(tmp_path / "reg" / "sub" / "many" / "two" / "overlay.toml", 'name = "two"\n')
+    _write(tmp_path / "reg" / "sub" / "many" / "three" / "overlay.toml", 'name = "three"\n')
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    reg = _sources.load_repo(str(tmp_path / "reg" / "sub" / "r.json"), cache)
+    assert isinstance(reg, RegistryRepo) and reg.base == Spec("dir", str(tmp_path / "reg" / "sub"))
+    assert reg.overlay_dir("one") == tmp_path / "reg" / "one"
+    assert reg.overlay_dir("two") == tmp_path / "reg" / "sub" / "many" / "two"
+    assert reg.overlay_dir("three") == tmp_path / "reg" / "sub" / "many" / "three"
+
+
+def test_resolve_relative_forms():
+    rr = _sources.resolve_relative
+    d = Spec("dir", "/srv/reg")
+    g = Spec("git", "https://h/x.git", "dev", "overlays")
+    # Absolute, ~-prefixed, git and url specs are never touched.
+    for text in ("/abs/x", "~/x", "https://h/y.git@v1#p", "git+https://h/y", "https://h/r.json"):
+        spec = parse_spec(text)
+        assert rr(spec, d, origin="r", key="k") == spec
+        assert rr(spec, g, origin="r", key="k") == spec
+    # No base: as is.
+    assert rr(parse_spec("./x"), None, origin="r", key="k") == parse_spec("./x")
+    # A dir base joins and normalizes; a #path on the entry survives.
+    assert rr(parse_spec("./x/../y"), d, origin="r", key="k") == Spec(
+        "dir", os.path.normpath("/srv/reg/y"), None, None)
+    assert rr(parse_spec("y#sub"), d, origin="r", key="k").path == "sub"
+    # A git base: same repository, same ref, path joined onto the file's dir.
+    assert rr(parse_spec("./rust"), g, origin="r", key="k") == Spec("git", "https://h/x.git", "dev", "overlays/rust")
+    assert rr(parse_spec("../"), g, origin="r", key="k") == Spec("git", "https://h/x.git", "dev", None)
+    assert rr(parse_spec("."), Spec("git", "https://h/x.git", None, None), origin="r", key="k") == Spec(
+        "git", "https://h/x.git", None, None)
+    assert rr(parse_spec("rust#kb"), g, origin="r", key="k").path == "overlays/rust/kb"
+    with pytest.raises(SystemExit) as exc:
+        rr(parse_spec("../../out"), g, origin="r", key="k")
+    assert "leaves the repository" in str(exc.value)
+    # An http(s) registry has nothing beside it.
+    with pytest.raises(SystemExit) as exc:
+        rr(parse_spec("./x"), Spec("url", "https://h/r.json"), origin="r", key="k")
+    assert "relative path" in str(exc.value)
+
+
+@needs_git
+def test_relative_entries_in_a_git_registry_stay_in_that_repo_and_ref(repo, tmp_path):
+    """A registry inside a checkout names its neighbours relative to itself,
+    and they come from the SAME ref -- the dev branch's registry hands out the
+    dev branch's overlays, whatever the default branch holds."""
+    work = repo["work"]
+    _git("checkout", "-q", "dev", cwd=work)
+    _write(work / "overlays" / "reg.json", json.dumps({
+        "inner": "./inner",          # beside the registry
+        "whole": "..",               # the repository root, which is an overlay
+        "escape": "../../outside",   # above the repository: refused
+    }))
+    _git("add", "-A", cwd=work)
+    _git("commit", "-q", "-m", "registry on dev", cwd=work)
+    _git("push", "-q", str(repo["bare"]), "dev", cwd=work)
+    _git("checkout", "-q", "main", cwd=work)
+
+    cache = GitCache(tmp_path / "cache")
+    reg = _sources.load_repo(repo["url"] + "@dev#overlays/reg.json", cache)
+    assert isinstance(reg, RegistryRepo)
+    assert reg.base == Spec("git", repo["url"], "dev", "overlays")
+    assert (reg.overlay_dir("inner") / "kb" / "INNER.md").read_text() == "dev\n"
+    assert (reg.overlay_dir("whole") / "kb" / "WHOLE.md").read_text() == "dev\n"
+    with pytest.raises(SystemExit) as exc:
+        reg.overlay_dir("escape")
+    assert "leaves the repository" in str(exc.value)
+
+
 def test_registry_documents_and_entry_forms(tmp_path):
     cache = GitCache(tmp_path / "cache")
     _write(tmp_path / "one" / "overlay.toml", 'name = "one"\n')

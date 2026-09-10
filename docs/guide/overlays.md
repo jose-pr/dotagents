@@ -83,6 +83,13 @@ in what the path names:
 - for a **source**, the overlay: the path is the overlay's root directory, and with no
   path **the repository root is the overlay**.
 
+A source written as a **relative path** (`./python`, `../shared/net`, `overlays/rust`)
+is relative to the registry it is in: the registry file's directory for a local file,
+and for a registry inside a git checkout the **same repository at the same ref**, with
+the path joined onto the registry file's directory (`overlays/reg.toml` saying `./rust`
+means `<repo>@<ref>#overlays/rust`). A registry fetched over `http(s)` has no overlays
+beside it, so a relative entry there is an error.
+
 Checkouts are cached under `<user store>/.cache/overlays/` and refreshed on every
 `add`/`sync`.
 
@@ -101,6 +108,7 @@ engineering = "https://github.com/you/dotagents.git@overlays#overlays/engineerin
 python      = "https://github.com/you/dotagents.git@overlays#overlays/python"
 mytool      = "git@github.com:you/mytool-overlay.git@v2"      # no path: the repo root is the overlay
 local       = "~/src/overlays/local"                           # a local overlay directory
+mine        = "./overlays/mine"                                # relative to this file: ~/.agents/overlays/mine
 ```
 
 ```bash
