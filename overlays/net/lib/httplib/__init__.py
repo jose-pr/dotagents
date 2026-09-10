@@ -9,7 +9,7 @@ Public surface (see kb/NET.md):
                                          the <proxy><endpoint><url> a prefix gateway gets
   proxy.redact / should_bypass         — a printable URL, the NO_PROXY decision
   jar.FileCookieJar / FileTokenJar     — file-backed jars under the dotagents store
-  hooks                                — AGENTS_NET_HOOK_<KEY> URL hooks (a curl wrapper,
+  hooks                                — NET_HOOKS_<KEY> URL hooks (a curl wrapper,
                                          an httplib callable) matched on the caller's URL
   session.new_session                  — configured requests.Session
   fetch.request_text / request_json / request_with_reauth / *_auto helpers

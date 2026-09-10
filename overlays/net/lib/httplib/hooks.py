@@ -1,12 +1,14 @@
 """URL hooks: a wrapper the curl shim runs, or a callable ``httplib`` calls,
 for requests whose URL matches a pattern -- declared in the environment.
+``NET_HOOKS_<KEY>`` (plural) declares a hook; ``NET_HOOK_<NAME>`` (singular)
+is a variable one hook RUN exports to its wrapper.
 
-    AGENTS_NET_HOOK_<KEY>=<regex>            matched (re.search) against the URL the
+    NET_HOOKS_<KEY>=<regex>            matched (re.search) against the URL the
                                              caller asked for -- the origin URL, never
                                              the proxy's or a prefix gateway's rewrite
-    AGENTS_NET_HOOK_<KEY>_CURL=<command>     the curl shim runs THIS instead of itself,
+    NET_HOOKS_<KEY>_CURL=<command>     the curl shim runs THIS instead of itself,
                                              with the shim's own argv appended
-    AGENTS_NET_HOOK_<KEY>_PY=<module:callable>   httplib calls it before the request:
+    NET_HOOKS_<KEY>_PY=<module:callable>   httplib calls it before the request:
                                              callable(session, method, url, kwargs)
 
 A hook does what it wants with the session (log in, set a header in
@@ -20,15 +22,17 @@ mutable in place. ``<module:callable>`` is importable from ``PYTHONPATH``
 The curl wrapper is a shell-quoted command line -- a program and its own
 arguments -- that the shim's whole argv is appended to::
 
-    AGENTS_NET_HOOK_X_CURL='cmd fetch --'        ->   cmd fetch -- "$@"
+    NET_HOOKS_X_CURL='cmd fetch --'        ->   cmd fetch -- "$@"
 
 Quote (single or double) what has spaces; a backslash is literal on every
 platform, so a Windows path needs no doubling. A first word that is a
 ``.py`` file runs under the shim's own interpreter. The wrapper receives
-``AGENTS_CURL`` naming the shim so it can call curl back after its own
-work, and ``AGENTS_NET_HOOK_SKIP`` carrying its KEY, so that call does not
-run the same wrapper again. A hook with only a ``_PY`` target is ignored
-by the shim, one with only ``_CURL`` by httplib.
+``NET_HOOK_URL`` (the requested URL, so it need not parse argv),
+``NET_HOOK_KEY`` (which hook matched), ``AGENTS_CURL`` naming the shim so
+it can call curl back after its own work, and ``NET_HOOK_SKIP`` carrying
+its KEY, so that call does not run the same wrapper again. A hook with
+only a ``_PY`` target is ignored by the shim, one with only ``_CURL`` by
+httplib.
 
 Several hooks may match one URL: httplib calls each in KEY order (sorted),
 the first returning a response ends the chain; the shim runs the first
@@ -46,10 +50,12 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-PREFIX = "AGENTS_NET_HOOK_"
+PREFIX = "NET_HOOKS_"
 CURL_SUFFIX = "_CURL"
 PY_SUFFIX = "_PY"
-SKIP_ENV = "AGENTS_NET_HOOK_SKIP"
+SKIP_ENV = "NET_HOOK_SKIP"
+URL_ENV = "NET_HOOK_URL"
+KEY_ENV = "NET_HOOK_KEY"
 CURL_ENV = "AGENTS_CURL"
 
 

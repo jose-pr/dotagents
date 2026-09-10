@@ -11,7 +11,7 @@ comes back is attributed to the origin again (``response.url``,
 already names a scheme), never a session header, so it cannot leak to another
 host; an explicit header or ``auth=`` wins.
 
-URL hooks (``AGENTS_NET_HOOK_<KEY>`` + ``_PY``, see :mod:`.hooks`) run in the
+URL hooks (``NET_HOOKS_<KEY>`` + ``_PY``, see :mod:`.hooks`) run in the
 same place, on the caller's URL, before the request: a hook may log in, set
 headers in the request's kwargs, or return a response of its own. A hook
 that makes requests through the session does not trigger hooks again.

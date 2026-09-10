@@ -115,16 +115,16 @@ not at all.
   and a `Set-Cookie` is filed under the origin, not the gateway. The curl shim's
   `-b` sends what you give it and `-c` writes the origin's cookies the same way.
 
-## URL hooks — `AGENTS_NET_HOOK_<KEY>`
+## URL hooks — `NET_HOOKS_<KEY>`
 
 Something special for some URLs (a login dance, a signed header, a token
 refresh, a stub), declared in the environment so an overlay's `env` file or a
 project's `local.env` can carry it, and matched on **the URL you ask for** —
 the origin's, never the proxy's or a prefix gateway's rewrite:
 
-    AGENTS_NET_HOOK_<KEY>=<regex>                 re.search against the requested URL
-    AGENTS_NET_HOOK_<KEY>_CURL=<command>          the curl shim runs this in its place
-    AGENTS_NET_HOOK_<KEY>_PY=<module:callable>    httplib calls it before the request
+    NET_HOOKS_<KEY>=<regex>                 re.search against the requested URL
+    NET_HOOKS_<KEY>_CURL=<command>          the curl shim runs this in its place
+    NET_HOOKS_<KEY>_PY=<module:callable>    httplib calls it before the request
 
 - **httplib**: `callable(session, method, url, kwargs)` runs inside
   `session.request` (so `session.get`, the `fetch` helpers, everything). It may
@@ -135,22 +135,25 @@ the origin's, never the proxy's or a prefix gateway's rewrite:
   `lib/` is, after `dotagents env`) or a `<file>.py:callable`.
 - **curl shim**: the wrapper is a shell-quoted command line — a program and its
   own arguments — that the shim's whole argv is appended to:
-  `AGENTS_NET_HOOK_X_CURL='cmd fetch --'` runs `cmd fetch -- "$@"`. Quote what
+  `NET_HOOKS_X_CURL='cmd fetch --'` runs `cmd fetch -- "$@"`. Quote what
   has spaces; a backslash is literal on every platform (a Windows path needs no
   doubling); a first word that is a `.py` file runs under `$AGENTS_PYTHON`. The
-  wrapper gets `AGENTS_CURL` naming the shim so it calls curl back after its own
-  work, and `AGENTS_NET_HOOK_SKIP` holding the KEY so that call does not run the
-  wrapper again. Its exit code is the shim's. It runs before the real-curl
-  passthrough and the fallback alike.
+  wrapper's environment carries **`NET_HOOK_URL`** (the requested URL, no argv
+  parsing needed), `NET_HOOK_KEY` (which hook matched), `AGENTS_CURL` (the shim,
+  to call curl back with after its own work) and `NET_HOOK_SKIP` holding the KEY
+  so that call does not run the wrapper again (`NET_HOOKS_<KEY>`, plural,
+  declares a hook; `NET_HOOK_<NAME>`, singular, is what one hook run exports).
+  Its exit code is the shim's. It runs before the real-curl passthrough and the
+  fallback alike.
 - Several hooks may match: httplib runs each in KEY order and stops at the first
   that answers; the shim runs the first `_CURL` in that order. A `_PY` without a
   `_CURL` leaves the shim alone and vice versa.
 
 ```sh
 # a signed-request helper for one API, whichever tool an agent picks
-AGENTS_NET_HOOK_INTERNAL='^https://api\.internal\.example/'
-AGENTS_NET_HOOK_INTERNAL_PY='mytools.net:sign_request'      # (session, method, url, kwargs)
-AGENTS_NET_HOOK_INTERNAL_CURL="$MYTOOLS_OVERLAY_ROOT/bin/curl-signed.py"
+NET_HOOKS_INTERNAL='^https://api\.internal\.example/'
+NET_HOOKS_INTERNAL_PY='mytools.net:sign_request'      # (session, method, url, kwargs)
+NET_HOOKS_INTERNAL_CURL="$MYTOOLS_OVERLAY_ROOT/bin/curl-signed.py"
 ```
 
 ## Referencing the lib from a skill

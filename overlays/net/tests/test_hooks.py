@@ -1,4 +1,4 @@
-"""URL hooks: AGENTS_NET_HOOK_<KEY> patterns matched on the caller's URL run a
+"""URL hooks: NET_HOOKS_<KEY> patterns matched on the caller's URL run a
 Python callable with the session (httplib) or a wrapper program in the curl
 shim's place -- under a prefix gateway too, where the wire URL is the
 gateway's and must not be what is matched.
@@ -60,12 +60,14 @@ def _no_ambient_hooks(monkeypatch):
 
 def test_hooks_from_env_key_order_targets_and_skip():
     env = {
-        "AGENTS_NET_HOOK_B": r"^https://b\.example/", "AGENTS_NET_HOOK_B_PY": "m:f",
-        "AGENTS_NET_HOOK_A": r"example", "AGENTS_NET_HOOK_A_CURL": "/usr/bin/wrap",
-        "AGENTS_NET_HOOK_A_PY": "m:g",
-        "AGENTS_NET_HOOK_NOTARGET": r".*",              # nothing to run: ignored
-        "AGENTS_NET_HOOK_ORPHAN_CURL": "/x",            # no pattern: ignored
-        "AGENTS_NET_HOOK_EMPTY": "", "AGENTS_NET_HOOK_EMPTY_PY": "m:f",
+        "NET_HOOKS_B": r"^https://b\.example/", "NET_HOOKS_B_PY": "m:f",
+        "NET_HOOKS_A": r"example", "NET_HOOKS_A_CURL": "/usr/bin/wrap",
+        "NET_HOOKS_A_PY": "m:g",
+        "NET_HOOKS_NOTARGET": r".*",              # nothing to run: ignored
+        "NET_HOOKS_ORPHAN_CURL": "/x",            # no pattern: ignored
+        "NET_HOOKS_EMPTY": "", "NET_HOOKS_EMPTY_PY": "m:f",
+        # A hook run's own exports (singular NET_HOOK_): a different prefix, not hooks.
+        "NET_HOOK_URL": "https://b.example/x", "NET_HOOK_KEY": "A", "NET_HOOK_SKIP": "",
     }
     found = hooks.hooks_from_env(env)
     assert [h.key for h in found] == ["A", "B"]
@@ -76,8 +78,8 @@ def test_hooks_from_env_key_order_targets_and_skip():
     assert [h.key for h in hooks.matching("https://c.example/", env)] == ["A"]
     env[hooks.SKIP_ENV] = "A, Z"
     assert [h.key for h in hooks.matching(url, env)] == ["B"]
-    with pytest.raises(ValueError, match="AGENTS_NET_HOOK_BAD"):
-        hooks.hooks_from_env({"AGENTS_NET_HOOK_BAD": "(", "AGENTS_NET_HOOK_BAD_PY": "m:f"})
+    with pytest.raises(ValueError, match="NET_HOOKS_BAD"):
+        hooks.hooks_from_env({"NET_HOOKS_BAD": "(", "NET_HOOKS_BAD_PY": "m:f"})
 
 
 def test_load_callable_module_and_file(tmp_path):
@@ -128,22 +130,22 @@ def _session():
 
 
 def test_py_hook_runs_on_the_origin_url_under_a_prefix_gateway(origin, gateway, monkeypatch):
-    monkeypatch.setenv("AGENTS_NET_HOOK_T", "^" + origin.replace(".", r"\."))
-    monkeypatch.setenv("AGENTS_NET_HOOK_T_PY", "test_hooks:record")
+    monkeypatch.setenv("NET_HOOKS_T", "^" + origin.replace(".", r"\."))
+    monkeypatch.setenv("NET_HOOKS_T_PY", "test_hooks:record")
     resp = _session().get(origin + "/x", timeout=5)
     assert resp.text == "gateway"
     assert CALLS == [("GET", origin + "/x")], "the caller's URL, not /fetch/<url> on the gateway"
     assert _Gateway.seen[-1][1].get("X-Hooked") == "record", "headers the hook set went out"
     # A URL the pattern does not cover: untouched.
     CALLS.clear()
-    monkeypatch.setenv("AGENTS_NET_HOOK_T", "^https://nowhere[.]example/")
+    monkeypatch.setenv("NET_HOOKS_T", "^https://nowhere[.]example/")
     _session().get(origin + "/z", timeout=5)
     assert CALLS == [] and "X-Hooked" not in _Gateway.seen[-1][1]
 
 
 def test_py_hook_can_answer_instead(origin, gateway, monkeypatch):
-    monkeypatch.setenv("AGENTS_NET_HOOK_T", "/answered$")
-    monkeypatch.setenv("AGENTS_NET_HOOK_T_PY", "test_hooks:answer")
+    monkeypatch.setenv("NET_HOOKS_T", "/answered$")
+    monkeypatch.setenv("NET_HOOKS_T_PY", "test_hooks:answer")
     session = _session()
     before = len(_Gateway.seen)
     resp = session.get(origin + "/answered", timeout=5)
@@ -153,8 +155,8 @@ def test_py_hook_can_answer_instead(origin, gateway, monkeypatch):
 
 
 def test_py_hook_requests_do_not_re_trigger_hooks(origin, gateway, monkeypatch):
-    monkeypatch.setenv("AGENTS_NET_HOOK_T", ".")
-    monkeypatch.setenv("AGENTS_NET_HOOK_T_PY", "test_hooks:reentrant")
+    monkeypatch.setenv("NET_HOOKS_T", ".")
+    monkeypatch.setenv("NET_HOOKS_T_PY", "test_hooks:reentrant")
     resp = _session().get(origin + "/x", timeout=5)
     assert resp.text == "gateway"
     assert CALLS == [("inner-start", origin + "/x"), ("inner-done", 200)]
@@ -163,12 +165,12 @@ def test_py_hook_requests_do_not_re_trigger_hooks(origin, gateway, monkeypatch):
 
 
 def test_py_hooks_run_in_key_order_first_answer_wins(origin, gateway, monkeypatch):
-    monkeypatch.setenv("AGENTS_NET_HOOK_A", ".")
-    monkeypatch.setenv("AGENTS_NET_HOOK_A_PY", "test_hooks:record")
-    monkeypatch.setenv("AGENTS_NET_HOOK_B", ".")
-    monkeypatch.setenv("AGENTS_NET_HOOK_B_PY", "test_hooks:answer")
-    monkeypatch.setenv("AGENTS_NET_HOOK_C", ".")
-    monkeypatch.setenv("AGENTS_NET_HOOK_C_PY", "test_hooks:reentrant")
+    monkeypatch.setenv("NET_HOOKS_A", ".")
+    monkeypatch.setenv("NET_HOOKS_A_PY", "test_hooks:record")
+    monkeypatch.setenv("NET_HOOKS_B", ".")
+    monkeypatch.setenv("NET_HOOKS_B_PY", "test_hooks:answer")
+    monkeypatch.setenv("NET_HOOKS_C", ".")
+    monkeypatch.setenv("NET_HOOKS_C_PY", "test_hooks:reentrant")
     resp = _session().get(origin + "/x", timeout=5)
     assert resp.text == "from-hook" and CALLS == [("GET", origin + "/x")]
 
@@ -191,7 +193,8 @@ from pathlib import Path
 argv = sys.argv[1:]
 curl_argv = argv[argv.index("--") + 1:] if "--" in argv else argv
 Path(os.environ["WRAPPER_LOG"]).write_text(json.dumps({
-    "argv": argv, "curl": os.environ.get("AGENTS_CURL"), "skip": os.environ.get("AGENTS_NET_HOOK_SKIP"),
+    "argv": argv, "curl": os.environ.get("AGENTS_CURL"), "skip": os.environ.get("NET_HOOK_SKIP"),
+    "url": os.environ.get("NET_HOOK_URL"), "key": os.environ.get("NET_HOOK_KEY"),
 }))
 shim_py = str(Path(os.environ["AGENTS_CURL"]).with_name("curl.py"))
 sys.exit(subprocess.run([sys.executable, shim_py, "-H", "X-Hooked: wrapper", *curl_argv]).returncode)
@@ -203,15 +206,16 @@ def test_curl_hook_runs_the_wrapper_which_calls_the_shim_back(origin, gateway, t
     wrapper.write_text(WRAPPER, encoding="utf-8")
     log = tmp_path / "log.json"
     monkeypatch.setenv("WRAPPER_LOG", str(log))
-    monkeypatch.setenv("AGENTS_NET_HOOK_W", "^" + origin.replace(".", r"\.") + "/hooked")
+    monkeypatch.setenv("NET_HOOKS_W", "^" + origin.replace(".", r"\.") + "/hooked")
     # A command line with the wrapper's own arguments; the shim's argv follows.
-    monkeypatch.setenv("AGENTS_NET_HOOK_W_CURL", "'%s' fetch --" % wrapper)
+    monkeypatch.setenv("NET_HOOKS_W_CURL", "'%s' fetch --" % wrapper)
     monkeypatch.setenv("AGENTS_PYTHON", sys.executable)
     rc = curl.main(["-s", origin + "/hooked"])
     assert rc == 0
     seen = json.loads(log.read_text(encoding="utf-8"))
     assert seen["argv"] == ["fetch", "--", "-s", origin + "/hooked"]
     assert Path(seen["curl"]).name in ("curl", "curl.cmd") and seen["skip"] == "W"
+    assert seen["url"] == origin + "/hooked" and seen["key"] == "W"
     path, headers = _Gateway.seen[-1]
     assert path == "/fetch/" + origin + "/hooked" and headers.get("X-Hooked") == "wrapper"
     # An unmatched URL never runs the wrapper.
@@ -221,7 +225,7 @@ def test_curl_hook_runs_the_wrapper_which_calls_the_shim_back(origin, gateway, t
 
 
 def test_curl_hook_with_only_a_py_target_leaves_the_shim_alone(origin, gateway, monkeypatch, capsysbinary):
-    monkeypatch.setenv("AGENTS_NET_HOOK_P", ".")
-    monkeypatch.setenv("AGENTS_NET_HOOK_P_PY", "test_hooks:answer")
+    monkeypatch.setenv("NET_HOOKS_P", ".")
+    monkeypatch.setenv("NET_HOOKS_P_PY", "test_hooks:answer")
     rc, out = _fallback(monkeypatch, capsysbinary, ["-s", origin + "/x"])
     assert rc == 0 and out.out == b"gateway"

@@ -596,11 +596,12 @@ def shim_entry():
 
 
 def maybe_run_hook(argv):
-    """``AGENTS_NET_HOOK_<KEY>`` + ``_CURL``: when the caller's URL matches,
-    run the wrapper in this shim's place with argv appended, ``AGENTS_CURL``
-    naming the shim and ``AGENTS_NET_HOOK_SKIP`` carrying the KEY (so the
-    wrapper's own curl call runs the shim, not the wrapper again). Returns
-    the wrapper's exit code, or ``None`` when no hook applies."""
+    """``NET_HOOKS_<KEY>`` + ``_CURL``: when the caller's URL matches, run the
+    wrapper in this shim's place with argv appended and, in its environment,
+    ``NET_HOOK_URL`` (the requested URL), ``NET_HOOK_KEY`` (the hook),
+    ``AGENTS_CURL`` (this shim, to call curl back with) and ``NET_HOOK_SKIP``
+    carrying the KEY so that call runs the shim, not the wrapper again.
+    Returns the wrapper's exit code, or ``None`` when no hook applies."""
     url = requested_url(argv)
     if not url:
         return None
@@ -611,6 +612,8 @@ def maybe_run_hook(argv):
     command = net_hooks.curl_command(hook, python=os.environ.get('AGENTS_PYTHON') or sys.executable)
     env = dict(os.environ)
     env[net_hooks.CURL_ENV] = shim_entry()
+    env[net_hooks.URL_ENV] = url
+    env[net_hooks.KEY_ENV] = hook.key
     env[net_hooks.SKIP_ENV] = ','.join(sorted(net_hooks.skipped(env) | {hook.key}))
     return subprocess.run([*command, *argv], env=env).returncode
 
