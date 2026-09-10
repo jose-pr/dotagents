@@ -19,7 +19,9 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   store is always the user store and the project scope only adds/removes tiers,
   as in `env` / `context`.
 - Compiled command classes live in `dotagents.cli.<name>` (`init`, `overlays`
-  — `add` (installs each manifest's `requires` first, `--no-requires` to skip;
+  — `add` (installs and sets up each manifest's `requires` before the overlay
+  itself, `--no-requires` to skip; a requirement the scope's walk already has
+  is satisfied, not re-copied or re-set-up -- an explicit name always is;
   every name validated and resolved against the source BEFORE anything is
   touched; skills published from the INSTALLED copy), `remove` (recomposes the
   managed block over what remains — the un-merge), `list`, `sync` (`--copy`

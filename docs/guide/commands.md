@@ -143,9 +143,12 @@ dotagents overlays sync --overwrite        # also replace installed files whose 
 dotagents overlays show python             # describe one: manifest, requires, setup, skills (--json)
 ```
 
-`add` installs what each manifest's `requires` names first (`--no-requires` to skip),
-validates every name before touching anything, and publishes skills from the installed
-copy. `remove` recomposes `AGENTS.md`'s managed block over the overlays that remain, so
+`add` installs what each manifest's `requires` names first, each requirement installed
+and set up before the overlay that needs it (`--no-requires` to skip); a requirement
+the scope already has, in its own store or the user store for a project, is satisfied
+and left alone, while a name you ask for explicitly is always (re)installed and set up.
+It validates every name before touching anything, and publishes skills from the
+installed copy. `remove` recomposes `AGENTS.md`'s managed block over the overlays that remain, so
 an overlay's rules and routing leave with it. `sync` never clobbers an installed file
 unless `--overwrite`.
 

@@ -205,6 +205,49 @@ def test_add_installs_requires_first(world, caplog):
     assert sorted(p.name for p in (scope_root / "overlays").iterdir()) == ["top"]
 
 
+def test_an_installed_requirement_is_satisfied_not_redone(world, caplog):
+    """`add mid` when `base` (its requirement) is already installed: base is
+    neither copied again nor set up again. `add base` itself still is."""
+    src, scope_root = world
+    _overlay(src, "base", setup=True)
+    _overlay(src, "mid", requires=["base"])
+    assert _add(src, scope_root, "base") == 0
+    with caplog.at_level(logging.INFO):
+        assert _add(src, scope_root, "mid") == 0
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("requires base: already installed" in m for m in msgs)
+    assert not any("installing it too" in m for m in msgs)
+    assert not any("running setup for base" in m for m in msgs)
+    assert sorted(p.name for p in (scope_root / "overlays").iterdir()) == ["base", "mid"]
+    # Asked for by name, the installed overlay is set up again as always.
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        assert _add(src, scope_root, "base") == 0
+    assert any("running setup for base" in m for m in (r.getMessage() for r in caplog.records))
+
+
+def test_a_requirement_in_the_user_store_satisfies_a_project_add(world, tmp_path, monkeypatch, caplog):
+    """Adding to a project: a requirement installed in the USER store is in
+    the project's walk already, so it is not installed into the project too."""
+    src, user_store = world
+    _overlay(src, "base", setup=True)
+    _overlay(src, "mid", requires=["base"])
+    assert _add(src, user_store, "base") == 0
+    project_store = tmp_path / "proj" / ".agents"
+    project_store.mkdir(parents=True)
+    (project_store / "AGENTS.md").write_text(BASE_AGENTS, encoding="utf-8")
+    monkeypatch.setenv("AGENTS_HOME", str(user_store))
+    monkeypatch.delenv("AGENTS_PROJECT_ROOT", raising=False)
+    with caplog.at_level(logging.INFO):
+        rc = _run(
+            OverlayAdd, name=["mid"], repo=[str(src)], global_scope=False,
+            agents_dir=project_store, copy=True, dry_run=False,
+        )
+    assert rc == 0
+    assert any("requires base: already installed" in r.getMessage() for r in caplog.records)
+    assert sorted(p.name for p in (project_store / "overlays").iterdir()) == ["mid"]
+
+
 def test_requires_cycle_is_an_error(world):
     src, scope_root = world
     _overlay(src, "a", requires=["b"])

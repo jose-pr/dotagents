@@ -43,6 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `python`/`python3` on PATH may be a Store alias stub, an emulated build, a
   venv's, or missing.
 
+### Changed
+
+- `overlays add` no longer re-installs and re-runs the setup of a requirement
+  the scope already has (in its own store, or the user store when adding to a
+  project): it is satisfied and left alone, and the log says so. Each missing
+  requirement is still installed and set up before the overlay that needs it;
+  a name asked for explicitly is (re)installed and set up as before.
+
 ### Removed
 
 - `overlays --source` and `$AGENTS_OVERLAYS_SRC`: a source directory is just a

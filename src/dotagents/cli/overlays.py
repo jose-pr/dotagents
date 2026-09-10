@@ -44,15 +44,25 @@ def _validated_names(raw_names, what: str) -> "list[str]":
     return names
 
 
-def _install_order(source, names, *, follow_requires: bool, logger) -> "list[str]":
+def _install_order(
+    source, names, *, follow_requires: bool, logger, installed: "frozenset[str]" = frozenset(),
+) -> "list[str]":
     """The overlays to install, dependencies first: each name's manifest
     `requires` (transitively), then the name itself, de-duplicated. A required
     overlay the source does not offer is a warning, not an error (the overlay
-    asked for still installs); a cycle is an error."""
+    asked for still installs); a cycle is an error.
+
+    ``installed`` (normalized names) is what the scope already has -- its own
+    store and, for a project, the user store's too. A requirement in it is
+    satisfied: it is neither copied again nor set up again (a venv build or a
+    toolchain check should not rerun because a neighbour was added). A name
+    asked for explicitly is never treated that way: `add x` re-installs and
+    re-sets-up `x` as it always did."""
     from dotagents._overlays import Overlay
 
     order: "list[str]" = []
     done: "set[str]" = set()
+    satisfied: "set[str]" = set()
 
     def visit(name: str, chain: "list[str]") -> None:
         if name in done:
@@ -74,8 +84,15 @@ def _install_order(source, names, *, follow_requires: bool, logger) -> "list[str
         if follow_requires:
             for dep in Overlay(src).read_manifest()["requires"]:  # type: ignore[union-attr]
                 dep = Overlay.normalize_name(str(dep))
-                if dep not in done and dep not in names:
-                    logger.info("overlay %s requires %s (installing it too)", name, dep)
+                if dep in done or dep in names:
+                    visit(dep, chain + [name])
+                    continue
+                if dep in installed:
+                    if dep not in satisfied:
+                        satisfied.add(dep)
+                        logger.info("overlay %s requires %s: already installed", name, dep)
+                    continue
+                logger.info("overlay %s requires %s (installing it too)", name, dep)
                 visit(dep, chain + [name])
         done.add(name)
         order.append(name)
@@ -142,8 +159,11 @@ class OverlayAdd(DotAgentsArgs):
 
         # Resolve every name (and its requires) against the source BEFORE the
         # first install, so `add good bad` fails on `bad` with nothing touched.
+        # What the scope's walk already has satisfies a requirement as it is.
+        installed = frozenset(o.normalized_name for o in scope.overlays)
         order = _install_order(
             source, names, follow_requires=not self.no_requires, logger=self._logger_,
+            installed=installed,
         )
         sources = {name: source.overlay_dir(name) for name in order}
 
