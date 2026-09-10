@@ -15,7 +15,7 @@ class Context(DotAgentsArgs):
     """Assemble the effective context for agents (Plan 04).
 
     Roots (both configurable, never hardcoded -- D58/D79/D80): the user store is
-    ``--agents-dir`` -> ``$AGENTS_HOME`` -> legacy ``$DOTAGENTS_AGENTS_DIR`` ->
+    ``--agents-dir`` -> ``$AGENTS_HOME`` ->
     ``~/.agents`` (:func:`~dotagents.cli._common.resolve_user_store`), and the
     project root is ``$AGENTS_PROJECT_ROOT`` -> ``$CLAUDE_PROJECT_DIR`` -> the cwd
     (:func:`~dotagents._scope.project_root_default`). This matters most here: the

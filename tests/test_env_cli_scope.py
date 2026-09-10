@@ -36,7 +36,6 @@ from dotagents.cli.env import Env  # noqa: E402
 
 SCOPE_VARS = (
     "AGENTS_HOME",
-    "DOTAGENTS_AGENTS_DIR",
     "AGENTS_PROJECT_ROOT",
     "CLAUDE_PROJECT_DIR",
 )
@@ -100,20 +99,15 @@ def _run_context(**fields):
 
 def test_resolve_user_store_precedence(tmp_path, monkeypatch):
     explicit = tmp_path / "explicit"
-    from_new = tmp_path / "from-new"
-    from_legacy = tmp_path / "from-legacy"
+    from_env = tmp_path / "from-env"
 
-    monkeypatch.setenv("AGENTS_HOME", str(from_new))
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(from_legacy))
-    # 1. an explicit --agents-dir beats both vars.
+    monkeypatch.setenv("AGENTS_HOME", str(from_env))
+    # 1. an explicit --agents-dir beats the variable.
     assert resolve_user_store(explicit) == explicit
-    # 2. AGENTS_HOME beats the legacy name.
-    assert resolve_user_store(None) == from_new
-    # 3. the legacy name still works alone (one more release, D80).
+    # 2. AGENTS_HOME.
+    assert resolve_user_store(None) == from_env
+    # 3. unset -> ~/.agents (computed, never touched).
     monkeypatch.delenv("AGENTS_HOME")
-    assert resolve_user_store(None) == from_legacy
-    # 4. neither set -> ~/.agents (computed, never touched).
-    monkeypatch.delenv("DOTAGENTS_AGENTS_DIR")
     assert resolve_user_store(None) == Path.home() / ".agents"
 
 

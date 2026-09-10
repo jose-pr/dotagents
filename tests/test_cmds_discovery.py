@@ -11,9 +11,6 @@ a private-sync command.
 Filesystem-only (tmp_path); no network. NEVER exports HOME/USERPROFILE -- the
 user scope is redirected via `$AGENTS_HOME` and the project scope via
 `monkeypatch.chdir`, so a real `~/.agents` is never touched.
-
-Env-var prefix (D80): readers prefer the `AGENTS_*` name and fall back to the old
-`DOTAGENTS_*` name for one release; the fallback tests below assert both paths.
 """
 
 import os
@@ -349,46 +346,3 @@ def test_project_overrides_user_scope(monkeypatch, tmp_path):
     assert getattr(toy[0], "marker", None) == "project"
 
 
-# --------------------------------------------------------------------------- #
-# Env-var prefix back-compat (D80): new AGENTS_* preferred, old DOTAGENTS_* falls
-# back for one release.
-# --------------------------------------------------------------------------- #
-
-
-def test_agents_home_fallback_to_legacy_dotagents_agents_dir(monkeypatch, tmp_path):
-    # Only the OLD name set -> the user scope still resolves through it.
-    user_root = tmp_path / "user" / ".agents"
-    _write(user_root / "dotagents" / "cmds" / "toy.py", TOY)
-    monkeypatch.delenv("AGENTS_HOME", raising=False)
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(user_root))
-    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
-    monkeypatch.delenv("DOTAGENTS_CMDS_PATH", raising=False)
-    monkeypatch.chdir(tmp_path)
-
-    assert "toy" in _names(cli._discover([]))
-
-
-def test_agents_home_new_name_wins_over_legacy(monkeypatch, tmp_path):
-    # Both set: the new name wins; the legacy value is ignored.
-    good = tmp_path / "good" / ".agents"
-    _write(good / "dotagents" / "cmds" / "toy.py", TOY)
-    stale = tmp_path / "stale" / ".agents"  # empty; would yield no `toy`
-    monkeypatch.setenv("AGENTS_HOME", str(good))
-    monkeypatch.setenv("DOTAGENTS_AGENTS_DIR", str(stale))
-    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
-    monkeypatch.delenv("DOTAGENTS_CMDS_PATH", raising=False)
-    monkeypatch.chdir(tmp_path)
-
-    assert "toy" in _names(cli._discover([]))
-
-
-def test_cmds_path_fallback_to_legacy(monkeypatch, tmp_path):
-    # Only the OLD $DOTAGENTS_CMDS_PATH set -> still honored.
-    cmds = tmp_path / "extra"
-    _write(cmds / "toy.py", TOY)
-    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
-    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
-    monkeypatch.setenv("DOTAGENTS_CMDS_PATH", str(cmds))
-    monkeypatch.chdir(tmp_path)
-
-    assert "toy" in _names(cli._discover([]))

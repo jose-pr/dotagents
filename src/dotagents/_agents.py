@@ -464,11 +464,6 @@ class ClaudeAgent(Agent):
             hooks = {}
         changed = False
 
-        # Legacy lowercase key from the precursor -- fold it in, then drop it.
-        legacy = hooks.pop("session_start", None)
-        if legacy is not None:
-            changed = True
-
         # Per event, a bash-syntax handler -- and on WINDOWS a second,
         # PowerShell-native one (`shell: powershell`): there, without Git Bash,
         # hooks.md's documented default routes the bash-syntax command through
@@ -486,7 +481,7 @@ class ClaudeAgent(Agent):
         # identity.
         windows = self._is_windows()
         events = (
-            ("SessionStart", hooks.get("SessionStart", legacy), self.SESSION_START_COMMAND,
+            ("SessionStart", hooks.get("SessionStart"), self.SESSION_START_COMMAND,
              self.SESSION_START_COMMAND_POWERSHELL, "Loading agent context"),
             ("CwdChanged", hooks.get("CwdChanged"), self.CWD_CHANGED_COMMAND,
              self.CWD_CHANGED_COMMAND_POWERSHELL, "Checking for AGENTS.md"),

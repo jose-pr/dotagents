@@ -456,7 +456,7 @@ class Env(DotAgentsArgs):
     forms ``json``/``ini``/``yaml``. An explicit ``--format`` always wins.
 
     Roots (both configurable, never hardcoded -- D58/D79/D80): the user store is
-    ``--agents-dir`` -> ``$AGENTS_HOME`` -> legacy ``$DOTAGENTS_AGENTS_DIR`` ->
+    ``--agents-dir`` -> ``$AGENTS_HOME`` ->
     ``~/.agents`` (:func:`~dotagents.cli._common.resolve_user_store`), and the
     project root is ``$AGENTS_PROJECT_ROOT`` -> ``$CLAUDE_PROJECT_DIR`` -> the cwd
     (:func:`~dotagents._scope.project_root_default`). A harness that pins those

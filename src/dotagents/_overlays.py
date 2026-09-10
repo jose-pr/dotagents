@@ -202,15 +202,10 @@ class Overlay:
     #: The optional manifest an overlay may carry at its root.
     MANIFEST_NAME = "overlay.toml"
 
-    #: An overlay's optional idempotent setup script, tried in preference order.
-    #: ``setup.py`` is the **recommended, OS-agnostic** form: it runs under the same
-    #: interpreter that runs dotagents, so it works on every platform (the ``net``
-    #: overlay uses it). The extensionless ``setup`` (a POSIX shell script) is a
-    #: **legacy fallback**, kept for existing overlays but discouraged -- a shell
-    #: script isn't portable to Windows without a shell. When an overlay ships both,
-    #: ``setup.py`` wins (it is first in this tuple). Presence of one file = opt-in;
-    #: absence = nothing to run.
-    SETUP_SCRIPT_NAMES = ("setup.py", "setup")
+    #: An overlay's optional idempotent setup script: ``setup.py``, run under
+    #: the interpreter that runs dotagents, so it works on every platform.
+    #: Presence = opt-in; absence = nothing to run.
+    SETUP_SCRIPT_NAMES = ("setup.py",)
 
     DEFAULT_PRIORITY = DEFAULT_PRIORITY
 
@@ -435,10 +430,6 @@ class Overlay:
     def find_setup_script(self) -> "Optional[Path]":
         """The overlay's setup script, or ``None`` if it ships none.
 
-        Prefers the OS-agnostic ``setup.py`` over the legacy extensionless
-        ``setup`` when an overlay ships both (``SETUP_SCRIPT_NAMES`` is in
-        preference order).
-
         Call this on the *installed* overlay: setup runs against the copy under
         ``<scope>/overlays/<name>/`` with that as its cwd, so a script can
         reference its own sibling files by relative path."""
@@ -452,10 +443,9 @@ class Overlay:
         """Run the overlay's idempotent ``setup`` script if it ships one.
 
         Returns the script's exit code, or ``None`` when the overlay has no setup
-        script (nothing to run -- not an error). Presence of ``setup.py``
-        (preferred, OS-agnostic) or the legacy ``setup`` at the overlay root is
-        the opt-in; the runner never second-guesses a script the user chose to
-        install (see the overlay-authoring contract).
+        script (nothing to run -- not an error). Presence of ``setup.py`` at the
+        overlay root is the opt-in; the runner never second-guesses a script the
+        user chose to install (see the overlay-authoring contract).
 
         **Idempotency is the overlay author's contract**: the script must be safe
         to run on every ``add``/``sync`` (check-then-act). The runner only
@@ -466,14 +456,9 @@ class Overlay:
 
         * **cwd** = the installed overlay dir, so the script sees its own files.
         * **env** carries ``AGENTS_HOME`` = the resolved store path (D58
-          configurable store), so the script never hardcodes ``~/.agents``. It
-          also gets ``AGENTS_OVERLAY_DIR`` = its own installed dir for
-          convenience. The old ``DOTAGENTS_AGENTS_DIR`` / ``DOTAGENTS_OVERLAY_DIR``
-          are also set for back-compat this release (removable next), so
-          existing setup scripts keep working.
-        * a ``.py`` script runs under the current interpreter; an extensionless
-          ``setup`` runs directly, or via ``sh`` on Windows where it isn't
-          executable.
+          configurable store), so the script never hardcodes ``~/.agents``, and
+          ``AGENTS_OVERLAY_DIR`` = its own installed dir.
+        * the script runs under the interpreter running dotagents.
 
         A non-zero exit is surfaced (returned) so the caller can raise a clear
         error -- never a silent skip. Never prints ``DOTAGENTS_*`` values
@@ -490,18 +475,9 @@ class Overlay:
         env = dict(os.environ)
         env["AGENTS_HOME"] = str(agents_dir)
         env["AGENTS_OVERLAY_DIR"] = str(self.path)
-        # back-compat: DOTAGENTS_* is deprecated, removable next release.
-        env["DOTAGENTS_AGENTS_DIR"] = str(agents_dir)
-        env["DOTAGENTS_OVERLAY_DIR"] = str(self.path)
 
-        if script.suffix.lower() == ".py":
-            import sys
-            cmd = [sys.executable, str(script)]
-        else:
-            cmd = [str(script)]
-            if os.name == "nt":
-                # An extensionless script is not directly executable on Windows.
-                cmd = ["sh"] + cmd
+        import sys
+        cmd = [sys.executable, str(script)]
 
         try:
             res = subprocess.run(cmd, cwd=str(self.path), env=env)

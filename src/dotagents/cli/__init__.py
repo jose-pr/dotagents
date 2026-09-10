@@ -52,7 +52,6 @@ from dotagents import __version__
 # command modules and external importers (`dotagents._overlays`, `dotagents._scope`).
 from dotagents.cli._common import (  # noqa: F401
     AGENTS_DIR_ENV,
-    AGENTS_DIR_ENV_LEGACY,
     BASE_PLAIN_FILES,
     BASE_ROOT,
     DotAgentsArgs,
@@ -134,8 +133,6 @@ _COMMAND_MODULES = (
 #: Extra env-var command search paths (os.pathsep-split), additive to the scope
 #: walk.
 CMDS_PATH_ENV = "AGENTS_CMDS_PATH"
-#: back-compat: DOTAGENTS_CMDS_PATH is deprecated, removable next release.
-CMDS_PATH_ENV_LEGACY = "DOTAGENTS_CMDS_PATH"
 
 
 class Dotagents(LoggingArgs, Cli):
@@ -284,7 +281,7 @@ def _cmds_dirs(argv=None) -> "list[Path]":
     (an overlay may SHIP a command; a user/project can still override it).
 
     The store location is configurable (D58/D79): the user scope resolves through
-    `resolve_user_store()` (`$AGENTS_HOME`, legacy `$DOTAGENTS_AGENTS_DIR`, default
+    `resolve_user_store()` (`$AGENTS_HOME`, default
     `~/.agents`) -- the same resolver `env`/`context` use, so every user-store
     reader agrees; the project scope is `<cwd>/.agents`.
     `include_missing=True` (precursor semantics): every level's cmds dir is offered
@@ -337,8 +334,8 @@ def _discover(argv=None) -> "list":
     for cmds_dir in _cmds_dirs(argv):
         _discover_dir(cmds_dir, by_name)
 
-    # 4. $AGENTS_CMDS_PATH (back-compat: $DOTAGENTS_CMDS_PATH, removable next release)
-    raw = os.environ.get(CMDS_PATH_ENV) or os.environ.get(CMDS_PATH_ENV_LEGACY)
+    # 4. $AGENTS_CMDS_PATH
+    raw = os.environ.get(CMDS_PATH_ENV)
     if raw:
         for entry in raw.split(os.pathsep):
             if entry:

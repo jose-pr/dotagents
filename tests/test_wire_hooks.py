@@ -184,20 +184,6 @@ def test_preserves_unrelated_keys_and_foreign_hooks(tmp_path):
     assert ClaudeAgent.SESSION_START_COMMAND in cmds
 
 
-def test_migrates_legacy_lowercase_session_start(tmp_path):
-    dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
-    root.mkdir()
-    _settings(root).write_text(
-        json.dumps({"hooks": {"session_start": []}}), encoding="utf-8"
-    )
-
-    ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
-
-    hooks = _hooks_of_settings(root)
-    assert "session_start" not in hooks, "legacy key should be dropped"
-    assert ClaudeAgent.SESSION_START_COMMAND in _commands(hooks["SessionStart"])
-
-
 def test_dry_run_writes_nothing(tmp_path):
     dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
     ClaudeAgent().wire_hooks(dest, dry_run=True, logger=None, config_root=root)
