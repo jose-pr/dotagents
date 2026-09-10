@@ -396,7 +396,7 @@ def _apply_base(
     # it (the README). The DIR is created unconditionally because it is the
     # documented user extension point: a `*.py` command module dropped here is
     # discovered with zero config. The bundled command modules themselves
-    # (`findings.py`) are deliberately NOT copied: the bundled dir is always a
+    # (`findings.py`, `launch.py`) are deliberately NOT copied: the bundled dir is always a
     # discovery source (`cli._bundled_cmds_dir`), so a copy would add nothing --
     # and, being create-if-absent, it would silently pin the version installed
     # first and shadow every later one. A user who wants to customize a bundled

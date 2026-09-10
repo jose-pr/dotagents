@@ -152,6 +152,24 @@ class Agent:
         """Return True if this agent's config is present in the given root."""
         return any((root / f).exists() for f in self.context_files)
 
+    #: The harness's command-line program, for ``dotagents launch``: a bare
+    #: name resolved on the PATH the launch exports. Empty = no CLI dotagents
+    #: knows how to start (an IDE-only harness); ``launch --command`` overrides.
+    launch_command: str = ""
+
+    def launch_context_args(self, context_file: Path) -> "Optional[list[str]]":
+        """Argv that hands ``context_file`` (the assembled context, markdown) to
+        a fresh session as text APPENDED to the harness's own system prompt.
+
+        ``None`` = the harness has no append mechanism, and ``launch`` falls
+        back to :meth:`write_context` (the managed block in
+        :attr:`context_target`, which the harness loads by itself). Only a
+        documented append flag earns an override: Codex's
+        ``model_instructions_file`` and Gemini's ``GEMINI_SYSTEM_MD`` REPLACE
+        the built-in prompt, which is not the same thing and is documented to
+        degrade the harness."""
+        return None
+
 
 class ClaudeAgent(Agent):
     name = "claude"
@@ -173,6 +191,15 @@ class ClaudeAgent(Agent):
     harness_id = "claude-code"
     vendor = "anthropic"
     model_source_vars = ["ANTHROPIC_MODEL"]
+    launch_command = "claude"
+
+    def launch_context_args(self, context_file: Path) -> "Optional[list[str]]":
+        # The file form, not `--append-system-prompt <text>`: the text is
+        # multi-line markdown, and on Windows `claude` is an npm `.cmd` shim
+        # that cmd.exe re-parses -- a newline inside an argument ends the
+        # command there. Both flags work in interactive and -p mode
+        # (code.claude.com/docs/en/cli-reference, system prompt flags).
+        return ["--append-system-prompt-file", str(context_file)]
 
     def loaded_paths(self, project_root: Path) -> "list[Path]":
         seen: "set[Path]" = set()
@@ -574,6 +601,7 @@ class GeminiAgent(Agent):
     # GEMINI_SESSION was invented; GEMINI_API_KEY is a credential, not a marker.
     detect_env_vars = ["GEMINI_CLI"]
     harness_id = "gemini-cli"
+    launch_command = "gemini"
     vendor = "google"
     model_source_vars = ["GEMINI_MODEL"]
 
@@ -753,6 +781,7 @@ class CodexAgent(Agent):
     # `_config_root` still honours it as the config location.
     detect_env_vars = ["CODEX_SANDBOX"]
     harness_id = "codex"
+    launch_command = "codex"
     vendor = "openai"
     # OpenAI base/model live under OPENAI_* (support the OPENAI_API_BASE alias
     # elsewhere); Codex has no dedicated model var, so read the OpenAI one.
@@ -1006,6 +1035,7 @@ class CursorAgent(Agent):
     # invented.
     detect_env_vars = ["CURSOR_AGENT"]
     harness_id = "cursor"
+    launch_command = "cursor-agent"
     vendor = "cursor"
     model_source_vars = ["CURSOR_DEFAULT_MODEL"]
 
@@ -1032,6 +1062,7 @@ class CopilotAgent(Agent):
     # detect(). The old COPILOT_SESSION_ID / GITHUB_COPILOT were invented.
     detect_env_vars = []
     harness_id = "copilot"
+    launch_command = "copilot"
     vendor = "github"
     model_source_vars = ["COPILOT_MODEL"]
 

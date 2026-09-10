@@ -88,8 +88,8 @@ from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
 
 _LOGGER = logging.getLogger("dotagents")
 
-# The compiled built-in command classes, in --help order. Together with the one
-# bundled command module (`findings`) this is dotagents' WHOLE shipped surface:
+# The compiled built-in command classes, in --help order. Together with the
+# bundled command modules (`findings`, `launch`) this is dotagents' WHOLE shipped surface:
 # link/sync left the package with their logic (D85 -- the private-sync overlay
 # supplies link-project/sync-project), personal tooling stays in the user's own
 # `<scope>/dotagents/cmds/` as discovered modules (D84), and audit is repo CI
@@ -163,7 +163,8 @@ def _bundled_cmds_dir() -> "Path | None":
     """The bundled command-module dir shipped inside the package (D76).
 
     `<package>/_overlay/dotagents/cmds` is that dir. It ships `findings.py`
-    (the per-scope findings queue) plus its README; `link`/`sync` left it for
+    (the per-scope findings queue) and `launch.py` (start a harness with the
+    env and context applied) plus its README; `link`/`sync` left it for
     the private-sync overlay (D85). It is always a discovery source -- `init`
     lays down only the README as the user's drop-in point, never a copy of the
     bundled modules (a create-if-absent copy would pin the first-installed

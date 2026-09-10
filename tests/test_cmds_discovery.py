@@ -105,9 +105,11 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
     # The compiled built-ins survive the app switch.
     for builtin in ("init", "build-pyz", "context", "env", "overlays"):
         assert builtin in names
-    # The one bundled command module: the findings queue. Its subcommands are
-    # nested classes, so none of them leaks out as a top-level command.
+    # The bundled command modules: the findings queue (its subcommands are
+    # nested classes, so none of them leaks out as a top-level command) and
+    # launch.
     assert "findings" in names
+    assert "launch" in names
     for nested in ("add", "list", "show", "done", "reopen", "remove", "index", "path"):
         assert nested not in names
     # D85: link/sync left the package. They are `link-project`/`sync-project`,
@@ -118,20 +120,23 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
     # A personal command module is discovered only when the user has dropped it
     # into their own `<scope>/dotagents/cmds/` (D84) -- never a default of a
     # fresh install. So a fresh install offers EXACTLY the built-ins plus the
-    # bundled findings module, and nothing else.
+    # bundled modules, and nothing else.
     assert "my-personal-tool" not in names
-    assert set(names) == {"init", "build-pyz", "context", "env", "overlays", "findings"}
+    assert set(names) == {
+        "init", "build-pyz", "context", "env", "overlays", "findings", "launch",
+    }
     # Built-ins are handed to `duho.app` via `commands=`, never `_subcommands_`.
     assert cli.Dotagents._subcommands_ == []
 
 
-def test_bundled_cmds_dir_ships_only_findings(monkeypatch, tmp_path):
+def test_bundled_cmds_dir_ships_findings_and_launch(monkeypatch, tmp_path):
     # The bundled cmds DIR is a discovery source and `init` lays its README
-    # down as the user's drop-in point. The only *.py it ships is `findings`
-    # (link/sync left for the private-sync overlay, D85).
+    # down as the user's drop-in point. The *.py it ships are `findings` and
+    # `launch` (link/sync left for the private-sync overlay, D85).
     bundled = cli._bundled_cmds_dir()
     assert bundled is not None and bundled.is_dir()
-    assert [p.name for p in bundled.glob("*.py") if not p.name.startswith("_")] == ["findings.py"]
+    shipped = sorted(p.name for p in bundled.glob("*.py") if not p.name.startswith("_"))
+    assert shipped == ["findings.py", "launch.py"]
 
 
 def test_overlay_supplies_link_project(monkeypatch, tmp_path):

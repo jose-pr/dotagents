@@ -27,13 +27,19 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   skills, files, `--json`) — `context`, `env`, `build_pyz` (a checkout only:
   a clear error elsewhere)); each is a `class X(LoggingArgs, Cmd)` — or
   `class X(DotAgentsArgs)`, which is that pair transitively — with a
-  `__call__`. Plus ONE bundled command module,
-  `_overlay/dotagents/cmds/findings.py` (`dotagents findings`: a per-scope
+  `__call__`. Plus TWO bundled command modules under
+  `_overlay/dotagents/cmds/`: `findings.py` (`dotagents findings`: a per-scope
   findings queue at `<scope-root>/findings/` — add / list / show / done / reopen /
   remove / index / path; its subcommands are classes NESTED in the `Findings`
-  umbrella so discovery does not register them as top-level commands, and `init`
-  does not copy it into the store — the bundled dir is always a discovery
-  source). `link` / `sync` left the package with their logic (D85): the
+  umbrella so discovery does not register them as top-level commands) and
+  `launch.py` (`dotagents launch <agent> -- <args>`: exports the `env`
+  assembly into the process and the child, writes the `context` to a file
+  exported as `AGENTS_CONTEXT_FILE`, hands it over via
+  `Agent.launch_context_args` — Claude's `--append-system-prompt-file`; `None`
+  means no append flag and the context is merged into `Agent.context_target`
+  as `context --write-agent` does — then runs `Agent.launch_command` resolved
+  on the exported PATH, or `--command`). `init` copies neither into the store —
+  the bundled dir is always a discovery source. `link` / `sync` left the package with their logic (D85): the
   opt-in **private-sync** overlay ships them, renamed `link-project` /
   `sync-project`, from its own `cmds/` + `lib/_link.py`. A personal command module
   dropped into a scope's `dotagents/cmds/` is discovered like any other, so private

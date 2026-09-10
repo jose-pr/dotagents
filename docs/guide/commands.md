@@ -17,10 +17,11 @@ by default (the `<cwd>/.agents` store, when run inside a project) or **user** wi
 | `env` | Assemble the chained env-file layers + identity vars, in a chosen format. |
 | `build-pyz` | Build the self-contained `dotagents.pyz` zipapp. |
 | `findings` | Per-scope findings queue: `add` / `list` / `show` / `done` / `reopen` / `remove` / `index` / `path`. |
+| `launch` | Start an agent's CLI with the `env` exported and the `context` handed over; everything after `--` goes to the agent. |
 
-That table is the **whole** shipped surface; `findings` is the one bundled command
-module (discovered from the package itself, overridable by a same-named module in a
-scope's `cmds/`). Everything else is **discovered**, from each **installed overlay's** `cmds/`
+That table is the **whole** shipped surface; `findings` and `launch` are the two bundled
+command modules (discovered from the package itself, overridable by a same-named module
+in a scope's `cmds/`). Everything else is **discovered**, from each **installed overlay's** `cmds/`
 dir, each scope's command dir, `$AGENTS_CMDS_PATH` entries, and `--cmdspath` — one
 Contract-A resolver walk covers the overlay + scope tiers (D84). Two consequences
 worth knowing:
@@ -270,6 +271,46 @@ dotagents findings path                     # where this scope's queue lives
   or line) and gains one the first time the command rewrites it.
 - The command is bundled with dotagents and discovered from the package itself;
   a same-named `findings.py` in a scope's `dotagents/cmds/` overrides it.
+
+## launch
+
+Start an agent's command-line harness the way a session wired by `init` would
+find the world already: the full `env` exported, and the `context` handed over
+up front.
+
+```bash
+dotagents launch claude -- --model sonnet   # everything after `--` is the agent's
+dotagents launch                            # the active agent, as `context` picks it
+dotagents launch codex --dry-run            # print the command line and the exported names
+dotagents launch -g gemini                  # user-store tiers only (the env/context meaning of -g)
+```
+
+What happens, in order:
+
+1. **Environment** — the same assembly as `dotagents env` for this scope (identity
+   vars, `AGENTS_HOME` / `AGENTS_PROJECT_ROOT` / `AGENTS_PYTHON`, every
+   `<NAME>_OVERLAY_ROOT`, the `PATH` / `PYTHONPATH` prepends, the env-file chain)
+   is applied to the `dotagents` process and handed to the child, so the harness
+   and everything it spawns see it.
+2. **Context** — `dotagents context` for that agent (what its harness does not
+   already load) is written to a file, exported as `AGENTS_CONTEXT_FILE`, and
+   passed the way the harness takes appended system-prompt text: Claude Code gets
+   `--append-system-prompt-file`. A harness with no append flag (Codex, Gemini,
+   Cursor, Copilot — their prompt-file options *replace* the built-in prompt, which
+   is not the same thing) gets it the static way instead: merged as the managed
+   `dotagents:context` block into its own instruction file in the project, exactly
+   what `context --write-agent` does. `--no-context` skips this; `--inline` also
+   inlines the on-demand files the sources reference.
+3. **The harness** — the agent's program (`claude`, `codex`, `gemini`,
+   `cursor-agent`, `copilot`), resolved on the PATH from step 1 so a harness an
+   overlay's `bin/` provides is found, or `--command <program>` for one under
+   another name. dotagents' flags come first and the passthrough after, so yours
+   win where the harness takes the last value. The exit code is the harness's.
+
+`--dry-run` prints the command line and the names of the exported changes (never
+their values) and runs nothing. Like `findings`, the command is bundled and
+discovered from the package; a same-named `launch.py` in a scope's
+`dotagents/cmds/` overrides it.
 
 ## audit — not a dotagents command
 

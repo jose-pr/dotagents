@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   or a git spec whose path is the overlay's root (no path: the repository root
   is the overlay). Checkouts are cached under `<user store>/.cache/overlays/`
   and refreshed on every use; credentials in a repo URL never reach a log line.
+- `dotagents launch [<agent>] [-- <the agent's arguments>]`, a bundled command
+  module like `findings`: starts an agent's CLI (`claude`, `codex`, `gemini`,
+  `cursor-agent`, `copilot`, or `--command <program>`) with the full `env`
+  assembly exported to the process and the child, and the assembled `context`
+  written to a file (exported as `AGENTS_CONTEXT_FILE`) and handed over as
+  appended system-prompt text where the harness takes one (Claude Code:
+  `--append-system-prompt-file`), or merged into the harness's own instruction
+  file as the managed `dotagents:context` block otherwise. The program is
+  resolved on the exported PATH, so a harness an overlay's `bin/` provides is
+  found; `--dry-run` prints the command line and the exported names;
+  `--no-context` and `--inline` shape the context step; the exit code is the
+  harness's. Adapters gained `launch_command` and `launch_context_args()`.
 - `env` exports `AGENTS_PYTHON`: the interpreter `dotagents` itself is running
   under (`sys.executable`), seeded only if unset like the scope roots. Shims
   and helper scripts now have a default Python they can trust, where a bare
