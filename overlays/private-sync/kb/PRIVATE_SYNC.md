@@ -31,7 +31,7 @@ For each checked-out project, `<project>/.agents` is a **symlink** →
 
 Everything below is **one way to use `link-project`/`sync-project`, not what
 dotagents requires**. Two knobs make that concrete: `--store-dir` /
-`$DOTAGENTS_STORE_DIR` moves the stores anywhere (relative to the agents dir, or an
+`$AGENTS_STORE_DIR` moves the stores anywhere (relative to the agents dir, or an
 absolute path outside it), and a `hooks/sync` script replaces git entirely. Both
 `link-project` and `sync-project` are optional subcommands — `init`/`install` never
 touch a project directory.
@@ -52,8 +52,8 @@ touch a project directory.
     This is the only part dotagents genuinely owns: it repairs the divergence its
     own `--copy` fallback creates.
   - **Transport** is then handed to `<agents-dir>/hooks/sync` if that exists — it
-    gets the store path as `$1` and the message as `$2` (plus `DOTAGENTS_AGENTS_DIR`
-    / `DOTAGENTS_SYNC_MESSAGE`), and its exit code is returned. Use it for rsync, a
+    gets the store path as `$1` and the message as `$2` (plus `AGENTS_HOME`
+    / `AGENTS_SYNC_MESSAGE`), and its exit code is returned. Use it for rsync, a
     cloud drive, or nothing at all.
   - With no hook, a built-in git path runs as a convenience: `git pull --rebase` /
     commit / push. `--remote <url>` bootstraps a fresh repo (`git init` + set
@@ -64,9 +64,9 @@ touch a project directory.
 
 ```bash
 # 1. Lay down the per-user base into ~/.agents, then the overlays you want (from a
-#    checkout of the dotagents `overlays` branch, or $AGENTS_OVERLAYS_SRC).
+#    checkout of the dotagents `overlays` branch, or $AGENTS_OVERLAYS_REPO).
 dotagents init -g
-dotagents overlays add engineering private-sync --source <overlays-checkout>/overlays -g
+dotagents overlays add engineering private-sync --repo <overlays-checkout>/overlays -g
 # 2. Make ~/.agents a git repo pointing at your private remote, and push.
 dotagents sync-project --remote git@github.com:<you>/.agents.git -m "init: agents repo"
 git -C ~/.agents push -u origin HEAD
@@ -125,15 +125,14 @@ recover the environment.
 
 Auth for the clone/push comes from the environment, never a committed file:
 
-- `DOTAGENTS_AGENTS_REMOTE` — git URL of your private repo. Prefer a **tokenless** HTTPS
+- `AGENTS_REMOTE` — git URL of your private repo. Prefer a **tokenless** HTTPS
   URL (`https://github.com/<you>/.agents.git`) paired with `DOTAGENTS_AGENTS_TOKEN`.
 - `DOTAGENTS_AGENTS_TOKEN` — **(recommended)** a fine-grained PAT scoped to just this
   repo (Contents: read/write). The hooks wire it via a git credential helper that reads
   it from the environment at auth time, so the secret is never written to `.git/config`
-  or any file on disk. A token embedded directly in `DOTAGENTS_AGENTS_REMOTE` also works
+  or any file on disk. A token embedded directly in `AGENTS_REMOTE` also works
   but is then persisted in `.git/config` — avoid it.
-- `AGENTS_HOME` — where the repo lives (default `$HOME/.agents`; the legacy
-  `DOTAGENTS_AGENTS_DIR` is still read).
+- `AGENTS_HOME` — where the repo lives (default `$HOME/.agents`).
 
 Why a PAT (not the session's own GitHub auth): a hosted agent runner authenticates git
 through a per-session, repo-scoped credential, and a repo whose name starts with `.`
