@@ -34,7 +34,6 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE" if os.name == "nt" else "HOME", str(fake))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake))
     monkeypatch.delenv("AGENTS_HOME", raising=False)
-    monkeypatch.delenv("DOTAGENTS_AGENTS_DIR", raising=False)
     return fake
 
 

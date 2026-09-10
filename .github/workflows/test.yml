@@ -64,7 +64,7 @@ jobs:
       - name: Fetch example overlays (separate branch)
         # The example overlays live on the `overlays` orphan branch, not in main's
         # tree (D77). Check them out into ./overlays-src so the overlays-command
-        # integration steps below can resolve them via --source overlays-src/overlays
+        # integration steps below can resolve them via --repo overlays-src/overlays
         # (the branch keeps them at overlays/<name>/). The pure-unit pytest step
         # below uses tmp fixtures and needs none of this.
         uses: actions/checkout@v4
@@ -90,7 +90,7 @@ jobs:
         run: |
           export HOME="$(mktemp -d)"
           python install.py init -g
-          python -m dotagents overlays add engineering python --source overlays-src/overlays -g
+          python -m dotagents overlays add engineering python --repo overlays-src/overlays -g
           test -f "$HOME/.agents/AGENTS.md"
           test -f "$HOME/.agents/overlays/engineering/flows/PLAN.md"
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"
@@ -98,36 +98,36 @@ jobs:
         run: |
           export HOME="$(mktemp -d)"
           python install.py init -g
-          python -m dotagents overlays add engineering --source overlays-src/overlays -g
-          python -m dotagents overlays add engineering --source overlays-src/overlays -g 2>&1 | grep -q "skip (exists)"
+          python -m dotagents overlays add engineering --repo overlays-src/overlays -g
+          python -m dotagents overlays add engineering --repo overlays-src/overlays -g 2>&1 | grep -q "skip (exists)"
       - name: overlays add/list/remove into a scope (discover, not track)
         run: |
           export HOME="$(mktemp -d)"
           python install.py init -g                                   # lay the base AGENTS.md
           # add by name from the bundled source, into the user scope.
-          python -m dotagents overlays add python --source overlays-src/overlays -g
+          python -m dotagents overlays add python --repo overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"     # installed as a dir
           test -f "$HOME/.agents/overlays/python/overlay.toml"     # self-describing
           grep -q "kb/PYTHON.md" "$HOME/.agents/AGENTS.md"         # D59 routing merged
           # list discovers it by presence (no registry file).
-          python -m dotagents overlays list --source overlays-src/overlays -g | grep -q "python"
-          python -m dotagents overlays list --source overlays-src/overlays -g --json | grep -q '"installed"'
+          python -m dotagents overlays list --repo overlays-src/overlays -g | grep -q "python"
+          python -m dotagents overlays list --repo overlays-src/overlays -g --json | grep -q '"installed"'
           # glob-filtered sync is a no-op-safe refresh.
-          python -m dotagents overlays sync 'py*' --source overlays-src/overlays -g
+          python -m dotagents overlays sync 'py*' --repo overlays-src/overlays -g
           # remove deletes the overlay dir AND recomposes the managed block over what
           # remains, so the routing it merged leaves with it (the un-merge).
           python -m dotagents overlays remove python -g
           test ! -e "$HOME/.agents/overlays/python"
           ! grep -q "kb/PYTHON.md" "$HOME/.agents/AGENTS.md"
           # show describes an overlay from the source when it is not installed.
-          python -m dotagents overlays show python --source overlays-src/overlays -g | grep -q "python (source)"
+          python -m dotagents overlays show python --repo overlays-src/overlays -g | grep -q "python (source)"
       - name: Link a project into the private store, then sync (git bootstrap)
         run: |
           export HOME="$(mktemp -d)"
           git config --global user.email ci@example.invalid
           git config --global user.name CI
           python install.py init -g
-          python -m dotagents overlays add private-sync --source overlays-src/overlays -g
+          python -m dotagents overlays add private-sync --repo overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/private-sync/kb/PRIVATE_SYNC.md"
           test -f "$HOME/.agents/overlays/private-sync/hooks/private-sync-start.sh"
           # A project with an existing .agents is adopted into the store and symlinked.
@@ -151,7 +151,7 @@ jobs:
           python install.py init -g
           # link-project/sync-project come FROM the private-sync overlay (D85), so
           # the overlay MUST be installed before either is used.
-          python -m dotagents overlays add private-sync --source overlays-src/overlays -g
+          python -m dotagents overlays add private-sync --repo overlays-src/overlays -g
           proj="$(mktemp -d)"; printf '.agents\n' > "$proj/.gitignore"
           git init -q "$proj/.agents"
           echo "checkout" > "$proj/.agents/AGENTS.md"
@@ -173,7 +173,7 @@ jobs:
           python install.py init -g
           # link-project/sync-project come FROM the private-sync overlay (D85), so
           # the overlay MUST be installed before either is used.
-          python -m dotagents overlays add private-sync --source overlays-src/overlays -g
+          python -m dotagents overlays add private-sync --repo overlays-src/overlays -g
           proj="$(mktemp -d)"; printf '.agents/\n' > "$proj/.gitignore"
           python -m dotagents link-project "$proj" --copy
           test -d "$proj/.agents" && test ! -L "$proj/.agents"  # real dir, not a symlink
@@ -204,7 +204,7 @@ jobs:
           # through the zipapp (the shim this job guards). Install the private-sync
           # overlay into HOME and exercise its link-project the way the bundled
           # link used to be exercised.
-          python dist/dotagents.pyz overlays add private-sync --source overlays-src/overlays -g
+          python dist/dotagents.pyz overlays add private-sync --repo overlays-src/overlays -g
           python dist/dotagents.pyz --help | grep -q -- "link-project"
           python dist/dotagents.pyz --help | grep -q -- "sync-project"
           python dist/dotagents.pyz link-project --help | grep -q -- "--copy"
@@ -264,11 +264,11 @@ jobs:
           python dist/dotagents.pyz env --format dotenv -g | grep -q -- "^AGENT="
           # auto (the default) resolves to a concrete format and prints SOMETHING.
           python dist/dotagents.pyz env -g | grep -q -- "AGENT"
-          # overlays add: the `<name>` positional + aliased flags (--source, -g) must
-          # survive the zipapp (duho AST-introspection-in-pyz gotcha). --source must
-          # NOT degrade to --source-, and -g must select the user scope.
-          python dist/dotagents.pyz overlays add --help | grep -q -- "--source"
-          ! python dist/dotagents.pyz overlays add --help | grep -q -- "--source-"
+          # overlays add: the `<name>` positional + aliased flags (--repo, -g) must
+          # survive the zipapp (duho AST-introspection-in-pyz gotcha). --repo must
+          # NOT degrade to --repo-, and -g must select the user scope.
+          python dist/dotagents.pyz overlays add --help | grep -q -- "--repo"
+          ! python dist/dotagents.pyz overlays add --help | grep -q -- "--repo-"
           # --no-setup (the setup-runner escape hatch) must survive the zipapp too.
           python dist/dotagents.pyz overlays add --help | grep -q -- "--no-setup"
           ! python dist/dotagents.pyz overlays add --help | grep -q -- "--no-setup-"
@@ -281,7 +281,7 @@ jobs:
           ! python dist/dotagents.pyz --help | grep -q -- "audit"
           python dist/dotagents.pyz --help | grep -q -- "findings"
           python dist/dotagents.pyz init
-          python dist/dotagents.pyz overlays add python --source overlays-src/overlays -g
+          python dist/dotagents.pyz overlays add python --repo overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"
           # pyvenv/py (D-latest): DISCOVERED commands that INHERIT a dotagents-defined
           # base class (DotAgentsArgs, in cli/_common.py -- not their own module) are a

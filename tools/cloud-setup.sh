@@ -43,16 +43,14 @@
 #   DOTAGENTS_CLI_INSTALL    pip spec for the CLI if not already installed
 #                            (default: "dotagents"; e.g. a git URL if unpublished)
 #   CLAUDE_PROJECT_DIR       project to link (default: current directory)
-#   AGENTS_OVERLAYS_SRC      local overlay source dir; set it to skip the overlays-
-#                            branch fetch in step 4 entirely
+#   AGENTS_OVERLAYS_REPO     an overlay repo (a directory of overlays, a registry
+#                            file, or a git <repo>[@ref][#path]); set it to skip
+#                            the overlays-branch fetch in step 4 entirely
 #   DOTAGENTS_OVERLAYS_REMOTE / DOTAGENTS_OVERLAYS_REF
 #                            where to fetch the private-sync overlay from
 #                            (default: this repo, branch `overlays`)
-#
-# back-compat: the old names DOTAGENTS_AGENTS_REMOTE / DOTAGENTS_AGENTS_DIR are
-# still honored this release (removable next); the AGENTS_* names win when both set.
 
-AGENTS_DIR="${AGENTS_HOME:-${DOTAGENTS_AGENTS_DIR:-$HOME/.agents}}"
+AGENTS_DIR="${AGENTS_HOME:-$HOME/.agents}"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 
 # Banner so the environment's setup-script log unambiguously shows this ran (a
@@ -180,8 +178,7 @@ _dg_install_recovery_hook() {
 }
 
 # --- 2. Clone (with retry/backoff) or pull the private repo. ------------------
-# back-compat: DOTAGENTS_AGENTS_REMOTE is deprecated, removable next release.
-AGENTS_REMOTE="${AGENTS_REMOTE:-${DOTAGENTS_AGENTS_REMOTE:-}}"
+AGENTS_REMOTE="${AGENTS_REMOTE:-}"
 if [ -d "$AGENTS_DIR/.git" ]; then
     dg_git -C "$AGENTS_DIR" pull --rebase --autostash --quiet \
         || echo "dotagents: pull failed, using local copy"
@@ -231,10 +228,10 @@ dg_cli() { if command -v dotagents >/dev/null 2>&1; then dotagents "$@"; else py
 # e.g. a user's own cmds module), so the common path costs nothing.
 #
 # The example overlays live on the dotagents repo's `overlays` BRANCH, not in
-# main's tree, and `overlays add --source` takes a local directory -- so fetch that
-# branch shallowly into a temp dir and point --source at its overlays/ dir.
-# AGENTS_OVERLAYS_SRC (or a pre-populated <store>/overlays/private-sync) short-
-# circuits the fetch entirely, for an air-gapped or pinned setup.
+# main's tree -- so fetch that branch shallowly into a temp dir and point --repo
+# at its overlays/ dir. AGENTS_OVERLAYS_REPO (or a pre-populated
+# <store>/overlays/private-sync) short-circuits the fetch entirely, for an
+# air-gapped or pinned setup.
 DOTAGENTS_OVERLAYS_REMOTE="${DOTAGENTS_OVERLAYS_REMOTE:-https://github.com/jose-pr/dotagents.git}"
 DOTAGENTS_OVERLAYS_REF="${DOTAGENTS_OVERLAYS_REF:-overlays}"
 
@@ -244,16 +241,16 @@ _dg_have_link_project() {
 
 if [ -d "$AGENTS_DIR/overlays/private-sync" ]; then
     echo "dotagents: private-sync overlay already installed"
-elif [ -n "${AGENTS_OVERLAYS_SRC:-}" ]; then
-    echo "dotagents: installing the private-sync overlay from AGENTS_OVERLAYS_SRC"
+elif [ -n "${AGENTS_OVERLAYS_REPO:-}" ]; then
+    echo "dotagents: installing the private-sync overlay from AGENTS_OVERLAYS_REPO"
     dg_cli overlays add private-sync --agents-dir "$AGENTS_DIR" -g \
-        || echo "dotagents: private-sync overlay install failed (AGENTS_OVERLAYS_SRC)"
+        || echo "dotagents: private-sync overlay install failed (AGENTS_OVERLAYS_REPO)"
 else
     _dg_ovl_tmp="$(mktemp -d 2>/dev/null || echo /tmp/dg-overlays.$$)"
     echo "dotagents: fetching the overlays branch ($DOTAGENTS_OVERLAYS_REF) for private-sync"
     if dg_git clone --quiet --depth 1 --branch "$DOTAGENTS_OVERLAYS_REF" \
         "$DOTAGENTS_OVERLAYS_REMOTE" "$_dg_ovl_tmp/src" 2>/dev/null; then
-        dg_cli overlays add private-sync --source "$_dg_ovl_tmp/src/overlays" \
+        dg_cli overlays add private-sync --repo "$_dg_ovl_tmp/src/overlays" \
             --agents-dir "$AGENTS_DIR" -g \
             || echo "dotagents: private-sync overlay install failed"
     else
@@ -272,7 +269,7 @@ if [ -d "$PROJECT_DIR" ]; then
             || echo "dotagents: link-project failed"
     else
         echo "dotagents: link-project unavailable -- the private-sync overlay is not installed"
-        echo "dotagents: install it, then re-run: dotagents overlays add private-sync --source <overlays-checkout>"
+        echo "dotagents: install it, then re-run: dotagents overlays add private-sync --repo <overlays-checkout>/overlays"
     fi
 fi
 

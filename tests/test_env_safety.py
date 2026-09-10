@@ -132,7 +132,6 @@ def test_global_scope_uses_agents_home(tmp_path, monkeypatch):
     the session had pinned $AGENTS_HOME (the very var `env` emits)."""
     pinned = tmp_path / "pinned"
     monkeypatch.setenv("AGENTS_HOME", str(pinned))
-    monkeypatch.delenv("DOTAGENTS_AGENTS_DIR", raising=False)
     assert _scope.resolve_scope(True).agents_root == pinned
     # An explicit --agents-dir still wins.
     assert _scope.resolve_scope(True, agents_dir=tmp_path / "x").agents_root == tmp_path / "x"

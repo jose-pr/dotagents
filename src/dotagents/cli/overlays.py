@@ -88,8 +88,8 @@ def _install_order(source, names, *, follow_requires: bool, logger) -> "list[str
 class OverlayAdd(DotAgentsArgs):
     """Install overlay(s) by name into a scope, and publish their skills.
 
-    Resolves each ``<name>`` against the source (``--source`` /
-    ``$AGENTS_OVERLAYS_SRC``, default the bundled ``overlays/``), installs what
+    Resolves each ``<name>`` against the source (``--repo``,
+    the env repos, the stores' registries, the bundled ``overlays/``), installs what
     its manifest ``requires`` first, copies it into
     ``<scope>/.agents/overlays/<name>/`` (discoverable), merges its D59
     routing/rules into the installed ``AGENTS.md`` managed block (additive), and
@@ -103,9 +103,13 @@ class OverlayAdd(DotAgentsArgs):
     "Overlay name(s) to install (resolved against the source)."
     ("name",)
 
-    source: Optional[str] = None
-    "Overlay source directory (default: $AGENTS_OVERLAYS_SRC or the bundled overlays/)."
-    ("--source",)
+    repo: "list[str]" = []
+    ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
+     "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
+     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO, the stores' "
+     "dotagents.{json,toml,yaml} and the bundled overlays/. The first repo "
+     "offering a name wins.")
+    ("--repo",)
 
     copy: bool = False
     "Copy skills into the shared dir instead of symlinking (no-symlink fallback)."
@@ -131,8 +135,8 @@ class OverlayAdd(DotAgentsArgs):
             return 0
         names = _validated_names(self.name, "add")
 
-        source = _scope.resolve_source(self.source)
         scope = self.resolve_scope()
+        source = _scope.resolve_source(self.repo, scope=scope, logger=self._logger_)
         self._logger_.info("scope: %s (%s)", scope.level, scope.agents_root)
         agents_md = scope.agents_root / "AGENTS.md"
 
@@ -272,9 +276,13 @@ class OverlayList(DotAgentsArgs):
 
     _parsername_ = "list"
 
-    source: Optional[str] = None
-    "Overlay source directory (default: $AGENTS_OVERLAYS_SRC or the bundled overlays/)."
-    ("--source",)
+    repo: "list[str]" = []
+    ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
+     "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
+     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO, the stores' "
+     "dotagents.{json,toml,yaml} and the bundled overlays/. The first repo "
+     "offering a name wins.")
+    ("--repo",)
 
     json: bool = False
     "Emit JSON instead of plain text."
@@ -302,7 +310,7 @@ class OverlayList(DotAgentsArgs):
             for store in scope.stores
         }
         try:
-            available = _scope.resolve_source(self.source).available()
+            available = _scope.resolve_source(self.repo, scope=scope, logger=self._logger_).available()
         except SystemExit:
             available = []
         names = {o.name for o in active}
@@ -359,9 +367,13 @@ class OverlayShow(DotAgentsArgs):
     "Overlay name."
     ("name",)
 
-    source: Optional[str] = None
-    "Overlay source directory (default: $AGENTS_OVERLAYS_SRC or the bundled overlays/)."
-    ("--source",)
+    repo: "list[str]" = []
+    ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
+     "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
+     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO, the stores' "
+     "dotagents.{json,toml,yaml} and the bundled overlays/. The first repo "
+     "offering a name wins.")
+    ("--repo",)
 
     json: bool = False
     "Emit JSON instead of plain text."
@@ -384,7 +396,7 @@ class OverlayShow(DotAgentsArgs):
             where = "installed (%s)" % scope.store_level(active[0].store)
         else:
             where = "source"
-            path = _scope.resolve_source(self.source).overlay_dir(name)
+            path = _scope.resolve_source(self.repo, scope=scope, logger=self._logger_).overlay_dir(name)
         overlay = _overlays.Overlay(path)
         manifest = overlay.read_manifest()
         setup = overlay.find_setup_script()
@@ -439,9 +451,13 @@ class OverlaySync(DotAgentsArgs):
     "Glob over installed overlay names to sync (default: all)."
     ("pattern",)
 
-    source: Optional[str] = None
-    "Overlay source directory (default: $AGENTS_OVERLAYS_SRC or the bundled overlays/)."
-    ("--source",)
+    repo: "list[str]" = []
+    ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
+     "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
+     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO, the stores' "
+     "dotagents.{json,toml,yaml} and the bundled overlays/. The first repo "
+     "offering a name wins.")
+    ("--repo",)
 
     copy: bool = False
     "Copy skills into the shared dir instead of symlinking (no-symlink fallback)."
@@ -463,7 +479,7 @@ class OverlaySync(DotAgentsArgs):
         from dotagents import _overlays, _scope, _skills
 
         scope = self.resolve_scope()
-        source = _scope.resolve_source(self.source)
+        source = _scope.resolve_source(self.repo, scope=scope, logger=self._logger_)
         installed = [o.name for o in _overlays.Overlay.discover(scope.overlay_root)]
         names = _scope.filter_names(installed, self.pattern)
         if not names:

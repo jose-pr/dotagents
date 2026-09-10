@@ -27,7 +27,6 @@ _extracted_dirs_cache: "dict[str, Path]" = {}
 # command modules and the umbrella import them from `dotagents.cli`.
 from dotagents._scope import (  # noqa: E402
     AGENTS_DIR_ENV,
-    AGENTS_DIR_ENV_LEGACY,
     resolve_user_store,
 )
 
@@ -173,7 +172,7 @@ def _package_data_dir(name: str) -> "Path | None":
 # The base overlay (neutral minimum) is bundled package data at
 # `src/dotagents/_overlay`; `init` lays it down. Overlays beyond the base are
 # opt-in and installed by name with `overlays add` from a source dir
-# (`--source` / `$AGENTS_OVERLAYS_SRC`; this package bundles none of them).
+# (`--repo` / `$AGENTS_OVERLAYS_REPO`; this package bundles none of them).
 BASE_ROOT = _package_data_dir("_overlay") or (
     Path(__file__).resolve().parent.parent / "_overlay"
 )

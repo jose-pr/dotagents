@@ -159,46 +159,40 @@ def logger():
 # Source resolution
 # --------------------------------------------------------------------------- #
 
-def test_source_resolution_explicit_path(tmp_path):
+def test_source_resolution_explicit_repo(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENTS_OVERLAYS_REPO", raising=False)
     src = make_source(tmp_path)
-    source = _scope.resolve_source(str(src))
-    assert sorted(source.available()) == ["plain", "py-demo"]
+    source = _scope.resolve_source([str(src)])
+    assert sorted(n for n in source.available() if n in ("plain", "py-demo")) == ["plain", "py-demo"]
     assert source.overlay_dir("py-demo") == src / "py-demo"
 
 
-def test_source_resolution_env(tmp_path, monkeypatch):
+def test_source_resolution_env_default_repo(tmp_path, monkeypatch):
     src = make_source(tmp_path)
-    monkeypatch.delenv(_scope.SOURCE_ENV_LEGACY, raising=False)
-    monkeypatch.setenv(_scope.SOURCE_ENV, str(src))
+    monkeypatch.setenv("AGENTS_OVERLAYS_REPO", str(src))
     source = _scope.resolve_source(None)
     assert "py-demo" in source.available()
 
 
-def test_source_resolution_env_legacy_fallback(tmp_path, monkeypatch):
-    # D80 back-compat: the old $DOTAGENTS_OVERLAYS_SRC still resolves when the new
-    # $AGENTS_OVERLAYS_SRC is unset.
+def test_source_resolution_keyed_env_repo_beats_the_default(tmp_path, monkeypatch):
     src = make_source(tmp_path)
-    monkeypatch.delenv(_scope.SOURCE_ENV, raising=False)
-    monkeypatch.setenv(_scope.SOURCE_ENV_LEGACY, str(src))
-    source = _scope.resolve_source(None)
-    assert "py-demo" in source.available()
-
-
-def test_source_resolution_env_new_name_wins(tmp_path, monkeypatch):
-    # Both set: the new name wins.
-    src = make_source(tmp_path)
-    monkeypatch.setenv(_scope.SOURCE_ENV, str(src))
-    monkeypatch.setenv(_scope.SOURCE_ENV_LEGACY, str(tmp_path / "nonexistent-legacy"))
-    source = _scope.resolve_source(None)
-    assert "py-demo" in source.available()
+    other = tmp_path / "other"
+    (other / "py-demo").mkdir(parents=True)
+    (other / "py-demo" / "overlay.toml").write_text('name = "py-demo"\n', encoding="utf-8")
+    monkeypatch.setenv("AGENTS_OVERLAYS_REPO", str(src))
+    monkeypatch.setenv("AGENTS_OVERLAYS_REPO_A", str(other))
+    assert _scope.resolve_source(None).overlay_dir("py-demo") == other / "py-demo"
 
 
 def test_source_resolution_no_bundled_errors(tmp_path, monkeypatch):
     # main ships no bundled overlays/ (they live on the `overlays` branch, D77),
-    # and this test env packages none. With no --source and no env, resolve_source
+    # and this test env packages none. With no repo anywhere, resolve_source
     # must fail with a clear "no overlay source" error, not silently pick nothing.
-    monkeypatch.delenv(_scope.SOURCE_ENV, raising=False)
-    monkeypatch.delenv(_scope.SOURCE_ENV_LEGACY, raising=False)
+    monkeypatch.delenv("AGENTS_OVERLAYS_REPO", raising=False)
+    for k in list(__import__("os").environ):
+        if k.startswith("AGENTS_OVERLAYS_REPO_"):
+            monkeypatch.delenv(k)
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "empty-store"))
     if _scope.bundled_overlays_root() is not None:
         pytest.skip("this build/checkout bundles overlays; default-source error N/A")
     with pytest.raises(SystemExit, match="no overlay source"):
@@ -207,7 +201,7 @@ def test_source_resolution_no_bundled_errors(tmp_path, monkeypatch):
 
 def test_source_unknown_name_errors(tmp_path):
     src = make_source(tmp_path)
-    source = _scope.resolve_source(str(src))
+    source = _scope.resolve_source([str(src)])
     with pytest.raises(SystemExit):
         source.overlay_dir("nope")
 
@@ -434,7 +428,7 @@ def test_cmd_add_then_remove_roundtrip(tmp_path):
     src = make_source(tmp_path)
     scope = make_scope(tmp_path)
     rc = _run(
-        OverlayAdd, name=["py-demo"], source=str(src), global_scope=True,
+        OverlayAdd, name=["py-demo"], repo=[str(src)], global_scope=True,
         agents_dir=scope.agents_root, copy=True, dry_run=False,
     )
     assert rc == 0
@@ -457,7 +451,7 @@ def test_cmd_add_dry_run_writes_nothing(tmp_path):
     src = make_source(tmp_path)
     scope = make_scope(tmp_path)
     _run(
-        OverlayAdd, name=["py-demo"], source=str(src), global_scope=True,
+        OverlayAdd, name=["py-demo"], repo=[str(src)], global_scope=True,
         agents_dir=scope.agents_root, copy=True, dry_run=True,
     )
     assert not (scope.overlay_root / "py-demo").exists()
@@ -469,10 +463,10 @@ def test_cmd_sync_glob_filter(tmp_path):
 
     src = make_source(tmp_path)
     scope = make_scope(tmp_path)
-    _run(OverlayAdd, name=["py-demo", "plain"], source=str(src), global_scope=True,
+    _run(OverlayAdd, name=["py-demo", "plain"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
     # A glob that matches only py-demo; a run that touches only it must succeed.
-    rc = _run(OverlaySync, pattern="py*", source=str(src), global_scope=True,
+    rc = _run(OverlaySync, pattern="py*", repo=[str(src)], global_scope=True,
               agents_dir=scope.agents_root, copy=True, dry_run=False)
     assert rc == 0
 
@@ -509,27 +503,26 @@ def test_setup_runs_on_add(tmp_path):
         "open(os.path.join(agents, 'SETUP_RAN'), 'w').write('ok')\n",
     )
     scope = make_scope(tmp_path)
-    rc = _run(OverlayAdd, name=["with-setup"], source=str(src), global_scope=True,
+    rc = _run(OverlayAdd, name=["with-setup"], repo=[str(src)], global_scope=True,
               agents_dir=scope.agents_root, copy=True, dry_run=False)
     assert rc == 0
     assert (scope.agents_root / "SETUP_RAN").is_file()
 
 
-def test_setup_env_sets_both_new_and_legacy_names(tmp_path):
-    # D80 dual-SET back-compat: the runner emits the new AGENTS_* names AND the
-    # deprecated DOTAGENTS_* names (removable next release), so existing setup
-    # scripts keep working. The script asserts all four are present and equal.
+def test_setup_env_carries_only_the_agents_names(tmp_path):
+    # The runner emits AGENTS_HOME / AGENTS_OVERLAY_DIR and nothing under the
+    # retired DOTAGENTS_* prefix.
     from dotagents.cli import OverlayAdd
 
     src = tmp_path / "src_overlays"
     _add_setup_overlay(
         src, "dual-env",
-        "assert os.environ['AGENTS_HOME'] == os.environ['DOTAGENTS_AGENTS_DIR']\n"
-        "assert os.environ['AGENTS_OVERLAY_DIR'] == os.environ['DOTAGENTS_OVERLAY_DIR']\n"
+        "assert os.environ['AGENTS_HOME'] == agents\n"
+        "assert not [k for k in os.environ if k.startswith('DOTAGENTS_')]\n"
         "open(os.path.join(agents, 'DUAL_OK'), 'w').write('ok')\n",
     )
     scope = make_scope(tmp_path)
-    rc = _run(OverlayAdd, name=["dual-env"], source=str(src), global_scope=True,
+    rc = _run(OverlayAdd, name=["dual-env"], repo=[str(src)], global_scope=True,
               agents_dir=scope.agents_root, copy=True, dry_run=False)
     assert rc == 0
     assert (scope.agents_root / "DUAL_OK").is_file()
@@ -540,13 +533,13 @@ def test_setup_cwd_is_installed_overlay_dir(tmp_path):
 
     src = tmp_path / "src_overlays"
     # The marker lands via a *relative* path -> proves cwd is the installed dir,
-    # and its content is DOTAGENTS_OVERLAY_DIR -> proves that env var is set.
+    # and its content is AGENTS_OVERLAY_DIR -> proves that env var is set.
     _add_setup_overlay(
         src, "cwd-demo",
         "open('MARKER', 'w').write(overlay)\n",
     )
     scope = make_scope(tmp_path)
-    _run(OverlayAdd, name=["cwd-demo"], source=str(src), global_scope=True,
+    _run(OverlayAdd, name=["cwd-demo"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
     marker = scope.overlay_root / "cwd-demo" / "MARKER"
     assert marker.is_file()
@@ -558,7 +551,7 @@ def test_add_without_setup_is_fine(tmp_path):
 
     src = make_source(tmp_path)  # py-demo / plain ship no setup script
     scope = make_scope(tmp_path)
-    rc = _run(OverlayAdd, name=["plain"], source=str(src), global_scope=True,
+    rc = _run(OverlayAdd, name=["plain"], repo=[str(src)], global_scope=True,
               agents_dir=scope.agents_root, copy=True, dry_run=False)
     assert rc == 0
     assert (scope.overlay_root / "plain" / "note.md").is_file()
@@ -573,7 +566,7 @@ def test_no_setup_flag_skips(tmp_path):
         "open(os.path.join(agents, 'SETUP_RAN'), 'w').write('ok')\n",
     )
     scope = make_scope(tmp_path)
-    rc = _run(OverlayAdd, name=["with-setup"], source=str(src), global_scope=True,
+    rc = _run(OverlayAdd, name=["with-setup"], repo=[str(src)], global_scope=True,
               agents_dir=scope.agents_root, copy=True, dry_run=False, no_setup=True)
     assert rc == 0
     # Overlay installed, but the setup marker must NOT exist.
@@ -588,7 +581,7 @@ def test_setup_nonzero_exit_surfaces_error(tmp_path):
     _add_setup_overlay(src, "bad-setup", "sys.exit(3)\n")
     scope = make_scope(tmp_path)
     with pytest.raises(SystemExit):
-        _run(OverlayAdd, name=["bad-setup"], source=str(src), global_scope=True,
+        _run(OverlayAdd, name=["bad-setup"], repo=[str(src)], global_scope=True,
              agents_dir=scope.agents_root, copy=True, dry_run=False)
 
 
@@ -601,7 +594,7 @@ def test_setup_dry_run_does_not_run(tmp_path):
         "open(os.path.join(agents, 'SETUP_RAN'), 'w').write('ok')\n",
     )
     scope = make_scope(tmp_path)
-    _run(OverlayAdd, name=["with-setup"], source=str(src), global_scope=True,
+    _run(OverlayAdd, name=["with-setup"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=True)
     assert not (scope.agents_root / "SETUP_RAN").exists()
 
@@ -616,9 +609,9 @@ def test_setup_runs_on_sync(tmp_path):
         "open(os.path.join(agents, 'RUNS'), 'a').write('x')\n",
     )
     scope = make_scope(tmp_path)
-    _run(OverlayAdd, name=["with-setup"], source=str(src), global_scope=True,
+    _run(OverlayAdd, name=["with-setup"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
-    _run(OverlaySync, pattern="with-setup", source=str(src), global_scope=True,
+    _run(OverlaySync, pattern="with-setup", repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
     # Ran once on add + once on sync.
     assert (scope.agents_root / "RUNS").read_text(encoding="utf-8") == "xx"
@@ -701,9 +694,9 @@ def test_recompose_block_positions_high_priority_last_across_adds(tmp_path):
     _make_rules_overlay(src, "zeta", "HI", priority=900)
     scope = make_scope(tmp_path)
 
-    _run(OverlayAdd, name=["alpha"], source=str(src), global_scope=True,
+    _run(OverlayAdd, name=["alpha"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
-    _run(OverlayAdd, name=["zeta"], source=str(src), global_scope=True,
+    _run(OverlayAdd, name=["zeta"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
 
     text = (scope.agents_root / "AGENTS.md").read_text(encoding="utf-8")
@@ -721,9 +714,9 @@ def test_recompose_block_high_priority_added_first_still_sorts_last(tmp_path):
     _make_rules_overlay(src, "zeta", "HI", priority=900)
     scope = make_scope(tmp_path)
 
-    _run(OverlayAdd, name=["zeta"], source=str(src), global_scope=True,
+    _run(OverlayAdd, name=["zeta"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
-    _run(OverlayAdd, name=["alpha"], source=str(src), global_scope=True,
+    _run(OverlayAdd, name=["alpha"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
 
     text = (scope.agents_root / "AGENTS.md").read_text(encoding="utf-8")

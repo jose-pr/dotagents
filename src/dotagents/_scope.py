@@ -11,13 +11,12 @@ only wires args) to match ``_overlays.py`` / ``_skills.py``:
   track" decision).
 
 * **Source** -- *where an overlay to install comes from*. ``resolve_source`` returns
-  an ``OverlaySource`` whose ``.root`` is a local directory of ``<name>/`` overlay
-  dirs. The default is the bundled ``overlays/`` (resolved ``.pyz``-safe via
-  ``importlib.resources``, mirroring ``cli._package_data_dir``); an explicit
-  ``--source`` / ``$AGENTS_OVERLAYS_SRC`` overrides it. A git/URI source is a
-  *later* swap of the resolver's default -- ``resolve_source`` is the single
-  extension point (clone/pull into a cache, then hand back a local ``.root``), so a
-  repo source drops in with **no** change to the command classes.
+  the repos in precedence order (``--repo``, the env repos, the stores'
+  ``dotagents.*`` registries, the bundled ``overlays/`` -- resolved
+  ``.pyz``-safe via ``importlib.resources``, mirroring ``cli._package_data_dir``);
+  a repo is a directory of overlays, a registry file, or a git spec, and the
+  first offering a name wins. The command classes only use the returned
+  object's ``available`` / ``overlay_dir`` / ``root`` -- see ``dotagents._sources``.
 
 The ``system`` store (``Scope.system_root``: ``/etc/agents``, or
 ``$AGENTS_SYSTEM_ROOT``) is walked by the Contract-A resolver (``Scope.paths``)
@@ -243,8 +242,8 @@ def resolve_scope(
     """Pick the install scope.
 
     ``-g/--global`` forces the **user** scope: ``agents_dir`` (``--agents-dir``)
-    if given, else the configurable store -- ``$AGENTS_HOME``, the legacy
-    ``$DOTAGENTS_AGENTS_DIR``, then ``~/.agents`` (:func:`resolve_user_store`,
+    if given, else the configurable store -- ``$AGENTS_HOME``, then
+    ``~/.agents`` (:func:`resolve_user_store`,
     the same chain ``env`` / ``context`` use, so a session that pinned the store
     installs into it rather than into the literal home dir).
     Otherwise the scope is **project**: ``agents_dir`` if given (the store root
@@ -279,14 +278,11 @@ def system_root_default() -> Path:
 #: home path -- this is the same var `dotagents env` emits (D79). Re-exported by
 #: `dotagents.cli` for command modules.
 AGENTS_DIR_ENV = "AGENTS_HOME"
-#: back-compat: DOTAGENTS_AGENTS_DIR is deprecated, removable next release.
-AGENTS_DIR_ENV_LEGACY = "DOTAGENTS_AGENTS_DIR"
 
 
 def resolve_user_store(agents_dir: "str | os.PathLike | None" = None) -> Path:
     """The USER store root, in precedence order: an explicit ``agents_dir``
-    (``--agents-dir``) -> ``$AGENTS_HOME`` -> the legacy
-    ``$DOTAGENTS_AGENTS_DIR`` -> ``~/.agents`` (D58/D79/D80).
+    (``--agents-dir``) -> ``$AGENTS_HOME`` -> ``~/.agents`` (D58/D79).
 
     :func:`resolve_scope` defaults its ``-g`` store through this; ``env`` and
     ``context`` -- whose Contract-A walk takes the user store as ``agents_dir``
@@ -298,7 +294,7 @@ def resolve_user_store(agents_dir: "str | os.PathLike | None" = None) -> Path:
     """
     if agents_dir:
         return Path(agents_dir).expanduser()
-    value = os.environ.get(AGENTS_DIR_ENV) or os.environ.get(AGENTS_DIR_ENV_LEGACY)
+    value = os.environ.get(AGENTS_DIR_ENV)
     if value:
         return Path(value).expanduser()
     return Path.home() / ".agents"
@@ -336,52 +332,13 @@ def filter_names(names: "list[str]", pattern: "Optional[str]") -> "list[str]":
     return [n for n in names if fnmatch.fnmatch(n, pattern)]
 
 
-class OverlaySource:
-    """A resolved place overlays are fetched *from* for ``add``/``sync``.
+def OverlaySource(root):  # noqa: N802 -- the name tests and older code use
+    """A directory of overlays (``<root>/<name>/``): :class:`dotagents._sources.DirRepo`."""
+    from dotagents._sources import DirRepo
 
-    ``root`` is a local directory holding ``<name>/`` overlay dirs. ``available()``
-    lists them; ``overlay_dir(name)`` resolves one (raising if absent). This is the
-    seam a future git/URI source slots into: a ``GitOverlaySource`` would clone/pull
-    into a cache in ``__init__`` and set ``root`` to that checkout -- the command
-    classes only ever touch this interface, so they need no change.
-    """
-
-    def __init__(self, root: Path):
-        self.root = Path(root)
-
-    def available(self) -> "list[str]":
-        """Overlay names the source offers -- the ONE discovery rule
-        (:meth:`Overlay.discover`), so ``__pycache__`` / ``2fast`` / dotdirs are
-        never listed as installable."""
-        return [overlay.name for overlay in Overlay.discover(self.root)]
-
-    def overlay_dir(self, name: str) -> Path:
-        """The source dir for ``name``: the literal dir, its normalized form, or
-        any available overlay whose NORMALIZED name matches -- so a source dir
-        named ``my_overlay`` resolves for ``add my_overlay`` / ``add my-overlay``
-        alike (``add`` normalizes before looking up, and a source dir is not
-        obliged to use the normalized spelling)."""
-        wanted = Overlay.normalize_name(name)
-        for candidate in (self.root / name, self.root / wanted):
-            if candidate.is_dir():
-                return candidate
-        for overlay in Overlay.discover(self.root):
-            if overlay.normalized_name == wanted:
-                return overlay.path
-        raise SystemExit(
-            "error: overlay %r not found in source %s (available: %s)"
-            % (name, self.root, ", ".join(self.available()) or "none")
-        )
-
-    def __repr__(self) -> str:
-        return "OverlaySource(%s)" % self.root
+    return DirRepo(root)
 
 
-#: Environment override for the default overlay source (a local directory today;
-#: a git/URI string once ``resolve_source`` grows that branch). Read, never printed.
-SOURCE_ENV = "AGENTS_OVERLAYS_SRC"
-#: back-compat: DOTAGENTS_OVERLAYS_SRC is deprecated, removable next release.
-SOURCE_ENV_LEGACY = "DOTAGENTS_OVERLAYS_SRC"
 
 
 def bundled_overlays_root() -> "Path | None":
@@ -409,37 +366,28 @@ def bundled_overlays_root() -> "Path | None":
     return None
 
 
-def resolve_source(source: "Optional[str]" = None) -> OverlaySource:
-    """Resolve the overlay source: explicit ``--source`` / ``$AGENTS_OVERLAYS_SRC``,
-    else the bundled ``overlays/``.
+def resolve_source(
+    repos: "Optional[list[str]]" = None,
+    *,
+    scope: "Optional[Scope]" = None,
+    logger=None,
+):
+    """Resolve where overlays come from: the repos in precedence order --
+    ``repos`` (``--repo`` values), then ``$AGENTS_OVERLAYS_REPO_<KEY>`` by KEY,
+    then ``$AGENTS_OVERLAYS_REPO``, then the project and user stores'
+    ``dotagents.{json,toml,yaml,yml}`` registries, then this build's bundled
+    ``overlays/`` -- the first repo offering a name wins. A repo is a directory of overlays, a registry file, or a git spec
+    (``<repo>[@ref][#path]``) that materializes to one; see
+    :mod:`dotagents._sources`. Callers use only ``available()`` /
+    ``overlay_dir()`` / ``root``. Raises when nothing at all is configured."""
+    from dotagents import _sources
 
-    Today every branch yields a **local directory** ``OverlaySource``. The single
-    extension point for a git/URI source is here: when ``raw`` looks like a URI (a
-    later change), construct a ``GitOverlaySource`` instead -- callers are unaffected
-    because they only use the returned object's ``available``/``overlay_dir``.
-    """
-    raw = (
-        source
-        or os.environ.get(SOURCE_ENV)
-        or os.environ.get(SOURCE_ENV_LEGACY)
-        or None
+    user_root = Path(scope.user_root) if scope is not None else resolve_user_store(None)
+    stores = [scope.project_store if scope is not None and not scope.global_scope else None, user_root]
+    return _sources.resolve(
+        list(repos or []),
+        cache_root=user_root / ".cache" / "overlays",
+        stores=stores,
+        bundled=bundled_overlays_root(),
+        logger=logger,
     )
-    if raw:
-        # (extension point) a URI/git ``raw`` would branch to a cached clone here.
-        root = Path(raw).expanduser()
-        if not root.is_dir():
-            origin = "--source" if source else "$" + (
-                SOURCE_ENV if os.environ.get(SOURCE_ENV) else SOURCE_ENV_LEGACY
-            )
-            raise SystemExit(
-                "error: %s path is not a directory: %s" % (origin, raw)
-            )
-        return OverlaySource(root)
-
-    bundled = bundled_overlays_root()
-    if bundled is None:
-        raise SystemExit(
-            "error: no overlay source. This build bundles no overlays; pass "
-            "--source <dir> or set %s to a directory of overlays." % SOURCE_ENV
-        )
-    return OverlaySource(bundled)

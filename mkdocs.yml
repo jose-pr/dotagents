@@ -40,6 +40,7 @@ nav:
       - Agents: api/agents.md
       - Overlays: api/overlays.md
       - Scope: api/scope.md
+      - Sources: api/sources.md
       - Context: api/context.md
       - Environment: api/env.md
       - Merge: api/merge.md

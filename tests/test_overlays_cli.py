@@ -73,7 +73,7 @@ def world(tmp_path):
 
 def _add(src, scope_root, *names, **extra):
     return _run(
-        OverlayAdd, name=list(names), source=str(src), global_scope=True,
+        OverlayAdd, name=list(names), repo=[str(src)], global_scope=True,
         agents_dir=scope_root, copy=True, dry_run=False, **extra,
     )
 
@@ -129,7 +129,7 @@ def test_add_validates_every_name_before_touching_anything(world):
 def test_skills_are_published_from_the_installed_copy(world, tmp_path):
     src, scope_root = world
     _overlay(src, "sk", skill="my-skill")
-    _run(OverlayAdd, name=["sk"], source=str(src), global_scope=True,
+    _run(OverlayAdd, name=["sk"], repo=[str(src)], global_scope=True,
          agents_dir=scope_root, copy=False, dry_run=False)
     target = scope_root / "skills" / "my-skill"
     assert (target / "SKILL.md").is_file()
@@ -157,11 +157,11 @@ def test_sync_copy_and_overwrite(world):
 
     (src / "up" / "kb" / "UP.md").write_text("v2\n", encoding="utf-8")
     # Plain sync never clobbers.
-    _run(OverlaySync, pattern=None, source=str(src), global_scope=True,
+    _run(OverlaySync, pattern=None, repo=[str(src)], global_scope=True,
          agents_dir=scope_root, copy=True, overwrite=False, dry_run=False)
     assert installed.read_text(encoding="utf-8") == "v1\n"
     # --overwrite replaces the changed file.
-    _run(OverlaySync, pattern=None, source=str(src), global_scope=True,
+    _run(OverlaySync, pattern=None, repo=[str(src)], global_scope=True,
          agents_dir=scope_root, copy=True, overwrite=True, dry_run=False)
     assert installed.read_text(encoding="utf-8") == "v2\n"
 
@@ -169,7 +169,7 @@ def test_sync_copy_and_overwrite(world):
     import shutil
 
     shutil.rmtree(str(scope_root / "skills" / "s1"))
-    _run(OverlaySync, pattern=None, source=str(src), global_scope=True,
+    _run(OverlaySync, pattern=None, repo=[str(src)], global_scope=True,
          agents_dir=scope_root, copy=True, overwrite=False, dry_run=False)
     assert (scope_root / "skills" / "s1").is_dir()
     assert not os.path.islink(str(scope_root / "skills" / "s1"))
@@ -183,7 +183,7 @@ def test_dry_run_add_reports_the_setup_script(world, caplog):
     src, scope_root = world
     _overlay(src, "withsetup", setup=True)
     with caplog.at_level(logging.INFO):
-        _run(OverlayAdd, name=["withsetup"], source=str(src), global_scope=True,
+        _run(OverlayAdd, name=["withsetup"], repo=[str(src)], global_scope=True,
              agents_dir=scope_root, copy=True, dry_run=True)
     assert any("would run setup.py" in r.getMessage() for r in caplog.records)
     assert not (scope_root / "overlays").exists()
@@ -216,7 +216,7 @@ def test_requires_cycle_is_an_error(world):
 def test_show_describes_installed_then_source(world, capsys):
     src, scope_root = world
     _overlay(src, "shown", requires=["base"], routing=["- R -> ~/.agents/kb/R.md"], skill="sk", setup=True)
-    _run(OverlayShow, name="shown", source=str(src), global_scope=True, agents_dir=scope_root, json=True)
+    _run(OverlayShow, name="shown", repo=[str(src)], global_scope=True, agents_dir=scope_root, json=True)
     info = json.loads(capsys.readouterr().out)
     assert info["where"] == "source"
     assert info["description"] == "the shown overlay"
@@ -224,7 +224,7 @@ def test_show_describes_installed_then_source(world, capsys):
     assert info["root_var"] == "SHOWN_OVERLAY_ROOT"
     _overlay(src, "base")
     _add(src, scope_root, "shown")
-    _run(OverlayShow, name="shown", source=str(src), global_scope=True, agents_dir=scope_root, json=False)
+    _run(OverlayShow, name="shown", repo=[str(src)], global_scope=True, agents_dir=scope_root, json=False)
     out = capsys.readouterr().out
     assert out.startswith("shown (installed (user))")
 
@@ -239,11 +239,10 @@ def test_list_shows_both_scopes_unless_global(tmp_path, monkeypatch, capsys):
         (tmp_path / d).mkdir(parents=True)
     monkeypatch.setenv("AGENTS_HOME", str(store))
     monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(project))
-    monkeypatch.delenv("AGENTS_OVERLAYS_SRC", raising=False)
 
     monkeypatch.setenv("AGENTS_SYSTEM_ROOT", str(tmp_path / "no-system-store"))
 
-    _run(OverlayList, json=False, source=str(tmp_path / "nosrc"))
+    _run(OverlayList, json=False, repo=[str(tmp_path / "nosrc")])
     out = capsys.readouterr().out
     assert out.splitlines()[:6] == [
         "installed (project):",
@@ -253,7 +252,7 @@ def test_list_shows_both_scopes_unless_global(tmp_path, monkeypatch, capsys):
         "  only-user",
         "  common  (shadowed by a more specific store's)",
     ]
-    _run(OverlayList, json=True, global_scope=True, source=str(tmp_path / "nosrc"))
+    _run(OverlayList, json=True, global_scope=True, repo=[str(tmp_path / "nosrc")])
     data = json.loads(capsys.readouterr().out)
     assert data["scope"] == "user" and data["installed"] == ["common", "only-user"]
     assert [s["level"] for s in data["stores"]] == ["user"]
