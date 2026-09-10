@@ -127,16 +127,10 @@ def proxy_authorization(url: Optional[str] = None, *, env: bool = True) -> Optio
 
 
 def strip_auth(url: str) -> str:
-    """``url`` without any userinfo."""
-    url = _normalize(url)
-    parts = urlsplit(url)
-    if parts.username is None and parts.password is None:
-        return url
-    host = parts.hostname or ""
-    if ":" in host and not host.startswith("["):
-        host = "[%s]" % host  # IPv6 literal
-    netloc = host + (":%d" % parts.port if parts.port is not None else "")
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    """``url`` without any userinfo: the authority is what follows the last
+    ``@`` of the netloc, verbatim (IPv6 brackets, odd ports and case intact)."""
+    parts = urlsplit(_normalize(url))
+    return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2]))
 
 
 def redact(url: Optional[str]) -> Optional[str]:
@@ -146,10 +140,8 @@ def redact(url: Optional[str]) -> Optional[str]:
     parts = urlsplit(_normalize(url))
     if parts.password is None:
         return url
-    bare = strip_auth(url)
-    scheme, netloc, path, query, fragment = urlsplit(bare)
-    user = parts.username or ""
-    return urlunsplit((scheme, "%s:***@%s" % (user, netloc), path, query, fragment))
+    authority = parts.netloc.rpartition("@")[2]
+    return urlunsplit(parts._replace(netloc="%s:***@%s" % (parts.username or "", authority)))
 
 
 def resolve(url: Optional[str] = None, *, env: bool = True) -> Optional[Tuple[str, Optional[str]]]:
@@ -202,17 +194,36 @@ def bypassed_by(host: str, no_proxy: Optional[str]) -> bool:
     return bool(proxy_bypass_environment(host, {"no": no_proxy}))
 
 
-def should_bypass(host_or_url: str) -> bool:
-    """``NO_PROXY`` / ``no_proxy`` (either case) says this host goes direct.
-    Accepts a URL or a bare ``host[:port]``."""
+def no_proxy_from_env() -> Optional[str]:
+    """The ``NO_PROXY`` / ``no_proxy`` list (either case), or ``None``."""
+    return os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or None
+
+
+_ENV = object()  # sentinel: "read NO_PROXY from the environment"
+
+
+def should_bypass(host_or_url: str, no_proxy=_ENV) -> bool:
+    """Does the bypass list say this host goes direct? ``no_proxy`` defaults
+    to the environment's ``NO_PROXY``/``no_proxy``; pass a list of your own
+    (curl's ``--noproxy`` REPLACES the environment's) or ``None`` for "never
+    bypass". Accepts a URL or a bare ``host[:port]``. A URL that does not
+    parse (``http://h:notaport/``) is not bypassed -- the HTTP stack reports
+    it on its own terms."""
+    if no_proxy is _ENV:
+        no_proxy = no_proxy_from_env()
+    if not no_proxy:
+        return False
     if "://" in host_or_url:
         parts = urlsplit(host_or_url)
         host = parts.hostname or ""
-        if parts.port is not None:
-            host = "%s:%d" % (host, parts.port)
+        try:
+            if parts.port is not None:
+                host = "%s:%d" % (host, parts.port)
+        except ValueError:
+            return False
     else:
         host = host_or_url
-    return bypassed_by(host, os.environ.get("NO_PROXY") or os.environ.get("no_proxy"))
+    return bypassed_by(host, no_proxy)
 
 
 def proxies_from_env() -> Optional[dict]:

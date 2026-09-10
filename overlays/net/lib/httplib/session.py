@@ -1,5 +1,6 @@
-"""Build a configured ``requests.Session`` with retry/backoff, proxy-from-env,
-and transparent cookie/token load-save + per-host auth.
+"""Build a configured ``requests.Session`` with retry/backoff, the agent proxy
+(credential, kind and ``NO_PROXY`` bypass, all decided in ONE adapter), and
+transparent cookie/token load-save + per-host auth.
 
 ``requests`` + ``urllib3`` are this toolkit's **optional dependency** (the net
 overlay does NOT vendor them — see ``lib/VENDORED.md``). ``new_session`` imports
@@ -35,6 +36,74 @@ def _import_requests():
     return requests, HTTPAdapter, Retry
 
 
+def _agent_proxy_adapter_class(HTTPAdapter):
+    """The one adapter that owns every proxy decision, built lazily on the
+    lazily imported ``HTTPAdapter``. ``HTTPAdapter.send(request, proxies=...)``
+    is the single point every request -- ``session.get``, a bare
+    ``session.send``, and every redirect hop -- passes through, so this is the
+    layer requests designed for it; a ``session.request`` wrapper would miss
+    the last two."""
+
+    class AgentProxyAdapter(HTTPAdapter):
+        """``proxy`` (userinfo-free URL) + ``authorization`` (the
+        ``Proxy-Authorization`` value) + ``endpoint`` (``None`` for a
+        ``connect`` proxy, the ``/endpoint`` of a prefix gateway).
+
+        * ``NO_PROXY`` hosts go direct, and never see the credential.
+        * ``connect``: the proxy is passed EXPLICITLY per request, so the global
+          ``HTTP_PROXY``/``HTTPS_PROXY`` that ``trust_env`` would otherwise merge
+          in cannot win over the agent proxy -- and the credential is added by
+          ``proxy_headers`` only for THIS proxy, so it can never reach another.
+          That hook covers the plain-http request and the https ``CONNECT``; a
+          header on the session would reach the origin inside the tunnel instead.
+        * ``prefix``: the request goes directly to ``<proxy><endpoint><url>`` with
+          the credential as a header of that request.
+
+        Every send works on a COPY of the prepared request: requests builds
+        redirect hops from the caller's object, so mutating it would carry the
+        gateway URL and the credential into the next hop -- which may be a
+        ``NO_PROXY`` origin. The response reports the caller's URL, so
+        redirects, cookies and history speak the URL the caller asked for.
+        """
+
+        def __init__(self, *, proxy=None, authorization=None, endpoint=None, **kwargs):
+            super().__init__(**kwargs)
+            self.proxy = proxy
+            self.authorization = authorization
+            self.endpoint = endpoint
+            self._gateway_base = prefix_url("", proxy, endpoint) if endpoint is not None and proxy else None
+
+        def proxy_headers(self, proxy):
+            headers = super().proxy_headers(proxy)
+            if self.authorization and self.proxy and proxy.rstrip("/") == self.proxy.rstrip("/"):
+                headers["Proxy-Authorization"] = self.authorization
+            return headers
+
+        def send(self, request, **kwargs):
+            if not self.proxy:
+                return super().send(request, **kwargs)
+            original = request.url
+            request = request.copy()
+            if should_bypass(original):
+                kwargs["proxies"] = {}
+                return super().send(request, **kwargs)
+            if self.endpoint is None:
+                kwargs["proxies"] = {"http": self.proxy, "https": self.proxy}
+                return super().send(request, **kwargs)
+            # Prefix gateway. A Location the gateway wrote in its own namespace
+            # is already prefixed: never wrap it twice.
+            if not original.startswith(self._gateway_base):
+                request.url = prefix_url(original, self.proxy, self.endpoint)
+            if self.authorization:
+                request.headers["Proxy-Authorization"] = self.authorization
+            kwargs["proxies"] = {}
+            response = super().send(request, **kwargs)
+            response.url = original
+            return response
+
+    return AgentProxyAdapter
+
+
 def new_session(
     *,
     user_agent: Optional[str] = None,
@@ -50,7 +119,6 @@ def new_session(
     disable_insecure_request_warnings()
     requests, HTTPAdapter, Retry = _import_requests()
     session = requests.Session()
-    authorization: Optional[str] = None
     cookie_jar: Optional[CookieJar] = None
     cookie_key: Optional[str] = None
     if cookies is True:
@@ -78,74 +146,27 @@ def new_session(
         backoff_factor=backoff,
         status_forcelist=list(status_forcelist),
     )
-    gateway: Optional[tuple] = None  # (clean proxy url, endpoint) in prefix mode
+    proxy_url: Optional[str] = None
+    authorization: Optional[str] = None
+    endpoint: Optional[str] = None
     if proxies is None:
         resolved = resolve()
         if resolved:
-            clean_url, authorization = resolved
-            kind, endpoint = proxy_type()
-            if kind == "prefix":
-                gateway = (clean_url, endpoint)
-            else:
-                proxies = {"http": clean_url, "https": clean_url}
+            proxy_url, authorization = resolved
+            endpoint = proxy_type()[1]
     else:
-        # Caller-supplied proxies keep their own userinfo (requests reads it);
-        # a configured header value still applies to them.
-        authorization = configured_authorization()
-
-    class _ProxyAuthAdapter(HTTPAdapter):
-        """Sends the configured ``Proxy-Authorization`` to the proxy -- on the
-        plain-http request AND on the https ``CONNECT`` -- through the one hook
-        requests offers for proxy-bound headers. A header set on the session
-        would reach the ORIGIN inside the tunnel instead, and never the proxy."""
-
-        def proxy_headers(self, proxy):
-            headers = super().proxy_headers(proxy)
-            if authorization:
-                headers["Proxy-Authorization"] = authorization
-            return headers
-
-    class _PrefixGatewayAdapter(HTTPAdapter):
-        """``AGENTS_PROXY_TYPE=prefix``: every request goes directly to
-        ``<proxy><endpoint><url>`` with the ``Proxy-Authorization`` value as a
-        header of that request; nothing is tunnelled. The prepared request's URL
-        is rewritten for the wire only and restored afterwards, so redirects,
-        cookies and history are still resolved against the URL the caller asked
-        for. ``NO_PROXY`` hosts go direct, untouched."""
-
-        def send(self, request, **kwargs):
-            original = request.url
-            if should_bypass(original):
-                return super().send(request, **kwargs)
-            request.url = prefix_url(original, gateway[0], gateway[1])
-            if authorization:
-                request.headers["Proxy-Authorization"] = authorization
-            kwargs["proxies"] = {}  # the gateway IS the destination; no env proxy on top
-            try:
-                response = super().send(request, **kwargs)
-            finally:
-                request.url = original
-            response.url = original
-            return response
-
-    adapter_cls = _PrefixGatewayAdapter if gateway else _ProxyAuthAdapter
-    adapter = adapter_cls(max_retries=retry_strategy)
+        # Caller-supplied proxies are requests' business (userinfo included);
+        # the configured credential still applies if one of them IS the agent proxy.
+        session.proxies = proxies
+        configured = resolve()
+        if configured:
+            proxy_url, authorization = configured[0], configured_authorization()
+            proxy_url = proxy_url if proxy_url in proxies.values() else None
+    adapter = _agent_proxy_adapter_class(HTTPAdapter)(
+        proxy=proxy_url, authorization=authorization, endpoint=endpoint, max_retries=retry_strategy,
+    )
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-    if proxies:
-        session.proxies = proxies
-        # `requests` applies NO_PROXY only to proxies it discovers from the
-        # environment itself; explicitly set `session.proxies` are used for
-        # every host, loopback included. Honour the bypass list here: a
-        # per-request `None` proxy removes the session-level one for that call.
-        _proxied_request = session.request
-
-        def _request_honouring_no_proxy(method, url, **kwargs):
-            if should_bypass(url):
-                kwargs.setdefault("proxies", {"http": None, "https": None})
-            return _proxied_request(method, url, **kwargs)
-
-        session.request = _request_honouring_no_proxy
     if isinstance(verify, Path):
         session.verify = str(verify)
     else:

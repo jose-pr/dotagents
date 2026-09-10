@@ -24,15 +24,20 @@ build on `PATH` cannot break the shim.
 
 - **It uses the agent proxy either way.** Real curl reads only the global
   `http_proxy` vars, never `AGENTS_PROXY`, so when `AGENTS_PROXY` is set and you
-  did not pass `-x`/`--proxy*`/`--noproxy`/`-U`, the shim hands it over: for a
-  `connect` proxy it prepends `--proxy` plus `--proxy-header
-  'Proxy-Authorization: …'` (or `--proxy-user` for URL userinfo); for a `prefix`
-  gateway it rewrites the URL argument to `<proxy><endpoint><url>` and adds the
-  header with `-H`. The fallback resolves the proxy exactly like `httplib`
-  (`AGENTS_PROXY`, then the global vars; credential and type as below) and
-  honours `NO_PROXY`. `-x` names a proxy of your own (always `connect`, never
-  given the agent proxy's credential); `-U user:pass` its credentials;
-  `--noproxy` (`*` or a host list) replaces `NO_PROXY`, as in curl.
+  did not name a proxy (`-x`) or a bypass list (`--noproxy`), the shim prepends
+  `--proxy` plus `--proxy-header 'Proxy-Authorization: …'` (or `--proxy-user`
+  for URL userinfo). Your own `-U user:pass` keeps the agent proxy and replaces
+  its credential. A **`prefix` gateway is served by the fallback**, not real
+  curl: curl cannot express `<proxy><endpoint><url>` per hop (multi-URL, `-L`,
+  config files), so the shim speaks the gateway itself and flags it lacks fail
+  loud. The fallback resolves the proxy exactly like `httplib` (`AGENTS_PROXY`,
+  then the global vars; credential and type as below), re-decides **every
+  redirect hop** (proxied again, or direct without the credential for a
+  `NO_PROXY` host) and honours `NO_PROXY`. `-x` names a proxy of your own
+  (always `connect`, never given the agent proxy's credential); `--noproxy`
+  (`*` or a host list) replaces `NO_PROXY`, as in curl. A malformed
+  `AGENTS_PROXY`/`AGENTS_PROXY_TYPE` never blocks real curl (one warning, argv
+  as typed); the fallback, which would have to use it, exits 2.
 - Supported: `-X -d --data-raw -H -o -s -S -v -i -I -D -b -c -x -U --noproxy -k -A
   -L --timeout`.
 - **Unsupported flags fail loud** (`NotImplementedError`) rather than silently do
@@ -72,10 +77,14 @@ not at all.
   **`AGENTS_PROXY_AUTH`** first, then **`HTTP_PROXY_AUTH`**, e.g.
   `AGENTS_PROXY_AUTH="Basic $(printf 'user:pass' | base64)"` or `Bearer <token>`.
   Without either, userinfo in the URL (`http://user:pass@host:3128`) is sent as
-  `Basic`. `new_session()` delivers it through the adapter's proxy headers — on
-  the plain-http request and on the HTTPS `CONNECT` — so it never reaches the
-  origin and the session gets past a 407 on its own. `proxy.resolve()` gives the
-  two halves (clean URL, header value); print a URL only through `proxy.redact()`.
+  `Basic`. `new_session()` delivers it through its HTTP adapter — on the
+  plain-http request and on the HTTPS `CONNECT`, for the agent proxy only — so
+  it never reaches an origin or another proxy (a `proxies=` you pass yourself is
+  not given it unless it is the agent proxy), and the session gets past a 407 on
+  its own. The adapter also passes the proxy explicitly per request, so the
+  machine's `HTTP_PROXY` cannot win over `AGENTS_PROXY` through `trust_env`, and
+  every redirect hop is decided afresh. `proxy.resolve()` gives the two halves
+  (clean URL, header value); print a URL only through `proxy.redact()`.
 - **`AGENTS_PROXY_TYPE`** — how the proxy is spoken to. `connect` (default) is a
   standard HTTP proxy. **`prefix[:/endpoint]`** is a URL-prefix gateway: every
   request goes *directly* to `<proxy><endpoint><url>` (endpoint defaults to `/`)

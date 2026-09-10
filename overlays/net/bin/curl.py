@@ -450,136 +450,240 @@ def _load_cookie_header(args):
     return args.cookie
 
 
+class _ProxyPlan(object):
+    """One proxy decision for the fallback, applied per hop.
+
+    ``proxy`` -- the proxy URL without userinfo, or ``None`` for direct;
+    ``authorization`` -- the ``Proxy-Authorization`` value, or ``None``;
+    ``endpoint`` -- ``None`` for a ``connect`` proxy, the ``/endpoint`` of a
+    prefix gateway; ``no_proxy`` -- the bypass list in force (curl's
+    ``--noproxy`` REPLACES ``NO_PROXY``), re-checked for every hop's host.
+    """
+
+    __slots__ = ('proxy', 'authorization', 'endpoint', 'no_proxy')
+
+    def __init__(self, proxy, authorization, endpoint, no_proxy):
+        self.proxy = proxy
+        self.authorization = authorization
+        self.endpoint = endpoint
+        self.no_proxy = no_proxy
+
+    def bypasses(self, url):
+        return agent_proxy.should_bypass(url, no_proxy=self.no_proxy)
+
+
+_STEERING = {'proxy': ('-x', '--proxy'), 'noproxy': ('--noproxy',), 'proxy_user': ('-U', '--proxy-user')}
+
+
+def _caller_steering(argv):
+    """``(proxy, noproxy, proxy_user)`` as the caller wrote them, or ``None``
+    each. argv is walked the way curl reads it, using the shim's own parser
+    only as the table of which options take a value: combined short flags
+    (``-sx URL``, ``-Uu:p``) and option VALUES that merely look like flags
+    (``-d '--proxy=x'``, ``-H --noproxy``) are handled; an unknown ``--opt``
+    is assumed to take no value. (argparse itself refuses a value that
+    starts with ``-``, so it cannot be the parser here.)"""
+    takes_value, wanted = {}, {}
+    for action in build_parser()._actions:
+        for opt in action.option_strings:
+            takes_value[opt] = action.nargs != 0 and not isinstance(
+                action, (argparse._StoreTrueAction, argparse._StoreFalseAction, argparse._CountAction))
+            for key, names in _STEERING.items():
+                if opt in names:
+                    wanted[opt] = key
+    seen = {'proxy': None, 'noproxy': None, 'proxy_user': None}
+    args = list(argv)
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        i += 1
+        if arg == '--':
+            break
+        if arg.startswith('--'):
+            name, has_eq, value = arg.partition('=')
+            if not has_eq and takes_value.get(name):
+                value = args[i] if i < len(args) else ''
+                i += 1
+            if name in wanted:
+                seen[wanted[name]] = value if takes_value.get(name) else True
+        elif arg.startswith('-') and len(arg) > 1:
+            j = 1
+            while j < len(arg):
+                short = '-' + arg[j]
+                j += 1
+                if takes_value.get(short):
+                    value = arg[j:]
+                    if not value:
+                        value = args[i] if i < len(args) else ''
+                        i += 1
+                    if short in wanted:
+                        seen[wanted[short]] = value
+                    break
+                if short in wanted:
+                    seen[wanted[short]] = True
+    return seen['proxy'], seen['noproxy'], seen['proxy_user']
+
+
+def plan_proxy(url, proxy=None, noproxy=None, proxy_user=None):
+    """The :class:`_ProxyPlan` for a request -- the one resolver both the
+    real-curl passthrough and the fallback use, so they cannot disagree.
+
+    ``proxy`` (``-x``) wins over the agent proxy chain (``AGENTS_PROXY``, then
+    the global vars -- see ``httplib.proxy``) and is always a plain ``connect``
+    proxy whose credential is its own userinfo or ``proxy_user`` (``-U``,
+    as Basic) -- never the agent proxy's ``AGENTS_PROXY_AUTH``. For the agent
+    proxy, ``proxy_user`` wins over the configured header value, which wins
+    over the URL's userinfo. A malformed ``AGENTS_PROXY`` or
+    ``AGENTS_PROXY_TYPE`` raises ``ValueError`` (a configuration error, only
+    when that proxy would actually be used).
+    """
+    no_proxy = noproxy if noproxy is not None else agent_proxy.no_proxy_from_env()
+    if proxy:
+        resolved, endpoint = agent_proxy.resolve(proxy, env=False), None
+    else:
+        resolved = agent_proxy.resolve()
+        endpoint = agent_proxy.proxy_type()[1] if resolved else None
+    if not resolved:
+        return None
+    proxy, authorization = resolved
+    if proxy_user:
+        user, _, password = proxy_user.partition(':')
+        authorization = agent_proxy.basic_authorization(user, password)
+    return _ProxyPlan(proxy, authorization, endpoint, no_proxy)
+
+
 def agent_proxy_argv(argv):
-    """Extra LEADING argv so real curl uses the agent proxy.
+    """Extra LEADING argv so real curl uses the agent proxy, or ``[]``.
 
     Real curl reads only the global proxy vars (``http_proxy`` & co.), never
     ``AGENTS_PROXY`` -- and the whole point of ``AGENTS_PROXY`` is a proxy that
     differs from the machine's, so a bare passthrough would send the agent's
     traffic the wrong way, or nowhere. Injected only when ``AGENTS_PROXY`` is
-    set and the caller does not already steer the proxy (``-x``/``--proxy*``,
-    ``--noproxy``, ``-U``/``--proxy-user``). A configured header value
-    (``AGENTS_PROXY_AUTH`` / ``HTTP_PROXY_AUTH``) rides as ``--proxy-header``,
-    which curl sends to the proxy only (the CONNECT included); URL userinfo
-    goes through ``--proxy-user``. Either way the proxy URL itself stays clean
-    in process listings. ``NO_PROXY`` needs nothing: curl honours it even with
-    ``--proxy``."""
+    set and the caller did not name a proxy (``-x``) or a bypass list
+    (``--noproxy``); a caller's ``-U`` keeps the proxy but replaces the
+    credential. A configured header value rides as ``--proxy-header`` (sent to
+    the proxy only, the CONNECT included); URL userinfo as ``--proxy-user``.
+    ``NO_PROXY`` needs nothing: curl honours it even with ``--proxy``. A
+    prefix gateway is not expressible to curl -- see :func:`use_real_curl`."""
     if not os.environ.get('AGENTS_PROXY'):
         return []
-    for arg in argv:
-        if arg in ('-x', '-U') or arg.startswith(('--proxy', '--noproxy')):
-            return []
-    clean_url, _ = agent_proxy.resolve()
-    extra = ['--proxy', clean_url]
-    configured = agent_proxy.configured_authorization()
-    creds = agent_proxy.userinfo(agent_proxy.proxy_url())
-    if configured:
-        extra += ['--proxy-header', 'Proxy-Authorization: ' + configured]
-    elif creds:
-        extra += ['--proxy-user', '%s:%s' % creds]
+    proxy, noproxy, proxy_user = _caller_steering(argv)
+    if proxy or noproxy is not None:
+        return []
+    plan = plan_proxy('', proxy_user=proxy_user)
+    if plan is None or plan.endpoint is not None:
+        return []
+    extra = ['--proxy', plan.proxy]
+    if proxy_user:
+        pass  # curl already has -U on its own argv
+    elif agent_proxy.configured_authorization():
+        extra += ['--proxy-header', 'Proxy-Authorization: ' + plan.authorization]
+    else:
+        creds = agent_proxy.userinfo(agent_proxy.proxy_url())
+        if creds:
+            extra += ['--proxy-user', '%s:%s' % creds]
     return extra
 
 
-def real_curl_argv(argv):
-    """The argv real curl gets: ``argv`` with the agent proxy applied.
-
-    ``connect`` type: :func:`agent_proxy_argv` prepended. ``prefix`` type: curl
-    has no notion of a URL-prefix gateway, so the URL argument itself is
-    rewritten to ``<proxy><endpoint><url>`` and the ``Proxy-Authorization``
-    value goes on as a plain ``-H`` header (the gateway is curl's origin).
-    ``NO_PROXY`` hosts and argv this shim cannot parse are left untouched."""
-    kind, endpoint = agent_proxy.proxy_type()
-    if kind != 'prefix':
-        return [*agent_proxy_argv(argv), *argv]
-    if not agent_proxy_argv(argv):  # unset, or the caller steers the proxy
-        return list(argv)
-    try:
-        ns = build_parser().parse_known_args(argv)[0]
-    except SystemExit:
-        return list(argv)
-    url = ns.url or ns.url_positional
-    if not url or agent_proxy.should_bypass(url if '://' in url else 'https://' + url):
-        return list(argv)
-    clean_url, authorization = agent_proxy.resolve()
-    rewritten, done = [], False
-    for arg in argv:
-        if not done and arg == url:
-            rewritten.append(agent_proxy.prefix_url(url, clean_url, endpoint))
-            done = True
-        elif not done and arg == '--url=' + url:
-            rewritten.append('--url=' + agent_proxy.prefix_url(url, clean_url, endpoint))
-            done = True
-        else:
-            rewritten.append(arg)
-    if authorization:
-        rewritten = ['-H', 'Proxy-Authorization: ' + authorization, *rewritten]
-    return rewritten
+def use_real_curl(argv):
+    """Real curl handles everything except a prefix gateway: it has no notion
+    of ``<proxy><endpoint><url>``, and rewriting the URL argument by hand
+    cannot cover multi-URL invocations, ``-L`` (curl would follow the
+    gateway's Location straight to the origin, credential attached) or
+    config files. So with the agent proxy in play and ``prefix`` configured,
+    the request is served by the fallback, which speaks the gateway per hop;
+    flags the fallback lacks fail loud there, as the shim's contract says."""
+    if not os.environ.get('AGENTS_PROXY'):
+        return True
+    proxy, noproxy, _ = _caller_steering(argv)
+    if proxy or noproxy is not None:
+        return True
+    return agent_proxy.proxy_type()[0] != 'prefix'
 
 
 def find_real_curl():
-    """The system curl, or ``None`` -- never this shim. With the overlay's
-    ``bin/`` on PATH (what ``dotagents env`` does) a bare ``which("curl")``
-    finds ``bin/curl`` / ``bin/curl.cmd`` first, i.e. ourselves, and the shim
-    would exec itself forever. So PATH is walked directory by directory,
-    skipping the one this file lives in."""
+    """The system curl, or ``None`` -- never a copy of this shim. With the
+    overlay's ``bin/`` on PATH (what ``dotagents env`` does) a bare
+    ``which("curl")`` finds ``bin/curl`` / ``bin/curl.cmd`` first, i.e.
+    ourselves, and the shim would exec itself forever. PATH is walked
+    directory by directory, skipping this file's own directory, any hit that
+    is not actually inside the directory searched (Windows ``which`` on
+    Python < 3.12 consults the cwd too) and any hit that has a ``curl.py``
+    beside it (another installed copy of the shim -- a project-scope net
+    overlay next to the user-scope one would otherwise exec each other)."""
     here = Path(__file__).resolve().parent
     for directory in os.environ.get('PATH', '').split(os.pathsep):
         if not directory:
             continue
         try:
-            if Path(directory).resolve() == here:
+            searched = Path(directory).resolve()
+            if searched == here:
+                continue
+            found = shutil.which('curl', path=directory)
+            if not found:
+                continue
+            found_path = Path(found).resolve()
+            if found_path.parent != searched or (found_path.parent / 'curl.py').is_file():
                 continue
         except OSError:
             continue
-        found = shutil.which('curl', path=directory)
-        if found:
-            return found
+        return found
     return None
 
 
 def maybe_run_system_curl(argv):
+    """Run the real curl with the agent proxy applied; ``None`` when the
+    fallback must serve the request (no real curl, or a prefix gateway).
+    A malformed proxy configuration never blocks real curl: it runs with
+    argv as typed, after one warning."""
     curl_path = find_real_curl()
     if not curl_path:
         return None
-    result = subprocess.run([curl_path, *real_curl_argv(argv)])
+    try:
+        if not use_real_curl(argv):
+            return None
+        extra = agent_proxy_argv(argv)
+    except ValueError as exc:
+        print('curl: ignoring the agent proxy: %s' % exc, file=sys.stderr)
+        extra = []
+    result = subprocess.run([curl_path, *extra, *argv])
     return result.returncode
 
 
-def resolve_proxy(args, url):
-    """``(proxy_url, proxy_authorization, endpoint)`` for this request -- the
-    proxy URL without userinfo, the ``Proxy-Authorization`` value to send
-    (``None`` if the proxy needs none), and the prefix-gateway endpoint
-    (``None`` for a ``connect`` proxy; ``-x`` is always ``connect``) -- or
-    ``None`` for a direct connection.
+class _AgentProxyHandler(urllib.request.BaseHandler):
+    """Applies the :class:`_ProxyPlan` to EVERY request the opener sends --
+    the first one and each redirect hop -- since urllib builds a fresh
+    ``Request`` per hop that carries neither the proxy nor an unredirected
+    header. Per hop: a bypassed host goes direct; a ``connect`` proxy is set
+    on the request (what ``ProxyHandler`` does after its own env/registry
+    checks, which are deliberately not consulted here); a prefix gateway
+    rewrites the URL to ``<proxy><endpoint><url>`` unless the gateway already
+    wrote it in its own namespace. The credential is an UNREDIRECTED header:
+    urllib sends it to the proxy for http, moves it onto the https CONNECT,
+    and never copies it into the next hop -- so it cannot reach an origin."""
 
-    ``-x``/``--proxy`` wins over the agent proxy chain (``AGENTS_PROXY``, then the
-    global vars -- see ``httplib.proxy``). ``-U``/``--proxy-user`` (as Basic)
-    wins over the configured header value (``AGENTS_PROXY_AUTH`` /
-    ``HTTP_PROXY_AUTH``), which wins over the URL's userinfo; the variables
-    apply to the agent proxy only, never to a ``-x`` the caller named. Bypass
-    follows curl: ``--noproxy`` (``*`` = never proxy, else a ``host[:port]``
-    suffix list) REPLACES ``NO_PROXY``; without it, ``NO_PROXY``/``no_proxy``
-    decides."""
-    parts = urllib.parse.urlsplit(url)
-    hostport = parts.hostname or ''
-    if parts.port is not None:
-        hostport = '%s:%d' % (hostport, parts.port)
-    if args.noproxy is not None:
-        if args.noproxy.strip() == '*' or agent_proxy.bypassed_by(hostport, args.noproxy):
-            return None
-    elif agent_proxy.should_bypass(hostport):
-        return None
-    if args.proxy:
-        resolved, endpoint = agent_proxy.resolve(args.proxy, env=False), None
-    else:
-        resolved, endpoint = agent_proxy.resolve(), agent_proxy.proxy_type()[1]
-    if not resolved:
-        return None
-    proxy, authorization = resolved
-    if args.proxy_user:
-        user, _, password = args.proxy_user.partition(':')
-        authorization = agent_proxy.basic_authorization(user, password)
-    return proxy, authorization, endpoint
+    handler_order = 90  # before the (empty) ProxyHandler at 100
+
+    def __init__(self, plan):
+        self.plan = plan
+
+    def _apply(self, req):
+        plan = self.plan
+        if plan.bypasses(req.full_url):
+            return req
+        if plan.endpoint is None:
+            proxy_parts = urllib.parse.urlsplit(plan.proxy)
+            req.set_proxy(proxy_parts.netloc, proxy_parts.scheme)
+        else:
+            base = agent_proxy.prefix_url('', plan.proxy, plan.endpoint)
+            if not req.full_url.startswith(base):
+                req.full_url = agent_proxy.prefix_url(req.full_url, plan.proxy, plan.endpoint)
+        if plan.authorization:
+            req.add_unredirected_header('Proxy-Authorization', plan.authorization)
+        return req
+
+    http_request = _apply
+    https_request = _apply
 
 
 def run_fallback(argv):
@@ -601,48 +705,35 @@ def run_fallback(argv):
     if cookie_header:
         headers['Cookie'] = cookie_header
 
-    proxied = resolve_proxy(args, url)
-    proxy, proxy_authorization, endpoint = proxied if proxied else (None, None, None)
+    plan = plan_proxy(url, proxy=args.proxy, noproxy=args.noproxy, proxy_user=args.proxy_user)
 
     if args.verbose and not args.silent:
         print('Request: %s %s' % (method, url), file=sys.stderr)
         if data:
             print('Data:', data.decode('utf-8', errors='replace'), file=sys.stderr)
         print('Headers:', headers, file=sys.stderr)
-        if proxy:
+        if plan is not None and not plan.bypasses(url):
             # The URL only, never the credential: this line ends up in logs.
-            print('Proxy%s: %s%s' % (' (prefix %s)' % endpoint if endpoint else '',
-                                     agent_proxy.redact(proxy),
-                                     ' (with Proxy-Authorization)' if proxy_authorization else ''),
+            print('Proxy%s: %s%s' % (' (prefix %s)' % plan.endpoint if plan.endpoint else '',
+                                     agent_proxy.redact(plan.proxy),
+                                     ' (with Proxy-Authorization)' if plan.authorization else ''),
                   file=sys.stderr)
 
-    # Build the opener. The proxy decision is `resolve_proxy`'s alone (-x, else
-    # the agent proxy chain; NO_PROXY / --noproxy applied there), so the opener
-    # always carries an EMPTY ProxyHandler: urllib's own one would re-read the
-    # global vars (never AGENTS_PROXY), re-check NO_PROXY and, on Windows, the
-    # registry's bypass list -- and silently go direct where we decided to
-    # proxy. The proxy is set on the request itself instead (what ProxyHandler
-    # would have done after its checks). The credential is a
-    # Proxy-Authorization header on that request, only when proxied: urllib
-    # sends it to the proxy for http and moves it onto the https CONNECT, so
-    # the origin never sees it. A prefix gateway is not a proxy to urllib: the
-    # request goes directly to <proxy><endpoint><url>, header included.
+    # The opener always carries an EMPTY ProxyHandler: urllib's own would
+    # re-read the global vars (never AGENTS_PROXY), re-check NO_PROXY and, on
+    # Windows, the registry's bypass list -- and silently go direct where we
+    # decided to proxy. `_AgentProxyHandler` applies the plan per hop instead.
     handlers = [
         urllib.request.HTTPSHandler(context=_ssl_context(args.insecure)),
         urllib.request.ProxyHandler({}),
     ]
-    if proxy and endpoint is not None:
-        url = agent_proxy.prefix_url(url, proxy, endpoint)
-    if proxy and proxy_authorization:
-        headers['Proxy-Authorization'] = proxy_authorization
+    if plan is not None:
+        handlers.append(_AgentProxyHandler(plan))
     if not args.location:
         handlers.append(_NoRedirect())
     opener = urllib.request.build_opener(*handlers)
 
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    if proxy and endpoint is None:
-        proxy_parts = urllib.parse.urlsplit(proxy)
-        req.set_proxy(proxy_parts.netloc, proxy_parts.scheme)
     try:
         resp = opener.open(req, timeout=args.timeout)
         status = resp.getcode()
@@ -689,10 +780,16 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    system_curl_rc = maybe_run_system_curl(argv)
-    if system_curl_rc is not None:
-        return system_curl_rc
-    return run_fallback(argv)
+    try:
+        system_curl_rc = maybe_run_system_curl(argv)
+        if system_curl_rc is not None:
+            return system_curl_rc
+        return run_fallback(argv)
+    except ValueError as exc:
+        # A configuration error (a bad AGENTS_PROXY / AGENTS_PROXY_TYPE that
+        # would be used) is curl's exit 2, one line on stderr -- not a traceback.
+        print('curl: %s' % exc, file=sys.stderr)
+        return 2
 
 
 if __name__ == '__main__':
