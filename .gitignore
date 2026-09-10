@@ -24,6 +24,7 @@ dist/
 *.pyz
 .venv/
 .venv-test/
+.pyvenv/
 
 # MkDocs build output
 site/
