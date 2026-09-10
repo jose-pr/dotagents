@@ -182,6 +182,49 @@ def _bundled_cmds_dir() -> "Path | None":
     return cmds if cmds.is_dir() else None
 
 
+def _describe(exc: BaseException) -> str:
+    """``TypeName: message`` for a log line; a bare ``sys.exit()`` has no
+    message, so say so instead of printing ``SystemExit: None``."""
+    if isinstance(exc, SystemExit):
+        return "SystemExit%s" % (": %s" % exc.code if exc.code not in (None, 0) else " (no message)")
+    return "%s: %s" % (type(exc).__name__, exc)
+
+
+def _discover_modules(directory: Path) -> "list":
+    """duho's per-directory discovery, made resilient per MODULE.
+
+    duho's own loop catches only ImportError/NotImplementedError per file and
+    lets anything else propagate ("a real bug the author wants surfaced"),
+    which is right for an app that owns its commands -- but discovery runs
+    before EVERY dotagents invocation, including `env` / `context` inside the
+    SessionStart hooks, so one typo in `~/.agents/dotagents/cmds/foo.py` took
+    down env, context, init and even `--version` for the whole session (review
+    2026-09-09), and wrapping the whole directory instead dropped every
+    sibling command with it. So the loop is mirrored here with a catch-all
+    per file: the bad module is named, with its exception, and skipped;
+    the rest of the directory still loads. SystemExit included: a module that
+    `sys.exit()`s at import (a project-scope override refusing to load without
+    its user-scope base) is not an Exception, and it killed `init -g` in a
+    store that did not exist yet (2026-09-10). Falls back to duho's own
+    per-directory unit if a duho release moves these helpers."""
+    try:
+        from duho.discovery import _commands_in_module, _import_from_path, _unique_module_name
+    except ImportError:  # pragma: no cover -- a later duho without these internals
+        from duho.discovery import discover_commands
+
+        return discover_commands(directory)
+    commands = []
+    for file in sorted(directory.glob("*.py")):
+        if file.name.startswith("_"):
+            continue
+        try:
+            module = _import_from_path(_unique_module_name("duho._discovered." + file.stem), file)
+            commands.extend(_commands_in_module(module, stem=file.stem))
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 -- see docstring
+            _LOGGER.warning("skipping command module %s: %s", file, _describe(exc))
+    return commands
+
+
 def _discover_dir(source, by_name: dict) -> None:
     """Discover command modules from one directory source, resiliently.
 
@@ -191,28 +234,13 @@ def _discover_dir(source, by_name: dict) -> None:
     resolved subcommand name (`_parsername_` / class name), so a LATER source
     overrides an earlier same-named command (built-in < bundled < scope < env <
     flag)."""
-    from duho.discovery import discover_commands
-
     path = Path(source)
     if not path.is_dir():
         return
     try:
-        commands = discover_commands(path)
-    except (Exception, SystemExit) as exc:  # noqa: BLE001 -- see below
-        # EVERYTHING, not only ImportError: duho deliberately lets a
-        # SyntaxError or a module-level RuntimeError propagate ("a real bug
-        # the author wants surfaced"), which is right for an app that owns its
-        # commands -- but discovery runs before EVERY dotagents invocation,
-        # including `env` / `context` inside the SessionStart hooks, so one typo
-        # in `~/.agents/dotagents/cmds/foo.py` took down env, context, init and
-        # even `--version` for the whole session (review 2026-09-09). The bad
-        # source is named, with the exception, and skipped. SystemExit too: a
-        # module that `sys.exit()`s at import (a project-scope override refusing
-        # to load without its user-scope base, measured 2026-09-10) is not an
-        # Exception, and it killed `init -g` in a store that did not exist yet.
-        _LOGGER.warning(
-            "skipping command source %r: %s: %s", str(source), type(exc).__name__, exc
-        )
+        commands = _discover_modules(path)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 -- the directory itself
+        _LOGGER.warning("skipping command source %r: %s", str(source), _describe(exc))
         return
     for command in commands:
         name = getattr(command, "_parsername_", None) or getattr(

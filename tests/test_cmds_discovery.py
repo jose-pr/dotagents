@@ -284,6 +284,30 @@ def test_bad_source_is_skipped_not_fatal(monkeypatch, tmp_path):
     assert "env" in names and "context" in names
 
 
+def test_a_bad_module_does_not_take_its_siblings_down(monkeypatch, tmp_path, caplog):
+    """Resilience is per MODULE, not per directory: duho's own loop lets a
+    SyntaxError/RuntimeError/SystemExit escape and would discard every command
+    already collected from the same dir. The warning names the FILE."""
+    import logging
+
+    cmds = tmp_path / "cmds"
+    _write(cmds / "aa_toy.py", TOY)
+    _write(cmds / "bb_refuse.py", "raise SystemExit('install the base tool first')\n")
+    _write(cmds / "cc_typo.py", BROKEN)
+    _write(cmds / "dd_silent_exit.py", "import sys\nsys.exit()\n")
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
+    monkeypatch.setenv("AGENTS_CMDS_PATH", str(cmds))
+    monkeypatch.chdir(tmp_path)
+
+    with caplog.at_level(logging.WARNING, logger="dotagents.cli"):
+        names = _names(cli._discover([]))
+    assert "toy" in names, "the sibling in the same directory survives"
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("bb_refuse.py" in m and "install the base tool first" in m for m in messages), messages
+    assert any("cc_typo.py" in m and "SyntaxError" in m for m in messages), messages
+    assert any("dd_silent_exit.py" in m and "no message" in m for m in messages), messages
+
+
 def test_later_source_wins_dedup(monkeypatch, tmp_path):
     # `init` is a compiled built-in (the earliest source); an env-var source
     # claims the same name. Later wins.
