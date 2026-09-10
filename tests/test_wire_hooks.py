@@ -245,7 +245,8 @@ class TestDualShellSessionHooks:
     matched group fires unconditionally (hooks.md), so exactly one of the two
     succeeds per machine depending on which interpreter is present."""
 
-    def test_both_shell_variants_present(self, tmp_path):
+    @pytest.mark.skipif(os.name != "nt", reason="the PowerShell variants are written on Windows only")
+    def test_both_shell_variants_present_on_windows(self, tmp_path):
         dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
         ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
@@ -257,22 +258,42 @@ class TestDualShellSessionHooks:
                 "one handler must be default-shell (bash), the other explicit powershell"
             )
 
-    def test_powershell_variants_are_context_only_not_env(self, tmp_path):
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX hosts get the bash handler only")
+    def test_posix_gets_the_bash_handler_only(self, tmp_path):
+        """A `shell: powershell` entry on a host with no PowerShell is not
+        harmless: Claude Code cannot spawn it, and a shell that falls back to
+        running the text as bash reports a syntax error on EVERY session
+        (measured in WSL, 2026-09-10: `syntax error near unexpected token
+        'Get-Command'` for both events). So on POSIX it is never written."""
+        dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
+        ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+
+        hooks = _hooks_of_settings(root)
+        for event in ("SessionStart", "CwdChanged"):
+            assert len(hooks[event]) == 1, "%s must carry the bash handler only" % event
+            assert hooks[event][0]["hooks"][0].get("shell") is None
+            assert "Get-Command" not in hooks[event][0]["hooks"][0]["command"]
+        assert "PreToolUse" not in hooks
+
+    def test_windows_gate_is_the_real_os_name(self):
+        """Same reasoning as TestPowerShellPreToolUse.test_windows_only: the gate
+        cannot be monkeypatched safely, so pin it in source."""
+        import inspect
+
+        src = inspect.getsource(ClaudeAgent.wire_hooks)
+        assert 'windows = os.name == "nt"' in src
+        assert src.count("if windows:") == 3, "SessionStart, CwdChanged and PreToolUse PowerShell variants"
+
+    def test_powershell_variants_are_context_only_not_env(self):
         """The PowerShell SessionStart variant must NOT try to write
         $CLAUDE_ENV_FILE -- that variable's documented effect is "subsequent
         BASH commands" regardless of which shell wrote it, so a write from here
         would feed nothing. The env gap for PowerShell tool calls is covered
         separately by PRETOOLUSE_POWERSHELL_COMMAND."""
-        dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
-        ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
-
-        hooks = _hooks_of_settings(root)
-        ps_session_start = next(
-            e for e in hooks["SessionStart"] if e["hooks"][0].get("shell") == "powershell"
-        )
-        assert "CLAUDE_ENV_FILE" not in ps_session_start["hooks"][0]["command"]
-        assert "dotagents.cmd" in ps_session_start["hooks"][0]["command"]
-        assert ps_session_start["hooks"][0]["command"].strip().endswith("context }")
+        cmd = ClaudeAgent.SESSION_START_COMMAND_POWERSHELL
+        assert "CLAUDE_ENV_FILE" not in cmd
+        assert "dotagents.cmd" in cmd
+        assert cmd.strip().endswith("context }")
 
     def test_powershell_variants_only_run_when_bash_is_absent(self, tmp_path):
         """Both handlers fire on every session (hooks.md); on a Windows box that

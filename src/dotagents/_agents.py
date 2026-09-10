@@ -469,27 +469,34 @@ class ClaudeAgent(Agent):
         if legacy is not None:
             changed = True
 
-        # Two independent handlers per event: bash-syntax (works with Git Bash on
-        # Windows and on every POSIX host) and a PowerShell-native equivalent
-        # (works on Windows without Git Bash, where hooks.md's documented default
-        # silently routes the bash-syntax command through PowerShell instead --
-        # a hard parse error, verified directly). Both fire unconditionally every
-        # session (hooks.md: every handler in a matched group runs); the one
-        # whose interpreter is absent on this machine fails harmlessly, the other
-        # carries the real effect. Chained `merge_hook` calls, each keyed by its
-        # own `status_message` so they merge/refresh independently and never
-        # collide with each other's identity.
+        # Two independent handlers per event ON WINDOWS: bash-syntax (works with
+        # Git Bash) and a PowerShell-native equivalent (works on Windows without
+        # Git Bash, where hooks.md's documented default silently routes the
+        # bash-syntax command through PowerShell instead -- a hard parse error,
+        # verified directly). Both fire unconditionally every session (hooks.md:
+        # every handler in a matched group runs); the one whose interpreter is
+        # absent on this machine fails harmlessly, the other carries the real
+        # effect. On a POSIX host only the bash handler is registered: there is
+        # no PowerShell to select, and a `shell: powershell` entry that Claude
+        # Code cannot spawn (or that a shell falls back to running as bash) is a
+        # syntax error reported on EVERY session -- measured in WSL, 2026-09-10.
+        # Chained `merge_hook` calls, each keyed by its own `status_message` so
+        # they merge/refresh independently and never collide with each other's
+        # identity.
+        windows = os.name == "nt"
         session_start, ss_changed_1 = _hooks.merge_hook(
             hooks.get("SessionStart", legacy),
             self.SESSION_START_COMMAND,
             status_message="Loading agent context",
         )
-        session_start, ss_changed_2 = _hooks.merge_hook(
-            session_start,
-            self.SESSION_START_COMMAND_POWERSHELL,
-            status_message="Loading agent context (PowerShell)",
-            shell="powershell",
-        )
+        ss_changed_2 = False
+        if windows:
+            session_start, ss_changed_2 = _hooks.merge_hook(
+                session_start,
+                self.SESSION_START_COMMAND_POWERSHELL,
+                status_message="Loading agent context (PowerShell)",
+                shell="powershell",
+            )
         hooks["SessionStart"] = session_start
         ss_changed = ss_changed_1 or ss_changed_2
 
@@ -498,17 +505,19 @@ class ClaudeAgent(Agent):
             self.CWD_CHANGED_COMMAND,
             status_message="Checking for AGENTS.md",
         )
-        cwd_changed, cc_changed_2 = _hooks.merge_hook(
-            cwd_changed,
-            self.CWD_CHANGED_COMMAND_POWERSHELL,
-            status_message="Checking for AGENTS.md (PowerShell)",
-            shell="powershell",
-        )
+        cc_changed_2 = False
+        if windows:
+            cwd_changed, cc_changed_2 = _hooks.merge_hook(
+                cwd_changed,
+                self.CWD_CHANGED_COMMAND_POWERSHELL,
+                status_message="Checking for AGENTS.md (PowerShell)",
+                shell="powershell",
+            )
         hooks["CwdChanged"] = cwd_changed
         cc_changed = cc_changed_1 or cc_changed_2
 
         pt_changed = False
-        if os.name == "nt":
+        if windows:
             pt_changed = self._wire_powershell_pretooluse(hooks)
 
         if not (changed or ss_changed or cc_changed or pt_changed):
