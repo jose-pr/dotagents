@@ -197,7 +197,18 @@ jobs:
           # Assert against the COMMAND-LIST line ("{init,build-pyz,...}"), not the
           # whole help: `overlays`' own description mentions its `sync` subcommand,
           # which would false-positive a naive grep.
-          python dist/dotagents.pyz --help | grep -q -- "{init,build-pyz,context,env,overlays,findings}"
+          python dist/dotagents.pyz --help | grep -q -- "{init,build-pyz,context,env,overlays,findings,launch}"
+          # The second bundled command module, launch: its positional, its
+          # declared flags and their help survive the zipapp shim too.
+          python dist/dotagents.pyz launch --help | grep -q -- "\[agent\]"
+          python dist/dotagents.pyz launch --help | grep -q -- "--command COMMAND"
+          ! python dist/dotagents.pyz launch --help | grep -q -- "--command-"
+          python dist/dotagents.pyz launch --help | grep -q -- "--no-context"
+          python dist/dotagents.pyz launch --help | grep -q -- "--dry-run"
+          python dist/dotagents.pyz launch --help | grep -q -- "Which agent to start"
+          # A dry run assembles env + context and prints the command line; the
+          # program need not exist (a warning, not an error, under --dry-run).
+          python dist/dotagents.pyz launch claude --dry-run -g -- -p hi | grep -q -- "claude .*-p hi"
           ! python dist/dotagents.pyz --help | grep -q -- "link"
           ! python dist/dotagents.pyz --help | grep -q -- "sync-project"
           # A DISCOVERED command module must still keep its flags/help/positional
