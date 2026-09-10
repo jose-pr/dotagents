@@ -44,5 +44,5 @@ One filename *is* conventional: a named agent (Claude, Antigravity, …) reads i
 If you'd rather start from a fuller, opinionated example than build from scratch, see
 this project's opt-in overlays (`engineering` rules, planning/execution flows, language
 knowledge bases, CI/reference templates) — layer them in deliberately, by name, with
-`dotagents overlays add <name> --source <dir>` (or set `AGENTS_OVERLAYS_SRC`), never
+`dotagents overlays add <name> --repo <dir>` (or set `AGENTS_OVERLAYS_REPO`), never
 wholesale. `dotagents overlays show <name>` describes one before you add it.

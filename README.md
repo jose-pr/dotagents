@@ -48,7 +48,7 @@ The **example overlays** — the `flows` workflow set, per-language `kb/` + temp
 `references`, `release`, `private-sync`, `net`, `recovery`, `tools` — live on a separate
 [`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays), not in `main`'s
 tree: they are swappable payloads, not part of the tool. `dotagents overlays add <name>`
-resolves them from there (or from any `--source`). See the
+resolves them from there (or from any `--repo`). See the
 [docs](https://jose-pr.github.io/dotagents/) for what each ships.
 
 Named-agent directives aren't a shipped overlay — a named agent (Claude, Antigravity,
@@ -99,11 +99,14 @@ overlay's skills into the shared skills dir. See below.
 
 ### Managing overlays
 
-`dotagents overlays` manages opt-in overlays **by name**, resolving each name against a
-source directory of overlays — point `--source <dir>` (or `$AGENTS_OVERLAYS_SRC`) at
-one, e.g. a checkout of the [`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays)
-where the example overlays live. Installed overlays are *discovered* by their presence
-under `<scope>/.agents/overlays/` — there is no registry file.
+`dotagents overlays` manages opt-in overlays **by name**, resolving each name against
+**repos** in order — the first that offers the name wins. A repo is a directory of
+overlays (e.g. a checkout of the [`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays)),
+a JSON/TOML/YAML registry mapping names to sources, or a git repository:
+`<repo>[@<branch|tag|commit>][#<path>]`, where without a path the whole repository is
+the overlay. Name repos with `--repo`, `$AGENTS_OVERLAYS_REPO_<KEY>` / `$AGENTS_OVERLAYS_REPO`,
+or a `dotagents.{json,toml,yaml}` in the project or user store.
+Installed overlays are *discovered* by their presence under `<scope>/.agents/overlays/`.
 
 ```bash
 dotagents overlays add python engineering  # install into the scope, publish skills, merge D59 rules/routing
@@ -124,9 +127,7 @@ at the manual edit, or re-run `install`).
 
 **Overlay setup scripts.** An overlay may ship an **idempotent** `setup.py` at its root
 (the recommended form: it runs under the same Python that runs dotagents, so it works on
-every OS — the bundled `net` overlay is the model). An extensionless `setup` (a POSIX
-shell script) is still honored as a legacy fallback, but it is discouraged: a shell
-script isn't portable to Windows without a shell. After `add`/`sync` copies the overlay
+every OS). After `add`/`sync` copies the overlay
 in, dotagents runs the script automatically — so anything a human would otherwise
 hand-follow (PATH/lib wiring, self-registration) is one script the tool runs, not a doc.
 When both are present, `setup.py` wins. Presence of a script is the opt-in; skip it with
@@ -156,53 +157,14 @@ Then wire your runner to it — e.g. Claude Code: put `@AGENTS.md` in
 > Read README.md, run `python install.py init && python install.py overlays add engineering -g`,
 > and confirm `~/.agents/overlays/flows/flows/PLAN.md` exists.
 
-## Private sync (per-user + per-project, one private repo)
+## Private sync
 
-Keep your global config **and** every project's private `.agents` (plans, kb, findings)
-in a single private git repo — synced across machines and cloud sessions — without ever
-committing any of it into the (often public) project repos.
-
-The idea: your global `~/.agents` **is** a private git repo. Its root is the per-user
-config; a `projects/<name>/` tree holds each project's private `.agents` payload. For a
-checked-out project, `<project>/.agents` is a **symlink** to `~/.agents/projects/<name>`
-(the project's `.gitignore` already excludes `.agents/` per the Leakage rule, so the
-link never lands in the public repo). `<name>` defaults to the project's basename, so a
-local `~/code/app` and a cloud `/home/user/app` resolve to the same store.
-
-The `link-project` / `sync-project` commands are **supplied by the `private-sync`
-overlay**, not by dotagents itself — installing the overlay is what makes them exist
-(it ships the commands, their logic, the `kb/` walkthrough and the cloud hooks
-together). So `overlays add private-sync` comes first:
-
-```bash
-dotagents init                                       # base
-dotagents overlays add private-sync --source <overlays-checkout> # commands + kb + hooks
-dotagents link-project .   # symlink this project's .agents into the private repo
-                           #   (an existing .agents/ is adopted in on the first link;
-                           #    --copy mirrors it as a real dir for no-symlink systems)
-dotagents sync-project -m msg   # git pull --rebase / commit / push the private repo
-dotagents sync-project --remote git@github.com:<you>/.agents.git -m init   # one-command bootstrap
-```
-
-In cloud sessions, the installed `~/.agents/hooks/private-sync-{start,stop}.sh` clone/pull
-the private repo and link/sync the project per session — register them in
-`~/.claude/settings.json` (see `~/.agents/hooks/settings.snippet.json`). For a **fresh
-container** (no `~/.agents` yet), point the web environment's **setup-script** field at the
-self-contained bootstrap in this repo — it fetches the latest each start, so there's
-nothing to re-paste:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-setup.sh -o /tmp/dg-cloud-setup.sh && sh /tmp/dg-cloud-setup.sh
-```
-
-Use `curl … -o file && sh file`, not `curl … | sh`: with a pipe the setup field's exit
-code is `sh`'s (0 on empty stdin), so a failed fetch is silently logged as success; `&&`
-propagates the curl failure instead.
-
-It authenticates (bypassing a hosted-runner `github.com`→proxy git rewrite), clones/pulls
-`~/.agents`, installs the CLI, and links the project — driven by `AGENTS_REMOTE`
-/ `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL` env vars (token never committed). Full
-walkthrough: `~/.agents/kb/PRIVATE_SYNC.md`.
+Keeping your global config and every project's private `.agents` in one private
+git repo, synced across machines and cloud sessions, is the **`private-sync`
+overlay's** job (`link-project` / `sync-project`, the cloud hooks and the
+walkthrough all ship with it). See the overlays branch README and, once
+installed, `$PRIVATE_SYNC_OVERLAY_ROOT/kb/PRIVATE_SYNC.md`. The self-contained
+cloud bootstrap the overlay's hooks use lives here at `tools/cloud-setup.sh`.
 
 ## Validate
 

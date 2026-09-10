@@ -1,8 +1,8 @@
 # Authoring an overlay
 
 An overlay is just a directory with the files you want laid into a scope, plus an
-optional `overlay.toml` manifest. Anyone can write one; point `dotagents overlays` at
-its parent directory with `--source`.
+optional `overlay.toml` manifest. Anyone can write one; name its parent directory (a
+directory of overlays), a registry, or a git repo with `--repo` — see the overlays guide.
 
 ## Minimal overlay
 
@@ -24,7 +24,7 @@ routing = [
 Install it:
 
 ```bash
-python -m dotagents overlays add my-overlay --source /path/to/parent -g
+python -m dotagents overlays add my-overlay --repo /path/to/parent -g
 ```
 
 The overlay's files land at the same relative path in the scope, and each `routing`
@@ -54,10 +54,7 @@ matters.
 
 Ship an idempotent `setup.py` at the overlay root to run install-time wiring
 automatically — the recommended, OS-agnostic form (it runs under the same Python as
-dotagents, so it works on every platform; the bundled `net` overlay is the model). An
-extensionless `setup` (a POSIX shell script) still works as a legacy fallback but is
-discouraged — it needs a shell, so it isn't portable to Windows. When both are present,
-`setup.py` wins. See the contract in
+dotagents, so it works on every platform). See the contract in
 [Overlays → Setup scripts](overlays.md#setup-scripts). The essentials:
 
 - idempotent, check-then-act;

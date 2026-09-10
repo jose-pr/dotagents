@@ -8,10 +8,10 @@ opinionated ships as a named overlay you add explicitly.
 
 An overlay is a directory (optionally carrying an `overlay.toml` manifest) whose files
 install to the same relative path in the destination scope. `dotagents overlays`
-resolves each overlay **by name** against a source directory you point it at with
-`--source <dir>` (or `$AGENTS_OVERLAYS_SRC`), and installs it into the scope's
-overlays directory. There is **no registry file**: installed overlays are *discovered*
-by their presence there.
+resolves each overlay **by name** against the repos you name (`--repo`,
+`$AGENTS_OVERLAYS_REPO`, a `dotagents.{json,toml,yaml}` in a store — see
+"Where overlays come from" below), and installs it into the scope's overlays
+directory. Installed overlays are then *discovered* by their presence there.
 
 Overlays are **additive**. `add` / `sync` never clobber a file you hand-edited inside
 an installed overlay — an already-present file is skipped.
@@ -21,8 +21,8 @@ an installed overlay — an already-present file is skipped.
 The example overlays below live on this repo's separate
 [`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays), not in `main` —
 they are **payloads riding on dotagents**, not part of the tool, so you swap them for
-your own. Point `--source` at a checkout of that branch to install any with
-`dotagents overlays add <name> --source <overlays-checkout>`.
+your own. Name a checkout of that branch as a repo to install any with
+`dotagents overlays add <name> --repo <overlays-checkout>/overlays`.
 
 | Overlay | What it carries |
 | --- | --- |
@@ -59,6 +59,48 @@ Removing an overlay deletes only its directory and unpublishes only the skills *
 published (a copy the user edited is left alone). Its lines in `AGENTS.md`'s managed
 block leave with it: the block is recomposed from the pristine base over the overlays
 that remain.
+
+## Where overlays come from: repos
+
+`add`, `sync`, `list` and `show` resolve a name against a list of **repos**, and the
+first repo that offers the name wins. A repo is any of:
+
+- a **directory of overlays** — `<dir>/<name>/` is the overlay (a checkout of the
+  `overlays` branch, any folder);
+- a **registry** — a JSON, TOML or YAML file mapping `<name-or-alias>` to a *spec* for
+  that one overlay (the whole document, or its `overlays` key);
+- a **git repository**, named by a spec.
+
+A spec is `<location>[@<ref>][#<path>]`: `<location>` is a local path, an `http(s)://`
+URL, or a git repository (`https://…/x.git`, `git@host:org/x.git`, `ssh://…`, a local
+`…/x.git`; prefix `git+` to force git); `<ref>` is a branch, tag or commit; `<path>` is
+inside it. What it resolves to decides what it is: a directory is a directory of
+overlays (for a repo) or the overlay itself (for a registry entry — with no path, **the
+whole repository is the overlay**); a file is a registry. Checkouts are cached under
+`<user store>/.cache/overlays/` and refreshed on every `add`/`sync`.
+
+The repos, in order:
+
+1. `--repo <spec>` (repeatable);
+2. `$AGENTS_OVERLAYS_REPO_<KEY>=<spec>`, sorted by `KEY`, then `$AGENTS_OVERLAYS_REPO`
+   (the default repo);
+3. `<project store>/dotagents.{json,toml,yaml,yml}`, then the user store's;
+4. the `overlays/` bundled with this build, if any.
+
+```toml
+# ~/.agents/dotagents.toml
+[overlays]
+engineering = "https://github.com/you/dotagents.git@overlays#overlays/engineering"
+python      = "https://github.com/you/dotagents.git@overlays#overlays/python"
+mytool      = "git@github.com:you/mytool-overlay.git@v2"      # the whole repo is the overlay
+local       = "~/src/overlays"                                 # a directory of overlays: local/
+```
+
+```bash
+dotagents overlays add engineering -g                                  # from the registry above
+dotagents overlays add net --repo https://github.com/you/dotagents.git@overlays#overlays/net
+dotagents overlays sync -g                                             # refetches git-sourced overlays
+```
 
 ## What `dotagents env` wires for every overlay
 
@@ -98,9 +140,7 @@ only the skills it published, then sweeps any now-broken symlinks.
 
 An overlay may ship an **idempotent** `setup.py` at its root — the recommended,
 OS-agnostic form: it runs under the same Python that runs dotagents, so it works on
-every platform. An extensionless `setup` (a POSIX shell script) is still honored as a
-**legacy fallback**, but discouraged — a shell script isn't portable to Windows without
-a shell. When both are present, `setup.py` wins. After `add` / `sync` copies the overlay
+every platform. After `add` / `sync` copies the overlay
 in, dotagents runs the script automatically. Reserve it for real install-time work:
 PATH / PYTHONPATH / `$<NAME>_OVERLAY_ROOT` are `dotagents env`'s job (above), and an
 overlay's own env vars belong in its `env.py`, not in a script that writes one into the

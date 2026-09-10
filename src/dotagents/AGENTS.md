@@ -15,8 +15,7 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `--agents-dir` pair and `resolve_scope()`; an overlay-shipped command module
   should inherit it (as the FIRST base) rather than redeclare the flags.
 - `dotagents.cli.resolve_user_store(agents_dir=None) -> Path` — the USER store
-  root: `agents_dir` (`--agents-dir`) → `$AGENTS_HOME` → legacy
-  `$DOTAGENTS_AGENTS_DIR` → `~/.agents`. Use it (not `resolve_scope`) when the
+  root: `agents_dir` (`--agents-dir`) → `$AGENTS_HOME` → `~/.agents`. Use it (not `resolve_scope`) when the
   store is always the user store and the project scope only adds/removes tiers,
   as in `env` / `context`.
 - Compiled command classes live in `dotagents.cli.<name>` (`init`, `overlays`
@@ -96,7 +95,7 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   chain `dotagents.cli` re-exports) and `resolve_source(...)`. Scope = *where
   installed overlays live*, source = *where an overlay comes from* (bundled by
   default). `-g` resolves the store through `resolve_user_store`
-  (`--agents-dir` → `$AGENTS_HOME` → legacy → `~/.agents`), never the literal
+  (`--agents-dir` → `$AGENTS_HOME` → `~/.agents`), never the literal
   home dir; `--agents-dir` overrides the store in EITHER scope. The library
   functions take a `Scope` only — no keyword-triple compatibility form: the CLI
   is the public surface, the package internals have one caller.
@@ -295,17 +294,19 @@ Config / path / sync vars (`AGENTS_*`, non-secret — read, and some emitted):
 - `AGENTS_SYSTEM_ROOT` — the machine-wide store (default `/etc/agents`), walked
   first for overlays/bin/lib/env/cmds/AGENTS.md; nothing installs into it.
 - `AGENTS_STORE_DIR` — per-project store location (absolute paths allowed).
-- `AGENTS_OVERLAYS_SRC` — default overlay source dir for `overlays`.
+- `AGENTS_OVERLAYS_REPO` — the default overlay repo for `overlays` (a directory
+  of overlays, a registry file, or a git `<repo>[@ref][#path]`), and
+  `AGENTS_OVERLAYS_REPO_<KEY>` — one repo per variable, ordered by KEY, consulted
+  before the default; both after `--repo` and before the stores'
+  `dotagents.{json,toml,yaml}` registries and the bundled `overlays/`.
+  `_sources` is the module; `resolve_source(repos, scope=)` the entry point.
 - `AGENTS_CMDS_PATH` — extra command-module search paths (os.pathsep-split).
 - `AGENTS_OVERLAY_DIR` — set for an overlay's setup script (its own installed dir).
 - `AGENTS_REMOTE` / `AGENTS_SYNC_MESSAGE` — private-store sync (tokenless remote URL /
   commit message).
 
-Every reader above prefers the `AGENTS_*` name and falls back to the old
-`DOTAGENTS_*` name (`DOTAGENTS_AGENTS_DIR`, `DOTAGENTS_STORE_DIR`,
-`DOTAGENTS_OVERLAYS_SRC`, `DOTAGENTS_CMDS_PATH`, `DOTAGENTS_OVERLAY_DIR`,
-`DOTAGENTS_AGENTS_REMOTE`, `DOTAGENTS_SYNC_MESSAGE`) for one release — deprecated,
-removable next. Setters emit both names this release.
+The `DOTAGENTS_*` spellings of these are gone (0.5.0): readers take the `AGENTS_*`
+name only, and setters emit it only.
 
 Tool-internal / secret vars (`DOTAGENTS_*` — kept; read, **never printed**):
 
@@ -344,7 +345,7 @@ agent-native `CLAUDE_PROJECT_DIR`, then cwd) for the project scope's root.
 
 Every command READS both back, so the pin actually holds: `env` and `context`
 resolve their user store through `cli.resolve_user_store()` (`--agents-dir` →
-`$AGENTS_HOME` → legacy `$DOTAGENTS_AGENTS_DIR` → `~/.agents`) and their project
+`$AGENTS_HOME` → `~/.agents`) and their project
 root through `_scope.project_root_default()` — neither is taken from the cwd or a
 hardcoded home. This matters for hook-invoked runs: a `SessionStart` hook runs
 `dotagents context` / `dotagents env` from wherever the session started, and only

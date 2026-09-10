@@ -295,7 +295,7 @@ behind them, so a plain install carries no private-sync workflow at all. Install
 overlay first and they become available like any other subcommand:
 
 ```bash
-python -m dotagents overlays add private-sync --source <overlays-checkout>
+python -m dotagents overlays add private-sync --repo <overlays-checkout>/overlays
 
 python -m dotagents link-project .                       # symlink this project's .agents into its store
 python -m dotagents link-project . --copy                # real-dir copy (no-symlink systems)

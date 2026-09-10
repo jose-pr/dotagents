@@ -24,7 +24,7 @@ entry.
 
 ```bash
 dotagents init                                            # base config
-dotagents overlays add private-sync --source <overlays-checkout>  # commands + kb + hooks
+dotagents overlays add private-sync --repo <overlays-checkout>/overlays  # commands + kb + hooks
 
 # link-project / sync-project come FROM that overlay -- run `overlays add` first.
 python -m dotagents link-project .   # symlink this project's .agents into its store

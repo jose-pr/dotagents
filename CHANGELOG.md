@@ -9,11 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Overlays can come from git repositories and registries. `overlays add` /
+  `sync` / `list` / `show` resolve a name against **repos** in order, the first
+  that offers it winning: `--repo <spec>` (repeatable), `$AGENTS_OVERLAYS_REPO_<KEY>`
+  (one repo per variable, by KEY), `$AGENTS_OVERLAYS_REPO` (the default repo),
+  the project store's `dotagents.{json,toml,yaml,yml}`, the user store's, then
+  the bundled `overlays/`. A repo is a directory of
+  overlays, a registry file mapping names (or aliases) to specs, or a git
+  repository named by a spec `<repo>[@<branch|tag|commit>][#<path>]`; for a
+  registry entry with no path the whole repository is the overlay. Checkouts
+  are cached under `<user store>/.cache/overlays/` and refreshed on every use;
+  credentials in a repo URL never reach a log line.
 - `env` exports `AGENTS_PYTHON`: the interpreter `dotagents` itself is running
   under (`sys.executable`), seeded only if unset like the scope roots. Shims
   and helper scripts now have a default Python they can trust, where a bare
   `python`/`python3` on PATH may be a Store alias stub, an emulated build, a
   venv's, or missing.
+
+### Removed
+
+- `overlays --source` and `$AGENTS_OVERLAYS_SRC`: a source directory is just a
+  repo now — `--repo <dir>` / `$AGENTS_OVERLAYS_REPO=<dir>`.
+- The one-release `DOTAGENTS_*` fallbacks: `DOTAGENTS_AGENTS_DIR`,
+  `DOTAGENTS_OVERLAYS_SRC`, `DOTAGENTS_CMDS_PATH`, and the duplicate
+  `DOTAGENTS_AGENTS_DIR` / `DOTAGENTS_OVERLAY_DIR` an overlay's setup script
+  received. Only the `AGENTS_*` names are read or set.
+- The extensionless POSIX `setup` script an overlay could ship: `setup.py` is
+  the one form, run under the interpreter running dotagents on every platform.
+- The precursor's lowercase `session_start` hook key is no longer migrated.
 
 ### Fixed
 
