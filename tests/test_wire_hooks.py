@@ -19,6 +19,9 @@ from pathlib import Path
 
 import pytest
 
+from _shell import BASH
+from dotagents._fs import write_text_lf
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from dotagents._agents import AntigravityAgent, ClaudeAgent, CodexAgent  # noqa: E402
@@ -293,7 +296,7 @@ class TestDualShellSessionHooks:
         assert "[ -d .agents ]" in cmd, "only a directory that IS a project re-pins"
         assert "pwd -W" in cmd, "Git Bash needs the Windows-native form for a Windows Python"
 
-    @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+    @pytest.mark.skipif(BASH is None, reason="needs a working bash")
     def test_cwd_changed_command_runs_and_pins(self, tmp_path):
         import subprocess
 
@@ -302,7 +305,7 @@ class TestDualShellSessionHooks:
         env_file = tmp_path / "env.sh"
         env_file.write_text("", encoding="utf-8")
         proc = subprocess.run(
-            ["bash", "-c", ClaudeAgent.CWD_CHANGED_COMMAND], cwd=str(tmp_path),
+            [BASH, "-c", ClaudeAgent.CWD_CHANGED_COMMAND], cwd=str(tmp_path),
             env={**os.environ, "CLAUDE_ENV_FILE": str(env_file)}, capture_output=True, text=True,
         )
         assert proc.returncode == 0, proc.stderr
@@ -546,7 +549,7 @@ class TestCodexPreToolUse:
         assert "AGENTS_RUNTIME_SET" in cmd
         assert "dotagents env --diff --format export" in cmd
 
-    @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+    @pytest.mark.skipif(BASH is None, reason="needs a working bash")
     def test_rewritten_command_actually_runs_in_bash(self, tmp_path):
         """Execute the prefix with a stub `dotagents` on the project bin: the
         exported var must land and PATH must carry NO literal quote characters
@@ -571,13 +574,13 @@ class TestCodexPreToolUse:
         project = tmp_path / "proj"
         stub_bin = project / ".agents" / "bin"
         stub_bin.mkdir(parents=True)
-        (stub_bin / "dotagents").write_text(
+        write_text_lf(  # Path.write_text(newline=) needs 3.10; the package floor is 3.9
+            stub_bin / "dotagents",
             "#!/bin/sh\necho \"export FROM_STUB='yes'\"\necho \"export STUB_PATH='$PATH'\"\n",
-            encoding="utf-8", newline="\n",
         )
         (stub_bin / "dotagents").chmod(0o755)
         run = subprocess.run(
-            ["bash", "-c", cmd], cwd=str(project), capture_output=True, text=True,
+            [BASH, "-c", cmd], cwd=str(project), capture_output=True, text=True,
             env={k: v for k, v in os.environ.items() if k != "AGENTS_RUNTIME_SET"},
         )
         assert run.returncode == 0, run.stderr

@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from _shell import BASH
+
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
@@ -586,7 +588,7 @@ ROUNDTRIP = {
 }
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.skipif(BASH is None, reason="needs a working bash")
 def test_export_values_roundtrip_through_real_bash(tmp_path):
     """Sourcing the export output must set EXACTLY the values given -- no
     expansion, no escape mangling, no encoding damage."""
@@ -598,7 +600,7 @@ def test_export_values_roundtrip_through_real_bash(tmp_path):
         "printf '%%s\\0' \"$%s\"" % k for k in sorted(ROUNDTRIP)
     )
     proc = subprocess.run(
-        ["bash", "-c", ". %s && %s" % (json.dumps(str(script)), probe)],
+        [BASH, "-c", ". %s && %s" % (json.dumps(str(script)), probe)],
         capture_output=True, env={**os.environ, "LANG": "C.UTF-8"},
     )
     assert proc.returncode == 0, proc.stderr
