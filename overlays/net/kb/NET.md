@@ -102,6 +102,18 @@ not at all.
   never a hardcoded path:
   cookies at `<store>/cookies/<host>.txt` (Netscape), tokens at
   `<store>/tokens/<host>.token`. **Token values are secrets — never log them.**
+- **Cookies and tokens are picked by the origin**, the host of the URL you
+  ask for — never the proxy's or the gateway's, under either `AGENTS_PROXY_TYPE`.
+  `cookies=True` loads `<host>.txt` before the request and saves what came back
+  under the same host; `tokens=True` sends `<host>.token` as a per-request
+  `Authorization` header (`Bearer <value>`, or the value verbatim when it
+  already names a scheme such as `Basic …` / `token …`) — never a session
+  header, so it cannot reach another host, and an explicit `Authorization` or
+  `auth=` wins. A string instead of `True` names one jar file for every host.
+  Under a prefix gateway the response still speaks the origin (`response.url`,
+  `response.request`, `response.cookies`), so redirects keep the origin's token
+  and a `Set-Cookie` is filed under the origin, not the gateway. The curl shim's
+  `-b` sends what you give it and `-c` writes the origin's cookies the same way.
 
 ## Referencing the lib from a skill
 

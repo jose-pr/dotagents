@@ -433,6 +433,45 @@ def should_print_error(args):
     return (not args.silent) or args.show_error_supported
 
 
+def _write_cookie_jar(path, url, header_items, loaded_from=None):
+    """``-c``: write the response's cookies in Netscape format -- the domain
+    defaults to the host of the URL the CALLER asked for, never a gateway's
+    (under a prefix gateway the wire URL is the gateway's) -- on top of what a
+    ``-b <file>`` read, a later cookie replacing an earlier one of the same
+    domain, path and name, ``Max-Age=0`` removing it. The final response's
+    headers only: urllib does not hand back the intermediate hops' cookies."""
+    from http.cookies import SimpleCookie
+
+    host = urllib.parse.urlsplit(url).hostname or ''
+    rows = {}
+    if loaded_from and os.path.exists(loaded_from):
+        for line in Path(loaded_from).read_text(encoding='utf-8', errors='ignore').splitlines():
+            parts = line.strip().split('\t')
+            if len(parts) >= 7 and not parts[0].startswith('#'):
+                rows[(parts[0], parts[2], parts[5])] = parts[:7]
+    for name, value in header_items:
+        if name.lower() != 'set-cookie':
+            continue
+        parsed = SimpleCookie()
+        try:
+            parsed.load(value)
+        except Exception:
+            continue
+        for morsel in parsed.values():
+            domain = morsel['domain'] or host
+            cpath = morsel['path'] or '/'
+            key = (domain, cpath, morsel.key)
+            if morsel['max-age'] == '0' or not morsel.value:
+                rows.pop(key, None)
+                continue
+            rows[key] = [
+                domain, 'TRUE' if domain.startswith('.') else 'FALSE', cpath,
+                'TRUE' if morsel['secure'] else 'FALSE', '0', morsel.key, morsel.value,
+            ]
+    lines = ['# Netscape HTTP Cookie File'] + ['\t'.join(row) for row in rows.values()]
+    Path(path).write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+
 def _load_cookie_header(args):
     """Return a Cookie: header value from -b (a string ``a=b; c=d`` or a file)."""
     if not args.cookie:
@@ -746,6 +785,8 @@ def run_fallback(argv):
         reason = getattr(exc, 'reason', '') or ''
         header_items = list(exc.headers.items()) if exc.headers else []
         content = b'' if args.head else (exc.read() or b'')
+        if args.cookie_jar:
+            _write_cookie_jar(args.cookie_jar, url, header_items, args.cookie)
         header_bytes = format_response_headers(status, reason, header_items)
         write_header_dump(args, header_bytes)
         emit_output(args, header_bytes, content)
@@ -761,6 +802,8 @@ def run_fallback(argv):
 
     if args.verbose and not args.silent:
         print('Response status: %s' % status, file=sys.stderr)
+    if args.cookie_jar:
+        _write_cookie_jar(args.cookie_jar, url, header_items, args.cookie)
     header_bytes = format_response_headers(status, reason, header_items)
     write_header_dump(args, header_bytes)
     emit_output(args, header_bytes, content)

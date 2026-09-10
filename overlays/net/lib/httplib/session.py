@@ -2,6 +2,15 @@
 (credential, kind and ``NO_PROXY`` bypass, all decided in ONE adapter), and
 transparent cookie/token load-save + per-host auth.
 
+Cookies and tokens are always chosen by the host of the URL the caller asked
+for -- the origin -- never by the proxy's or the gateway's: the jars are read
+before the adapter sees the request, the adapter rewrites a COPY, and what
+comes back is attributed to the origin again (``response.url``,
+``response.request``, ``response.cookies``). A token is a per-request
+``Authorization`` header (``Bearer <value>``, or the value verbatim when it
+already names a scheme), never a session header, so it cannot leak to another
+host; an explicit header or ``auth=`` wins.
+
 ``requests`` + ``urllib3`` are this toolkit's **optional dependency** (the net
 overlay does NOT vendor them — see ``lib/VENDORED.md``). ``new_session`` imports
 them lazily and raises a clear, actionable error if they are absent; the curl
@@ -9,6 +18,7 @@ shim and the ``certifi`` shim work with zero dependencies regardless.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Iterable, Optional, Union
 from urllib.parse import urlparse
@@ -16,7 +26,10 @@ from urllib.parse import urlparse
 from .auth import AuthProvider
 from .cookies import CookieSpec, apply_to_session, merge_set_cookie_headers
 from .jar import CookieJar, FileCookieJar, FileTokenJar, TokenJar
-from .proxy import configured_authorization, prefix_url, proxy_type, resolve, should_bypass
+# The module, not its functions: `should_bypass`'s default sentinel belongs
+# to the module instance that defined it, and a reload (tests do one) mints
+# a new one -- a function bound by name before that passes a stale sentinel.
+from . import proxy as _proxy
 from .warnings import disable_insecure_request_warnings
 
 VerifyT = Union[bool, str, Path]
@@ -43,6 +56,7 @@ def _agent_proxy_adapter_class(HTTPAdapter):
     ``session.send``, and every redirect hop -- passes through, so this is the
     layer requests designed for it; a ``session.request`` wrapper would miss
     the last two."""
+    from requests.cookies import RequestsCookieJar, extract_cookies_to_jar
 
     class AgentProxyAdapter(HTTPAdapter):
         """``proxy`` (userinfo-free URL) + ``authorization`` (the
@@ -71,7 +85,7 @@ def _agent_proxy_adapter_class(HTTPAdapter):
             self.proxy = proxy
             self.authorization = authorization
             self.endpoint = endpoint
-            self._gateway_base = prefix_url("", proxy, endpoint) if endpoint is not None and proxy else None
+            self._gateway_base = _proxy.prefix_url("", proxy, endpoint) if endpoint is not None and proxy else None
 
         def proxy_headers(self, proxy):
             headers = super().proxy_headers(proxy)
@@ -83,8 +97,9 @@ def _agent_proxy_adapter_class(HTTPAdapter):
             if not self.proxy:
                 return super().send(request, **kwargs)
             original = request.url
+            caller_request = request
             request = request.copy()
-            if should_bypass(original):
+            if _proxy.should_bypass(original):
                 kwargs["proxies"] = {}
                 return super().send(request, **kwargs)
             if self.endpoint is None:
@@ -93,12 +108,23 @@ def _agent_proxy_adapter_class(HTTPAdapter):
             # Prefix gateway. A Location the gateway wrote in its own namespace
             # is already prefixed: never wrap it twice.
             if not original.startswith(self._gateway_base):
-                request.url = prefix_url(original, self.proxy, self.endpoint)
+                request.url = _proxy.prefix_url(original, self.proxy, self.endpoint)
             if self.authorization:
                 request.headers["Proxy-Authorization"] = self.authorization
             kwargs["proxies"] = {}
             response = super().send(request, **kwargs)
             response.url = original
+            # The response speaks the caller's request too, not the transport
+            # copy: `Session.resolve_redirects` compares `response.request.url`
+            # with the next hop to decide whether `Authorization` survives (a
+            # gateway URL there strips the origin's token on every redirect),
+            # and the per-response cookies were extracted against the request
+            # host -- the gateway's -- so a `Set-Cookie` without a Domain was
+            # filed under the gateway and one naming the origin was dropped.
+            response.request = caller_request
+            jar = RequestsCookieJar()
+            extract_cookies_to_jar(jar, caller_request, response.raw)
+            response.cookies = jar
             return response
 
     return AgentProxyAdapter
@@ -150,17 +176,17 @@ def new_session(
     authorization: Optional[str] = None
     endpoint: Optional[str] = None
     if proxies is None:
-        resolved = resolve()
+        resolved = _proxy.resolve()
         if resolved:
             proxy_url, authorization = resolved
-            endpoint = proxy_type()[1]
+            endpoint = _proxy.proxy_type()[1]
     else:
         # Caller-supplied proxies are requests' business (userinfo included);
         # the configured credential still applies if one of them IS the agent proxy.
         session.proxies = proxies
-        configured = resolve()
+        configured = _proxy.resolve()
         if configured:
-            proxy_url, authorization = configured[0], configured_authorization()
+            proxy_url, authorization = configured[0], _proxy.configured_authorization()
             proxy_url = proxy_url if proxy_url in proxies.values() else None
     adapter = _agent_proxy_adapter_class(HTTPAdapter)(
         proxy=proxy_url, authorization=authorization, endpoint=endpoint, max_retries=retry_strategy,
@@ -179,6 +205,31 @@ def new_session(
 
         def _key_for(url: str) -> str:
             return urlparse(url).hostname or ""
+
+        def _has_header(mapping, name: str) -> bool:
+            try:
+                return any(str(k).lower() == name for k in mapping)
+            except Exception:
+                return False
+
+        def _authorization_for(url: str) -> Optional[str]:
+            """The ``Authorization`` value for ``url``'s host from the token jar,
+            or ``None``. A value that already names its scheme (``Basic …``,
+            ``token …``) goes verbatim; a bare token is a bearer token. The
+            value is a secret: never logged."""
+            if not token_jar:
+                return None
+            key = token_key if token_key and token_key != "__by_host__" else _key_for(url)
+            if not key:
+                return None
+            try:
+                token = token_jar.get(key)
+            except Exception:
+                return None
+            if not token:
+                return None
+            token = str(token).strip()
+            return token if re.match(r"^[A-Za-z][\w-]*\s+\S", token) else "Bearer " + token
 
         def _cookie_keys_for(url: str) -> list:
             host = _key_for(url)
@@ -244,6 +295,16 @@ def new_session(
 
         def request(method, url, **kwargs):
             _load_state(url)
+            authorization = _authorization_for(url)
+            if (
+                authorization
+                and not kwargs.get("auth")
+                and not _has_header(session.headers, "authorization")
+            ):
+                headers = dict(kwargs.get("headers") or {})
+                if not _has_header(headers, "authorization"):
+                    headers["Authorization"] = authorization
+                    kwargs["headers"] = headers
             resp = _orig_request(method, url, **kwargs)
             _save_cookies_for(getattr(resp, "url", url), resp)
             return resp
