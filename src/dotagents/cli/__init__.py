@@ -198,7 +198,7 @@ def _discover_dir(source, by_name: dict) -> None:
         return
     try:
         commands = discover_commands(path)
-    except Exception as exc:  # noqa: BLE001 -- see below
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 -- see below
         # EVERYTHING, not only ImportError: duho deliberately lets a
         # SyntaxError or a module-level RuntimeError propagate ("a real bug
         # the author wants surfaced"), which is right for an app that owns its
@@ -206,7 +206,10 @@ def _discover_dir(source, by_name: dict) -> None:
         # including `env` / `context` inside the SessionStart hooks, so one typo
         # in `~/.agents/dotagents/cmds/foo.py` took down env, context, init and
         # even `--version` for the whole session (review 2026-09-09). The bad
-        # source is named, with the exception, and skipped.
+        # source is named, with the exception, and skipped. SystemExit too: a
+        # module that `sys.exit()`s at import (a project-scope override refusing
+        # to load without its user-scope base, measured 2026-09-10) is not an
+        # Exception, and it killed `init -g` in a store that did not exist yet.
         _LOGGER.warning(
             "skipping command source %r: %s: %s", str(source), type(exc).__name__, exc
         )

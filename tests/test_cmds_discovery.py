@@ -264,11 +264,17 @@ def test_bad_source_is_skipped_not_fatal(monkeypatch, tmp_path):
     _write(broken / "typo.py", BROKEN)
     raising = tmp_path / "raising"
     _write(raising / "boom.py", "raise RuntimeError('import-time failure')\n")
+    # SystemExit is NOT an Exception: a module that sys.exit()s at import (a
+    # project-scope override refusing to load without its user-scope base,
+    # measured 2026-09-10 installing into a fresh Linux home from a checkout
+    # whose private cmds/ carried one) killed `init -g` before any store existed.
+    exiting = tmp_path / "exiting"
+    _write(exiting / "refuse.py", "raise SystemExit('error: install the base tool first')\n")
     missing = tmp_path / "does-not-exist"
     monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
     monkeypatch.setenv(
         "AGENTS_CMDS_PATH",
-        os.pathsep.join([str(missing), str(broken), str(raising), str(good)]),
+        os.pathsep.join([str(missing), str(broken), str(raising), str(exiting), str(good)]),
     )
     monkeypatch.chdir(tmp_path)
 

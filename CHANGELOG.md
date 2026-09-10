@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `init` no longer registers the PowerShell hook variants on POSIX hosts. A
+  `shell: powershell` entry where no PowerShell exists is not harmless: the
+  text is run as bash and fails with a syntax error on every session (measured
+  in WSL). Linux and macOS get the bash handler only; Windows keeps both, and
+  the PowerShell one still selects itself only when `bash` is absent.
+- Command discovery also survives a module that calls `sys.exit()` at import.
+  `SystemExit` is not an `Exception`, so such a module (a project-scope
+  override refusing to load without its user-scope base) escaped the
+  resilience guard and killed every invocation, `init -g` for a store that
+  did not exist yet included. It is skipped with a warning like any other
+  broken source.
+
 ## [0.4.0] - 2026-09-09
 
 ### Security
