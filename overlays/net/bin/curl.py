@@ -37,6 +37,7 @@ LIB_DIR = Path(__file__).resolve().parents[1] / "lib"
 if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
+from httplib import hooks as net_hooks  # noqa: E402  (pure stdlib; via LIB_DIR)
 from httplib import proxy as agent_proxy  # noqa: E402  (pure stdlib; via LIB_DIR)
 
 USER_AGENT = "Python-curl/1.0"
@@ -511,17 +512,21 @@ class _ProxyPlan(object):
         return agent_proxy.should_bypass(url, no_proxy=self.no_proxy)
 
 
-_STEERING = {'proxy': ('-x', '--proxy'), 'noproxy': ('--noproxy',), 'proxy_user': ('-U', '--proxy-user')}
+_STEERING = {
+    'proxy': ('-x', '--proxy'), 'noproxy': ('--noproxy',), 'proxy_user': ('-U', '--proxy-user'),
+    'url': ('--url',),
+}
 
 
-def _caller_steering(argv):
-    """``(proxy, noproxy, proxy_user)`` as the caller wrote them, or ``None``
-    each. argv is walked the way curl reads it, using the shim's own parser
-    only as the table of which options take a value: combined short flags
-    (``-sx URL``, ``-Uu:p``) and option VALUES that merely look like flags
-    (``-d '--proxy=x'``, ``-H --noproxy``) are handled; an unknown ``--opt``
-    is assumed to take no value. (argparse itself refuses a value that
-    starts with ``-``, so it cannot be the parser here.)"""
+def _walk_argv(argv):
+    """``(seen, positionals)``: the ``_STEERING`` options as the caller wrote
+    them (``None`` each when absent) and the positional arguments. argv is
+    walked the way curl reads it, using the shim's own parser only as the
+    table of which options take a value: combined short flags (``-sx URL``,
+    ``-Uu:p``) and option VALUES that merely look like flags (``-d
+    '--proxy=x'``, ``-H --noproxy``) are handled; an unknown ``--opt`` is
+    assumed to take no value. (argparse itself refuses a value that starts
+    with ``-``, so it cannot be the parser here.)"""
     takes_value, wanted = {}, {}
     for action in build_parser()._actions:
         for opt in action.option_strings:
@@ -530,13 +535,15 @@ def _caller_steering(argv):
             for key, names in _STEERING.items():
                 if opt in names:
                     wanted[opt] = key
-    seen = {'proxy': None, 'noproxy': None, 'proxy_user': None}
+    seen = {key: None for key in _STEERING}
+    positionals = []
     args = list(argv)
     i = 0
     while i < len(args):
         arg = args[i]
         i += 1
         if arg == '--':
+            positionals.extend(args[i:])
             break
         if arg.startswith('--'):
             name, has_eq, value = arg.partition('=')
@@ -560,7 +567,52 @@ def _caller_steering(argv):
                     break
                 if short in wanted:
                     seen[wanted[short]] = True
+        else:
+            positionals.append(arg)
+    return seen, positionals
+
+
+def _caller_steering(argv):
+    """``(proxy, noproxy, proxy_user)`` as the caller wrote them, or ``None`` each."""
+    seen, _positionals = _walk_argv(argv)
     return seen['proxy'], seen['noproxy'], seen['proxy_user']
+
+
+def requested_url(argv):
+    """The URL the caller asked for (``--url`` or the first positional, the
+    scheme defaulted the way the shim does), or ``None``. Never the proxy's."""
+    seen, positionals = _walk_argv(argv)
+    url = seen['url'] if isinstance(seen['url'], str) and seen['url'] else (positionals[0] if positionals else None)
+    if not url:
+        return None
+    return url if url.startswith(('http://', 'https://')) else 'https://' + url
+
+
+def shim_entry():
+    """The platform entry of this shim (``curl`` / ``curl.cmd`` beside this
+    file), what a wrapper is told in ``AGENTS_CURL``."""
+    here = Path(__file__).resolve().parent
+    return str(here / ('curl.cmd' if os.name == 'nt' else 'curl'))
+
+
+def maybe_run_hook(argv):
+    """``AGENTS_NET_HOOK_<KEY>`` + ``_CURL``: when the caller's URL matches,
+    run the wrapper in this shim's place with argv appended, ``AGENTS_CURL``
+    naming the shim and ``AGENTS_NET_HOOK_SKIP`` carrying the KEY (so the
+    wrapper's own curl call runs the shim, not the wrapper again). Returns
+    the wrapper's exit code, or ``None`` when no hook applies."""
+    url = requested_url(argv)
+    if not url:
+        return None
+    hooks = net_hooks.matching(url, kind='curl')
+    if not hooks:
+        return None
+    hook = hooks[0]
+    command = net_hooks.curl_command(hook, python=os.environ.get('AGENTS_PYTHON') or sys.executable)
+    env = dict(os.environ)
+    env[net_hooks.CURL_ENV] = shim_entry()
+    env[net_hooks.SKIP_ENV] = ','.join(sorted(net_hooks.skipped(env) | {hook.key}))
+    return subprocess.run([*command, *argv], env=env).returncode
 
 
 def plan_proxy(url, proxy=None, noproxy=None, proxy_user=None):
@@ -824,6 +876,9 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
+        hook_rc = maybe_run_hook(argv)
+        if hook_rc is not None:
+            return hook_rc
         system_curl_rc = maybe_run_system_curl(argv)
         if system_curl_rc is not None:
             return system_curl_rc

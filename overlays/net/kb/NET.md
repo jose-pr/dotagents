@@ -115,6 +115,41 @@ not at all.
   and a `Set-Cookie` is filed under the origin, not the gateway. The curl shim's
   `-b` sends what you give it and `-c` writes the origin's cookies the same way.
 
+## URL hooks — `AGENTS_NET_HOOK_<KEY>`
+
+Something special for some URLs (a login dance, a signed header, a token
+refresh, a stub), declared in the environment so an overlay's `env` file or a
+project's `local.env` can carry it, and matched on **the URL you ask for** —
+the origin's, never the proxy's or a prefix gateway's rewrite:
+
+    AGENTS_NET_HOOK_<KEY>=<regex>                 re.search against the requested URL
+    AGENTS_NET_HOOK_<KEY>_CURL=<command>          the curl shim runs this in its place
+    AGENTS_NET_HOOK_<KEY>_PY=<module:callable>    httplib calls it before the request
+
+- **httplib**: `callable(session, method, url, kwargs)` runs inside
+  `session.request` (so `session.get`, the `fetch` helpers, everything). It may
+  log in through the session, put headers in `kwargs["headers"]`, refresh the
+  token jar — and return `None` to let the request go, or a response of its own
+  to answer instead. Requests the hook makes through the session do not run
+  hooks again. `<module:callable>` is importable from `PYTHONPATH` (an overlay's
+  `lib/` is, after `dotagents env`) or a `<file>.py:callable`.
+- **curl shim**: the wrapper is a program — a path to a file (a `.py` runs under
+  `$AGENTS_PYTHON`), or a command line split shell-style — run with the shim's
+  whole argv appended, `AGENTS_CURL` naming the shim so the wrapper calls curl
+  back after its own work, and `AGENTS_NET_HOOK_SKIP` holding the KEY so that
+  call does not run the wrapper again. Its exit code is the shim's. It runs
+  before the real-curl passthrough and the fallback alike.
+- Several hooks may match: httplib runs each in KEY order and stops at the first
+  that answers; the shim runs the first `_CURL` in that order. A `_PY` without a
+  `_CURL` leaves the shim alone and vice versa.
+
+```sh
+# a signed-request helper for one API, whichever tool an agent picks
+AGENTS_NET_HOOK_INTERNAL='^https://api\.internal\.example/'
+AGENTS_NET_HOOK_INTERNAL_PY='mytools.net:sign_request'      # (session, method, url, kwargs)
+AGENTS_NET_HOOK_INTERNAL_CURL="$MYTOOLS_OVERLAY_ROOT/bin/curl-signed.py"
+```
+
 ## Referencing the lib from a skill
 
 Use `$NET_OVERLAY_ROOT/lib` — `dotagents env` exports one `<NAME>_OVERLAY_ROOT`

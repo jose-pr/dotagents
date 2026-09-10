@@ -11,6 +11,11 @@ comes back is attributed to the origin again (``response.url``,
 already names a scheme), never a session header, so it cannot leak to another
 host; an explicit header or ``auth=`` wins.
 
+URL hooks (``AGENTS_NET_HOOK_<KEY>`` + ``_PY``, see :mod:`.hooks`) run in the
+same place, on the caller's URL, before the request: a hook may log in, set
+headers in the request's kwargs, or return a response of its own. A hook
+that makes requests through the session does not trigger hooks again.
+
 ``requests`` + ``urllib3`` are this toolkit's **optional dependency** (the net
 overlay does NOT vendor them — see ``lib/VENDORED.md``). ``new_session`` imports
 them lazily and raises a clear, actionable error if they are absent; the curl
@@ -23,6 +28,7 @@ from pathlib import Path
 from typing import Iterable, Optional, Union
 from urllib.parse import urlparse
 
+from . import hooks as _hooks
 from .auth import AuthProvider
 from .cookies import CookieSpec, apply_to_session, merge_set_cookie_headers
 from .jar import CookieJar, FileCookieJar, FileTokenJar, TokenJar
@@ -199,7 +205,7 @@ def new_session(
         session.verify = verify
     if user_agent:
         session.headers.setdefault("User-Agent", user_agent)
-    if cookie_jar or token_jar or auth_provider:
+    if True:  # the request wrapper: jars, auth provider, URL hooks
         _orig_request = session.request
         loaded_keys = set()
 
@@ -293,8 +299,19 @@ def new_session(
                 finally:
                     _ensuring = False
 
+        _in_hook = False
+
         def request(method, url, **kwargs):
+            nonlocal _in_hook
             _load_state(url)
+            if not _in_hook:
+                _in_hook = True
+                try:
+                    hooked = _hooks.call_py_hooks(session, method, url, kwargs)
+                finally:
+                    _in_hook = False
+                if hooked is not None:
+                    return hooked
             authorization = _authorization_for(url)
             if (
                 authorization

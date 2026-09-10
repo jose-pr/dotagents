@@ -1,0 +1,150 @@
+"""URL hooks: a wrapper the curl shim runs, or a callable ``httplib`` calls,
+for requests whose URL matches a pattern -- declared in the environment.
+
+    AGENTS_NET_HOOK_<KEY>=<regex>            matched (re.search) against the URL the
+                                             caller asked for -- the origin URL, never
+                                             the proxy's or a prefix gateway's rewrite
+    AGENTS_NET_HOOK_<KEY>_CURL=<command>     the curl shim runs THIS instead of itself,
+                                             with the shim's own argv appended
+    AGENTS_NET_HOOK_<KEY>_PY=<module:callable>   httplib calls it before the request:
+                                             callable(session, method, url, kwargs)
+
+A hook does what it wants with the session (log in, set a header in
+``kwargs["headers"]``, refresh a token in the jar) and returns ``None`` to
+let the request proceed; anything else it returns is used AS the response
+(a cached or synthetic one). ``kwargs`` is the request's keyword arguments,
+mutable in place. ``<module:callable>`` is importable from ``PYTHONPATH``
+(an overlay's ``lib/`` is on it once ``dotagents env`` ran) or a
+``<path>.py:callable`` file.
+
+The curl wrapper is a program: a path to a file (a ``.py`` runs under the
+shim's own interpreter), or a command line split shell-style. It receives
+the shim's whole argv, ``AGENTS_CURL`` naming the shim so it can call curl
+back after its own work, and ``AGENTS_NET_HOOK_SKIP`` carrying its KEY, so
+that call does not run the same wrapper again. A hook with only a ``_PY``
+target is ignored by the shim, one with only ``_CURL`` by httplib.
+
+Several hooks may match one URL: httplib calls each in KEY order (sorted),
+the first returning a response ends the chain; the shim runs the first
+``_CURL`` in that order. A pattern that does not compile is a configuration
+error (``ValueError`` naming the KEY) the first time it would be consulted.
+"""
+from __future__ import annotations
+
+import importlib
+import importlib.util
+import os
+import re
+import shlex
+import sys
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+PREFIX = "AGENTS_NET_HOOK_"
+CURL_SUFFIX = "_CURL"
+PY_SUFFIX = "_PY"
+SKIP_ENV = "AGENTS_NET_HOOK_SKIP"
+CURL_ENV = "AGENTS_CURL"
+
+
+class Hook(object):
+    __slots__ = ("key", "pattern", "curl", "py")
+
+    def __init__(self, key: str, pattern: "re.Pattern[str]", curl: Optional[str], py: Optional[str]):
+        self.key = key
+        self.pattern = pattern
+        self.curl = curl
+        self.py = py
+
+    def matches(self, url: str) -> bool:
+        return self.pattern.search(url) is not None
+
+    def __repr__(self) -> str:
+        return "Hook(%s, %r%s%s)" % (
+            self.key, self.pattern.pattern, ", curl" if self.curl else "", ", py" if self.py else "")
+
+
+def hooks_from_env(environ: "Optional[Dict[str, str]]" = None) -> List[Hook]:
+    """Every configured hook, in KEY order. A ``_CURL``/``_PY`` variable whose
+    KEY has no pattern is ignored (nothing to match)."""
+    env = os.environ if environ is None else environ
+    hooks = []
+    for name in sorted(env):
+        if not name.startswith(PREFIX) or name.endswith((CURL_SUFFIX, PY_SUFFIX)):
+            continue
+        key = name[len(PREFIX):]
+        if not key or not env[name]:
+            continue
+        try:
+            pattern = re.compile(env[name])
+        except re.error as exc:
+            raise ValueError("%s%s is not a valid regular expression: %s" % (PREFIX, key, exc))
+        curl = env.get(PREFIX + key + CURL_SUFFIX) or None
+        py = env.get(PREFIX + key + PY_SUFFIX) or None
+        if curl or py:
+            hooks.append(Hook(key, pattern, curl, py))
+    return hooks
+
+
+def skipped(environ: "Optional[Dict[str, str]]" = None) -> "set[str]":
+    env = os.environ if environ is None else environ
+    return {k.strip() for k in (env.get(SKIP_ENV) or "").split(",") if k.strip()}
+
+
+def matching(url: str, environ: "Optional[Dict[str, str]]" = None, *, kind: Optional[str] = None) -> List[Hook]:
+    """The hooks for ``url`` (the caller's URL), KEY order, minus the skipped
+    ones; ``kind`` (``"curl"`` / ``"py"``) keeps only hooks with that target."""
+    skip = skipped(environ)
+    out = []
+    for hook in hooks_from_env(environ):
+        if hook.key in skip or not hook.matches(url):
+            continue
+        if kind and not getattr(hook, kind):
+            continue
+        out.append(hook)
+    return out
+
+
+def load_callable(spec: str) -> Callable[..., Any]:
+    """``module:attr`` (importable) or ``<file>.py:attr``. ``attr`` may be dotted."""
+    target, sep, attr = spec.rpartition(":")
+    if not sep or not target or not attr:
+        raise ValueError("a hook callable is written <module or file.py>:<callable>, not %r" % spec)
+    if target.endswith(".py") and Path(target).is_file():
+        path = Path(target).resolve()
+        name = "agents_net_hook_" + re.sub(r"\W", "_", path.stem)
+        module_spec = importlib.util.spec_from_file_location(name, str(path))
+        module = importlib.util.module_from_spec(module_spec)
+        sys.modules[name] = module
+        module_spec.loader.exec_module(module)
+    else:
+        module = importlib.import_module(target)
+    obj: Any = module
+    for part in attr.split("."):
+        obj = getattr(obj, part)
+    if not callable(obj):
+        raise ValueError("%s is not callable" % spec)
+    return obj
+
+
+def call_py_hooks(session, method: str, url: str, kwargs: dict, environ=None) -> Any:
+    """Run every ``_PY`` hook matching ``url`` in order; the first non-None
+    result is returned (the caller uses it as the response), else ``None``."""
+    for hook in matching(url, environ, kind="py"):
+        result = load_callable(hook.py)(session, method, url, kwargs)
+        if result is not None:
+            return result
+    return None
+
+
+def curl_command(hook: Hook, python: Optional[str] = None) -> List[str]:
+    """The argv prefix a ``_CURL`` target means: an existing file runs as is
+    (a ``.py`` under ``python``, default this interpreter); anything else is a
+    command line, split shell-style (POSIX rules; on Windows unquoted
+    backslashes are kept)."""
+    value = (hook.curl or "").strip()
+    if Path(value).is_file():
+        if value.lower().endswith(".py"):
+            return [python or sys.executable, value]
+        return [value]
+    return shlex.split(value, posix=os.name != "nt")
