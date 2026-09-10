@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-10
+
 ### Added
 
 - Overlays can come from git repositories and registries. `overlays add` /
