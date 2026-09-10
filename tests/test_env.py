@@ -469,20 +469,47 @@ def test_identity_stamped_claude(tree):
 
 
 def test_agents_python_is_the_running_interpreter(tree):
-    """Shims and helpers need a Python they can trust: the one running the CLI.
-    A bare `python`/`python3` on PATH may be a Store stub, an emulated build or
-    absent (all three seen on one Windows ARM64 box), so `env` exports it."""
-    import sys
-
+    """Shims and helpers need a Python they can trust: the one running the CLI."""
     agents_dir, project_root = tree
     env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
     assert env["AGENTS_PYTHON"] == sys.executable
+    assert env["AGENTS_PYTHON"] and Path(env["AGENTS_PYTHON"]).is_file()
 
 
 def test_agents_python_pin_is_respected(tree):
     agents_dir, project_root = tree
     env = _run(agents_dir, project_root, {"PATH": "/usr/bin", "AGENTS_PYTHON": "/opt/py/bin/python3"})
     assert "AGENTS_PYTHON" not in env, "only-if-unset: an upstream pin is not re-stamped"
+
+
+def test_agents_python_is_not_exported_when_the_interpreter_is_unknown(tree, monkeypatch):
+    """`sys.executable` is '' or None under an embedding host: exporting that
+    would mark the var as set with an empty command name."""
+    agents_dir, project_root = tree
+    monkeypatch.setattr(sys, "executable", "")
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert "AGENTS_PYTHON" not in env
+
+
+def test_env_py_runs_under_a_pinned_agents_python(tree, tmp_path, monkeypatch):
+    """The pin `env` exports for shims is honoured for dotagents' own
+    subprocesses too (only when it names an existing file)."""
+    agents_dir, project_root = tree
+    (agents_dir / "env.py").write_text(_py_echo_seen("AGENTS_PYTHON", "SEEN_PY"), encoding="utf-8")
+    spawned = []
+    real_run = _env.subprocess.run
+
+    def spy(args, **kwargs):
+        spawned.append(args[0])
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(_env.subprocess, "run", spy)
+    _run(agents_dir, project_root, {"PATH": "/usr/bin", "AGENTS_PYTHON": str(tmp_path / "missing" / "python")})
+    assert spawned[-1] == sys.executable, "a pin that names no file falls back to the running interpreter"
+    spawned.clear()
+    _run(agents_dir, project_root, {"PATH": "/usr/bin", "AGENTS_PYTHON": sys.executable})
+    assert spawned[-1] == sys.executable
+    assert _env.interpreter({"AGENTS_PYTHON": sys.executable}) == sys.executable
 
 
 def test_identity_no_blanket_rewrite_artifacts(tree):

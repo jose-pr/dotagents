@@ -353,6 +353,18 @@ def _changed_env(env_dump: bytes, base_env: "dict[str, str]") -> "dict[str, str]
     }
 
 
+def interpreter(osenv: "dict[str, str]") -> str:
+    """The Python to run env-layer scripts with: a pinned ``AGENTS_PYTHON`` that
+    names an existing file, else the interpreter running this code. The pin is
+    what ``env`` exports for shims, so dotagents honours it for its own
+    subprocesses too -- otherwise a user who pins 3.12 because the CLI's venv
+    is 3.9 gets their helpers on 3.12 and their ``env.py`` on 3.9."""
+    pinned = osenv.get("AGENTS_PYTHON")
+    if pinned and Path(pinned).is_file():
+        return pinned
+    return sys.executable
+
+
 def get_env_from_py(
     env_py: Path,
     base_env: "dict[str, str]",
@@ -375,7 +387,7 @@ def get_env_from_py(
     abort assembly, and never echo the child's stdout (it may carry secret
     values).
     """
-    args = [sys.executable, str(env_py), "--agent", level]
+    args = [interpreter(base_env), str(env_py), "--agent", level]
     if global_scope:
         args.append("--global")
     try:
@@ -660,21 +672,24 @@ def get_environment(
     # --- Identity seed (plan 08) --- before the file chain so files can override.
     _apply(stamp_identity(osenv, explicit=explicit, root=project_root))
 
+    def _seed(key: str, value: "Optional[str]") -> None:
+        """Only-if-unset: a value already set upstream (user, harness, an
+        earlier layer) holds; an empty value is never written."""
+        if value and not osenv.get(key):
+            _apply({key: value})
+
     # --- Scope roots --- pin the two scope roots so every command/subprocess agrees:
     # AGENTS_HOME = the user store (agents_dir, ~/.agents by default); AGENTS_PROJECT_ROOT
-    # = this project's root (resolve_scope reads it). Respect any already set upstream.
-    if not osenv.get("AGENTS_HOME"):
-        _apply({"AGENTS_HOME": str(agents_dir)})
-    if not osenv.get("AGENTS_PROJECT_ROOT"):
-        _apply({"AGENTS_PROJECT_ROOT": str(project_root)})
-
+    # = this project's root (resolve_scope reads it).
+    _seed("AGENTS_HOME", str(agents_dir))
+    _seed("AGENTS_PROJECT_ROOT", str(project_root))
     # --- Interpreter --- AGENTS_PYTHON = the Python dotagents itself is running
     # under, so shims and helper scripts have a known-good default: a bare
     # `python`/`python3` on PATH may be a Store alias stub, an emulated build,
-    # a venv's, or absent, while this one demonstrably runs the CLI. Only-if-
-    # unset, like the roots, so a user or harness pin holds.
-    if not osenv.get("AGENTS_PYTHON"):
-        _apply({"AGENTS_PYTHON": sys.executable})
+    # a venv's, or absent, while this one demonstrably runs the CLI.
+    # `sys.executable` is '' or None under an embedding host: then nothing is
+    # exported rather than an empty command name.
+    _seed("AGENTS_PYTHON", sys.executable)
 
     # --- Overlay roots --- one `<NAME>_OVERLAY_ROOT` per installed overlay, the
     # same name `dotagents context` expands as a `<NAME_OVERLAY_ROOT>` placeholder
