@@ -139,7 +139,7 @@ the origin's, never the proxy's or a prefix gateway's rewrite:
   has spaces; a backslash is literal on every platform (a Windows path needs no
   doubling); a first word that is a `.py` file runs under `$AGENTS_PYTHON`. The
   wrapper's environment carries **`NET_HOOK_URL`** (the requested URL, no argv
-  parsing needed), `NET_HOOK_KEY` (which hook matched), `AGENTS_CURL` (the shim,
+  parsing needed), `NET_HOOK_KEY` (which hook matched), `NET_HOOK_CURL` (the shim,
   to call curl back with after its own work) and `NET_HOOK_SKIP` holding the KEY
   so that call does not run the wrapper again (`NET_HOOKS_<KEY>`, plural,
   declares a hook; `NET_HOOK_<NAME>`, singular, is what one hook run exports).

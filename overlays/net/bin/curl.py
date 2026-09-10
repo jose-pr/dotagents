@@ -590,7 +590,7 @@ def requested_url(argv):
 
 def shim_entry():
     """The platform entry of this shim (``curl`` / ``curl.cmd`` beside this
-    file), what a wrapper is told in ``AGENTS_CURL``."""
+    file), what a wrapper is told in ``NET_HOOK_CURL``."""
     here = Path(__file__).resolve().parent
     return str(here / ('curl.cmd' if os.name == 'nt' else 'curl'))
 
@@ -599,7 +599,7 @@ def maybe_run_hook(argv):
     """``NET_HOOKS_<KEY>`` + ``_CURL``: when the caller's URL matches, run the
     wrapper in this shim's place with argv appended and, in its environment,
     ``NET_HOOK_URL`` (the requested URL), ``NET_HOOK_KEY`` (the hook),
-    ``AGENTS_CURL`` (this shim, to call curl back with) and ``NET_HOOK_SKIP``
+    ``NET_HOOK_CURL`` (this shim, to call curl back with) and ``NET_HOOK_SKIP``
     carrying the KEY so that call runs the shim, not the wrapper again.
     Returns the wrapper's exit code, or ``None`` when no hook applies."""
     url = requested_url(argv)

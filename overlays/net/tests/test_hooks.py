@@ -193,10 +193,10 @@ from pathlib import Path
 argv = sys.argv[1:]
 curl_argv = argv[argv.index("--") + 1:] if "--" in argv else argv
 Path(os.environ["WRAPPER_LOG"]).write_text(json.dumps({
-    "argv": argv, "curl": os.environ.get("AGENTS_CURL"), "skip": os.environ.get("NET_HOOK_SKIP"),
+    "argv": argv, "curl": os.environ.get("NET_HOOK_CURL"), "skip": os.environ.get("NET_HOOK_SKIP"),
     "url": os.environ.get("NET_HOOK_URL"), "key": os.environ.get("NET_HOOK_KEY"),
 }))
-shim_py = str(Path(os.environ["AGENTS_CURL"]).with_name("curl.py"))
+shim_py = str(Path(os.environ["NET_HOOK_CURL"]).with_name("curl.py"))
 sys.exit(subprocess.run([sys.executable, shim_py, "-H", "X-Hooked: wrapper", *curl_argv]).returncode)
 """
 

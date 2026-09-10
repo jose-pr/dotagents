@@ -28,7 +28,7 @@ Quote (single or double) what has spaces; a backslash is literal on every
 platform, so a Windows path needs no doubling. A first word that is a
 ``.py`` file runs under the shim's own interpreter. The wrapper receives
 ``NET_HOOK_URL`` (the requested URL, so it need not parse argv),
-``NET_HOOK_KEY`` (which hook matched), ``AGENTS_CURL`` naming the shim so
+``NET_HOOK_KEY`` (which hook matched), ``NET_HOOK_CURL`` naming the shim so
 it can call curl back after its own work, and ``NET_HOOK_SKIP`` carrying
 its KEY, so that call does not run the same wrapper again. A hook with
 only a ``_PY`` target is ignored by the shim, one with only ``_CURL`` by
@@ -56,7 +56,7 @@ PY_SUFFIX = "_PY"
 SKIP_ENV = "NET_HOOK_SKIP"
 URL_ENV = "NET_HOOK_URL"
 KEY_ENV = "NET_HOOK_KEY"
-CURL_ENV = "AGENTS_CURL"
+CURL_ENV = "NET_HOOK_CURL"
 
 
 class Hook(object):
