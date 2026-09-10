@@ -92,14 +92,27 @@ def test_load_callable_module_and_file(tmp_path):
         hooks.load_callable("os:sep")
 
 
-def test_curl_command_forms(tmp_path):
-    script = tmp_path / "wrap.py"
+def test_curl_command_is_a_shell_quoted_command_line(tmp_path):
+    """`_CURL='cmd fetch --'` becomes `cmd fetch -- "$@"`: the command line
+    split shell-style, the shim's argv appended by the caller."""
+    cmd = lambda value, **kw: hooks.curl_command(hooks.Hook("K", None, value, None), **kw)
+    assert cmd("cmd fetch --") == ["cmd", "fetch", "--"]
+    assert cmd("wrap --flag 'a b' \"c d\"") == ["wrap", "--flag", "a b", "c d"]
+    # Backslashes are literal on every platform: a Windows path as typed.
+    assert cmd(r"C:\Tools\wrap.exe --x") == [r"C:\Tools\wrap.exe", "--x"]
+    assert cmd(r"'C:\Program Files\wrap.exe' --x") == [r"C:\Program Files\wrap.exe", "--x"]
+    assert cmd("wrap '#not' a # comment") == ["wrap", "#not", "a", "#", "comment"]
+    # A bare path to a file, spaces and all, is that one program; a .py first
+    # word runs under the shim's interpreter.
+    script = tmp_path / "my wrap.py"
     script.write_text("", encoding="utf-8")
-    assert hooks.curl_command(hooks.Hook("K", None, str(script), None), python="py3") == ["py3", str(script)]
+    assert cmd(str(script), python="py3") == ["py3", str(script)]
+    assert cmd("'%s' fetch --" % script, python="py3") == ["py3", str(script), "fetch", "--"]
     exe = tmp_path / "wrap"
     exe.write_text("", encoding="utf-8")
-    assert hooks.curl_command(hooks.Hook("K", None, str(exe), None)) == [str(exe)]
-    assert hooks.curl_command(hooks.Hook("K", None, "wrap --flag 'a b'", None))[:2] == ["wrap", "--flag"]
+    assert cmd(str(exe)) == [str(exe)]
+    with pytest.raises(ValueError):
+        cmd("   ")
 
 
 # --------------------------------------------------------------------------
@@ -176,11 +189,12 @@ WRAPPER = """
 import json, os, subprocess, sys
 from pathlib import Path
 argv = sys.argv[1:]
+curl_argv = argv[argv.index("--") + 1:] if "--" in argv else argv
 Path(os.environ["WRAPPER_LOG"]).write_text(json.dumps({
     "argv": argv, "curl": os.environ.get("AGENTS_CURL"), "skip": os.environ.get("AGENTS_NET_HOOK_SKIP"),
 }))
 shim_py = str(Path(os.environ["AGENTS_CURL"]).with_name("curl.py"))
-sys.exit(subprocess.run([sys.executable, shim_py, "-H", "X-Hooked: wrapper", *argv]).returncode)
+sys.exit(subprocess.run([sys.executable, shim_py, "-H", "X-Hooked: wrapper", *curl_argv]).returncode)
 """
 
 
@@ -190,12 +204,13 @@ def test_curl_hook_runs_the_wrapper_which_calls_the_shim_back(origin, gateway, t
     log = tmp_path / "log.json"
     monkeypatch.setenv("WRAPPER_LOG", str(log))
     monkeypatch.setenv("AGENTS_NET_HOOK_W", "^" + origin.replace(".", r"\.") + "/hooked")
-    monkeypatch.setenv("AGENTS_NET_HOOK_W_CURL", str(wrapper))
+    # A command line with the wrapper's own arguments; the shim's argv follows.
+    monkeypatch.setenv("AGENTS_NET_HOOK_W_CURL", "'%s' fetch --" % wrapper)
     monkeypatch.setenv("AGENTS_PYTHON", sys.executable)
     rc = curl.main(["-s", origin + "/hooked"])
     assert rc == 0
     seen = json.loads(log.read_text(encoding="utf-8"))
-    assert seen["argv"] == ["-s", origin + "/hooked"]
+    assert seen["argv"] == ["fetch", "--", "-s", origin + "/hooked"]
     assert Path(seen["curl"]).name in ("curl", "curl.cmd") and seen["skip"] == "W"
     path, headers = _Gateway.seen[-1]
     assert path == "/fetch/" + origin + "/hooked" and headers.get("X-Hooked") == "wrapper"

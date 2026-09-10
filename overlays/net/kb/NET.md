@@ -133,12 +133,15 @@ the origin's, never the proxy's or a prefix gateway's rewrite:
   to answer instead. Requests the hook makes through the session do not run
   hooks again. `<module:callable>` is importable from `PYTHONPATH` (an overlay's
   `lib/` is, after `dotagents env`) or a `<file>.py:callable`.
-- **curl shim**: the wrapper is a program — a path to a file (a `.py` runs under
-  `$AGENTS_PYTHON`), or a command line split shell-style — run with the shim's
-  whole argv appended, `AGENTS_CURL` naming the shim so the wrapper calls curl
-  back after its own work, and `AGENTS_NET_HOOK_SKIP` holding the KEY so that
-  call does not run the wrapper again. Its exit code is the shim's. It runs
-  before the real-curl passthrough and the fallback alike.
+- **curl shim**: the wrapper is a shell-quoted command line — a program and its
+  own arguments — that the shim's whole argv is appended to:
+  `AGENTS_NET_HOOK_X_CURL='cmd fetch --'` runs `cmd fetch -- "$@"`. Quote what
+  has spaces; a backslash is literal on every platform (a Windows path needs no
+  doubling); a first word that is a `.py` file runs under `$AGENTS_PYTHON`. The
+  wrapper gets `AGENTS_CURL` naming the shim so it calls curl back after its own
+  work, and `AGENTS_NET_HOOK_SKIP` holding the KEY so that call does not run the
+  wrapper again. Its exit code is the shim's. It runs before the real-curl
+  passthrough and the fallback alike.
 - Several hooks may match: httplib runs each in KEY order and stops at the first
   that answers; the shim runs the first `_CURL` in that order. A `_PY` without a
   `_CURL` leaves the shim alone and vice versa.

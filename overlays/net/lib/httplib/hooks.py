@@ -17,12 +17,18 @@ mutable in place. ``<module:callable>`` is importable from ``PYTHONPATH``
 (an overlay's ``lib/`` is on it once ``dotagents env`` ran) or a
 ``<path>.py:callable`` file.
 
-The curl wrapper is a program: a path to a file (a ``.py`` runs under the
-shim's own interpreter), or a command line split shell-style. It receives
-the shim's whole argv, ``AGENTS_CURL`` naming the shim so it can call curl
-back after its own work, and ``AGENTS_NET_HOOK_SKIP`` carrying its KEY, so
-that call does not run the same wrapper again. A hook with only a ``_PY``
-target is ignored by the shim, one with only ``_CURL`` by httplib.
+The curl wrapper is a shell-quoted command line -- a program and its own
+arguments -- that the shim's whole argv is appended to::
+
+    AGENTS_NET_HOOK_X_CURL='cmd fetch --'        ->   cmd fetch -- "$@"
+
+Quote (single or double) what has spaces; a backslash is literal on every
+platform, so a Windows path needs no doubling. A first word that is a
+``.py`` file runs under the shim's own interpreter. The wrapper receives
+``AGENTS_CURL`` naming the shim so it can call curl back after its own
+work, and ``AGENTS_NET_HOOK_SKIP`` carrying its KEY, so that call does not
+run the same wrapper again. A hook with only a ``_PY`` target is ignored
+by the shim, one with only ``_CURL`` by httplib.
 
 Several hooks may match one URL: httplib calls each in KEY order (sorted),
 the first returning a response ends the chain; the shim runs the first
@@ -137,14 +143,28 @@ def call_py_hooks(session, method: str, url: str, kwargs: dict, environ=None) ->
     return None
 
 
+def split_command(value: str) -> List[str]:
+    """A shell-quoted command line into argv: single and double quotes group
+    words with spaces, a backslash is literal (no escaping on any platform,
+    so ``C:\\Tools\\wrap.exe`` stays what it is), ``#`` starts no comment."""
+    lex = shlex.shlex(value, posix=True)
+    lex.whitespace_split = True
+    lex.escape = ""
+    lex.commenters = ""
+    return list(lex)
+
+
 def curl_command(hook: Hook, python: Optional[str] = None) -> List[str]:
-    """The argv prefix a ``_CURL`` target means: an existing file runs as is
-    (a ``.py`` under ``python``, default this interpreter); anything else is a
-    command line, split shell-style (POSIX rules; on Windows unquoted
-    backslashes are kept)."""
+    """The argv prefix a ``_CURL`` target means, the shim's argv to be
+    appended: the shell-quoted command line split; a bare path to an existing
+    file (spaces and all) is that one program; a first word that is a ``.py``
+    file runs under ``python`` (default: this interpreter)."""
     value = (hook.curl or "").strip()
-    if Path(value).is_file():
-        if value.lower().endswith(".py"):
-            return [python or sys.executable, value]
-        return [value]
-    return shlex.split(value, posix=os.name != "nt")
+    if not value:
+        raise ValueError("%s%s%s is empty" % (PREFIX, hook.key, CURL_SUFFIX))
+    argv = [value] if Path(value).is_file() else split_command(value)
+    if not argv:
+        raise ValueError("%s%s%s holds no command" % (PREFIX, hook.key, CURL_SUFFIX))
+    if argv[0].lower().endswith(".py") and Path(argv[0]).is_file():
+        argv = [python or sys.executable, *argv]
+    return argv
