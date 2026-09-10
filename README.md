@@ -162,15 +162,6 @@ Then wire your runner to it — e.g. Claude Code: put `@AGENTS.md` in
 > Read README.md, run `python install.py init && python install.py overlays add engineering -g`,
 > and confirm `~/.agents/overlays/flows/flows/PLAN.md` exists.
 
-## Private sync
-
-Keeping your global config and every project's private `.agents` in one private
-git repo, synced across machines and cloud sessions, is the **`private-sync`
-overlay's** job (`link-project` / `sync-project`, the cloud hooks and the
-walkthrough all ship with it). See the overlays branch README and, once
-installed, `$PRIVATE_SYNC_OVERLAY_ROOT/kb/PRIVATE_SYNC.md`. The self-contained
-cloud bootstrap the overlay's hooks use lives here at `tools/cloud-setup.sh`.
-
 ## Validate
 
 ```bash
