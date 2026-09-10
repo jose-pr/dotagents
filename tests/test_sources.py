@@ -148,6 +148,14 @@ def test_git_repo_as_a_whole_overlay_and_as_a_directory_of_overlays(repo, tmp_pa
     # A repo spec with a path to a directory: a directory of overlays.
     d = _sources.load_repo(repo["url"] + "@main#overlays", cache)
     assert isinstance(d, DirRepo) and d.available() == ["inner"] and d.has("inner")
+    # A repo spec with NO path: a repo is always a collection, so the path is
+    # the checkout root and that root is a directory of overlays -- never "the
+    # whole repository is the overlay" (that reading belongs to a registry
+    # entry, i.e. a source).
+    root = _sources.load_repo(repo["url"] + "@main", cache)
+    assert isinstance(root, DirRepo)
+    assert (root.root / "overlay.toml").is_file() and (root.root / "overlays" / "inner").is_dir()
+    assert root.root == d.root.parent
     with pytest.raises(SystemExit) as exc:
         _sources.load_repo(repo["url"] + "#overlays/missing", cache)
     assert "has no 'overlays/missing'" in str(exc.value)
