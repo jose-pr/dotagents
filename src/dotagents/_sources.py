@@ -1,14 +1,18 @@
 """Overlay repos: where ``overlays add`` / ``sync`` fetch an overlay from.
 
-A **repo** is any place that can answer "give me overlay ``<name>``". Two shapes:
+A **repo** is always a *collection* of overlays, the place that answers "give
+me overlay ``<name>``". Two shapes:
 
-* a **directory of overlays** -- ``<dir>/<name>/`` is the overlay (the ``.pyz``'s
-  bundled ``overlays/``, a checkout of the overlays branch, any folder);
-* a **registry** -- a JSON / TOML / YAML document mapping ``<name-or-alias>`` to
-  a *spec* for that one overlay. Either the whole document is the mapping, or
-  its ``overlays`` key is.
+* a **directory of overlays** -- each subdirectory is an overlay,
+  ``<dir>/<name>/`` (the ``.pyz``'s bundled ``overlays/``, a checkout of the
+  overlays branch, any folder);
+* a **registry** -- a JSON / TOML / YAML document mapping ``<name-or-alias>``
+  to the **source** of that one overlay. Either the whole document is the
+  mapping, or its ``overlays`` key is.
 
-Every repo is named by a **spec**, and so is every registry entry::
+A **source** is *one* overlay: the directory that is its root.
+
+Repos and sources are both written as a **spec**::
 
     <location>[@<ref>][#<path>]
 
@@ -17,10 +21,11 @@ Every repo is named by a **spec**, and so is every registry entry::
 ``ssh://…``, a local ``…/x.git``; prefix ``git+`` to force git for a URL that
 does not end in ``.git``). ``<ref>`` (git only) is a branch, tag or commit --
 default the remote's default branch. ``<path>`` is a path inside the location.
-What the spec resolves to decides what it is: a **file** is a registry, a
-**directory** is a directory of overlays (for a repo) or the overlay itself
-(for a registry entry -- so with no path, *the whole git repository is the
-overlay*). An ``http(s)://`` location can only be a file, i.e. a registry.
+What the path names differs: for a **repo** it is the collection -- a
+directory (of overlays) or a registry file, the checkout root when absent --
+and an ``http(s)://`` location is a registry file, fetched; for a **source**
+it is the overlay's root directory, and when absent *the repository root is
+the overlay*.
 
 Repos are consulted in order, and **the first that offers a name wins**:
 ``--repo`` values as given, then ``$AGENTS_OVERLAYS_REPO_<KEY>`` sorted by

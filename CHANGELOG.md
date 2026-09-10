@@ -14,12 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   that offers it winning: `--repo <spec>` (repeatable), `$AGENTS_OVERLAYS_REPO_<KEY>`
   (one repo per variable, by KEY), `$AGENTS_OVERLAYS_REPO` (the default repo),
   the project store's `dotagents.{json,toml,yaml,yml}`, the user store's, then
-  the bundled `overlays/`. A repo is a directory of
-  overlays, a registry file mapping names (or aliases) to specs, or a git
-  repository named by a spec `<repo>[@<branch|tag|commit>][#<path>]`; for a
-  registry entry with no path the whole repository is the overlay. Checkouts
-  are cached under `<user store>/.cache/overlays/` and refreshed on every use;
-  credentials in a repo URL never reach a log line.
+  the bundled `overlays/`. A repo is always a collection of overlays: a
+  directory (each subdirectory an overlay) or a registry file mapping names
+  (or aliases) to sources; it lives at a local path, an `http(s)://` URL (a
+  registry, fetched) or inside a git repository named
+  `<repo>[@<branch|tag|commit>][#<path>]`, the path picking the directory or
+  registry file in the checkout. A source is one overlay: a local directory,
+  or a git spec whose path is the overlay's root (no path: the repository root
+  is the overlay). Checkouts are cached under `<user store>/.cache/overlays/`
+  and refreshed on every use; credentials in a repo URL never reach a log line.
 - `env` exports `AGENTS_PYTHON`: the interpreter `dotagents` itself is running
   under (`sys.executable`), seeded only if unset like the scope roots. Shims
   and helper scripts now have a default Python they can trust, where a bare

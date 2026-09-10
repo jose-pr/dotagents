@@ -294,8 +294,10 @@ Config / path / sync vars (`AGENTS_*`, non-secret — read, and some emitted):
 - `AGENTS_SYSTEM_ROOT` — the machine-wide store (default `/etc/agents`), walked
   first for overlays/bin/lib/env/cmds/AGENTS.md; nothing installs into it.
 - `AGENTS_STORE_DIR` — per-project store location (absolute paths allowed).
-- `AGENTS_OVERLAYS_REPO` — the default overlay repo for `overlays` (a directory
-  of overlays, a registry file, or a git `<repo>[@ref][#path]`), and
+- `AGENTS_OVERLAYS_REPO` — the default overlay repo for `overlays` (always a
+  collection: a directory of overlays or a registry file, at a local path, an
+  http(s) URL, or inside a git `<repo>[@ref][#path]`; a registry's values are
+  sources, one overlay each, a git path being the overlay's root), and
   `AGENTS_OVERLAYS_REPO_<KEY>` — one repo per variable, ordered by KEY, consulted
   before the default; both after `--repo` and before the stores'
   `dotagents.{json,toml,yaml}` registries and the bundled `overlays/`.

@@ -63,21 +63,28 @@ that remain.
 ## Where overlays come from: repos
 
 `add`, `sync`, `list` and `show` resolve a name against a list of **repos**, and the
-first repo that offers the name wins. A repo is any of:
+first repo that offers the name wins. A repo is **always a collection** of overlays,
+in one of two shapes:
 
-- a **directory of overlays** — `<dir>/<name>/` is the overlay (a checkout of the
-  `overlays` branch, any folder);
-- a **registry** — a JSON, TOML or YAML file mapping `<name-or-alias>` to a *spec* for
-  that one overlay (the whole document, or its `overlays` key);
-- a **git repository**, named by a spec.
+- a **directory of overlays** — each subdirectory is an overlay, `<dir>/<name>/` (a
+  checkout of the `overlays` branch, any folder);
+- a **registry** — a JSON, TOML or YAML file mapping `<name-or-alias>` to the
+  **source** of that one overlay (the whole document, or its `overlays` key).
 
-A spec is `<location>[@<ref>][#<path>]`: `<location>` is a local path, an `http(s)://`
-URL, or a git repository (`https://…/x.git`, `git@host:org/x.git`, `ssh://…`, a local
-`…/x.git`; prefix `git+` to force git); `<ref>` is a branch, tag or commit; `<path>` is
-inside it. What it resolves to decides what it is: a directory is a directory of
-overlays (for a repo) or the overlay itself (for a registry entry — with no path, **the
-whole repository is the overlay**); a file is a registry. Checkouts are cached under
-`<user store>/.cache/overlays/` and refreshed on every `add`/`sync`.
+Both the repo and each source are written as a spec, `<location>[@<ref>][#<path>]`:
+`<location>` is a local path, an `http(s)://` URL, or a git repository
+(`https://…/x.git`, `git@host:org/x.git`, `ssh://…`, a local `…/x.git`; prefix `git+` to
+force git); `<ref>` is a branch, tag or commit; `<path>` is inside it. The two differ
+in what the path names:
+
+- for a **repo**, the collection: a directory (of overlays) or a registry file in the
+  checkout, the checkout root with no path; an `http(s)://` location is a registry
+  file, fetched;
+- for a **source**, the overlay: the path is the overlay's root directory, and with no
+  path **the repository root is the overlay**.
+
+Checkouts are cached under `<user store>/.cache/overlays/` and refreshed on every
+`add`/`sync`.
 
 The repos, in order:
 
@@ -92,8 +99,8 @@ The repos, in order:
 [overlays]
 engineering = "https://github.com/you/dotagents.git@overlays#overlays/engineering"
 python      = "https://github.com/you/dotagents.git@overlays#overlays/python"
-mytool      = "git@github.com:you/mytool-overlay.git@v2"      # the whole repo is the overlay
-local       = "~/src/overlays"                                 # a directory of overlays: local/
+mytool      = "git@github.com:you/mytool-overlay.git@v2"      # no path: the repo root is the overlay
+local       = "~/src/overlays/local"                           # a local overlay directory
 ```
 
 ```bash

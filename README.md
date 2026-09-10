@@ -100,12 +100,17 @@ overlay's skills into the shared skills dir. See below.
 ### Managing overlays
 
 `dotagents overlays` manages opt-in overlays **by name**, resolving each name against
-**repos** in order — the first that offers the name wins. A repo is a directory of
-overlays (e.g. a checkout of the [`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays)),
-a JSON/TOML/YAML registry mapping names to sources, or a git repository:
-`<repo>[@<branch|tag|commit>][#<path>]`, where without a path the whole repository is
-the overlay. Name repos with `--repo`, `$AGENTS_OVERLAYS_REPO_<KEY>` / `$AGENTS_OVERLAYS_REPO`,
-or a `dotagents.{json,toml,yaml}` in the project or user store.
+**repos** in order — the first that offers the name wins. A repo is always a
+**collection** of overlays: a directory (each subdirectory an overlay, e.g. a checkout of
+the [`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays)) or a
+JSON/TOML/YAML registry file mapping names to **sources**. It lives at a local path, an
+`http(s)://` URL (a registry file, fetched), or inside a git repository named
+`<repo>[@<branch|tag|commit>][#<path>]`, where the path picks the directory or registry
+file in the checkout (no path: the checkout root). A source names **one** overlay: a
+local directory, or a git spec whose path is the overlay's root directory (no path: the
+repository root is the overlay). Name repos with `--repo`,
+`$AGENTS_OVERLAYS_REPO_<KEY>` / `$AGENTS_OVERLAYS_REPO`, or a `dotagents.{json,toml,yaml}`
+in the project or user store.
 Installed overlays are *discovered* by their presence under `<scope>/.agents/overlays/`.
 
 ```bash
