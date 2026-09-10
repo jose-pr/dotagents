@@ -16,8 +16,12 @@ def test_posix_entry_exists_and_dispatches_to_curl_py():
     sh = BIN / "curl"
     text = sh.read_text(encoding="utf-8")
     assert text.startswith("#!/bin/sh\n")
+    assert 'exec "$AGENTS_PYTHON" "$here/curl.py" "$@"' in text, "the Python dotagents runs under comes first"
+    assert text.index("AGENTS_PYTHON") < text.index("python3"), "...before any PATH lookup"
     assert 'exec python3 "$here/curl.py" "$@"' in text
     assert 'exec python "$here/curl.py" "$@"' in text, "Git Bash on Windows has no python3"
+    code = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    assert not any("dirname" in ln or "$(" in ln for ln in code), "no external commands: PATH may be minimal"
     assert "\r" not in text, "a CRLF shebang line is a 'bad interpreter' on POSIX"
     if os.name != "nt":
         assert sh.stat().st_mode & stat.S_IXUSR, "must be executable in the checkout"
@@ -26,6 +30,8 @@ def test_posix_entry_exists_and_dispatches_to_curl_py():
 def test_windows_entry_dispatches_to_curl_py():
     cmd = (BIN / "curl.cmd").read_text(encoding="utf-8")
     assert "curl.py" in cmd and "%*" in cmd
+    assert '"%AGENTS_PYTHON%" "%~dp0curl.py" %*' in cmd, "the Python dotagents runs under comes first"
+    assert cmd.index("AGENTS_PYTHON") < cmd.index("python.exe")
 
 
 def _fake_real_curl(directory):

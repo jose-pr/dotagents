@@ -13,7 +13,10 @@ system `curl` first** (walking `PATH` past its own directory, so it never
 re-executes itself) and only falls back to a pure-stdlib (`urllib`)
 implementation when no other `curl` exists — so on a normal box you get real
 curl, and on a locked-down/minimal host you still get a working `curl` with
-**zero dependencies**.
+**zero dependencies**. Both entries run `curl.py` with **`$AGENTS_PYTHON`** —
+the interpreter `dotagents` itself runs under, which `dotagents env` exports —
+before trying `python3`/`python` on `PATH`, so a Store stub or an emulated
+build on `PATH` cannot break the shim.
 
     curl https://example.com
     curl -s -o out.json -H 'Accept: application/json' https://api.example.com/x

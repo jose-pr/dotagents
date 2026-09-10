@@ -2,12 +2,17 @@
 # POSIX entry for the curl shim (the Windows twin is curl.cmd): with the
 # overlay's bin/ on PATH via `dotagents env`, `curl` resolves here, and curl.py
 # runs the real system curl -- skipping this directory -- or its stdlib
-# fallback. python3 first, then python (Git Bash on Windows has only the
-# latter). No external commands (dirname & co.): PATH may be minimal.
+# fallback. The interpreter: $AGENTS_PYTHON (the one dotagents runs under,
+# exported by `dotagents env`) first, then python3, then python (Git Bash on
+# Windows has only the latter). No external commands (dirname & co.): PATH may
+# be minimal.
 case $0 in
     */*) here=${0%/*} ;;
     *) here=. ;;
 esac
+if [ -n "${AGENTS_PYTHON:-}" ] && [ -x "$AGENTS_PYTHON" ]; then
+    exec "$AGENTS_PYTHON" "$here/curl.py" "$@"
+fi
 if command -v python3 >/dev/null 2>&1; then
     exec python3 "$here/curl.py" "$@"
 fi
