@@ -160,11 +160,12 @@ def test_second_run_is_a_noop(tmp_path):
     assert _settings(root).read_text(encoding="utf-8") == first
 
     hooks = _hooks_of_settings(root)
-    # 2 handlers per event: bash-syntax + a PowerShell-native equivalent (Windows
-    # without Git Bash silently routes the bash one through PowerShell by
-    # default, per hooks.md's `shell` field docs -- a hard parse error).
-    assert len(hooks["SessionStart"]) == 2
-    assert len(hooks["CwdChanged"]) == 2
+    # Windows: 2 handlers per event, bash-syntax + a PowerShell-native equivalent
+    # (without Git Bash, hooks.md routes the bash one through PowerShell by
+    # default -- a hard parse error). POSIX: the bash handler only.
+    per_event = 2 if os.name == "nt" else 1
+    assert len(hooks["SessionStart"]) == per_event
+    assert len(hooks["CwdChanged"]) == per_event
 
 
 def test_preserves_unrelated_keys_and_foreign_hooks(tmp_path):
