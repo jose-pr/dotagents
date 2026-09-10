@@ -66,10 +66,16 @@ Python-specific extras/overrides on top of the generic repo standard in
   by hand. It creates `<scope>/.pyvenv/<version>-<os>-<arch>/` (a sibling of
   `.agents`; project scope by default, `-g` for the user-wide store shared across
   projects) and no-ops if it already exists, so re-running it is always safe. `<os>`
-  is `nt`/`posix`/`darwin`, `<arch>` is `platform.machine().lower()` (e.g.
-  `3.14.6-nt-amd64`) — the name is derived from the interpreter's actual probed
-  version, not trusted from a filename, so the same version+os+arch always
-  names the same dir regardless of which install produced it.
+  is `nt`/`posix`/`darwin`, `<arch>` is what the chosen interpreter was **built**
+  for (its `sysconfig.get_platform()` tail: `arm64`, `amd64`, `x86_64`; e.g.
+  `3.14.7-nt-arm64`) — never `platform.machine()`, which reports the host and so
+  files an emulated x64 CPython on an ARM64 box as native. Version and arch are
+  probed from the interpreter, not trusted from a filename, so the same
+  version+os+arch always names the same dir regardless of which install produced
+  it. **Native first**: among the installs that satisfy the spec, one built for
+  the machine's native architecture wins before the highest version does (an
+  ARM64 3.9.10 over an emulated x64 3.9.13); it warns when only an emulated one
+  fits. A venv's own interpreter is never a candidate.
   - **Normal work**: no version argument — `dotagents pyvenv` resolves and
     uses the **latest** Python installed on the machine. No version to track
     or pass day to day.

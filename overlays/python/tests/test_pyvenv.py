@@ -12,6 +12,8 @@ import pytest
 
 from pyvenv import (
     _arch_bucket,
+    _arch_from_platform_tag,
+    _host_arch,
     _os_bucket,
     _probe_version,
     _resolve_interpreter,
@@ -39,11 +41,36 @@ def test_darwin_is_its_own_bucket_not_posix(monkeypatch):
     assert _os_bucket() == "darwin"
 
 
-def test_arch_bucket_is_lowercased(monkeypatch):
-    import platform
+def test_arch_comes_from_the_build_platform_tag():
+    # The last dash segment of sysconfig.get_platform(), lowercased -- the
+    # arch the interpreter was BUILT for, which is what a venv inherits.
+    assert _arch_from_platform_tag("win-amd64") == "amd64"
+    assert _arch_from_platform_tag("win-ARM64") == "arm64"
+    assert _arch_from_platform_tag("macosx-14.0-arm64") == "arm64"
+    assert _arch_from_platform_tag("linux-x86_64") == "x86_64"
+    assert _arch_from_platform_tag("") == "unknown"
 
-    monkeypatch.setattr(platform, "machine", lambda: "AMD64")
-    assert _arch_bucket() == "amd64"
+
+def test_arch_bucket_of_the_running_interpreter_is_its_build_arch():
+    import sysconfig
+
+    assert _arch_bucket() == _arch_from_platform_tag(sysconfig.get_platform())
+
+
+def test_arch_bucket_probes_the_target_interpreter(monkeypatch):
+    import pyvenv as mod
+
+    monkeypatch.setattr(mod, "_probe_arch", lambda python: "arm64")
+    assert _arch_bucket(Path("/some/python")) == "arm64"
+    monkeypatch.setattr(mod, "_probe_arch", lambda python: None)
+    assert _arch_bucket(Path("/some/python")) == "unknown"
+
+
+def test_host_arch_is_a_known_bucket_word():
+    # Whatever the machine, the answer is in the same vocabulary as the
+    # build-platform tags, so equality against a probed arch is meaningful.
+    assert _host_arch() == _host_arch().lower()
+    assert _host_arch() not in ("", None)
 
 
 # --------------------------------------------------------------------------
@@ -135,9 +162,31 @@ def test_resolve_interpreter_bare_version_picks_highest_match(tmp_path, monkeypa
     }
     monkeypatch.setattr(mod, "_discover_all", lambda: candidates)
     monkeypatch.setattr(mod, "_probe_version", lambda p: versions.get(str(p)))
+    monkeypatch.setattr(mod, "_probe_arch", lambda p: "native")
+    monkeypatch.setattr(mod, "_host_arch", lambda: "native")
 
     result = mod._resolve_interpreter("3.11", logger=None)
     assert result == candidates[1]
+
+
+def test_resolve_interpreter_prefers_native_arch_over_higher_version(tmp_path, monkeypatch):
+    """An ARM64 3.9.10 beats an emulated x64 3.9.13 on an ARM64 box: the
+    emulated build is never the default when a native one satisfies the spec."""
+    import pyvenv as mod
+
+    emulated, native = tmp_path / "x64", tmp_path / "arm64"
+    versions = {str(emulated): (3, 9, 13), str(native): (3, 9, 10)}
+    arches = {str(emulated): "amd64", str(native): "arm64"}
+    monkeypatch.setattr(mod, "_discover_all", lambda: [emulated, native])
+    monkeypatch.setattr(mod, "_probe_version", lambda p: versions.get(str(p)))
+    monkeypatch.setattr(mod, "_probe_arch", lambda p: arches.get(str(p)))
+    monkeypatch.setattr(mod, "_host_arch", lambda: "arm64")
+
+    assert mod._resolve_interpreter("3.9", logger=None) == native
+    assert mod._resolve_interpreter(None, logger=None) == native
+    # ...and with no native candidate at all, the highest version still wins.
+    monkeypatch.setattr(mod, "_host_arch", lambda: "riscv64")
+    assert mod._resolve_interpreter("3.9", logger=None) == emulated
 
 
 def test_resolve_interpreter_no_version_picks_global_highest(tmp_path, monkeypatch):
@@ -147,6 +196,8 @@ def test_resolve_interpreter_no_version_picks_global_highest(tmp_path, monkeypat
     versions = {str(candidates[0]): (3, 9, 0), str(candidates[1]): (3, 13, 0)}
     monkeypatch.setattr(mod, "_discover_all", lambda: candidates)
     monkeypatch.setattr(mod, "_probe_version", lambda p: versions.get(str(p)))
+    monkeypatch.setattr(mod, "_probe_arch", lambda p: "native")
+    monkeypatch.setattr(mod, "_host_arch", lambda: "native")
 
     assert mod._resolve_interpreter(None, logger=None) == candidates[1]
 
@@ -173,7 +224,7 @@ def test_same_version_os_arch_produce_the_same_dirname(monkeypatch):
     import pyvenv as mod
 
     monkeypatch.setattr(mod, "_os_bucket", lambda: "posix")
-    monkeypatch.setattr(mod, "_arch_bucket", lambda: "x86_64")
+    monkeypatch.setattr(mod, "_arch_bucket", lambda interpreter=None: "x86_64")
 
     def dirname(version):
         return "%s-%s-%s" % (version, mod._os_bucket(), mod._arch_bucket())
@@ -181,3 +232,63 @@ def test_same_version_os_arch_produce_the_same_dirname(monkeypatch):
     # Two different interpreter binaries reporting the identical version must
     # collide into the identical venv dir name.
     assert dirname("3.11.7") == dirname("3.11.7")
+
+
+def test_venv_dir_is_named_for_the_target_interpreters_arch(tmp_path, monkeypatch):
+    """Running under an emulated x64 CPython, a venv made from a native ARM64
+    interpreter is filed as arm64 -- the bucket is the TARGET's build arch, not
+    the running process's idea of the machine."""
+    import pyvenv as mod
+
+    class FakeScope:
+        agents_root = tmp_path / ".agents"
+
+    target = tmp_path / "arm64-python"
+    monkeypatch.setattr(mod, "_resolve_interpreter", lambda version, logger=None: target)
+    monkeypatch.setattr(mod, "_probe_version", lambda p: (3, 14, 7))
+    monkeypatch.setattr(mod, "_probe_arch", lambda p: "arm64" if p == target else "amd64")
+    monkeypatch.setattr(mod, "_os_bucket", lambda: "nt")
+
+    venv_dir, interpreter = mod._venv_target(FakeScope(), "3.14")
+    assert interpreter == target
+    assert venv_dir == tmp_path / ".pyvenv" / "3.14.7-nt-arm64"
+
+
+def test_windows_discovery_skips_the_active_venv_and_any_venv_python(tmp_path, monkeypatch):
+    # The launcher lists the ACTIVE venv first (marked *); a venv is never a
+    # candidate -- a venv made from a venv inherits its base and hides which
+    # install that was.
+    import pyvenv as mod
+
+    install = tmp_path / "pythoncore-3.14-arm64" / "python.exe"
+    install.parent.mkdir()
+    install.write_text("", encoding="utf-8")
+    venv = tmp_path / ".venv" / "Scripts" / "python.exe"
+    venv.parent.mkdir(parents=True)
+    venv.write_text("", encoding="utf-8")
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = x", encoding="utf-8")
+    listing = " *               %s\n -V:3.14-arm64    %s\n" % (venv, install)
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[:2] == ["py", "--list-paths"]
+        return subprocess.CompletedProcess(cmd, 0, stdout=listing, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "no-such-dir"))
+    assert mod._candidates_windows() == [install]
+    assert mod._is_venv_python(venv) and not mod._is_venv_python(install)
+
+
+def test_windows_discovery_adds_python_manager_installs(tmp_path, monkeypatch):
+    import pyvenv as mod
+
+    managed = tmp_path / "Python" / "pythoncore-3.13-arm64" / "python.exe"
+    managed.parent.mkdir(parents=True)
+    managed.write_text("", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("no py launcher")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert managed in mod._candidates_windows()
