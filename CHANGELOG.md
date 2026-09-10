@@ -17,17 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- `init` no longer registers the PowerShell hook variants on POSIX hosts. A
-  `shell: powershell` entry where no PowerShell exists is not harmless: the
-  text is run as bash and fails with a syntax error on every session (measured
-  in WSL). Linux and macOS get the bash handler only; Windows keeps both, and
-  the PowerShell one still selects itself only when `bash` is absent.
-- Command discovery also survives a module that calls `sys.exit()` at import.
-  `SystemExit` is not an `Exception`, so such a module (a project-scope
-  override refusing to load without its user-scope base) escaped the
-  resilience guard and killed every invocation, `init -g` for a store that
-  did not exist yet included. It is skipped with a warning like any other
-  broken source.
+- `init` no longer registers the PowerShell hook variants on POSIX hosts, and
+  removes the ones an earlier `init` wrote there. A `shell: powershell` entry
+  on Linux or macOS is not harmless: Claude Code runs the text as bash and it
+  fails with a syntax error on every session (measured in WSL). Linux and
+  macOS get the bash handler only; Windows keeps both, and the PowerShell one
+  still selects itself only when `bash` is absent. Re-running `init -g` on an
+  existing POSIX install converges.
+- Command discovery is resilient per module, not per directory: one broken
+  file in a `cmds/` dir (a syntax error, an import-time exception, or a
+  `sys.exit()` — which is not an `Exception` and used to escape the guard and
+  kill every invocation, `init -g` for a store that did not exist yet
+  included) is skipped with a warning that names the file, and its siblings
+  still load.
 
 ## [0.4.0] - 2026-09-09
 

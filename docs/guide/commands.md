@@ -209,7 +209,11 @@ python -m dotagents env --diff --format json   # only vars that differ from the 
 
 Roots resolve exactly as for `context` above (`$AGENTS_HOME` /
 `$AGENTS_PROJECT_ROOT`, both of which `env` also emits — so a subprocess reading
-them agrees with the parent that wrote them). `env` also emits one
+them agrees with the parent that wrote them). `env` also emits `AGENTS_PYTHON`,
+the interpreter `dotagents` itself is running under — the Python a shim or helper
+script should run with, since a bare `python`/`python3` on `PATH` may be a Store
+stub, an emulated build, a venv's, or missing (only if unset, so a pin holds;
+the env-layer `env.py` scripts run under a valid pin too). And `env` emits one
 `<NAME>_OVERLAY_ROOT` per installed overlay, where `NAME` is the overlay's
 directory name upper-cased with `-`/`.` turned into `_` (`my-ov` →
 `MY_OV_OVERLAY_ROOT`). It is the same name `context` expands as a

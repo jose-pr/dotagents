@@ -220,13 +220,19 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   Antigravity's docs, so `detect_env_vars = []` — explicit `--agents antigravity`
   only, same posture as Codex's env-block precedent (writes touching an agent's
   own live config are opt-in, never inferred).
-- **`SessionStart`/`CwdChanged` register TWO handlers each**, bash-syntax
-  (default shell) and a PowerShell-native equivalent (`shell: "powershell"`).
-  hooks.md: `shell` "Defaults to bash, or to powershell on Windows when Git Bash
-  isn't installed" — verified directly that bash syntax fed to `powershell
-  -Command` on such a machine is a hard parse error, not a soft failure, so
-  every session there would silently get neither env nor context. Every handler
-  in a matched group fires unconditionally (hooks.md), so both always run —
+- **`SessionStart`/`CwdChanged` register TWO handlers each ON WINDOWS**,
+  bash-syntax (default shell) and a PowerShell-native equivalent (`shell:
+  "powershell"`); **POSIX hosts get the bash handler only**, and `init` there
+  RETRACTS PowerShell entries an earlier install wrote (`_hooks.remove_hook`,
+  keyed by status message) — Claude Code on Linux ran such an entry through
+  bash, a syntax error every session (measured in WSL, 2026-09-10). The gate
+  is `ClaudeAgent._is_windows()` (`os.name == "nt"`, a seam tests patch; never
+  "is pwsh installed"). hooks.md: `shell` "Defaults to bash, or to powershell
+  on Windows when Git Bash isn't installed" — verified directly that bash
+  syntax fed to `powershell -Command` on such a machine is a hard parse error,
+  not a soft failure, so every session there would silently get neither env
+  nor context. Every handler in a matched group fires unconditionally
+  (hooks.md), so on Windows both always run —
   and on a box with BOTH interpreters both used to succeed, injecting the same
   context twice per session (two identical 100 KB payloads, measured
   2026-09-09). The PowerShell variants therefore **select themselves: they run
