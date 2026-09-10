@@ -160,12 +160,11 @@ def test_second_run_is_a_noop(tmp_path):
     assert _settings(root).read_text(encoding="utf-8") == first
 
     hooks = _hooks_of_settings(root)
-    # Windows: 2 handlers per event, bash-syntax + a PowerShell-native equivalent
-    # (without Git Bash, hooks.md routes the bash one through PowerShell by
-    # default -- a hard parse error). POSIX: the bash handler only.
-    per_event = 2 if os.name == "nt" else 1
-    assert len(hooks["SessionStart"]) == per_event
-    assert len(hooks["CwdChanged"]) == per_event
+    # No duplicate entries either way (the per-platform count is pinned in
+    # TestDualShellSessionHooks).
+    for event in ("SessionStart", "CwdChanged"):
+        entries = [json.dumps(e, sort_keys=True) for e in hooks[event]]
+        assert len(entries) == len(set(entries)), event
 
 
 def test_preserves_unrelated_keys_and_foreign_hooks(tmp_path):
@@ -246,44 +245,55 @@ class TestDualShellSessionHooks:
     matched group fires unconditionally (hooks.md), so exactly one of the two
     succeeds per machine depending on which interpreter is present."""
 
-    @pytest.mark.skipif(os.name != "nt", reason="the PowerShell variants are written on Windows only")
-    def test_both_shell_variants_present_on_windows(self, tmp_path):
+    @pytest.mark.parametrize("windows, per_event", [(True, 2), (False, 1)])
+    def test_handlers_per_platform(self, tmp_path, monkeypatch, windows, per_event):
+        """Windows: bash + PowerShell handler per event and the PreToolUse
+        loader. POSIX: the bash handler only -- Claude Code there runs a
+        `shell: powershell` entry THROUGH BASH (a syntax error every session,
+        measured in WSL). Both branches run on every OS via the `_is_windows`
+        seam (`os.name` itself cannot be patched: `pathlib.Path()` dispatches
+        on it)."""
+        monkeypatch.setattr(ClaudeAgent, "_is_windows", staticmethod(lambda: windows))
         dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
         ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
         hooks = _hooks_of_settings(root)
         for event in ("SessionStart", "CwdChanged"):
-            assert len(hooks[event]) == 2, "%s must carry both shell variants" % event
+            assert len(hooks[event]) == per_event, event
             shells = {e["hooks"][0].get("shell") for e in hooks[event]}
-            assert shells == {None, "powershell"}, (
-                "one handler must be default-shell (bash), the other explicit powershell"
-            )
+            assert shells == ({None, "powershell"} if windows else {None}), event
+        assert ("PreToolUse" in hooks) is windows
 
-    @pytest.mark.skipif(os.name == "nt", reason="POSIX hosts get the bash handler only")
-    def test_posix_gets_the_bash_handler_only(self, tmp_path):
-        """A `shell: powershell` entry on a host with no PowerShell is not
-        harmless: Claude Code cannot spawn it, and a shell that falls back to
-        running the text as bash reports a syntax error on EVERY session
-        (measured in WSL, 2026-09-10: `syntax error near unexpected token
-        'Get-Command'` for both events). So on POSIX it is never written."""
+    def test_posix_retracts_powershell_entries_written_earlier(self, tmp_path, monkeypatch):
+        """The upgrade path: an install written while both variants were
+        registered everywhere keeps failing every session until the stale
+        `shell: powershell` entries are REMOVED, not merely no longer written.
+        Foreign hooks sharing the event stay."""
         dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
+        monkeypatch.setattr(ClaudeAgent, "_is_windows", staticmethod(lambda: True))
         ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        data = json.loads(_settings(root).read_text(encoding="utf-8"))
+        data["hooks"]["SessionStart"].append({"hooks": [{"type": "command", "command": "echo mine"}]})
+        write_text_lf(_settings(root), json.dumps(data, indent=2) + "\n")
 
+        monkeypatch.setattr(ClaudeAgent, "_is_windows", staticmethod(lambda: False))
+        ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
         hooks = _hooks_of_settings(root)
         for event in ("SessionStart", "CwdChanged"):
-            assert len(hooks[event]) == 1, "%s must carry the bash handler only" % event
-            assert hooks[event][0]["hooks"][0].get("shell") is None
-            assert "Get-Command" not in hooks[event][0]["hooks"][0]["command"]
+            assert not [e for e in hooks[event] if e["hooks"][0].get("shell") == "powershell"], event
         assert "PreToolUse" not in hooks
+        assert "echo mine" in _commands(hooks["SessionStart"]), "a foreign hook survives the retraction"
+        assert len(hooks["SessionStart"]) == 2 and len(hooks["CwdChanged"]) == 1
+        # ...and the second POSIX run is a no-op.
+        before = _settings(root).read_text(encoding="utf-8")
+        ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        assert _settings(root).read_text(encoding="utf-8") == before
 
-    def test_windows_gate_is_the_real_os_name(self):
-        """Same reasoning as TestPowerShellPreToolUse.test_windows_only: the gate
-        cannot be monkeypatched safely, so pin it in source."""
-        import inspect
-
-        src = inspect.getsource(ClaudeAgent.wire_hooks)
-        assert 'windows = os.name == "nt"' in src
-        assert src.count("if windows:") == 3, "SessionStart, CwdChanged and PreToolUse PowerShell variants"
+    def test_the_gate_is_the_real_os_name(self):
+        """The seam's default must stay `os.name` -- "is pwsh installed" would
+        reintroduce the POSIX failure, since it is Claude Code's handling of
+        the `shell` field, not the presence of a binary, that differs."""
+        assert ClaudeAgent._is_windows() is (os.name == "nt")
 
     def test_powershell_variants_are_context_only_not_env(self):
         """The PowerShell SessionStart variant must NOT try to write
@@ -361,20 +371,13 @@ class TestPowerShellPreToolUse:
     Process Restricted`, which blocks every `.ps1` file outright.
     """
 
-    def test_windows_only(self, tmp_path):
-        """The gate itself (`os.name == "nt"`) can't safely be monkeypatched --
-        `pathlib.Path()` dispatches on the REAL `os.name` to choose
-        `WindowsPath`/`PosixPath`, so patching it mid-test corrupts every
-        subsequent `Path()` call, pytest's own included. Inspect source instead.
-        """
-        import inspect
+    @pytest.fixture(autouse=True)
+    def _as_windows(self, monkeypatch):
+        """PreToolUse wiring is Windows-only; exercise it on every OS through
+        the `_is_windows` seam (the real gate stays `os.name`, see
+        TestDualShellSessionHooks.test_the_gate_is_the_real_os_name)."""
+        monkeypatch.setattr(ClaudeAgent, "_is_windows", staticmethod(lambda: True))
 
-        src = inspect.getsource(ClaudeAgent.wire_hooks)
-        assert 'os.name == "nt"' in src, (
-            "the PowerShell PreToolUse wiring must stay gated to Windows"
-        )
-
-    @pytest.mark.skipif(os.name != "nt", reason="PreToolUse wiring is gated to os.name == 'nt'")
     def test_wires_pretooluse_inline_no_file(self, tmp_path):
         dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
 
@@ -389,7 +392,6 @@ class TestPowerShellPreToolUse:
         assert "-File" not in entry["command"], "must be inline, not a script file reference"
         assert ".ps1" not in entry["command"]
 
-    @pytest.mark.skipif(os.name != "nt", reason="PreToolUse wiring is gated to os.name == 'nt'")
     def test_idempotent(self, tmp_path):
         dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
         agent = ClaudeAgent()

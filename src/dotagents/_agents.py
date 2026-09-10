@@ -469,74 +469,75 @@ class ClaudeAgent(Agent):
         if legacy is not None:
             changed = True
 
-        # Two independent handlers per event ON WINDOWS: bash-syntax (works with
-        # Git Bash) and a PowerShell-native equivalent (works on Windows without
-        # Git Bash, where hooks.md's documented default silently routes the
-        # bash-syntax command through PowerShell instead -- a hard parse error,
-        # verified directly). Both fire unconditionally every session (hooks.md:
-        # every handler in a matched group runs); the one whose interpreter is
-        # absent on this machine fails harmlessly, the other carries the real
-        # effect. On a POSIX host only the bash handler is registered: there is
-        # no PowerShell to select, and a `shell: powershell` entry that Claude
-        # Code cannot spawn (or that a shell falls back to running as bash) is a
-        # syntax error reported on EVERY session -- measured in WSL, 2026-09-10.
-        # Chained `merge_hook` calls, each keyed by its own `status_message` so
-        # they merge/refresh independently and never collide with each other's
+        # Per event, a bash-syntax handler -- and on WINDOWS a second,
+        # PowerShell-native one (`shell: powershell`): there, without Git Bash,
+        # hooks.md's documented default routes the bash-syntax command through
+        # PowerShell instead, a hard parse error (verified directly). Both fire
+        # every session (every handler in a matched group runs); the PowerShell
+        # one selects itself only when `bash` is absent. Elsewhere the `shell`
+        # field is not honoured the way it is on Windows: Claude Code on Linux
+        # ran the `shell: powershell` entry THROUGH BASH, a syntax error on
+        # every session (measured in WSL, 2026-09-10) -- so the gate is "the OS
+        # where `shell: powershell` means PowerShell", never "is pwsh
+        # installed". On POSIX the PowerShell entries are not only skipped but
+        # RETRACTED, so an install written before this rule converges on the
+        # next `init`. Each `merge_hook`/`remove_hook` is keyed by its own
+        # `status_message`, so the variants never collide with each other's
         # identity.
-        windows = os.name == "nt"
-        session_start, ss_changed_1 = _hooks.merge_hook(
-            hooks.get("SessionStart", legacy),
-            self.SESSION_START_COMMAND,
-            status_message="Loading agent context",
+        windows = self._is_windows()
+        events = (
+            ("SessionStart", hooks.get("SessionStart", legacy), self.SESSION_START_COMMAND,
+             self.SESSION_START_COMMAND_POWERSHELL, "Loading agent context"),
+            ("CwdChanged", hooks.get("CwdChanged"), self.CWD_CHANGED_COMMAND,
+             self.CWD_CHANGED_COMMAND_POWERSHELL, "Checking for AGENTS.md"),
         )
-        ss_changed_2 = False
-        if windows:
-            session_start, ss_changed_2 = _hooks.merge_hook(
-                session_start,
-                self.SESSION_START_COMMAND_POWERSHELL,
-                status_message="Loading agent context (PowerShell)",
-                shell="powershell",
-            )
-        hooks["SessionStart"] = session_start
-        ss_changed = ss_changed_1 or ss_changed_2
+        for event, existing, bash_command, ps_command, status in events:
+            entries, c = _hooks.merge_hook(existing, bash_command, status_message=status)
+            changed |= c
+            if windows:
+                entries, c = _hooks.merge_hook(
+                    entries, ps_command, status_message=status + " (PowerShell)", shell="powershell",
+                )
+            else:
+                entries, c = _hooks.remove_hook(entries, status + " (PowerShell)")
+            changed |= c
+            hooks[event] = entries
 
-        cwd_changed, cc_changed_1 = _hooks.merge_hook(
-            hooks.get("CwdChanged"),
-            self.CWD_CHANGED_COMMAND,
-            status_message="Checking for AGENTS.md",
-        )
-        cc_changed_2 = False
         if windows:
-            cwd_changed, cc_changed_2 = _hooks.merge_hook(
-                cwd_changed,
-                self.CWD_CHANGED_COMMAND_POWERSHELL,
-                status_message="Checking for AGENTS.md (PowerShell)",
-                shell="powershell",
-            )
-        hooks["CwdChanged"] = cwd_changed
-        cc_changed = cc_changed_1 or cc_changed_2
+            changed |= self._wire_powershell_pretooluse(hooks)
+        else:
+            pretooluse, c = _hooks.remove_hook(hooks.get("PreToolUse"), self.PRETOOLUSE_STATUS)
+            if c:
+                changed = True
+                if pretooluse:
+                    hooks["PreToolUse"] = pretooluse
+                else:
+                    hooks.pop("PreToolUse", None)
 
-        pt_changed = False
-        if windows:
-            pt_changed = self._wire_powershell_pretooluse(hooks)
-
-        if not (changed or ss_changed or cc_changed or pt_changed):
+        if not changed:
             if logger:
                 logger.info("hooks already wired: %s", settings_path)
             return
 
         settings["hooks"] = hooks
+        wired = "SessionStart + CwdChanged" + (" + PreToolUse" if windows else "")
         if dry_run:
             if logger:
-                logger.info("would wire SessionStart + CwdChanged hooks: %s", settings_path)
+                logger.info("would wire %s hooks: %s", wired, settings_path)
             return
         _hooks.write_settings(settings_path, settings)
         if logger:
-            logger.info(
-                "wired SessionStart + CwdChanged%s hooks: %s",
-                " + PreToolUse" if pt_changed else "",
-                settings_path,
-            )
+            logger.info("wired %s hooks: %s", wired, settings_path)
+
+    @staticmethod
+    def _is_windows() -> bool:
+        """The platform gate for the PowerShell hook variants, as a seam: tests
+        patch THIS (`os.name` cannot be patched -- `pathlib.Path()` dispatches
+        on it -- and the real gate must stay `os.name`, not "pwsh present")."""
+        return os.name == "nt"
+
+    #: Identity (statusMessage) of the PowerShell PreToolUse env-loader entry.
+    PRETOOLUSE_STATUS = "Checking PowerShell env"
 
     def _wire_powershell_pretooluse(self, hooks: dict) -> bool:
         """Windows only. Merges a no-matcher `PreToolUse` entry running
@@ -560,7 +561,7 @@ class ClaudeAgent(Agent):
         pretooluse, pt_hook_changed = _hooks.merge_hook(
             hooks.get("PreToolUse"),
             self.PRETOOLUSE_POWERSHELL_COMMAND,
-            status_message="Checking PowerShell env",
+            status_message=self.PRETOOLUSE_STATUS,
             shell="powershell",
         )
         hooks["PreToolUse"] = pretooluse

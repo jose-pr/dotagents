@@ -187,6 +187,29 @@ def merge_hook(
     return normalized, changed
 
 
+def remove_hook(existing: Any, status_message: str) -> "tuple[list, bool]":
+    """Retract our hook identified by ``status_message`` from ``existing`` --
+    the inverse of :func:`merge_hook`, for a hook this platform no longer
+    registers (a `shell: powershell` variant on a POSIX host). Returns
+    ``(list, changed)``. A foreign hook sharing an entry with ours stays; an
+    entry left empty is dropped; a non-list ``existing`` is ``([], False)``."""
+    if not isinstance(existing, list):
+        return [], False
+    kept_entries, changed = [], False
+    for entry in existing:
+        if not _has_status(entry, status_message):
+            kept_entries.append(entry)
+            continue
+        changed = True
+        remaining = [
+            h for h in entry["hooks"]
+            if not (isinstance(h, dict) and h.get("statusMessage") == status_message)
+        ]
+        if remaining:
+            kept_entries.append(dict(entry, hooks=remaining))
+    return kept_entries, changed
+
+
 def load_settings(path: Path) -> "dict[str, Any]":
     """Read a settings.json, tolerating absence but never corruption.
 
