@@ -189,6 +189,14 @@ class GitCache(object):
             if probe.returncode == 0:
                 self._git(["checkout", "--quiet", "--detach", candidate], dest)
                 return
+        if spec.ref is not None:
+            # Not among the fetched refs: ask the remote for it by name. Covers
+            # a commit the default refspec did not bring over (a server that
+            # allows reachable SHAs in want) and a ref the clone did not track.
+            fetched = self._git(["fetch", "--quiet", "origin", spec.ref], dest, check=False)
+            if fetched.returncode == 0:
+                self._git(["checkout", "--quiet", "--detach", "FETCH_HEAD"], dest)
+                return
         raise SystemExit(
             "error: %s has no branch, tag or commit %r" % (redact(spec.location), spec.ref or "HEAD")
         )
