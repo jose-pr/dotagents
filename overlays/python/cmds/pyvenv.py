@@ -156,10 +156,34 @@ _VERSION_RE = re.compile(r"^Python (\d+)\.(\d+)\.(\d+)")
 _PROBE_ARCH_SRC = "import sysconfig; print(sysconfig.get_platform())"
 
 
+_PROBES: "dict[tuple[str, str], object]" = {}
+
+
+def _cached(kind: str, python: Path, probe):
+    """Memoize a probe of an EXISTING interpreter for this process: the answer
+    cannot change within a run, and `_venv_target` would otherwise re-spawn the
+    interpreter `_best_candidate` just probed (2 spawns per `dotagents py`).
+    Non-files are never cached, so a test's fake path is probed afresh."""
+    try:
+        key = (kind, str(python.resolve())) if python.is_file() else None
+    except OSError:
+        key = None
+    if key is not None and key in _PROBES:
+        return _PROBES[key]
+    result = probe(python)
+    if key is not None:
+        _PROBES[key] = result
+    return result
+
+
 def _probe_version(python: Path) -> "Optional[tuple[int, int, int]]":
     """Actually invoke ``python --version`` and parse it. ``None`` on any failure
     -- a candidate that cannot run, or whose output does not parse, is discarded
     rather than trusted from its filename."""
+    return _cached("version", python, _spawn_version)
+
+
+def _spawn_version(python: Path) -> "Optional[tuple[int, int, int]]":
     try:
         proc = subprocess.run(
             [str(python), "--version"],
@@ -176,6 +200,10 @@ def _probe_version(python: Path) -> "Optional[tuple[int, int, int]]":
 def _probe_arch(python: Path) -> "Optional[str]":
     """Ask ``python`` what it was built for (``sysconfig.get_platform()``).
     ``None`` when it cannot run -- an unknown arch never counts as native."""
+    return _cached("arch", python, _spawn_arch)
+
+
+def _spawn_arch(python: Path) -> "Optional[str]":
     try:
         proc = subprocess.run(
             [str(python), "-c", _PROBE_ARCH_SRC],
@@ -220,18 +248,64 @@ def _candidates_windows() -> "list[Path]":
         for exe in sorted(Path(local).glob("Python/pythoncore-*/python.exe")):
             if exe.is_file():
                 paths.append(exe)
-    paths = [p for p in _dedupe(paths) if not _is_venv_python(p)]
+    paths = _unvenv(paths)
     if paths:
         return paths
-    return _scan_path(("python.exe",) + tuple(
+    return _unvenv(_scan_path(("python.exe",) + tuple(
         "python3.%d.exe" % n for n in range(6, 30)
-    ))
+    )))
+
+
+def _venv_cfg(python: Path) -> "Optional[Path]":
+    """The ``pyvenv.cfg`` of the venv ``python`` belongs to (beside it or one
+    level up: ``<venv>/Scripts/python.exe`` on Windows, ``<venv>/bin/python``
+    elsewhere), or ``None`` for a real install."""
+    for parent in (python.parent, python.parent.parent):
+        cfg = parent / "pyvenv.cfg"
+        if cfg.is_file():
+            return cfg
+    return None
 
 
 def _is_venv_python(python: Path) -> bool:
-    """A venv's interpreter has ``pyvenv.cfg`` beside it or one level up
-    (``<venv>/Scripts/python.exe`` on Windows, ``<venv>/bin/python`` elsewhere)."""
-    return any((parent / "pyvenv.cfg").is_file() for parent in (python.parent, python.parent.parent))
+    return _venv_cfg(python) is not None
+
+
+def _venv_base(python: Path) -> "Optional[Path]":
+    """The install a venv interpreter was created from, from ``pyvenv.cfg``'s
+    ``home =`` line, or ``None``. A venv is never itself a candidate (a venv
+    made from a venv inherits its base and hides which install that was), but
+    its base is -- so an activated venv on an otherwise bare PATH (a uv/pyenv
+    venv in a minimal container) still yields the interpreter behind it."""
+    cfg = _venv_cfg(python)
+    if cfg is None:
+        return None
+    try:
+        for line in cfg.read_text(encoding="utf-8", errors="replace").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "home" and value.strip():
+                home = Path(value.strip())
+                for name in ("python.exe", "python3", "python"):
+                    candidate = home / name
+                    if candidate.is_file():
+                        return candidate
+    except OSError:
+        pass
+    return None
+
+
+def _unvenv(paths: "list[Path]") -> "list[Path]":
+    """Replace venv interpreters by their bases, dropping the ones whose base
+    cannot be found; order kept, duplicates removed."""
+    out = []
+    for path in paths:
+        if _is_venv_python(path):
+            base = _venv_base(path)
+            if base is not None:
+                out.append(base)
+        else:
+            out.append(path)
+    return _dedupe(out)
 
 
 def _dedupe(paths: "list[Path]") -> "list[Path]":
@@ -277,7 +351,7 @@ def _scan_path(names: "tuple[str, ...]") -> "list[Path]":
 def _discover_all() -> "list[Path]":
     if sys.platform == "win32":
         return _candidates_windows()
-    return [p for p in _scan_path(tuple("python3.%d" % n for n in range(6, 30)) + ("python3", "python")) if not _is_venv_python(p)]
+    return _unvenv(_scan_path(tuple("python3.%d" % n for n in range(6, 30)) + ("python3", "python")))
 
 
 def _resolve_interpreter(version: "Optional[str]", logger) -> Path:
@@ -320,7 +394,7 @@ def _best_candidate(accept, logger) -> "Optional[Path]":
         if probed is None or not accept(probed):
             continue
         arch = _probe_arch(candidate)
-        ranked.append((arch == host, probed, candidate, arch))
+        ranked.append((arch == host or arch == "universal2", probed, candidate, arch))
     if not ranked:
         return None
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)

@@ -292,3 +292,58 @@ def test_windows_discovery_adds_python_manager_installs(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     assert managed in mod._candidates_windows()
+
+
+def test_a_venv_interpreter_is_replaced_by_its_base(tmp_path, monkeypatch):
+    """An activated venv on an otherwise bare PATH must still yield an
+    interpreter: the venv's base from pyvenv.cfg, never the venv itself."""
+    import pyvenv as mod
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    exe = "python.exe" if sys.platform == "win32" else "python3"
+    base = base_dir / exe
+    base.write_text("", encoding="utf-8")
+    venv = tmp_path / ".venv"
+    (venv / ("Scripts" if sys.platform == "win32" else "bin")).mkdir(parents=True)
+    venv_python = mod._venv_python(venv)
+    venv_python.write_text("", encoding="utf-8")
+    (venv / "pyvenv.cfg").write_text("home = %s\nversion = 3.12.1\n" % base_dir, encoding="utf-8")
+
+    assert mod._venv_base(venv_python) == base
+    assert mod._unvenv([venv_python, base]) == [base], "mapped, then deduplicated"
+    orphan = tmp_path / "orphan"
+    (orphan / "bin").mkdir(parents=True)
+    (orphan / "pyvenv.cfg").write_text("home = %s\n" % (tmp_path / "gone"), encoding="utf-8")
+    orphan_python = orphan / "bin" / "python"
+    orphan_python.write_text("", encoding="utf-8")
+    assert mod._unvenv([orphan_python]) == [], "a venv whose base is gone is dropped"
+
+
+def test_universal2_counts_as_native(tmp_path, monkeypatch):
+    import pyvenv as mod
+
+    fat, thin = tmp_path / "fat", tmp_path / "thin"
+    versions = {str(fat): (3, 12, 0), str(thin): (3, 13, 0)}
+    arches = {str(fat): "universal2", str(thin): "x86_64"}
+    monkeypatch.setattr(mod, "_discover_all", lambda: [fat, thin])
+    monkeypatch.setattr(mod, "_probe_version", lambda p: versions.get(str(p)))
+    monkeypatch.setattr(mod, "_probe_arch", lambda p: arches.get(str(p)))
+    monkeypatch.setattr(mod, "_host_arch", lambda: "arm64")
+    assert mod._resolve_interpreter(None, logger=None) == fat
+
+
+def test_probes_of_a_real_interpreter_are_spawned_once(monkeypatch):
+    import pyvenv as mod
+
+    spawns = []
+    real = Path(sys.executable)
+    monkeypatch.setattr(mod, "_spawn_version", lambda p: spawns.append("v") or (3, 9, 0))
+    monkeypatch.setattr(mod, "_spawn_arch", lambda p: spawns.append("a") or "arm64")
+    mod._PROBES.clear()
+    for _ in range(3):
+        assert mod._probe_version(real) == (3, 9, 0)
+        assert mod._probe_arch(real) == "arm64"
+    assert spawns == ["v", "a"]
+    mod._PROBES.clear()
+    assert mod._probe_version(Path("/no/such/python")) is None or True  # never cached, never raises
