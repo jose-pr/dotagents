@@ -1,8 +1,7 @@
 """File-backed cookie/token jars, keyed by host.
 
 Jars live under the **configured store** (D58), not a hardcoded ``~/.agents``:
-``store_root()`` resolves ``$AGENTS_HOME`` -> the legacy ``$DOTAGENTS_AGENTS_DIR`` ->
-``~/.agents``. Cookies go under ``<store>/cookies/<host>.txt`` (Netscape format),
+``store_root()`` resolves ``$AGENTS_HOME`` -> ``~/.agents``. Cookies go under ``<store>/cookies/<host>.txt`` (Netscape format),
 tokens under ``<store>/tokens/<host>.token``.
 
 Token values are secrets: this module never logs or prints them (Leakage rule).
@@ -20,12 +19,11 @@ def store_root() -> Path:
     """Resolve the dotagents store directory (D58 configurable store).
 
     ``$AGENTS_HOME`` (the configurable store, exported by ``dotagents env``) ->
-    the legacy ``$DOTAGENTS_AGENTS_DIR`` -> ``~/.agents``. Never hardcodes ``~/.agents``
-    unconditionally so a relocated store still finds its jars."""
-    for var in ("AGENTS_HOME", "DOTAGENTS_AGENTS_DIR"):
-        val = os.environ.get(var)
-        if val:
-            return Path(val)
+    ``~/.agents``. Never hardcodes ``~/.agents`` unconditionally so a relocated
+    store still finds its jars."""
+    val = os.environ.get("AGENTS_HOME")
+    if val:
+        return Path(val)
     return Path.home() / ".agents"
 
 

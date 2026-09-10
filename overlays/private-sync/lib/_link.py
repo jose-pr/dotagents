@@ -52,13 +52,7 @@ def store_root(agents_dir: Path, store_dir: "str | os.PathLike | None" = None) -
 
     Resolution order: explicit argument, ``AGENTS_STORE_DIR``, then
     ``<agents_dir>/projects``. An absolute value is used as-is."""
-    # back-compat: DOTAGENTS_STORE_DIR is deprecated, removable next release.
-    raw = (
-        store_dir
-        or os.environ.get("AGENTS_STORE_DIR")
-        or os.environ.get("DOTAGENTS_STORE_DIR")
-        or DEFAULT_STORE_SUBDIR
-    )
+    raw = store_dir or os.environ.get("AGENTS_STORE_DIR") or DEFAULT_STORE_SUBDIR
     p = Path(raw).expanduser()
     return p if p.is_absolute() else agents_dir / p
 
@@ -477,9 +471,7 @@ def _run_sync_hook(agents_dir: Path, *, message: str, dry_run: bool, log) -> "in
     Transport is not dotagents' concern -- git is only the bundled default. A hook
     lets the store reach other machines however the user wants (or not at all).
     It receives the store path as ``$1`` and the message as ``$2``, plus
-    ``AGENTS_HOME`` / ``AGENTS_SYNC_MESSAGE`` in the environment (the old
-    ``DOTAGENTS_AGENTS_DIR`` / ``DOTAGENTS_SYNC_MESSAGE`` are also set for
-    back-compat this release, removable next).
+    ``AGENTS_HOME`` / ``AGENTS_SYNC_MESSAGE`` in the environment.
     A non-zero exit is reported and returned; it does NOT fall through to git,
     since a failed hook means the user's own sync failed."""
     hook = _find_sync_hook(agents_dir)
@@ -494,9 +486,6 @@ def _run_sync_hook(agents_dir: Path, *, message: str, dry_run: bool, log) -> "in
     env = dict(os.environ)
     env["AGENTS_HOME"] = str(agents_dir)
     env["AGENTS_SYNC_MESSAGE"] = message
-    # back-compat: DOTAGENTS_* is deprecated, removable next release.
-    env["DOTAGENTS_AGENTS_DIR"] = str(agents_dir)
-    env["DOTAGENTS_SYNC_MESSAGE"] = message
     cmd = [str(hook), str(agents_dir), message]
     if hook.suffix.lower() in (".sh", "") and os.name == "nt":
         # .sh (and extensionless) are not directly executable on Windows.

@@ -98,8 +98,8 @@ not at all.
   honoured for every request, including hosts you set as `session.proxies` —
   `requests` alone applies it only to proxies it found in the environment, so a
   loopback test server would otherwise be sent to the proxy.
-- **Jars live under the store**, resolved from `$AGENTS_HOME`
-  (→ the legacy `$DOTAGENTS_AGENTS_DIR` → `~/.agents`), never a hardcoded path:
+- **Jars live under the store**, resolved from `$AGENTS_HOME` (→ `~/.agents`),
+  never a hardcoded path:
   cookies at `<store>/cookies/<host>.txt` (Netscape), tokens at
   `<store>/tokens/<host>.token`. **Token values are secrets — never log them.**
 

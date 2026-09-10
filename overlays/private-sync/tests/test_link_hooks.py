@@ -45,37 +45,24 @@ def test_overlay_hook_alt_name(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# store_root env-var back-compat (D80): AGENTS_STORE_DIR preferred, legacy
-# DOTAGENTS_STORE_DIR falls back for one release.
+# store_root: AGENTS_STORE_DIR, else <agents_dir>/projects.
 # --------------------------------------------------------------------------- #
 
 
-def test_store_root_uses_new_agents_store_dir(tmp_path, monkeypatch):
+def test_store_root_uses_agents_store_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTS_STORE_DIR", str(tmp_path / "stores"))
-    monkeypatch.delenv("DOTAGENTS_STORE_DIR", raising=False)
     assert store_root(tmp_path / "agents") == tmp_path / "stores"
-
-
-def test_store_root_falls_back_to_legacy(tmp_path, monkeypatch):
-    monkeypatch.delenv("AGENTS_STORE_DIR", raising=False)
-    monkeypatch.setenv("DOTAGENTS_STORE_DIR", str(tmp_path / "legacy-stores"))
-    assert store_root(tmp_path / "agents") == tmp_path / "legacy-stores"
-
-
-def test_store_root_new_name_wins(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTS_STORE_DIR", str(tmp_path / "new"))
-    monkeypatch.setenv("DOTAGENTS_STORE_DIR", str(tmp_path / "old"))
-    assert store_root(tmp_path / "agents") == tmp_path / "new"
+    monkeypatch.delenv("AGENTS_STORE_DIR")
+    assert store_root(tmp_path / "agents") == tmp_path / "agents" / "projects"
 
 
 # --------------------------------------------------------------------------- #
-# Sync hook env (D80): the runner sets AGENTS_HOME / AGENTS_SYNC_MESSAGE and,
-# for back-compat this release, the legacy DOTAGENTS_* names too.
+# Sync hook env: the runner sets AGENTS_HOME / AGENTS_SYNC_MESSAGE.
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.skipif(os.name == "nt", reason="needs a POSIX-executable hook script")
-def test_run_sync_hook_sets_both_env_names(tmp_path):
+def test_run_sync_hook_sets_the_env_names(tmp_path):
     agents = tmp_path / "agents"
     agents.mkdir()
     out = tmp_path / "env.txt"
@@ -86,8 +73,6 @@ def test_run_sync_hook_sets_both_env_names(tmp_path):
         '{\n'
         '  echo "AGENTS_HOME=$AGENTS_HOME"\n'
         '  echo "AGENTS_SYNC_MESSAGE=$AGENTS_SYNC_MESSAGE"\n'
-        '  echo "DOTAGENTS_AGENTS_DIR=$DOTAGENTS_AGENTS_DIR"\n'
-        '  echo "DOTAGENTS_SYNC_MESSAGE=$DOTAGENTS_SYNC_MESSAGE"\n'
         '} > "' + str(out) + '"\n',
         encoding="utf-8",
     )
@@ -100,6 +85,4 @@ def test_run_sync_hook_sets_both_env_names(tmp_path):
     )
     assert env["AGENTS_HOME"] == str(agents)
     assert env["AGENTS_SYNC_MESSAGE"] == "msg-42"
-    # back-compat dual-SET this release
-    assert env["DOTAGENTS_AGENTS_DIR"] == str(agents)
-    assert env["DOTAGENTS_SYNC_MESSAGE"] == "msg-42"
+    assert "DOTAGENTS_AGENTS_DIR" not in env and "DOTAGENTS_SYNC_MESSAGE" not in env
