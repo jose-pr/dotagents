@@ -168,6 +168,31 @@ def test_a_harness_without_an_append_flag_gets_its_own_file_written(
     assert Path(env["AGENTS_CONTEXT_FILE"]).read_text(encoding="utf-8") == CONTEXT
 
 
+def test_pi_gets_the_context_inline_on_posix_and_via_its_append_file_on_windows(
+    launch_mod, monkeypatch, tmp_path
+):
+    from dotagents import _agents
+
+    program = _program(tmp_path)
+    _context_is(monkeypatch, CONTEXT)
+    calls = _capture_spawn(monkeypatch, launch_mod)
+
+    monkeypatch.setattr(_agents.PiAgent, "_is_windows", staticmethod(lambda: False))
+    _run(launch_mod, passthrough=["-p", "hi"], agent="pi", command=str(program))
+    (argv, env), = calls
+    assert argv[1:] == ["--append-system-prompt", CONTEXT, "-p", "hi"]
+    assert env["AGENTS_HARNESS"] == "pi"
+    assert not (tmp_path / "project" / ".pi" / "APPEND_SYSTEM.md").exists()
+
+    calls.clear()
+    monkeypatch.setattr(_agents.PiAgent, "_is_windows", staticmethod(lambda: True))
+    _run(launch_mod, agent="pi", command=str(program))
+    (argv, env), = calls
+    assert argv[1:] == []
+    text = (tmp_path / "project" / ".pi" / "APPEND_SYSTEM.md").read_text(encoding="utf-8")
+    assert "dotagents:context" in text and CONTEXT.strip() in text
+
+
 def test_no_context_is_environment_only(launch_mod, monkeypatch, tmp_path):
     program = _program(tmp_path)
     calls = _capture_spawn(monkeypatch, launch_mod)

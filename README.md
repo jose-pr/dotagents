@@ -7,7 +7,7 @@
 
 Like dotfiles, but for AI coding agents: a portable, token-budgeted `~/.agents`
 configuration that works across agent runners (Claude Code, Antigravity, Copilot,
-Codex, ...). dotagents is the **mechanism** — install a neutral base, then layer in
+Codex, pi, ...). dotagents is the **mechanism** — install a neutral base, then layer in
 opt-in **overlays** that carry your standards (repo structure, CI/release discipline,
 whatever workflows you want) — so you record them once instead of restating them every
 session.

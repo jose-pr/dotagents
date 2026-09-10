@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and refreshed on every use; credentials in a repo URL never reach a log line.
 - `dotagents launch [<agent>] [-- <the agent's arguments>]`, a bundled command
   module like `findings`: starts an agent's CLI (`claude`, `codex`, `gemini`,
-  `cursor-agent`, `copilot`, or `--command <program>`) with the full `env`
+  `cursor-agent`, `copilot`, `pi`, or `--command <program>`) with the full `env`
   assembly exported to the process and the child, and the assembled `context`
   written to a file (exported as `AGENTS_CONTEXT_FILE`) and handed over as
   appended system-prompt text where the harness takes one (Claude Code:
@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   found; `--dry-run` prints the command line and the exported names;
   `--no-context` and `--inline` shape the context step; the exit code is the
   harness's. Adapters gained `launch_command` and `launch_context_args()`.
+- The `pi` agent (pi.dev, `@earendil-works/pi-coding-agent`): detected by its
+  documented `PI_CODING_AGENT` marker, model from `PI_MODEL`, no vendor (it is
+  multi-provider). Its config dir (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`)
+  and the project's `AGENTS.md` / `CLAUDE.md` count as loaded by the harness;
+  `context --write-agent` and `launch` hand the context over through
+  `.pi/APPEND_SYSTEM.md`, the file pi appends to its system prompt, and
+  `launch` uses `--append-system-prompt` directly on POSIX. `init -g` puts a
+  managed pointer to the store's `AGENTS.md` into the config dir's `AGENTS.md`
+  (pi has no include syntax), never a copy of the block.
 - `env` exports `AGENTS_PYTHON`: the interpreter `dotagents` itself is running
   under (`sys.executable`), seeded only if unset like the scope roots. Shims
   and helper scripts now have a default Python they can trust, where a bare

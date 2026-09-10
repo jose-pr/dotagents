@@ -18,14 +18,15 @@ do for a session that is already running, done up front for one that is not):
    not already load by itself). It is written to a file, exported as
    ``AGENTS_CONTEXT_FILE``, and handed to the harness the way that harness
    accepts appended system-prompt text (Claude Code:
-   ``--append-system-prompt-file``). A harness with no append flag gets it
+   ``--append-system-prompt-file``; pi: ``--append-system-prompt`` on POSIX).
+   A harness with no append flag gets it
    the static way instead: merged as the managed ``dotagents:context`` block
    into its own instruction file in the project (``Agent.context_target``,
    what ``context --write-agent`` does), which it then loads itself.
    ``--no-context`` skips this step; ``--inline`` also inlines the on-demand
    files the sources reference.
 3. **The harness.** ``Agent.launch_command`` (``claude``, ``codex``,
-   ``gemini``, ``cursor-agent``, ``copilot``), resolved on the PATH from step
+   ``gemini``, ``cursor-agent``, ``copilot``, ``pi``), resolved on the PATH from step
    1 -- so a harness an overlay's ``bin/`` provides is found -- or
    ``--command`` for a program under another name. Everything after the first
    literal ``--`` is passed through untouched (duho's ``_passthrough_``
@@ -88,7 +89,7 @@ class Launch(DotAgentsArgs):
 
     agent: Optional[str] = None
     (
-        "Which agent to start: claude, codex, gemini, cursor, copilot. Default: "
+        "Which agent to start: claude, codex, gemini, cursor, copilot, pi. Default: "
         "the active agent (explicit > $AGENTS_HARNESS > env detection > "
         "config files > claude)."
     )

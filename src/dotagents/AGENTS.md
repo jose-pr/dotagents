@@ -168,7 +168,8 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   harness's instruction file under the project root that `write_context`
   merges a managed context block into — Claude `.claude/CLAUDE.md`, Codex
   `AGENTS.md`, Gemini `GEMINI.md`, Cursor `.cursorrules`, Copilot
-  `.github/copilot-instructions.md`, Antigravity `.agents/rules/dotagents.md`),
+  `.github/copilot-instructions.md`, pi `.pi/APPEND_SYSTEM.md`, Antigravity
+  `.agents/rules/dotagents.md`),
   `write_base_config(dest, ...)` (Claude also writes the `@` include into
   `~/.claude/CLAUDE.md` or `<project>/.claude/CLAUDE.md` — THE last mile; the
   store's own `CLAUDE.md` is kept for the skeleton but no harness reads it).

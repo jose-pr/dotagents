@@ -151,6 +151,7 @@ def test_write_context_merges_a_block_into_the_project_file(tmp_path):
     (_agents.CursorAgent, ".cursorrules"),
     (_agents.CopilotAgent, ".github/copilot-instructions.md"),
     (_agents.AntigravityAgent, ".agents/rules/dotagents.md"),
+    (_agents.PiAgent, ".pi/APPEND_SYSTEM.md"),
 ])
 def test_write_context_targets_per_harness(tmp_path, agent_cls, rel):
     project = tmp_path / "proj"

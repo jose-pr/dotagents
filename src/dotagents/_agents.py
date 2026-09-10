@@ -1078,6 +1078,96 @@ class CopilotAgent(Agent):
         if logger: logger.info("%s: %s", branch, target.relative_to(dest))
 
 
+class PiAgent(Agent):
+    """pi (pi.dev; npm ``@earendil-works/pi-coding-agent``; the ``pi`` command).
+
+    Documented conventions (packages/coding-agent/README.md and
+    docs/environment-variables.md in badlogic/pi-mono, read 2026-09-10):
+
+    * Context files: ``AGENTS.md`` / ``CLAUDE.md`` (``AGENTS.override.md``
+      replaces both in its directory), read from the config dir
+      (``~/.pi/agent``, ``$PI_CODING_AGENT_DIR`` overrides) first, then every
+      parent of the cwd, then the cwd. No include syntax.
+    * System prompt: ``--system-prompt <text>`` replaces, ``--append-system-prompt
+      <text>`` appends; the file forms are ``SYSTEM.md`` (replaces) and
+      ``APPEND_SYSTEM.md`` (appends), in ``<project>/.pi/`` or the config dir.
+    * Markers in every process its tools run: ``PI_CODING_AGENT=true``,
+      ``AI_AGENT=pi``; ``PI_MODEL`` / ``PI_PROVIDER`` name the selected model.
+      pi is multi-provider, so it has no vendor of its own.
+    """
+    name = "pi"
+    # The project-level files only pi writes or reads -- AGENTS.md alone would
+    # make every repo with one look like a pi project (Codex owns that guess).
+    context_files = [".pi/APPEND_SYSTEM.md", ".pi/SYSTEM.md"]
+    # What pi loads by itself under the project root; the config dir's files
+    # are added by `loaded_paths` (their location is an env var, not static).
+    harness_loads = ["AGENTS.md", "CLAUDE.md", ".pi/APPEND_SYSTEM.md"]
+    # The append file: pi adds its whole content to the system prompt, which
+    # is exactly what the assembled context is for.
+    context_target = ".pi/APPEND_SYSTEM.md"
+    detect_env_vars = ["PI_CODING_AGENT"]
+    harness_id = "pi"
+    launch_command = "pi"
+    vendor = ""
+    model_source_vars = ["PI_MODEL"]
+
+    @staticmethod
+    def _config_dir() -> Path:
+        """``$PI_CODING_AGENT_DIR``, else ``~/.pi/agent`` (the documented default)."""
+        return Path(os.environ.get("PI_CODING_AGENT_DIR") or (Path.home() / ".pi" / "agent")).expanduser()
+
+    def loaded_paths(self, project_root: Path) -> "list[Path]":
+        out = super().loaded_paths(project_root)
+        for name in ("AGENTS.md", "CLAUDE.md", "APPEND_SYSTEM.md"):
+            try:
+                out.append((self._config_dir() / name).resolve())
+            except OSError:
+                pass
+        return out
+
+    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
+        from dotagents._merge import BEGIN_MARKER, END_MARKER, merge_block, timestamped_backup_root
+        backup_root = timestamped_backup_root(dest) if force else None
+        branch = merge_block(
+            dest / "AGENTS.md",
+            base_agents_text,
+            force=force, dry_run=dry_run, backup_root=backup_root,
+        )
+        if logger: logger.info("%s: AGENTS.md (pi)", branch)
+        # The last mile for the user store: pi reads `<config dir>/AGENTS.md`
+        # in every session and has no include syntax, so that file gets a
+        # managed block POINTING at the store's AGENTS.md -- not a copy of it,
+        # which would reach a launched session twice (once from pi's own file,
+        # once as the context `launch` appends). A project store needs nothing:
+        # pi walks the cwd's parents and finds the project's own AGENTS.md.
+        if _is_user_store(dest):
+            store_agents = (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
+            entry = self._config_dir() / "AGENTS.md"
+            pointer = (
+                "%s\n# dotagents\n\n"
+                "Read `%s` before anything else: it is the global agent configuration "
+                "`dotagents init` manages (the always-on rules and the routing to "
+                "on-demand files).\n%s\n" % (BEGIN_MARKER, store_agents, END_MARKER)
+            )
+            branch = merge_block(entry, pointer, force=force, dry_run=dry_run, backup_root=backup_root)
+            if logger: logger.info("%s: %s (pointer to the store)", branch, entry)
+
+    @staticmethod
+    def _is_windows() -> bool:
+        """Seam, as on :class:`ClaudeAgent`: tests patch this, not ``os.name``."""
+        return os.name == "nt"
+
+    def launch_context_args(self, context_file: Path) -> "Optional[list[str]]":
+        # `--append-system-prompt <text>` is the documented append; there is no
+        # file form. On Windows `pi` is an npm `.cmd` shim that cmd.exe
+        # re-parses, and a newline inside an argument ends the command there,
+        # so the multi-line context takes the static route instead
+        # (`.pi/APPEND_SYSTEM.md`, which pi appends by itself).
+        if self._is_windows():
+            return None
+        return ["--append-system-prompt", context_file.read_text(encoding="utf-8")]
+
+
 # Registry of agents
 _REGISTRY: dict[str, type[Agent]] = {
     "claude": ClaudeAgent,
@@ -1086,6 +1176,7 @@ _REGISTRY: dict[str, type[Agent]] = {
     "codex": CodexAgent,
     "cursor": CursorAgent,
     "copilot": CopilotAgent,
+    "pi": PiAgent,
 }
 
 def get_agent(name: str) -> Optional[Agent]:

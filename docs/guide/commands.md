@@ -173,7 +173,8 @@ dotagents context --write-agent --agents codex # merge a managed block into <pro
 - `--write-agent` — merge the context into each agent's own instruction file under
   the project root, as a managed `dotagents:context` block refreshed in place:
   Claude `.claude/CLAUDE.md`, Codex `AGENTS.md`, Gemini `GEMINI.md`, Cursor
-  `.cursorrules`, Copilot `.github/copilot-instructions.md`, Antigravity
+  `.cursorrules`, Copilot `.github/copilot-instructions.md`, pi
+  `.pi/APPEND_SYSTEM.md` (the file pi appends to its system prompt), Antigravity
   `.agents/rules/dotagents.md`. Prefer the hook where the harness has one; this is
   the static alternative. Mutually exclusive with `[output]` and `--format json`.
 - `--inline` — also append the on-demand `.md` files the sources reference (bare or
@@ -298,14 +299,16 @@ What happens, in order:
 2. **Context** — `dotagents context` for that agent (what its harness does not
    already load) is written to a file, exported as `AGENTS_CONTEXT_FILE`, and
    passed the way the harness takes appended system-prompt text: Claude Code gets
-   `--append-system-prompt-file`. A harness with no append flag (Codex, Gemini,
+   `--append-system-prompt-file`, pi gets `--append-system-prompt` (on POSIX; on
+   Windows its npm `.cmd` shim cannot carry a multi-line argument, so it takes the
+   static route below). A harness with no append flag (Codex, Gemini,
    Cursor, Copilot — their prompt-file options *replace* the built-in prompt, which
    is not the same thing) gets it the static way instead: merged as the managed
    `dotagents:context` block into its own instruction file in the project, exactly
    what `context --write-agent` does. `--no-context` skips this; `--inline` also
    inlines the on-demand files the sources reference.
 3. **The harness** — the agent's program (`claude`, `codex`, `gemini`,
-   `cursor-agent`, `copilot`), resolved on the PATH from step 1 so a harness an
+   `cursor-agent`, `copilot`, `pi`), resolved on the PATH from step 1 so a harness an
    overlay's `bin/` provides is found, or `--command <program>` for one under
    another name. dotagents' flags come first and the passthrough after, so yours
    win where the harness takes the last value. The exit code is the harness's.

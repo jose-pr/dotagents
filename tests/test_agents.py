@@ -88,6 +88,48 @@ def test_copilot_has_no_env_marker():
     assert not CopilotAgent().detect_env({"GITHUB_COPILOT": "1"})
 
 
+def test_pi_markers_model_and_no_vendor(monkeypatch, tmp_path):
+    pi = _agents.PiAgent()
+    # PI_CODING_AGENT=true is the documented pi-specific marker; AI_AGENT=pi is
+    # the generic one and is not what detection keys on.
+    assert pi.detect_env({"PI_CODING_AGENT": "true"})
+    assert not pi.detect_env({"AI_AGENT": "pi"})
+    assert pi.resolve_model({"PI_MODEL": "anthropic/claude-sonnet-4-5"}) == "anthropic/claude-sonnet-4-5"
+    identity = _agents.stamp_identity({}, explicit="pi")
+    assert identity["AGENTS_HARNESS"] == "pi" and identity["AGENT"] == "pi"
+    assert "AGENTS_VENDOR" not in identity, "multi-provider: no vendor is stamped"
+    # The config dir is $PI_CODING_AGENT_DIR, else ~/.pi/agent; its files count
+    # as loaded by the harness.
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "pi"))
+    loaded = pi.loaded_paths(tmp_path / "proj")
+    assert (tmp_path / "pi" / "AGENTS.md").resolve() in loaded
+    assert (tmp_path / "proj" / "AGENTS.md").resolve() in loaded
+
+
+def test_pi_user_store_gets_a_pointer_in_its_config_dir(monkeypatch, tmp_path):
+    from dotagents._merge import BEGIN_MARKER, END_MARKER, find_block
+
+    base = "%s\n# BASE\n%s\n" % (BEGIN_MARKER, END_MARKER)
+    store = tmp_path / "store"
+    store.mkdir()
+    monkeypatch.setenv("AGENTS_HOME", str(store))
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "pi"))
+    src = tmp_path / "src"
+    src.mkdir()
+    _agents.PiAgent().write_base_config(store, src, base, force=False, dry_run=False, logger=None)
+    assert "# BASE" in (store / "AGENTS.md").read_text(encoding="utf-8")
+    entry = (tmp_path / "pi" / "AGENTS.md").read_text(encoding="utf-8")
+    assert (store / "AGENTS.md").resolve().as_posix() in entry
+    assert "# BASE" not in entry, "a pointer, never a copy of the block"
+    assert find_block(entry) is not None
+    # A project store: nothing outside it.
+    project_store = tmp_path / "proj" / ".agents"
+    project_store.mkdir(parents=True)
+    _agents.PiAgent().write_base_config(project_store, src, base, force=False, dry_run=False, logger=None)
+    assert (project_store / "AGENTS.md").is_file()
+    assert (tmp_path / "pi" / "AGENTS.md").read_text(encoding="utf-8") == entry
+
+
 # --------------------------------------------------------------------------
 # resolve_active_agent precedence
 # --------------------------------------------------------------------------
@@ -201,4 +243,4 @@ def test_harness_ids_are_distinct_from_short_names():
 
 def test_registry_covers_all_builtin_names():
     names = {a.name for a in _agents.get_all_agents()}
-    assert names == {"claude", "gemini", "antigravity", "codex", "cursor", "copilot"}
+    assert names == {"claude", "gemini", "antigravity", "codex", "cursor", "copilot", "pi"}
