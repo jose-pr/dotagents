@@ -83,7 +83,7 @@ def test_hooks_from_env_key_order_targets_and_skip():
 
 
 def test_load_callable_module_and_file(tmp_path):
-    assert hooks.load_callable("test_hooks:record") is record
+    assert hooks.load_callable("test_url_hooks:record") is record
     assert hooks.load_callable("os.path:join") is os.path.join
     f = tmp_path / "my hook.py"
     f.write_text("def go(session, method, url, kwargs):\n    return 'file-hook'\n", encoding="utf-8")
@@ -131,7 +131,7 @@ def _session():
 
 def test_py_hook_runs_on_the_origin_url_under_a_prefix_gateway(origin, gateway, monkeypatch):
     monkeypatch.setenv("NET_HOOKS_T", "^" + origin.replace(".", r"\."))
-    monkeypatch.setenv("NET_HOOKS_T_PY", "test_hooks:record")
+    monkeypatch.setenv("NET_HOOKS_T_PY", "test_url_hooks:record")
     resp = _session().get(origin + "/x", timeout=5)
     assert resp.text == "gateway"
     assert CALLS == [("GET", origin + "/x")], "the caller's URL, not /fetch/<url> on the gateway"
@@ -145,7 +145,7 @@ def test_py_hook_runs_on_the_origin_url_under_a_prefix_gateway(origin, gateway, 
 
 def test_py_hook_can_answer_instead(origin, gateway, monkeypatch):
     monkeypatch.setenv("NET_HOOKS_T", "/answered$")
-    monkeypatch.setenv("NET_HOOKS_T_PY", "test_hooks:answer")
+    monkeypatch.setenv("NET_HOOKS_T_PY", "test_url_hooks:answer")
     session = _session()
     before = len(_Gateway.seen)
     resp = session.get(origin + "/answered", timeout=5)
@@ -156,7 +156,7 @@ def test_py_hook_can_answer_instead(origin, gateway, monkeypatch):
 
 def test_py_hook_requests_do_not_re_trigger_hooks(origin, gateway, monkeypatch):
     monkeypatch.setenv("NET_HOOKS_T", ".")
-    monkeypatch.setenv("NET_HOOKS_T_PY", "test_hooks:reentrant")
+    monkeypatch.setenv("NET_HOOKS_T_PY", "test_url_hooks:reentrant")
     resp = _session().get(origin + "/x", timeout=5)
     assert resp.text == "gateway"
     assert CALLS == [("inner-start", origin + "/x"), ("inner-done", 200)]
@@ -166,11 +166,11 @@ def test_py_hook_requests_do_not_re_trigger_hooks(origin, gateway, monkeypatch):
 
 def test_py_hooks_run_in_key_order_first_answer_wins(origin, gateway, monkeypatch):
     monkeypatch.setenv("NET_HOOKS_A", ".")
-    monkeypatch.setenv("NET_HOOKS_A_PY", "test_hooks:record")
+    monkeypatch.setenv("NET_HOOKS_A_PY", "test_url_hooks:record")
     monkeypatch.setenv("NET_HOOKS_B", ".")
-    monkeypatch.setenv("NET_HOOKS_B_PY", "test_hooks:answer")
+    monkeypatch.setenv("NET_HOOKS_B_PY", "test_url_hooks:answer")
     monkeypatch.setenv("NET_HOOKS_C", ".")
-    monkeypatch.setenv("NET_HOOKS_C_PY", "test_hooks:reentrant")
+    monkeypatch.setenv("NET_HOOKS_C_PY", "test_url_hooks:reentrant")
     resp = _session().get(origin + "/x", timeout=5)
     assert resp.text == "from-hook" and CALLS == [("GET", origin + "/x")]
 
@@ -226,6 +226,6 @@ def test_curl_hook_runs_the_wrapper_which_calls_the_shim_back(origin, gateway, t
 
 def test_curl_hook_with_only_a_py_target_leaves_the_shim_alone(origin, gateway, monkeypatch, capsysbinary):
     monkeypatch.setenv("NET_HOOKS_P", ".")
-    monkeypatch.setenv("NET_HOOKS_P_PY", "test_hooks:answer")
+    monkeypatch.setenv("NET_HOOKS_P_PY", "test_url_hooks:answer")
     rc, out = _fallback(monkeypatch, capsysbinary, ["-s", origin + "/x"])
     assert rc == 0 and out.out == b"gateway"
