@@ -1,0 +1,14 @@
+#!/bin/sh
+# POSIX entry for the curl shim (the Windows twin is curl.cmd): with the
+# overlay's bin/ on PATH via `dotagents env`, `curl` resolves here, and curl.py
+# runs the real system curl -- skipping this directory -- or its stdlib
+# fallback. python3 first, then python (Git Bash on Windows has only the
+# latter). No external commands (dirname & co.): PATH may be minimal.
+case $0 in
+    */*) here=${0%/*} ;;
+    *) here=. ;;
+esac
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 "$here/curl.py" "$@"
+fi
+exec python "$here/curl.py" "$@"

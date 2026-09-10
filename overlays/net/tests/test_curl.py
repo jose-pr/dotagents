@@ -62,7 +62,7 @@ def server():
 def test_prefers_real_system_curl(monkeypatch):
     calls = {}
 
-    monkeypatch.setattr(curl.shutil, "which", lambda name: "/usr/bin/curl" if name == "curl" else None)
+    monkeypatch.setattr(curl, "find_real_curl", lambda: "/usr/bin/curl")
 
     class _Res:
         returncode = 0
@@ -81,7 +81,7 @@ def test_prefers_real_system_curl(monkeypatch):
 
 
 def test_real_curl_exit_code_propagates(monkeypatch):
-    monkeypatch.setattr(curl.shutil, "which", lambda name: "/usr/bin/curl")
+    monkeypatch.setattr(curl, "find_real_curl", lambda: "/usr/bin/curl")
 
     class _Res:
         returncode = 22
@@ -95,7 +95,7 @@ def test_real_curl_exit_code_propagates(monkeypatch):
 # --------------------------------------------------------------------------
 def test_fallback_get_returns_200(server, monkeypatch, capsysbinary):
     # Simulate curl absent from PATH.
-    monkeypatch.setattr(curl.shutil, "which", lambda name: None)
+    monkeypatch.setattr(curl, "find_real_curl", lambda: None)
     rc = curl.main([server + "/"])
     assert rc == 0
     out = capsysbinary.readouterr().out
@@ -103,7 +103,7 @@ def test_fallback_get_returns_200(server, monkeypatch, capsysbinary):
 
 
 def test_fallback_head_returns_200_no_body(server, monkeypatch, capsysbinary):
-    monkeypatch.setattr(curl.shutil, "which", lambda name: None)
+    monkeypatch.setattr(curl, "find_real_curl", lambda: None)
     rc = curl.main(["-I", server + "/"])
     assert rc == 0
     out = capsysbinary.readouterr().out
@@ -114,7 +114,7 @@ def test_fallback_head_returns_200_no_body(server, monkeypatch, capsysbinary):
 
 
 def test_fallback_include_headers(server, monkeypatch, capsysbinary):
-    monkeypatch.setattr(curl.shutil, "which", lambda name: None)
+    monkeypatch.setattr(curl, "find_real_curl", lambda: None)
     rc = curl.main(["-i", server + "/"])
     assert rc == 0
     out = capsysbinary.readouterr().out
@@ -123,7 +123,7 @@ def test_fallback_include_headers(server, monkeypatch, capsysbinary):
 
 
 def test_fallback_post_data(server, monkeypatch, capsysbinary):
-    monkeypatch.setattr(curl.shutil, "which", lambda name: None)
+    monkeypatch.setattr(curl, "find_real_curl", lambda: None)
     rc = curl.main(["-d", "k=v", server + "/submit"])
     assert rc == 0
     out = capsysbinary.readouterr().out
@@ -131,13 +131,13 @@ def test_fallback_post_data(server, monkeypatch, capsysbinary):
 
 
 def test_fallback_404_returns_error_code(server, monkeypatch, capsysbinary):
-    monkeypatch.setattr(curl.shutil, "which", lambda name: None)
+    monkeypatch.setattr(curl, "find_real_curl", lambda: None)
     rc = curl.main(["-s", server + "/notfound"])
     assert rc == 404
 
 
 def test_fallback_output_to_file(server, monkeypatch, tmp_path):
-    monkeypatch.setattr(curl.shutil, "which", lambda name: None)
+    monkeypatch.setattr(curl, "find_real_curl", lambda: None)
     dest = tmp_path / "body.txt"
     rc = curl.main(["-s", "-o", str(dest), server + "/"])
     assert rc == 0
@@ -148,7 +148,7 @@ def test_fallback_output_to_file(server, monkeypatch, tmp_path):
 # 3. Unsupported flags must fail loud (never silently mis-behave).
 # --------------------------------------------------------------------------
 def test_unsupported_flag_raises(monkeypatch):
-    monkeypatch.setattr(curl.shutil, "which", lambda name: None)
+    monkeypatch.setattr(curl, "find_real_curl", lambda: None)
     with pytest.raises(NotImplementedError):
         curl.main(["--compressed", "https://example.com"])
 

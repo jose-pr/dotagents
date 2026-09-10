@@ -38,7 +38,7 @@ the store can live anywhere (`$AGENTS_HOME`) and nothing breaks when it moves. S
 | `python`, `node`, `rust` | Per-language `kb/` conventions + manifest templates + CI workflow templates (test / release / docs). |
 | `release` | A host-agnostic release helper: an agent-driven commit-plan loop plus tag/CI monitoring across GitHub (`gh`) and GitLab. |
 | `private-sync` | The one-private-repo, per-project `.agents` model (`kb/PRIVATE_SYNC.md` + cloud hooks). |
-| `net` | Dependency-free HTTP tooling (a drop-in `curl` shim, an OS-trust-store `certifi` shim, an `httplib` session toolkit reading `AGENTS_PROXY`). |
+| `net` | Dependency-free HTTP tooling (a drop-in `curl` shim, an OS-trust-store `certifi` shim, an `httplib` session toolkit). Speaks the agent proxy `AGENTS_PROXY` with its credential (`AGENTS_PROXY_AUTH`, a `Proxy-Authorization` value) and kind (`AGENTS_PROXY_TYPE=connect` or a `prefix[:/endpoint]` gateway); the curl shim hands the same to real curl. |
 | `recovery` | A config-recovery playbook for reconstructing a lost `~/.agents`. |
 
 ## Overlay layout

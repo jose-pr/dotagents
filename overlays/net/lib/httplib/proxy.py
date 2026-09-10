@@ -1,4 +1,4 @@
-"""Agent proxy resolution.
+"""Agent proxy resolution: which proxy, with which credentials, for which hosts.
 
 The proxy source is **``AGENTS_PROXY``** — the *agent* proxy, deliberately
 distinct from the machine's global proxy so non-agent tools (git, npm, corporate
@@ -8,11 +8,51 @@ convention: ``HTTPS_PROXY`` -> ``HTTP_PROXY`` -> ``ALL_PROXY`` (either case).
 (dotagents' ``env`` command seeds ``AGENTS_PROXY`` from the global proxy when
 unset, so on a proxied box this still finds it — but ``httplib`` reads
 ``AGENTS_PROXY`` directly and never fans back out to the global vars.)
+
+**Credentials.** An authenticating proxy is the normal case behind a corporate
+gateway, and a proxy that is configured but not authenticated to is worse than
+none: every request dies with 407. The credential is the value of the
+``Proxy-Authorization`` header, sent verbatim, so any scheme works (``Basic``,
+``Bearer``, ``Negotiate`` tokens, ...). Sources, first one wins:
+
+1. **``AGENTS_PROXY_AUTH``** — the agent proxy's header value;
+2. **``HTTP_PROXY_AUTH``** — the same for the machine's proxy;
+3. userinfo in the proxy URL (``http://user:pass@host:port``), turned into
+   ``Basic`` — the form curl, ``requests`` and ``urllib`` also read natively.
+
+Example: ``AGENTS_PROXY_AUTH="Basic $(printf 'user:pass' | base64)"``.
+
+When a header value is configured the proxy URL is used **without** its userinfo
+(:func:`resolve`), so no HTTP stack adds a second, competing header. Anything
+that prints a proxy URL goes through :func:`redact`.
+
+**Kind.** ``AGENTS_PROXY_TYPE`` says how the proxy is spoken to:
+
+* ``connect`` (default) — a standard HTTP proxy: plain-http requests are sent to
+  it with an absolute URL, https goes through a ``CONNECT`` tunnel;
+* ``prefix[:/endpoint]`` — a URL-prefix gateway: the request is made **directly**
+  to ``<proxy><endpoint><url>`` (``endpoint`` defaults to ``/``), e.g.
+  ``AGENTS_PROXY=https://gw.example AGENTS_PROXY_TYPE=prefix:/fetch/`` turns
+  ``GET https://api.example.com/x`` into
+  ``GET https://gw.example/fetch/https://api.example.com/x``. The
+  ``Proxy-Authorization`` value is sent as a header of that request.
+
+**Bypass.** ``NO_PROXY`` / ``no_proxy`` (comma-separated ``host[:port]`` suffixes,
+or ``*``) is honoured the same way curl and ``requests`` read it, so a loopback
+test server or an internal host is not sent to the proxy: :func:`should_bypass`.
 """
 from __future__ import annotations
 
+import base64
 import os
-from typing import Optional
+from typing import Optional, Tuple
+from urllib.parse import unquote, urlsplit, urlunsplit
+from urllib.request import proxy_bypass_environment
+
+#: Header-value variables, in precedence order.
+AUTH_VARS = ("AGENTS_PROXY_AUTH", "HTTP_PROXY_AUTH")
+#: How the proxy is spoken to: ``connect`` (default) or ``prefix[:/endpoint]``.
+TYPE_VAR = "AGENTS_PROXY_TYPE"
 
 # Fallback order after AGENTS_PROXY, both cases (curl reads lowercase per httpoxy).
 _FALLBACK_VARS = (
@@ -22,23 +62,164 @@ _FALLBACK_VARS = (
 )
 
 
+def _normalize(url: str) -> str:
+    """curl accepts a bare ``host:port``; the HTTP stacks need a scheme."""
+    return url if "://" in url else "http://" + url
+
+
 def proxy_url() -> Optional[str]:
-    """Return the agent proxy URL, or ``None``.
+    """The agent proxy URL as configured (userinfo included if the environment
+    put it there), or ``None``.
 
     ``AGENTS_PROXY`` wins; otherwise the first set of
     ``HTTPS_PROXY``/``HTTP_PROXY``/``ALL_PROXY`` (either case)."""
     agent = os.environ.get("AGENTS_PROXY")
     if agent:
-        return agent
+        return _normalize(agent)
     for var in _FALLBACK_VARS:
         val = os.environ.get(var)
         if val:
-            return val
+            return _normalize(val)
     return None
 
 
+def basic_authorization(user: str, password: str) -> str:
+    """The ``Proxy-Authorization`` value for Basic credentials."""
+    token = base64.b64encode(("%s:%s" % (user, password)).encode("utf-8")).decode("ascii")
+    return "Basic " + token
+
+
+def userinfo(url: Optional[str]) -> Optional[Tuple[str, str]]:
+    """``(user, password)`` from the URL's userinfo, percent-decoded, or ``None``."""
+    if not url:
+        return None
+    parts = urlsplit(_normalize(url))
+    if parts.username is None:
+        return None
+    return unquote(parts.username), unquote(parts.password or "")
+
+
+def configured_authorization() -> Optional[str]:
+    """The header value from ``AGENTS_PROXY_AUTH`` / ``HTTP_PROXY_AUTH``, or ``None``."""
+    for var in AUTH_VARS:
+        val = os.environ.get(var)
+        if val and val.strip():
+            return val.strip()
+    return None
+
+
+def proxy_authorization(url: Optional[str] = None, *, env: bool = True) -> Optional[str]:
+    """The ``Proxy-Authorization`` value to send to the proxy, or ``None``.
+
+    A configured header value (``AGENTS_PROXY_AUTH`` then ``HTTP_PROXY_AUTH``)
+    wins; otherwise the URL's userinfo as ``Basic``. ``url`` defaults to the
+    configured proxy. ``env=False`` ignores the variables — for a proxy the
+    caller named explicitly (curl's ``-x``), whose credentials are its own
+    userinfo, never the agent proxy's."""
+    if env:
+        configured = configured_authorization()
+        if configured:
+            return configured
+    creds = userinfo(url if url is not None else proxy_url())
+    if creds:
+        return basic_authorization(*creds)
+    return None
+
+
+def strip_auth(url: str) -> str:
+    """``url`` without any userinfo."""
+    url = _normalize(url)
+    parts = urlsplit(url)
+    if parts.username is None and parts.password is None:
+        return url
+    host = parts.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = "[%s]" % host  # IPv6 literal
+    netloc = host + (":%d" % parts.port if parts.port is not None else "")
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def redact(url: Optional[str]) -> Optional[str]:
+    """``url`` safe to print: the password, if any, replaced by ``***``."""
+    if not url:
+        return url
+    parts = urlsplit(_normalize(url))
+    if parts.password is None:
+        return url
+    bare = strip_auth(url)
+    scheme, netloc, path, query, fragment = urlsplit(bare)
+    user = parts.username or ""
+    return urlunsplit((scheme, "%s:***@%s" % (user, netloc), path, query, fragment))
+
+
+def resolve(url: Optional[str] = None, *, env: bool = True) -> Optional[Tuple[str, Optional[str]]]:
+    """``(proxy_url_without_userinfo, authorization)`` — what an HTTP stack
+    should connect to and the ``Proxy-Authorization`` value to send it (``None``
+    when the proxy needs none) — or ``None`` when no proxy is configured.
+    ``url``/``env`` as in :func:`proxy_authorization`."""
+    url = url if url is not None else proxy_url()
+    if not url:
+        return None
+    return strip_auth(url), proxy_authorization(url, env=env)
+
+
+def proxy_type() -> Tuple[str, Optional[str]]:
+    """``("connect", None)`` for a standard proxy, or ``("prefix", "/endpoint")``
+    for a URL-prefix gateway (endpoint defaults to ``/``), from
+    ``AGENTS_PROXY_TYPE``. Anything else is a configuration error, raised."""
+    raw = (os.environ.get(TYPE_VAR) or "").strip()
+    if not raw:
+        return "connect", None
+    kind, _, endpoint = raw.partition(":")
+    kind = kind.strip().lower()
+    if kind == "connect":
+        return "connect", None
+    if kind != "prefix":
+        raise ValueError(
+            "%s must be 'connect' or 'prefix[:/endpoint]', not %r" % (TYPE_VAR, raw)
+        )
+    endpoint = endpoint.strip() or "/"
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+    return "prefix", endpoint
+
+
+def prefix_url(target: str, proxy: Optional[str] = None, endpoint: Optional[str] = None) -> str:
+    """``<proxy><endpoint><target>``: the URL to request from a prefix gateway.
+    ``proxy`` (userinfo dropped) and ``endpoint`` default to the configured ones;
+    the target is appended as-is, so the gateway sees the URL the caller wrote."""
+    proxy = strip_auth(proxy if proxy is not None else (proxy_url() or ""))
+    if endpoint is None:
+        endpoint = proxy_type()[1] or "/"
+    return proxy.rstrip("/") + endpoint + target
+
+
+def bypassed_by(host: str, no_proxy: Optional[str]) -> bool:
+    """Does ``no_proxy`` (curl's comma list: ``host[:port]`` suffixes, or ``*``)
+    say ``host`` goes direct? ``host`` may include a port."""
+    if not no_proxy:
+        return False
+    return bool(proxy_bypass_environment(host, {"no": no_proxy}))
+
+
+def should_bypass(host_or_url: str) -> bool:
+    """``NO_PROXY`` / ``no_proxy`` (either case) says this host goes direct.
+    Accepts a URL or a bare ``host[:port]``."""
+    if "://" in host_or_url:
+        parts = urlsplit(host_or_url)
+        host = parts.hostname or ""
+        if parts.port is not None:
+            host = "%s:%d" % (host, parts.port)
+    else:
+        host = host_or_url
+    return bypassed_by(host, os.environ.get("NO_PROXY") or os.environ.get("no_proxy"))
+
+
 def proxies_from_env() -> Optional[dict]:
-    """Return a ``requests``-style ``{"http": ..., "https": ...}`` dict, or ``None``."""
+    """A ``requests``-style ``{"http": ..., "https": ...}`` dict of the configured
+    proxy URL (userinfo as configured), or ``None``. Note that a header value
+    from ``AGENTS_PROXY_AUTH`` cannot ride in a URL: :func:`session.new_session`
+    is what applies it; see :func:`resolve` for the two halves."""
     p = proxy_url()
     if not p:
         return None
