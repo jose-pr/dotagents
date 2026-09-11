@@ -48,7 +48,13 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+
+if TYPE_CHECKING:  # requests is optional at runtime: types only
+    import requests
+
+#: What a ``_PY`` hook is: ``(session, method, url, kwargs) -> None | response``.
+PyHook = Callable[["requests.Session", str, str, Dict[str, Any]], "Optional[requests.Response]"]
 
 PREFIX = "NET_HOOKS_"
 CURL_SUFFIX = "_CURL"
@@ -117,7 +123,7 @@ def matching(url: str, environ: "Optional[Dict[str, str]]" = None, *, kind: Opti
     return out
 
 
-def load_callable(spec: str) -> Callable[..., Any]:
+def load_callable(spec: str) -> "PyHook":
     """``module:attr`` (importable) or ``<file>.py:attr``. ``attr`` may be dotted."""
     target, sep, attr = spec.rpartition(":")
     if not sep or not target or not attr:
@@ -126,6 +132,8 @@ def load_callable(spec: str) -> Callable[..., Any]:
         path = Path(target).resolve()
         name = "agents_net_hook_" + re.sub(r"\W", "_", path.stem)
         module_spec = importlib.util.spec_from_file_location(name, str(path))
+        if module_spec is None or module_spec.loader is None:
+            raise ValueError("%s is not loadable as a Python module" % path)
         module = importlib.util.module_from_spec(module_spec)
         sys.modules[name] = module
         module_spec.loader.exec_module(module)
@@ -139,10 +147,15 @@ def load_callable(spec: str) -> Callable[..., Any]:
     return obj
 
 
-def call_py_hooks(session, method: str, url: str, kwargs: dict, environ=None) -> Any:
+def call_py_hooks(
+    session: "requests.Session", method: str, url: str, kwargs: Dict[str, Any],
+    environ: Optional[Dict[str, str]] = None,
+) -> "Optional[requests.Response]":
     """Run every ``_PY`` hook matching ``url`` in order; the first non-None
     result is returned (the caller uses it as the response), else ``None``."""
     for hook in matching(url, environ, kind="py"):
+        if not hook.py:  # `kind="py"` already filtered; for the type checker
+            continue
         try:
             fn = load_callable(hook.py)
             result = fn(session, method, url, kwargs)

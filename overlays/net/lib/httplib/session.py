@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Iterable, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Optional, Union
 from urllib.parse import urlparse
 
 from . import hooks as _hooks
@@ -37,6 +37,9 @@ from .jar import CookieJar, FileCookieJar, FileTokenJar, TokenJar
 # a new one -- a function bound by name before that passes a stale sentinel.
 from . import proxy as _proxy
 from .warnings import disable_insecure_request_warnings
+
+if TYPE_CHECKING:  # requests is optional at runtime: types only
+    import requests
 
 VerifyT = Union[bool, str, Path]
 
@@ -86,23 +89,27 @@ def _agent_proxy_adapter_class(HTTPAdapter):
         redirects, cookies and history speak the URL the caller asked for.
         """
 
-        def __init__(self, *, proxy=None, authorization=None, endpoint=None, **kwargs):
+        def __init__(
+            self, *, proxy: Optional[str] = None, authorization: Optional[str] = None,
+            endpoint: Optional[str] = None, auth_header: Optional[str] = None, **kwargs: Any,
+        ) -> None:
             super().__init__(**kwargs)
             self.proxy = proxy
             self.authorization = authorization
             self.endpoint = endpoint
+            self.auth_header = auth_header or _proxy.DEFAULT_AUTH_HEADER
             self._gateway_base = _proxy.prefix_url("", proxy, endpoint) if endpoint is not None and proxy else None
 
-        def proxy_headers(self, proxy):
+        def proxy_headers(self, proxy: str) -> Dict[str, str]:
             headers = super().proxy_headers(proxy)
             if self.authorization and self.proxy and proxy.rstrip("/") == self.proxy.rstrip("/"):
-                headers["Proxy-Authorization"] = self.authorization
+                headers[self.auth_header] = self.authorization
             return headers
 
-        def send(self, request, **kwargs):
+        def send(self, request: "requests.PreparedRequest", **kwargs: Any) -> "requests.Response":
             if not self.proxy:
                 return super().send(request, **kwargs)
-            original = request.url
+            original = request.url or ""
             caller_request = request
             request = request.copy()
             if _proxy.should_bypass(original):
@@ -113,10 +120,10 @@ def _agent_proxy_adapter_class(HTTPAdapter):
                 return super().send(request, **kwargs)
             # Prefix gateway. A Location the gateway wrote in its own namespace
             # is already prefixed: never wrap it twice.
-            if not original.startswith(self._gateway_base):
+            if not (self._gateway_base and original.startswith(self._gateway_base)):
                 request.url = _proxy.prefix_url(original, self.proxy, self.endpoint)
             if self.authorization:
-                request.headers["Proxy-Authorization"] = self.authorization
+                request.headers[self.auth_header] = self.authorization
             kwargs["proxies"] = {}
             response = super().send(request, **kwargs)
             response.url = original
@@ -147,10 +154,12 @@ def new_session(
     cookies: Union[bool, str, "CookieJar"] = False,
     tokens: Union[bool, str, "TokenJar"] = False,
     auth_provider: Optional["AuthProvider"] = None,
-):
+) -> "requests.Session":
     disable_insecure_request_warnings()
-    requests, HTTPAdapter, Retry = _import_requests()
-    session = requests.Session()
+    # Not `requests`: that name is the TYPE_CHECKING import the annotations
+    # below refer to, and a local of the same name would shadow it.
+    requests_mod, HTTPAdapter, Retry = _import_requests()
+    session = requests_mod.Session()
     cookie_jar: Optional[CookieJar] = None
     cookie_key: Optional[str] = None
     if cookies is True:
@@ -196,7 +205,8 @@ def new_session(
             proxy_url, authorization = configured[0], _proxy.configured_authorization()
             proxy_url = proxy_url if proxy_url in proxies.values() else None
     adapter = _agent_proxy_adapter_class(HTTPAdapter)(
-        proxy=proxy_url, authorization=authorization, endpoint=endpoint, max_retries=retry_strategy,
+        proxy=proxy_url, authorization=authorization, endpoint=endpoint,
+        auth_header=_proxy.auth_header(), max_retries=retry_strategy,
     )
     session.mount("http://", adapter)
     session.mount("https://", adapter)
@@ -244,7 +254,7 @@ def new_session(
                 return [cookie_key]
             return [host] if host else []
 
-        def _load_cookies_for(url: str) -> None:
+        def _load_cookies_for(url: str) -> None:  # noqa: E306
             if cookie_jar is None:
                 return
             for key in _cookie_keys_for(url):
@@ -256,7 +266,7 @@ def new_session(
                     pass
                 loaded_keys.add(key)
 
-        def _save_cookies_for(url: str, response) -> None:
+        def _save_cookies_for(url: str, response: "requests.Response") -> None:
             if cookie_jar is None:
                 return
             try:
@@ -307,7 +317,7 @@ def new_session(
 
         _in_hook = False
 
-        def request(method, url, **kwargs):
+        def request(method: str, url: str, **kwargs: Any) -> "requests.Response":
             nonlocal _in_hook
             _load_state(url)
             if not _in_hook:

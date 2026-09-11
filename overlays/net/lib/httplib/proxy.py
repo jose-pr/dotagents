@@ -47,10 +47,16 @@ import base64
 import os
 from typing import Optional, Tuple
 from urllib.parse import unquote, urlsplit, urlunsplit
-from urllib.request import proxy_bypass_environment
+# The stdlib's own NO_PROXY matcher (what urllib and requests use); present
+# since 2.x, absent from typeshed.
+from urllib.request import proxy_bypass_environment  # type: ignore[attr-defined]
 
 #: Header-value variables, in precedence order.
 AUTH_VARS = ("AGENTS_PROXY_AUTH", "HTTP_PROXY_AUTH")
+#: The header the credential rides in; default the standard one. A gateway
+#: that wants it under another name (``X-Proxy-Token``) sets this.
+AUTH_HEADER_VAR = "AGENTS_PROXY_AUTH_HEADER"
+DEFAULT_AUTH_HEADER = "Proxy-Authorization"
 #: How the proxy is spoken to: ``connect`` (default) or ``prefix[:/endpoint]``.
 TYPE_VAR = "AGENTS_PROXY_TYPE"
 
@@ -97,6 +103,18 @@ def userinfo(url: Optional[str]) -> Optional[Tuple[str, str]]:
     if parts.username is None:
         return None
     return unquote(parts.username), unquote(parts.password or "")
+
+
+def auth_header() -> str:
+    """The name of the header the proxy credential is sent in:
+    ``$AGENTS_PROXY_AUTH_HEADER``, else ``Proxy-Authorization``. A value with
+    a colon or whitespace is not a header name: a ``ValueError``."""
+    name = (os.environ.get(AUTH_HEADER_VAR) or "").strip()
+    if not name:
+        return DEFAULT_AUTH_HEADER
+    if ":" in name or any(ch.isspace() for ch in name):
+        raise ValueError("%s must be a header name, not %r" % (AUTH_HEADER_VAR, name))
+    return name
 
 
 def configured_authorization() -> Optional[str]:

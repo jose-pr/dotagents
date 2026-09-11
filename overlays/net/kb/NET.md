@@ -61,6 +61,9 @@ build on `PATH` cannot break the shim.
 - **Unsupported flags fail loud** (`curl: (2) Unsupported options: --http2`, exit
   2) rather than silently do the wrong thing — that guard is deliberate. If you
   hit one, call real `curl`.
+- **`NET_CURL=0`** (or `n`/`no`/`false`/`off`) runs the real curl exactly as
+  typed — no agent proxy, no hooks, no fallback; exit 2 if there is none. Unset
+  or `1`/`y` is the shim.
 - Fallback TLS verifies against the **OS trust store** (via the `certifi` shim);
   `-k/--insecure` disables verification.
 - `-v` prints the proxy with the password redacted; nothing here logs a credential.
@@ -96,7 +99,10 @@ not at all.
   **`AGENTS_PROXY_AUTH`** first, then **`HTTP_PROXY_AUTH`**, e.g.
   `AGENTS_PROXY_AUTH="Basic $(printf 'user:pass' | base64)"` or `Bearer <token>`.
   Without either, userinfo in the URL (`http://user:pass@host:3128`) is sent as
-  `Basic`. `new_session()` delivers it through its HTTP adapter — on the
+  `Basic`. **`AGENTS_PROXY_AUTH_HEADER`** names the header the value rides in,
+  default `Proxy-Authorization`, for a gateway that wants it under another name
+  (`X-Proxy-Token`); the session, the fallback and real curl's `--proxy-header`
+  all use it. `new_session()` delivers it through its HTTP adapter — on the
   plain-http request and on the HTTPS `CONNECT`, for the agent proxy only — so
   it never reaches an origin or another proxy (a `proxies=` you pass yourself is
   not given it unless it is the agent proxy), and the session gets past a 407 on

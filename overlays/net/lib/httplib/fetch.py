@@ -3,17 +3,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple, Union
 
 from .auth import AuthProvider
 from .jar import CookieJar, TokenJar
 from .session import new_session
 
+if TYPE_CHECKING:  # requests is optional at runtime: types only
+    import requests
+
 VerifyT = Union[bool, str, Path]
 
 
 def request_text(
-    session,
+    session: "requests.Session",
     method: str,
     url: str,
     *,
@@ -35,7 +38,7 @@ def request_text(
 
 
 def request_json(
-    session,
+    session: "requests.Session",
     method: str,
     url: str,
     *,
@@ -64,7 +67,7 @@ def request_json(
 
 
 def request_with_reauth(
-    session,
+    session: "requests.Session",
     method: str,
     url: str,
     *,
@@ -109,7 +112,7 @@ def request_text_auto(
     method: str,
     url: str,
     *,
-    session=None,
+    session: "Optional[requests.Session]" = None,
     user_agent: Optional[str] = None,
     proxies: Optional[dict] = None,
     verify: VerifyT = True,
@@ -151,7 +154,7 @@ def request_json_auto(
     method: str,
     url: str,
     *,
-    session=None,
+    session: "Optional[requests.Session]" = None,
     user_agent: Optional[str] = None,
     proxies: Optional[dict] = None,
     verify: VerifyT = True,

@@ -4,8 +4,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from http.cookies import SimpleCookie
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import TYPE_CHECKING, Iterable, List, Optional, Protocol
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:  # requests is optional at runtime: types only
+    import requests
+
+
+class CookieLike(Protocol):
+    """What :func:`save_netscape` reads off a cookie: ``http.cookiejar.Cookie``
+    (a requests session's) or any object with these attributes."""
+
+    domain: str
+    path: str
+    secure: bool
+    expires: Optional[int]
+    name: str
+    value: str
 
 
 @dataclass(frozen=True)
@@ -47,7 +62,7 @@ def load_netscape(path: Path) -> List[CookieSpec]:
     return cookies
 
 
-def apply_to_session(session, cookies: Iterable[CookieSpec]) -> None:
+def apply_to_session(session: "requests.Session", cookies: Iterable[CookieSpec]) -> None:
     """Load jar rows into the session with their flags: a ``Secure`` row
     stays secure (never sent over http), an expiry stays an expiry."""
     for c in cookies:
@@ -71,7 +86,7 @@ def domain_covers(domain: str, host: str) -> bool:
     return h == bare or (d.startswith(".") and h.endswith("." + bare))
 
 
-def save_netscape(session_cookies, path: Path) -> None:
+def save_netscape(session_cookies: "Iterable[CookieLike]", path: Path) -> None:
     lines = ["# Netscape HTTP Cookie File\n"]
     for cookie in session_cookies:
         domain = getattr(cookie, "domain", "") or ""
@@ -91,7 +106,7 @@ def save_netscape(session_cookies, path: Path) -> None:
     path.write_text("".join(lines), encoding="utf-8")
 
 
-def merge_set_cookie_headers(session, response) -> None:
+def merge_set_cookie_headers(session: "requests.Session", response: "requests.Response") -> None:
     try:
         session.cookies.update(response.cookies)
     except Exception:

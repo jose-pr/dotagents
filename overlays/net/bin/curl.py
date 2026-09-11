@@ -94,6 +94,17 @@ UNSUPPORTED_ARGS = [
     'vsock', 'write_out', 'xattr',
 ]
 
+#: ``NET_CURL=0`` / ``n`` / ``no`` / ``false`` / ``off``: run the real curl
+#: exactly as typed -- no agent proxy, no hooks, no fallback. Anything else
+#: (unset, ``1``, ``y``) is the shim.
+SHIM_ENV = 'NET_CURL'
+_OFF = ('0', 'n', 'no', 'false', 'off')
+
+
+def shim_enabled():
+    return (os.environ.get(SHIM_ENV) or '').strip().lower() not in _OFF
+
+
 #: The shim's own version line (``-V``); real curl answers when it is present.
 SHIM_VERSION = 'curl 0.0.0-dotagents-shim (python %d.%d, urllib) -- the net overlay fallback' % sys.version_info[:2]
 
@@ -625,19 +636,22 @@ class _ProxyPlan(object):
     """One proxy decision for the fallback, applied per hop.
 
     ``proxy`` -- the proxy URL without userinfo, or ``None`` for direct;
-    ``authorization`` -- the ``Proxy-Authorization`` value, or ``None``;
+    ``authorization`` -- the proxy credential (the header value), or ``None``;
+    ``auth_header`` -- the header it rides in (``AGENTS_PROXY_AUTH_HEADER``,
+    default ``Proxy-Authorization``);
     ``endpoint`` -- ``None`` for a ``connect`` proxy, the ``/endpoint`` of a
     prefix gateway; ``no_proxy`` -- the bypass list in force (curl's
     ``--noproxy`` REPLACES ``NO_PROXY``), re-checked for every hop's host.
     """
 
-    __slots__ = ('proxy', 'authorization', 'endpoint', 'no_proxy')
+    __slots__ = ('proxy', 'authorization', 'endpoint', 'no_proxy', 'auth_header')
 
-    def __init__(self, proxy, authorization, endpoint, no_proxy):
+    def __init__(self, proxy, authorization, endpoint, no_proxy, auth_header=None):
         self.proxy = proxy
         self.authorization = authorization
         self.endpoint = endpoint
         self.no_proxy = no_proxy
+        self.auth_header = auth_header or agent_proxy.DEFAULT_AUTH_HEADER
 
     def bypasses(self, url):
         return agent_proxy.should_bypass(url, no_proxy=self.no_proxy)
@@ -774,7 +788,7 @@ def plan_proxy(url, proxy=None, noproxy=None, proxy_user=None):
     if proxy_user:
         user, _, password = proxy_user.partition(':')
         authorization = agent_proxy.basic_authorization(user, password)
-    return _ProxyPlan(proxy, authorization, endpoint, no_proxy)
+    return _ProxyPlan(proxy, authorization, endpoint, no_proxy, agent_proxy.auth_header())
 
 
 def agent_proxy_argv(argv):
@@ -802,7 +816,7 @@ def agent_proxy_argv(argv):
     if proxy_user:
         pass  # curl already has -U on its own argv
     elif agent_proxy.configured_authorization():
-        extra += ['--proxy-header', 'Proxy-Authorization: ' + plan.authorization]
+        extra += ['--proxy-header', '%s: %s' % (plan.auth_header, plan.authorization)]
     else:
         creds = agent_proxy.userinfo(agent_proxy.proxy_url())
         if creds:
@@ -904,7 +918,7 @@ class _AgentProxyHandler(urllib.request.BaseHandler):
             if not req.full_url.startswith(base):
                 req.full_url = agent_proxy.prefix_url(req.full_url, plan.proxy, plan.endpoint)
         if plan.authorization:
-            req.add_unredirected_header('Proxy-Authorization', plan.authorization)
+            req.add_unredirected_header(plan.auth_header, plan.authorization)
         return req
 
     http_request = _apply
@@ -949,7 +963,7 @@ def run_fallback(argv):
             # The URL only, never the credential: this line ends up in logs.
             print('Proxy%s: %s%s' % (' (prefix %s)' % plan.endpoint if plan.endpoint else '',
                                      agent_proxy.redact(plan.proxy),
-                                     ' (with Proxy-Authorization)' if plan.authorization else ''),
+                                     ' (with %s)' % plan.auth_header if plan.authorization else ''),
                   file=sys.stderr)
 
     # The opener always carries an EMPTY ProxyHandler: urllib's own would
@@ -1050,8 +1064,22 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def run_real_curl_as_typed(argv):
+    """``NET_CURL=0``: the real curl with argv untouched, or exit 2 when there
+    is none -- the caller asked for the real thing, a fallback would be a
+    surprise."""
+    curl_path = find_real_curl()
+    if not curl_path:
+        print('curl: (2) %s=%s asks for the real curl, which is not on PATH' % (
+            SHIM_ENV, os.environ.get(SHIM_ENV)), file=sys.stderr)
+        return 2
+    return subprocess.run([curl_path, *argv]).returncode
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    if not shim_enabled():
+        return run_real_curl_as_typed(argv)
     try:
         hook_rc = maybe_run_hook(argv)
         if hook_rc is not None:
