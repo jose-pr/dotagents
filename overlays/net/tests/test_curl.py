@@ -130,10 +130,12 @@ def test_fallback_post_data(server, monkeypatch, capsysbinary):
     assert b"posted" in out
 
 
-def test_fallback_404_returns_error_code(server, monkeypatch, capsysbinary):
+def test_fallback_404_is_a_response_and_fail_makes_it_22(server, monkeypatch, capsysbinary):
+    """curl's exit codes: an HTTP status is a printed response (exit 0);
+    -f turns a 4xx/5xx into exit 22 with no body."""
     monkeypatch.setattr(curl, "find_real_curl", lambda: None)
-    rc = curl.main(["-s", server + "/notfound"])
-    assert rc == 404
+    assert curl.main(["-s", server + "/notfound"]) == 0
+    assert curl.main(["-s", "-f", server + "/notfound"]) == 22
 
 
 def test_fallback_output_to_file(server, monkeypatch, tmp_path):
@@ -147,10 +149,15 @@ def test_fallback_output_to_file(server, monkeypatch, tmp_path):
 # --------------------------------------------------------------------------
 # 3. Unsupported flags must fail loud (never silently mis-behave).
 # --------------------------------------------------------------------------
-def test_unsupported_flag_raises(monkeypatch):
+def test_unsupported_flag_is_refused_out_loud(monkeypatch, capsysbinary):
+    """An unsupported flag is curl's exit 2 with one line on stderr -- never
+    a traceback, never a silent mis-handling."""
     monkeypatch.setattr(curl, "find_real_curl", lambda: None)
+    assert curl.main(["--http2", "https://example.com"]) == 2
+    err = capsysbinary.readouterr().err
+    assert err.strip() == b"curl: (2) Unsupported options: --http2"
     with pytest.raises(NotImplementedError):
-        curl.main(["--compressed", "https://example.com"])
+        curl.run_fallback(["--http2", "https://example.com"])
 
 
 # --------------------------------------------------------------------------

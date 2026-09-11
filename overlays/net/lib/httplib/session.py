@@ -30,7 +30,7 @@ from urllib.parse import urlparse
 
 from . import hooks as _hooks
 from .auth import AuthProvider
-from .cookies import CookieSpec, apply_to_session, merge_set_cookie_headers
+from .cookies import CookieSpec, apply_to_session, domain_covers, merge_set_cookie_headers
 from .jar import CookieJar, FileCookieJar, FileTokenJar, TokenJar
 # The module, not its functions: `should_bypass`'s default sentinel belongs
 # to the module instance that defined it, and a reload (tests do one) mints
@@ -159,7 +159,8 @@ def new_session(
     elif isinstance(cookies, str):
         cookie_jar = FileCookieJar()
         cookie_key = cookies
-    elif cookies:
+    elif cookies is not None and cookies is not False:
+        # `is not`, not truthiness: an empty MemoryCookieJar is a jar.
         cookie_jar = cookies
         cookie_key = "__by_host__"
     token_jar: Optional[TokenJar] = None
@@ -170,7 +171,7 @@ def new_session(
     elif isinstance(tokens, str):
         token_jar = FileTokenJar()
         token_key = tokens
-    elif tokens:
+    elif tokens is not None and tokens is not False:
         token_jar = tokens
         token_key = "__by_host__"
     retry_strategy = Retry(
@@ -223,7 +224,7 @@ def new_session(
             or ``None``. A value that already names its scheme (``Basic …``,
             ``token …``) goes verbatim; a bare token is a bearer token. The
             value is a secret: never logged."""
-            if not token_jar:
+            if token_jar is None:
                 return None
             key = token_key if token_key and token_key != "__by_host__" else _key_for(url)
             if not key:
@@ -244,7 +245,7 @@ def new_session(
             return [host] if host else []
 
         def _load_cookies_for(url: str) -> None:
-            if not cookie_jar:
+            if cookie_jar is None:
                 return
             for key in _cookie_keys_for(url):
                 if not key or key in loaded_keys:
@@ -256,7 +257,7 @@ def new_session(
                 loaded_keys.add(key)
 
         def _save_cookies_for(url: str, response) -> None:
-            if not cookie_jar:
+            if cookie_jar is None:
                 return
             try:
                 merge_set_cookie_headers(session, response)
@@ -280,8 +281,13 @@ def new_session(
             for key in _cookie_keys_for(url):
                 if not key:
                     continue
+                # A host's file holds that host's cookies: by-host keys keep
+                # only the rows whose domain covers the host, so a session
+                # that talked to two hosts never copies one's cookies into
+                # the other's file. A named jar keeps everything.
+                rows = specs if key != _key_for(url) else [c for c in specs if domain_covers(c.domain, key)]
                 try:
-                    cookie_jar[key] = specs
+                    cookie_jar[key] = rows
                 except Exception:
                     pass
 
@@ -327,7 +333,7 @@ def new_session(
             return resp
 
         session.request = request
-        if cookie_jar and cookie_key and cookie_key != "__by_host__":
+        if cookie_jar is not None and cookie_key and cookie_key != "__by_host__":
             try:
                 apply_to_session(session, cookie_jar.get(cookie_key, []))
                 loaded_keys.add(cookie_key)

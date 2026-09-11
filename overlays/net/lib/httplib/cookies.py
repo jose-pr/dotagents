@@ -24,12 +24,16 @@ def load_netscape(path: Path) -> List[CookieSpec]:
     cookies: List[CookieSpec] = []
     for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         line = line.strip()
-        if not line or line.startswith("#"):
+        # curl writes an HttpOnly cookie's domain as `#HttpOnly_<domain>`; any
+        # other `#` line is a comment.
+        if not line or (line.startswith("#") and not line.startswith("#HttpOnly_")):
             continue
         parts = line.split("\t")
         if len(parts) < 7:
             continue
         domain, _flag, cpath, secure, expires, name, value = parts[:7]
+        if domain.startswith("#HttpOnly_"):
+            domain = domain[len("#HttpOnly_"):]
         cookies.append(
             CookieSpec(
                 domain=domain,
@@ -44,11 +48,27 @@ def load_netscape(path: Path) -> List[CookieSpec]:
 
 
 def apply_to_session(session, cookies: Iterable[CookieSpec]) -> None:
+    """Load jar rows into the session with their flags: a ``Secure`` row
+    stays secure (never sent over http), an expiry stays an expiry."""
     for c in cookies:
         try:
-            session.cookies.set(c.name, c.value, domain=c.domain, path=c.path)
+            session.cookies.set(
+                c.name, c.value, domain=c.domain, path=c.path,
+                secure=bool(c.secure), expires=c.expires or None,
+            )
         except Exception:
             continue
+
+
+def domain_covers(domain: str, host: str) -> bool:
+    """Does a cookie ``domain`` apply to ``host``: the host itself, or a
+    subdomain when the domain has a leading dot (the Netscape flag)."""
+    d = (domain or "").lower()
+    h = (host or "").lower()
+    if not d or not h:
+        return False
+    bare = d.lstrip(".")
+    return h == bare or (d.startswith(".") and h.endswith("." + bare))
 
 
 def save_netscape(session_cookies, path: Path) -> None:

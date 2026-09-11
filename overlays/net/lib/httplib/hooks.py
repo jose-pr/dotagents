@@ -143,7 +143,15 @@ def call_py_hooks(session, method: str, url: str, kwargs: dict, environ=None) ->
     """Run every ``_PY`` hook matching ``url`` in order; the first non-None
     result is returned (the caller uses it as the response), else ``None``."""
     for hook in matching(url, environ, kind="py"):
-        result = load_callable(hook.py)(session, method, url, kwargs)
+        try:
+            fn = load_callable(hook.py)
+            result = fn(session, method, url, kwargs)
+        except Exception as exc:
+            # The variable, so the failure is traceable to its declaration
+            # (the URL is the caller's; the exception carries the rest).
+            raise RuntimeError(
+                "%s%s%s (%s) failed for %s %s: %s" % (PREFIX, hook.key, PY_SUFFIX, hook.py, method, url, exc)
+            ) from exc
         if result is not None:
             return result
     return None

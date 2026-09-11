@@ -38,10 +38,29 @@ build on `PATH` cannot break the shim.
   (`*` or a host list) replaces `NO_PROXY`, as in curl. A malformed
   `AGENTS_PROXY`/`AGENTS_PROXY_TYPE` never blocks real curl (one warning, argv
   as typed); the fallback, which would have to use it, exits 2.
-- Supported: `-X -d --data-raw -H -o -s -S -v -i -I -D -b -c -x -U --noproxy -k -A
-  -L --timeout`.
-- **Unsupported flags fail loud** (`NotImplementedError`) rather than silently do
-  the wrong thing — that guard is deliberate. If you hit one, call real `curl`.
+- Supported: `-X -d --data-raw --data-binary -H -o -s -S -v -i -I -D -b -c -x
+  -U --noproxy -k -A -L --max-redirs -m --connect-timeout --timeout -f -u -e
+  --compressed -V`, with curl's meaning where it matters:
+  - **Exit codes are curl's.** An HTTP status is a response, printed and exit 0
+    (a 404, a 302 without `-L`); `-f` makes a 4xx/5xx exit 22 with no body.
+    Transport failures: 6 could not resolve, 7 could not connect, 28 timed out,
+    60 certificate; an unsupported flag or a bad proxy configuration is exit 2
+    (`curl: (2) …`, one line, never a traceback).
+  - `-d` repeats and joins with `&`; `@file` reads a file (CR/LF stripped, as
+    curl does), `@-` stdin; `--data-binary` keeps bytes as they are; a body
+    without a `Content-Type` gets `application/x-www-form-urlencoded`.
+  - `-H 'Name: v'` sets, `-H 'Name:'` removes the header (urllib's own defaults
+    included), `-H 'Name;'` sends it empty. `-u user:pass` is Basic, `-e` the
+    Referer, `--compressed` asks for gzip/deflate and decodes the body.
+  - `-b <file>` sends only the rows that apply to the URL — domain (the leading
+    dot or the `TRUE` flag covers subdomains), path, `Secure` only over https,
+    not expired, `#HttpOnly_` rows included — so a jar with several hosts never
+    leaks one host's cookies to another. `-c` writes the origin's cookies with
+    their expiry and `HttpOnly`, on top of what `-b` read.
+  - `-I` prints the headers by itself; `-i` adds them to a body.
+- **Unsupported flags fail loud** (`curl: (2) Unsupported options: --http2`, exit
+  2) rather than silently do the wrong thing — that guard is deliberate. If you
+  hit one, call real `curl`.
 - Fallback TLS verifies against the **OS trust store** (via the `certifi` shim);
   `-k/--insecure` disables verification.
 - `-v` prints the proxy with the password redacted; nothing here logs a credential.

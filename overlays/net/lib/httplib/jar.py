@@ -14,6 +14,14 @@ from typing import Iterable, Protocol
 
 from .cookies import CookieSpec, load_netscape, save_netscape
 
+_UNSAFE = '<>:"/\\|?*'
+
+
+def safe_name(key: str) -> str:
+    """A jar file name for a host: characters no filesystem takes (``:`` of an
+    IPv6 literal on Windows, a ``/``) become ``_``."""
+    return "".join("_" if ch in _UNSAFE else ch for ch in key)
+
 
 def store_root() -> Path:
     """Resolve the dotagents store directory (D58 configurable store).
@@ -46,8 +54,7 @@ class FileCookieJar:
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, key: str) -> Path:
-        safe = key.replace("/", "_")
-        return self.dir / ("%s.txt" % safe)
+        return self.dir / ("%s.txt" % safe_name(key))
 
     def __getitem__(self, key: str) -> Iterable[CookieSpec]:
         return load_netscape(self._path(key))
@@ -80,8 +87,7 @@ class FileTokenJar:
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, key: str) -> Path:
-        safe = key.replace("/", "_")
-        return self.dir / ("%s.token" % safe)
+        return self.dir / ("%s.token" % safe_name(key))
 
     def __getitem__(self, key: str) -> str:
         # Never logs the value read (secret).
