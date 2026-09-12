@@ -1,6 +1,7 @@
 """`dotagents build-pyz` -- vendor deps and package a self-contained pyz."""
 
 import re
+import json
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,24 @@ from duho import Cmd, LoggingArgs
 #: regex, not a TOML parser (tomllib is 3.11+, this repo's floor is 3.9, and a
 #: single quoted scalar under a known table header doesn't need one).
 _PYPROJECT_VERSION_RE = re.compile(r'(?m)^version\s*=\s*"([^"]+)"')
+
+
+def _dist_info_name_version(dist_info: Path) -> "dict[str, str]":
+    """``{Name: Version}`` from a ``*.dist-info/METADATA``, or ``{}``."""
+    metadata = dist_info / "METADATA"
+    if not metadata.is_file():
+        return {}
+    name = version = None
+    for line in metadata.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("Name:"):
+            name = line[5:].strip()
+        elif line.startswith("Version:"):
+            version = line[8:].strip()
+        if name and version:
+            break
+        if not line.strip():
+            break  # the header ends at the first blank line
+    return {name: version} if name and version else {}
 
 
 class BuildPyz(LoggingArgs, Cmd):
@@ -132,6 +151,20 @@ class BuildPyz(LoggingArgs, Cmd):
                 )
                 self._logger_.info("stamped __version__ = %s (from pyproject.toml)", version)
 
+            # What went into the bundle, for `dotagents about`: the zipapp
+            # carries no dist-info (stripped below), so record the vendored
+            # distributions' names and versions beside the package first.
+            bundled = {}
+            for path in sorted(stage.rglob("*.dist-info")):
+                bundled.update(_dist_info_name_version(path))
+            (dotagents_pkg_dest / "_bundle.json").write_text(
+                json.dumps({
+                    "packages": bundled,
+                    "extras": extras,
+                    "python": "%d.%d.%d" % sys.version_info[:3],
+                }, indent=2) + "\n",
+                encoding="utf-8",
+            )
             for path in stage.rglob("*.dist-info"):
                 shutil.rmtree(path, ignore_errors=True)
             for path in stage.rglob("__pycache__"):

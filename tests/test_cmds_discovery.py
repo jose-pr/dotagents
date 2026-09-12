@@ -103,7 +103,7 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
 
     names = _names(cli._discover([]))
     # The compiled built-ins survive the app switch.
-    for builtin in ("init", "build-pyz", "context", "env", "overlays"):
+    for builtin in ("init", "build-pyz", "context", "env", "overlays", "about"):
         assert builtin in names
     # The bundled command modules: the findings queue (its subcommands are
     # nested classes, so none of them leaks out as a top-level command) and
@@ -123,7 +123,7 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
     # bundled modules, and nothing else.
     assert "my-personal-tool" not in names
     assert set(names) == {
-        "init", "build-pyz", "context", "env", "overlays", "findings", "launch",
+        "init", "build-pyz", "context", "env", "overlays", "about", "findings", "launch",
     }
     # Built-ins are handed to `duho.app` via `commands=`, never `_subcommands_`.
     assert cli.Dotagents._subcommands_ == []

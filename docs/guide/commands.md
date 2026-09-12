@@ -18,6 +18,7 @@ by default (the `<cwd>/.agents` store, when run inside a project) or **user** wi
 | `build-pyz` | Build the self-contained `dotagents.pyz` zipapp. |
 | `findings` | Per-scope findings queue: `add` / `list` / `show` / `done` / `reopen` / `remove` / `index` / `path`. |
 | `launch` | Start an agent's CLI with the `env` exported and the `context` handed over; everything after `--` goes to the agent. |
+| `about` | `dotagents-cli <version>`, then every package bundled in the `.pyz` (or installed beside a plain install) with its version. |
 
 That table is the **whole** shipped surface; `findings` and `launch` are the two bundled
 command modules (discovered from the package itself, overridable by a same-named module
@@ -354,6 +355,19 @@ python -m dotagents sync-project --remote <url> -m init  # one-command bootstrap
 project's `.agents` — and `sync-project` no longer reads like `overlays sync`.)
 
 See [Private sync](private-sync.md) for the full walkthrough.
+
+## about
+
+```bash
+dotagents about          # dotagents-cli 0.5.0 / duho 0.5.0 / pathlib_next 0.9.0 ...
+dotagents about --json   # the same, plus where it runs from and the Python
+```
+
+One `<distribution> <version>` per line, the CLI first. From a built `.pyz` the
+list is exactly what `build-pyz` vendored (it records the names and versions in
+`dotagents/_bundle.json` before stripping the `dist-info` dirs the zipapp would
+otherwise carry, so `--extras uri,http` shows up here as `uritools`, `requests`
+and friends); from a plain install it is the dependencies actually present.
 
 ## build-pyz
 

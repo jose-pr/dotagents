@@ -73,6 +73,6 @@ def test_no_personal_tooling_is_in_the_repo():
     assert sorted(p.name for p in (REPO / "tools").iterdir()) == ["audit.py", "cloud-setup.sh"]
     cli_modules = sorted(p.name for p in (SRC / "dotagents" / "cli").glob("*.py"))
     assert cli_modules == [
-        "__init__.py", "_common.py", "build_pyz.py", "context.py", "env.py",
+        "__init__.py", "_common.py", "about.py", "build_pyz.py", "context.py", "env.py",
         "init.py", "overlays.py",
     ]

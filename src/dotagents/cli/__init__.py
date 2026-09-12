@@ -73,6 +73,7 @@ from dotagents.cli._common import (  # noqa: F401
 # cli/__init__ -> command modules. link/sync are NOT imported here -- they left
 # the package entirely (D85: the private-sync overlay ships link-project/
 # sync-project as discovered command modules; see `_discover`).
+from dotagents.cli.about import About
 from dotagents.cli.build_pyz import BuildPyz
 from dotagents.cli.context import Context
 from dotagents.cli.env import Env
@@ -102,6 +103,7 @@ _BUILTIN_COMMANDS = [
     Context,
     Env,
     Overlays,
+    About,
 ]
 
 # The cli submodules whose sources duho introspects for flag/help definitions.
@@ -127,6 +129,7 @@ _COMMAND_MODULES = (
     "dotagents.cli.env",
     "dotagents.cli.overlays",
     "dotagents.cli.build_pyz",
+    "dotagents.cli.about",
     "dotagents.cli._common",
 )
 

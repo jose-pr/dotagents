@@ -27,7 +27,10 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   managed block over what remains — the un-merge), `list`, `sync` (`--copy`
   honoured, `--overwrite` replaces changed files), `show` (manifest, setup,
   skills, files, `--json`) — `context`, `env`, `build_pyz` (a checkout only:
-  a clear error elsewhere)); each is a `class X(LoggingArgs, Cmd)` — or
+  a clear error elsewhere), `about` (`dotagents-cli <version>` then one
+  `<distribution> <version>` per line: from a `.pyz` what `build-pyz` vendored,
+  recorded in `dotagents/_bundle.json` at build time since the zipapp carries
+  no dist-info; from a plain install the runtime packages present)); each is a `class X(LoggingArgs, Cmd)` — or
   `class X(DotAgentsArgs)`, which is that pair transitively — with a
   `__call__`. Plus TWO bundled command modules under
   `_overlay/dotagents/cmds/`: `findings.py` (`dotagents findings`: a per-scope

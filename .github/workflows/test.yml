@@ -198,7 +198,12 @@ jobs:
           # Assert against the COMMAND-LIST line ("{init,build-pyz,...}"), not the
           # whole help: `overlays`' own description mentions its `sync` subcommand,
           # which would false-positive a naive grep.
-          python dist/dotagents.pyz --help | grep -q -- "{init,build-pyz,context,env,overlays,findings,launch}"
+          python dist/dotagents.pyz --help | grep -q -- "{init,build-pyz,context,env,overlays,about,findings,launch}"
+          # `about` from the .pyz: the CLI first, then what build-pyz vendored.
+          python dist/dotagents.pyz about | head -1 | grep -q -- "^dotagents-cli "
+          python dist/dotagents.pyz about | grep -q -- "^duho "
+          python dist/dotagents.pyz about | grep -q -- "^pathlib_next "
+          python dist/dotagents.pyz about --json | python -c "import sys,json; d=json.load(sys.stdin); assert d['bundle'] and 'duho' in d['packages'], d"
           # The second bundled command module, launch: its positional, its
           # declared flags and their help survive the zipapp shim too.
           python dist/dotagents.pyz launch --help | grep -q -- "\[agent\]"

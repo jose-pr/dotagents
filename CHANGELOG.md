@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `dotagents about`: `dotagents-cli <version>` and then, one per line, every
+  package bundled with it and its version -- from a `.pyz` exactly what
+  `build-pyz` vendored (recorded in `dotagents/_bundle.json` at build time),
+  from a plain install the dependencies present. `--json` adds where it runs
+  from and the Python.
 - Overlay sources and repos can be any path `pathlib_next` speaks. With the
   `uri` extra (`dotagents-cli[uri]`; `[http]`, `[sftp]`, `[s3]` add the schemes'
   clients) an `http(s)://` directory listing, an `sftp`, `s3`, `dav` or
