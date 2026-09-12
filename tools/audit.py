@@ -46,6 +46,7 @@ DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 # The overlays branch carries its own copy of the example content and its tests;
 # validating that content is the overlays branch's concern, not main's.
 SCAN = [
+    "src/dotagents/_overlay/dotagents/templates/AGENTS.md",
     "src/dotagents/_overlay/dotagents/AGENTS.md",
     "src/dotagents/_overlay/dotagents/README.md",
     "src/dotagents/_overlay/dotagents/DECISIONS.md",
@@ -79,7 +80,7 @@ REF_PATTERNS = BASE_PATTERNS
 # The base overlay's AGENTS.md is the only always-loaded file main ships, so it
 # is the one with a size budget here. The flow files (PLAN/EXEC/REVIEW/REPO) and
 # their budgets live with the overlay content on the `overlays` branch (D77).
-BUDGETS = {"src/dotagents/_overlay/dotagents/AGENTS.md": 2500}
+BUDGETS = {"src/dotagents/_overlay/dotagents/templates/AGENTS.md": 2500}
 
 SUBST = {"<project_name>": "demopkg", "<gh_org>": "demoorg",
          "<package_name>": "demopkg", "<year>": "2026",

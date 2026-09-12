@@ -29,7 +29,9 @@ mechanism get the assembled context through a hook (`init` wires it),
 
 ## This directory
 
-- `AGENTS.md` is NOT here: the template `init` renders lives in the package.
+- `AGENTS.md` — working notes for agents editing THIS directory (read when
+  working here, not by default); `templates/AGENTS.md` is the block
+  template `init` renders into the store root.
 - `DECISIONS.md` + `decisions/` — a design log for this config itself (why a
   rule exists, what changed and when): a lean index plus one file per decision.
   Not loaded in normal sessions.

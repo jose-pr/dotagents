@@ -33,7 +33,11 @@ def test_base_overlay_is_the_dotagents_dir_only():
     shipped = sorted(p.relative_to(BASE_ROOT).as_posix() for p in BASE_ROOT.rglob("*")
                      if p.is_file() and "__pycache__" not in p.parts)
     assert "AGENTS.md" not in shipped and "CLAUDE.md" not in shipped and "README.md" not in shipped
+    assert "dotagents/templates/AGENTS.md" in shipped
     assert "dotagents/AGENTS.md" in shipped and "dotagents/README.md" in shipped
+    # The notes are notes, not a block: no managed markers, no placeholder.
+    notes = (BASE_ROOT / "dotagents" / "AGENTS.md").read_text(encoding="utf-8")
+    assert "<!-- dotagents:begin -->" not in notes, "notes, not a managed block"
 
 
 def test_block_names_the_actual_agents_md(tmp_path):
@@ -58,6 +62,8 @@ def test_init_writes_the_rendered_block_and_the_dotagents_readme(tmp_path):
     assert "annotate that you read `%s`" % (store.resolve() / "AGENTS.md").as_posix() in agents_md
     assert "~/.agents/AGENTS.md" not in agents_md
     assert (store / "dotagents" / "README.md").is_file()
+    assert (store / "dotagents" / "AGENTS.md").is_file(), "the directory's own notes"
+    assert not (store / "dotagents" / "templates").exists(), "the template stays in the package"
     assert not (store / "README.md").exists(), "the README lives in dotagents/, not the store root"
     assert not (store / "CLAUDE.md").exists(), "nothing read the skeleton CLAUDE.md; it is gone"
     # A project store names ITS file, not the user store's.

@@ -182,19 +182,20 @@ BASE_ROOT = _package_data_dir("_overlay") or (
 # into `<store>/AGENTS.md` as a managed block.
 BASE_PLAIN_FILES = [
     "dotagents/README.md",
+    "dotagents/AGENTS.md",
     "dotagents/DECISIONS.md",
 ]
 
 #: Where the base AGENTS.md block template lives inside a base overlay dir.
-BASE_AGENTS_TEMPLATE = "dotagents/AGENTS.md"
+BASE_AGENTS_TEMPLATE = "dotagents/templates/AGENTS.md"
 #: Rendered by `base_agents_text` as the actual path of the store's AGENTS.md.
 AGENTS_MD_PLACEHOLDER = "{{AGENTS_MD}}"
 
 
 def base_agents_text(src: "str | os.PathLike[str]", dest: "str | os.PathLike[str]") -> str:
     """The base AGENTS.md block for the store at ``dest``: the template
-    (``<src>/dotagents/AGENTS.md``; a ``--from`` base laid out the old way may
-    keep it at ``<src>/AGENTS.md``) with ``{{AGENTS_MD}}`` rendered as the
+    (``<src>/dotagents/templates/AGENTS.md``; a ``--from`` base laid
+    out the old way may keep it at ``<src>/AGENTS.md``) with ``{{AGENTS_MD}}`` rendered as the
     ACTUAL path of the file being written, so the block's "annotate that you
     read `…`" line names this store's file -- not a ``~/.agents`` the store
     may not live at, and not the user store's file inside a project's."""

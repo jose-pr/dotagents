@@ -173,11 +173,12 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `write_base_config(dest, ...)` (Claude also writes the `@` include into
   `~/.claude/CLAUDE.md` or `<project>/.claude/CLAUDE.md` — THE last mile; no
   `<store>/CLAUDE.md` is written any more, nothing read it). The base overlay is
-  `_overlay/dotagents/` only: `AGENTS.md` (the block TEMPLATE, rendered by
-  `cli._common.base_agents_text(src, dest)` — `{{AGENTS_MD}}` becomes the
-  actual path of the store's `AGENTS.md`, so "annotate that you read `…`"
-  names the real file; `init` and every recompose use it), `README.md`,
-  `DECISIONS.md`, `cmds/`, `hooks/`.
+  `_overlay/dotagents/` only: `templates/AGENTS.md` (the block
+  TEMPLATE, rendered by `cli._common.base_agents_text(src, dest)` —
+  `{{AGENTS_MD}}` becomes the actual path of the store's `AGENTS.md`, so
+  "annotate that you read `…`" names the real file; `init` and every recompose
+  use it), `AGENTS.md` (dev notes for that directory, read when working in it),
+  `README.md` (user-facing), `DECISIONS.md`, `cmds/`, `hooks/`.
   The user scope is whatever `resolve_user_store()` returns, never the literal
   `~/.agents`.
 - `_skills` — publish an overlay's `skills/<name>/` into a scope's shared skills dir

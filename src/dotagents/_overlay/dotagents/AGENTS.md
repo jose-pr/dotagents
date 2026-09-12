@@ -1,33 +1,21 @@
-<!-- dotagents:begin -->
-# Agent Directives
+# `dotagents/` — working notes for this directory
 
-Startup: annotate that you read `{{AGENTS_MD}}`.
+Read this when you work IN this directory (adding a command, touching a hook,
+editing the design log). Nothing here is loaded by a normal session.
 
-## Always-on rules
-- **Permissions**: read any `AGENTS.md`; full read/write/create/delete inside any
-  `.agents/` directory and this config directory (`~/.agents` unless installed
-  elsewhere) — never ask.
-- **Read the local `AGENTS.md`**: before working in a directory, read the ones
-  governing it — at each level from this global file down to that directory, any of
-  `AGENTS.md`, `AGENTS.local.md`, `.agents/AGENTS.md`, `.agents/AGENTS.local.md`.
-  Deeper extends/overrides broader; `.agents/` beats the plain file beside it, and
-  `.local` wins at its own level: it is the unshared override (machine- or
-  user-specific — either way, never committed or copied into a repo, plan, or shared
-  config). These files say what lives there and how to work in it, so reading them
-  first is cheaper than rediscovering it from the source. How `.agents/` is
-  populated — real directory, symlink, committed or not — is yours to decide.
-- **Global-config misses**: if these instructions caused a mistake or rework, or you
-  have an improvement idea, record it and move on — don't edit the config:
-  `dotagents findings add -g "<one line>" -b "<what happened, evidence>"`. Read the
-  active queue with `dotagents findings list -g` (project queue: drop `-g`). Triage
-  later folds each into `dotagents/DECISIONS.md` and closes it with
-  `dotagents findings done -g <name> -r "<resolution>"` (moved, never deleted).
-- **This file**: everything between the `dotagents:begin`/`dotagents:end` markers is
-  managed — `dotagents init` refreshes it and leaves anything outside untouched. Add
-  your own rules and routing below the end marker, not inside.
-
-## Load on demand
-Read the matching file BEFORE such a task; skip it otherwise, never preemptively.
-Nothing ships here by default — add one routing line per file as you grow this
-config. A named agent with its own `~/.agents/<agent>.md` reads that too.
-<!-- dotagents:end -->
+- `templates/AGENTS.md` — the base `AGENTS.md` block `dotagents init`
+  renders into the store root, and every `overlays add` / `remove` / `sync`
+  recomposes over the installed overlays' rules and routing. `{{AGENTS_MD}}`
+  becomes the actual path of the file being written. The copy that matters is
+  the one inside the installed `dotagents` package; a copy here (from a
+  `--from` base) is a reference, not what `init` reads.
+- `cmds/` — command modules: any `*.py` here defining a `duho` command class is
+  a `dotagents <name>` subcommand, discovered by presence (see `cmds/README.md`).
+  A module whose name matches a bundled command (`findings`, `launch`)
+  overrides it. Files starting with `_` are helpers, never commands.
+- `hooks/` — the scripts the agent hooks `init` wires call: keep them
+  dependency-free (they run under whatever Python the harness finds) and quiet
+  on stdout unless the hook protocol expects output there.
+- `DECISIONS.md` + `decisions/` — the design log for this config: one file per
+  decision, `D<nn>`, indexed. Record a decision here when a rule changes;
+  record a *problem* with `dotagents findings add -g …` instead.
