@@ -13,12 +13,11 @@ Behavior:
      -k -A -x -U --noproxy -b`` etc.). It uses the agent proxy the same way
      ``httplib`` does (``AGENTS_PROXY`` then the global vars; credentials from
      the URL or ``AGENTS_PROXY_AUTH``; ``NO_PROXY`` bypass). CA verification
-     resolves through the net overlay's ``certifi`` shim (OS trust store);
-     ``requests`` is used only if importable but is **not required**.
+     resolves through the net overlay's ``certifi`` shim (OS trust store).
 
 The large ``UNSUPPORTED_ARGS`` set is parsed and **explicitly rejected** with
 ``NotImplementedError`` -- the shim must never silently do the wrong thing for a
-flag it does not actually honor. Python 3.9+, no third-party dependency required.
+flag it does not actually honor. Python 3.9+, no third-party dependency.
 """
 import argparse
 import base64
@@ -795,15 +794,14 @@ def agent_proxy_argv(argv):
     """Extra LEADING argv so real curl uses the agent proxy, or ``[]``.
 
     Real curl reads only the global proxy vars (``http_proxy`` & co.), never
-    ``AGENTS_PROXY`` -- and the whole point of ``AGENTS_PROXY`` is a proxy that
-    differs from the machine's, so a bare passthrough would send the agent's
-    traffic the wrong way, or nowhere. Injected only when ``AGENTS_PROXY`` is
-    set and the caller did not name a proxy (``-x``) or a bypass list
-    (``--noproxy``); a caller's ``-U`` keeps the proxy but replaces the
-    credential. A configured header value rides as ``--proxy-header`` (sent to
-    the proxy only, the CONNECT included); URL userinfo as ``--proxy-user``.
-    ``NO_PROXY`` needs nothing: curl honours it even with ``--proxy``. A
-    prefix gateway is not expressible to curl -- see :func:`use_real_curl`."""
+    ``AGENTS_PROXY``, so a bare passthrough would send the agent's traffic
+    the wrong way. Injected only when ``AGENTS_PROXY`` is set and the caller
+    did not name a proxy (``-x``) or a bypass list (``--noproxy``); a
+    caller's ``-U`` keeps the proxy but replaces the credential. A configured
+    header value rides as ``--proxy-header`` (sent to the proxy only, the
+    CONNECT included); URL userinfo as ``--proxy-user``. ``NO_PROXY`` needs
+    nothing: curl honours it even with ``--proxy``. A prefix gateway is not
+    expressible to curl -- see :func:`use_real_curl`."""
     if not os.environ.get('AGENTS_PROXY'):
         return []
     proxy, noproxy, proxy_user = _caller_steering(argv)

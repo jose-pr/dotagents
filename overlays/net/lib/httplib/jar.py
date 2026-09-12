@@ -1,10 +1,11 @@
 """File-backed cookie/token jars, keyed by host.
 
-Jars live under the **configured store** (D58), not a hardcoded ``~/.agents``:
-``store_root()`` resolves ``$AGENTS_HOME`` -> ``~/.agents``. Cookies go under ``<store>/cookies/<host>.txt`` (Netscape format),
-tokens under ``<store>/tokens/<host>.token``.
+Jars live under the configured store, not a hardcoded ``~/.agents``:
+``store_root()`` resolves ``$AGENTS_HOME`` -> ``~/.agents``. Cookies go under
+``<store>/cookies/<host>.txt`` (Netscape format), tokens under
+``<store>/tokens/<host>.token``.
 
-Token values are secrets: this module never logs or prints them (Leakage rule).
+Token values are secrets: this module never logs or prints them.
 """
 from __future__ import annotations
 
@@ -24,11 +25,9 @@ def safe_name(key: str) -> str:
 
 
 def store_root() -> Path:
-    """Resolve the dotagents store directory (D58 configurable store).
-
-    ``$AGENTS_HOME`` (the configurable store, exported by ``dotagents env``) ->
-    ``~/.agents``. Never hardcodes ``~/.agents`` unconditionally so a relocated
-    store still finds its jars."""
+    """The dotagents store directory: ``$AGENTS_HOME`` (exported by
+    ``dotagents env``) -> ``~/.agents``, so a relocated store still finds
+    its jars."""
     val = os.environ.get("AGENTS_HOME")
     if val:
         return Path(val)

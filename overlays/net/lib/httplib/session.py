@@ -33,8 +33,8 @@ from .auth import AuthProvider
 from .cookies import CookieSpec, apply_to_session, domain_covers, merge_set_cookie_headers
 from .jar import CookieJar, FileCookieJar, FileTokenJar, TokenJar
 # The module, not its functions: `should_bypass`'s default sentinel belongs
-# to the module instance that defined it, and a reload (tests do one) mints
-# a new one -- a function bound by name before that passes a stale sentinel.
+# to the module instance, and a function bound by name before a reload
+# would pass a stale one.
 from . import proxy as _proxy
 from .warnings import disable_insecure_request_warnings
 
@@ -129,11 +129,10 @@ def _agent_proxy_adapter_class(HTTPAdapter):
             response.url = original
             # The response speaks the caller's request too, not the transport
             # copy: `Session.resolve_redirects` compares `response.request.url`
-            # with the next hop to decide whether `Authorization` survives (a
-            # gateway URL there strips the origin's token on every redirect),
-            # and the per-response cookies were extracted against the request
-            # host -- the gateway's -- so a `Set-Cookie` without a Domain was
-            # filed under the gateway and one naming the origin was dropped.
+            # with the next hop to decide whether `Authorization` survives,
+            # and the per-response cookies must be extracted against the
+            # origin host, not the gateway's, so a `Set-Cookie` is filed under
+            # the origin.
             response.request = caller_request
             jar = RequestsCookieJar()
             extract_cookies_to_jar(jar, caller_request, response.raw)
@@ -216,137 +215,136 @@ def new_session(
         session.verify = verify
     if user_agent:
         session.headers.setdefault("User-Agent", user_agent)
-    if True:  # the request wrapper: jars, auth provider, URL hooks
-        _orig_request = session.request
-        loaded_keys = set()
+    _orig_request = session.request
+    loaded_keys = set()
 
-        def _key_for(url: str) -> str:
-            return urlparse(url).hostname or ""
+    def _key_for(url: str) -> str:
+        return urlparse(url).hostname or ""
 
-        def _has_header(mapping, name: str) -> bool:
+    def _has_header(mapping, name: str) -> bool:
+        try:
+            return any(str(k).lower() == name for k in mapping)
+        except Exception:
+            return False
+
+    def _authorization_for(url: str) -> Optional[str]:
+        """The ``Authorization`` value for ``url``'s host from the token jar,
+        or ``None``. A value that already names its scheme (``Basic …``,
+        ``token …``) goes verbatim; a bare token is a bearer token. The
+        value is a secret: never logged."""
+        if token_jar is None:
+            return None
+        key = token_key if token_key and token_key != "__by_host__" else _key_for(url)
+        if not key:
+            return None
+        try:
+            token = token_jar.get(key)
+        except Exception:
+            return None
+        if not token:
+            return None
+        token = str(token).strip()
+        return token if re.match(r"^[A-Za-z][\w-]*\s+\S", token) else "Bearer " + token
+
+    def _cookie_keys_for(url: str) -> list:
+        host = _key_for(url)
+        if cookie_key and cookie_key != "__by_host__":
+            return [cookie_key]
+        return [host] if host else []
+
+    def _load_cookies_for(url: str) -> None:  # noqa: E306
+        if cookie_jar is None:
+            return
+        for key in _cookie_keys_for(url):
+            if not key or key in loaded_keys:
+                continue
             try:
-                return any(str(k).lower() == name for k in mapping)
-            except Exception:
-                return False
-
-        def _authorization_for(url: str) -> Optional[str]:
-            """The ``Authorization`` value for ``url``'s host from the token jar,
-            or ``None``. A value that already names its scheme (``Basic …``,
-            ``token …``) goes verbatim; a bare token is a bearer token. The
-            value is a secret: never logged."""
-            if token_jar is None:
-                return None
-            key = token_key if token_key and token_key != "__by_host__" else _key_for(url)
-            if not key:
-                return None
-            try:
-                token = token_jar.get(key)
-            except Exception:
-                return None
-            if not token:
-                return None
-            token = str(token).strip()
-            return token if re.match(r"^[A-Za-z][\w-]*\s+\S", token) else "Bearer " + token
-
-        def _cookie_keys_for(url: str) -> list:
-            host = _key_for(url)
-            if cookie_key and cookie_key != "__by_host__":
-                return [cookie_key]
-            return [host] if host else []
-
-        def _load_cookies_for(url: str) -> None:  # noqa: E306
-            if cookie_jar is None:
-                return
-            for key in _cookie_keys_for(url):
-                if not key or key in loaded_keys:
-                    continue
-                try:
-                    apply_to_session(session, cookie_jar.get(key, []))
-                except Exception:
-                    pass
-                loaded_keys.add(key)
-
-        def _save_cookies_for(url: str, response: "requests.Response") -> None:
-            if cookie_jar is None:
-                return
-            try:
-                merge_set_cookie_headers(session, response)
+                apply_to_session(session, cookie_jar.get(key, []))
             except Exception:
                 pass
-            specs = []
-            try:
-                for c in session.cookies:
-                    specs.append(
-                        CookieSpec(
-                            domain=getattr(c, "domain", "") or "",
-                            path=getattr(c, "path", "/") or "/",
-                            secure=bool(getattr(c, "secure", False)),
-                            expires=getattr(c, "expires", None),
-                            name=getattr(c, "name", ""),
-                            value=getattr(c, "value", ""),
-                        )
+            loaded_keys.add(key)
+
+    def _save_cookies_for(url: str, response: "requests.Response") -> None:
+        if cookie_jar is None:
+            return
+        try:
+            merge_set_cookie_headers(session, response)
+        except Exception:
+            pass
+        specs = []
+        try:
+            for c in session.cookies:
+                specs.append(
+                    CookieSpec(
+                        domain=getattr(c, "domain", "") or "",
+                        path=getattr(c, "path", "/") or "/",
+                        secure=bool(getattr(c, "secure", False)),
+                        expires=getattr(c, "expires", None),
+                        name=getattr(c, "name", ""),
+                        value=getattr(c, "value", ""),
                     )
-            except Exception:
-                specs = []
-            for key in _cookie_keys_for(url):
-                if not key:
-                    continue
-                # A host's file holds that host's cookies: by-host keys keep
-                # only the rows whose domain covers the host, so a session
-                # that talked to two hosts never copies one's cookies into
-                # the other's file. A named jar keeps everything.
-                rows = specs if key != _key_for(url) else [c for c in specs if domain_covers(c.domain, key)]
-                try:
-                    cookie_jar[key] = rows
-                except Exception:
-                    pass
-
-        _ensuring = False
-
-        def _load_state(url: str) -> None:
-            _load_cookies_for(url)
-            nonlocal _ensuring
-            if auth_provider and not _ensuring:
-                try:
-                    _ensuring = True
-                    auth_provider.ensure(session, url)
-                except Exception:
-                    pass
-                finally:
-                    _ensuring = False
-
-        _in_hook = False
-
-        def request(method: str, url: str, **kwargs: Any) -> "requests.Response":
-            nonlocal _in_hook
-            _load_state(url)
-            if not _in_hook:
-                _in_hook = True
-                try:
-                    hooked = _hooks.call_py_hooks(session, method, url, kwargs)
-                finally:
-                    _in_hook = False
-                if hooked is not None:
-                    return hooked
-            authorization = _authorization_for(url)
-            if (
-                authorization
-                and not kwargs.get("auth")
-                and not _has_header(session.headers, "authorization")
-            ):
-                headers = dict(kwargs.get("headers") or {})
-                if not _has_header(headers, "authorization"):
-                    headers["Authorization"] = authorization
-                    kwargs["headers"] = headers
-            resp = _orig_request(method, url, **kwargs)
-            _save_cookies_for(getattr(resp, "url", url), resp)
-            return resp
-
-        session.request = request
-        if cookie_jar is not None and cookie_key and cookie_key != "__by_host__":
+                )
+        except Exception:
+            specs = []
+        for key in _cookie_keys_for(url):
+            if not key:
+                continue
+            # A host's file holds that host's cookies: by-host keys keep
+            # only the rows whose domain covers the host, so a session
+            # that talked to two hosts never copies one's cookies into
+            # the other's file. A named jar keeps everything.
+            rows = specs if key != _key_for(url) else [c for c in specs if domain_covers(c.domain, key)]
             try:
-                apply_to_session(session, cookie_jar.get(cookie_key, []))
-                loaded_keys.add(cookie_key)
+                cookie_jar[key] = rows
             except Exception:
                 pass
+
+    _ensuring = False
+
+    def _load_state(url: str) -> None:
+        _load_cookies_for(url)
+        nonlocal _ensuring
+        if auth_provider and not _ensuring:
+            try:
+                _ensuring = True
+                auth_provider.ensure(session, url)
+            except Exception:
+                pass
+            finally:
+                _ensuring = False
+
+    _in_hook = False
+
+    def request(method: str, url: str, **kwargs: Any) -> "requests.Response":
+        nonlocal _in_hook
+        _load_state(url)
+        if not _in_hook:
+            _in_hook = True
+            try:
+                hooked = _hooks.call_py_hooks(session, method, url, kwargs)
+            finally:
+                _in_hook = False
+            if hooked is not None:
+                return hooked
+        authorization = _authorization_for(url)
+        if (
+            authorization
+            and not kwargs.get("auth")
+            and not _has_header(session.headers, "authorization")
+        ):
+            headers = dict(kwargs.get("headers") or {})
+            if not _has_header(headers, "authorization"):
+                headers["Authorization"] = authorization
+                kwargs["headers"] = headers
+        resp = _orig_request(method, url, **kwargs)
+        _save_cookies_for(getattr(resp, "url", url), resp)
+        return resp
+
+    session.request = request
+    if cookie_jar is not None and cookie_key and cookie_key != "__by_host__":
+        try:
+            apply_to_session(session, cookie_jar.get(cookie_key, []))
+            loaded_keys.add(cookie_key)
+        except Exception:
+            pass
     return session

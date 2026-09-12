@@ -47,8 +47,8 @@ import base64
 import os
 from typing import Optional, Tuple
 from urllib.parse import unquote, urlsplit, urlunsplit
-# The stdlib's own NO_PROXY matcher (what urllib and requests use); present
-# since 2.x, absent from typeshed.
+# The stdlib's own NO_PROXY matcher (what urllib and requests use); absent
+# from typeshed.
 from urllib.request import proxy_bypass_environment  # type: ignore[attr-defined]
 
 #: Header-value variables, in precedence order.
