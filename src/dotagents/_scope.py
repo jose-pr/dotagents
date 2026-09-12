@@ -7,8 +7,7 @@ only wires args) to match ``_overlays.py`` / ``_skills.py``:
   configurable store, default ``~/.agents``); ``project`` is ``<project>/.agents/``.
   An overlay installs into ``<scope>/overlays/<name>/`` and skills publish into the
   shared ``<scope>/skills/``. There is no registry file: installed overlays are
-  **discovered** by their presence under ``overlays/`` (the locked "discover, don't
-  track" decision).
+  **discovered** by their presence under ``overlays/``.
 
 * **Source** -- *where an overlay to install comes from*. ``resolve_source`` returns
   the repos in precedence order (``--repo``, the env repos, the stores'
@@ -187,9 +186,8 @@ class Scope:
                 if template:
                     found.append((level, location / template, root))
 
-        # No manifest of any kind is required for an overlay to count -- not
-        # ``CONTEXT.md``, not ``overlay.toml`` (the old ``CONTEXT.md`` gate was a
-        # precursor leftover that silently excluded EVERY real overlay, D84).
+        # No manifest is required for an overlay to count -- neither
+        # ``CONTEXT.md`` nor ``overlay.toml`` (D84).
         overlays = self.overlays  # shadowing already applied, store-stamped
         for store in self.stores:
             for overlay in overlays:
@@ -213,9 +211,9 @@ class Scope:
 
     @property
     def cmds_dir(self) -> Path:
-        """Directory of discovered command modules for this scope (D76).
+        """Directory of discovered command modules for this scope (D76):
+        ``<agents_root>/dotagents/cmds``, a seam alongside ``overlays``/``skills``.
 
-            ``<agents_root>/dotagents/cmds`` -- a seam alongside ``overlays``/``skills``.
         ``init`` creates it (with the README only; the bundled modules are always
         discovered from the package itself), and ``dotagents.cli._discover`` runs
         ``duho.discover_commands`` over it (per scope, user + project) so a
@@ -301,12 +299,10 @@ def resolve_user_store(agents_dir: "str | os.PathLike | None" = None) -> Path:
 
 
 #: Agent-native project-root vars, consulted (in order) as a fallback for
-#: ``AGENTS_PROJECT_ROOT``. A harness that already exposes its workspace root lets
-#: dotagents pick it up without the user setting anything. As of 2026-07, Claude
-#: Code's ``CLAUDE_PROJECT_DIR`` is the ONLY one any major harness sets (and only in
-#: hook / stdio-MCP / plugin-LSP contexts, not its Bash tool) -- Gemini/Codex/Cursor/
-#: Copilot/aider all rely on cwd + internal git-root detection and export nothing.
-#: Extend this tuple as other harnesses adopt one.
+#: ``AGENTS_PROJECT_ROOT``, so a harness that exposes its workspace root is
+#: picked up without the user setting anything. Claude Code sets
+#: ``CLAUDE_PROJECT_DIR`` only in hook / stdio-MCP / plugin-LSP contexts, not
+#: its Bash tool. Extend this tuple as other harnesses adopt one.
 _HARNESS_PROJECT_ROOT_VARS = ("CLAUDE_PROJECT_DIR",)
 
 
@@ -332,12 +328,11 @@ def filter_names(names: "list[str]", pattern: "Optional[str]") -> "list[str]":
     return [n for n in names if fnmatch.fnmatch(n, pattern)]
 
 
-def OverlaySource(root):  # noqa: N802 -- the name tests and older code use
+def OverlaySource(root):  # noqa: N802 -- reads as a class at the call site
     """A directory of overlays (``<root>/<name>/``): :class:`dotagents._sources.DirRepo`."""
     from dotagents._sources import DirRepo
 
     return DirRepo(root)
-
 
 
 

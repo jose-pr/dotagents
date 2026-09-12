@@ -20,7 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from dotagents import _scope, _sources  # noqa: E402
-from dotagents._sources import CompositeSource, DirRepo, GitCache, RegistryRepo, Spec, parse_spec  # noqa: E402
+from dotagents._sources import CompositeSource, DirRepo, SourceCache, RegistryRepo, Spec, parse_spec  # noqa: E402
 
 GIT = shutil.which("git")
 needs_git = pytest.mark.skipif(GIT is None, reason="needs git on PATH")
@@ -114,7 +114,7 @@ def repo(tmp_path):
 
 @needs_git
 def test_git_checkout_default_branch_tag_and_commit(repo, tmp_path):
-    cache = GitCache(tmp_path / "cache")
+    cache = SourceCache(tmp_path / "cache")
     root = cache.checkout(parse_spec(repo["url"]))
     assert (root / "kb" / "WHOLE.md").read_text() == "main\n"
     dev = cache.checkout(parse_spec(repo["url"] + "@dev"))
@@ -130,17 +130,17 @@ def test_git_checkout_default_branch_tag_and_commit(repo, tmp_path):
 
 @needs_git
 def test_git_checkout_follows_the_remote_after_a_push(repo, tmp_path):
-    GitCache(tmp_path / "cache").checkout(parse_spec(repo["url"] + "@main"))
+    SourceCache(tmp_path / "cache").checkout(parse_spec(repo["url"] + "@main"))
     _write(repo["work"] / "kb" / "WHOLE.md", "main-2\n")
     _git("commit", "-q", "-am", "main-2", cwd=repo["work"])
     _git("push", "-q", str(repo["bare"]), "main", cwd=repo["work"])
-    root = GitCache(tmp_path / "cache").checkout(parse_spec(repo["url"] + "@main"))  # a new process fetches
+    root = SourceCache(tmp_path / "cache").checkout(parse_spec(repo["url"] + "@main"))  # a new process fetches
     assert (root / "kb" / "WHOLE.md").read_text() == "main-2\n"
 
 
 @needs_git
 def test_git_repo_as_a_whole_overlay_and_as_a_directory_of_overlays(repo, tmp_path):
-    cache = GitCache(tmp_path / "cache")
+    cache = SourceCache(tmp_path / "cache")
     # A registry entry with no path: the whole repository is the overlay.
     reg = RegistryRepo("r", {"whole": repo["url"] + "@main", "inner": repo["url"] + "@dev#overlays/inner"}, cache)
     assert (reg.overlay_dir("whole") / "overlay.toml").is_file()
@@ -167,7 +167,7 @@ def test_registry_from_a_git_file(repo, tmp_path):
     _git("add", "registry.json", cwd=repo["work"])
     _git("commit", "-q", "-m", "registry", cwd=repo["work"])
     _git("push", "-q", str(repo["bare"]), "main", cwd=repo["work"])
-    reg = _sources.load_repo(repo["url"] + "@main#registry.json", GitCache(tmp_path / "cache"))
+    reg = _sources.load_repo(repo["url"] + "@main#registry.json", SourceCache(tmp_path / "cache"))
     assert isinstance(reg, RegistryRepo) and reg.available() == ["inner"]
     assert (reg.overlay_dir("inner") / "kb" / "INNER.md").read_text() == "main\n"
 
@@ -179,7 +179,7 @@ def test_registry_from_a_git_file(repo, tmp_path):
 def test_a_directory_repo_looks_up_the_overlay_by_name(tmp_path):
     _write(tmp_path / "src" / "one" / "overlay.toml", 'name = "one"\n')
     _write(tmp_path / "src" / "my_two" / "overlay.toml", 'name = "my-two"\n')
-    d = _sources.load_repo(str(tmp_path / "src"), GitCache(tmp_path / "cache"))
+    d = _sources.load_repo(str(tmp_path / "src"), SourceCache(tmp_path / "cache"))
     assert isinstance(d, DirRepo) and sorted(d.available()) == ["my_two", "one"]
     assert d.overlay_dir("one") == tmp_path / "src" / "one"
     assert d.overlay_dir("my-two") == tmp_path / "src" / "my_two", "normalized-name match"
@@ -188,13 +188,13 @@ def test_a_directory_repo_looks_up_the_overlay_by_name(tmp_path):
         d.overlay_dir("nope")
     assert "not found in source" in str(exc.value)
     with pytest.raises(SystemExit):
-        _sources.load_repo(str(tmp_path / "missing"), GitCache(tmp_path / "cache"))
+        _sources.load_repo(str(tmp_path / "missing"), SourceCache(tmp_path / "cache"))
 
 
 def test_relative_entries_resolve_against_the_registry_file(tmp_path, monkeypatch):
     """A relative source is relative to the registry FILE it is in, never to
     the process's cwd (the file may be the store's, read from anywhere)."""
-    cache = GitCache(tmp_path / "cache")
+    cache = SourceCache(tmp_path / "cache")
     _write(tmp_path / "reg" / "sub" / "r.json", json.dumps({
         "one": "../one",            # a sibling of the registry's directory
         "two": "./many",            # a directory of overlays holding two/
@@ -261,7 +261,7 @@ def test_relative_entries_in_a_git_registry_stay_in_that_repo_and_ref(repo, tmp_
     _git("push", "-q", str(repo["bare"]), "dev", cwd=work)
     _git("checkout", "-q", "main", cwd=work)
 
-    cache = GitCache(tmp_path / "cache")
+    cache = SourceCache(tmp_path / "cache")
     reg = _sources.load_repo(repo["url"] + "@dev#overlays/reg.json", cache)
     assert isinstance(reg, RegistryRepo)
     assert reg.base == Spec("git", repo["url"], "dev", "overlays")
@@ -273,7 +273,7 @@ def test_relative_entries_in_a_git_registry_stay_in_that_repo_and_ref(repo, tmp_
 
 
 def test_registry_documents_and_entry_forms(tmp_path):
-    cache = GitCache(tmp_path / "cache")
+    cache = SourceCache(tmp_path / "cache")
     _write(tmp_path / "one" / "overlay.toml", 'name = "one"\n')
     _write(tmp_path / "many" / "two" / "overlay.toml", 'name = "two"\n')
     _write(tmp_path / "r.json", json.dumps({

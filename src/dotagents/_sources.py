@@ -479,8 +479,8 @@ class RegistryRepo(object):
 def is_relative(spec: Spec) -> bool:
     """A ``dir`` spec whose location is a relative path (not absolute, not
     rooted, not ``~``-prefixed): meaningful only against the registry it came
-    from. Rooted (``/x``) is spelled out because on Windows ``os.path.isabs``
-    stopped counting a drive-less root as absolute in 3.13."""
+    from. Rooted (``/x``) is spelled out because on Windows (3.13+)
+    ``os.path.isabs`` does not count a drive-less root as absolute."""
     return spec.kind == "dir" and not (
         os.path.isabs(spec.location) or spec.location.startswith(("~", "/", "\\"))
     )
@@ -537,10 +537,6 @@ def locate(spec: Spec, cache: SourceCache) -> Path:
     if not target.exists():
         raise SystemExit("error: overlay source does not exist: %s" % target)
     return target
-
-
-#: The old name; the cache holds more than git now.
-GitCache = SourceCache
 
 
 def load_repo(spec_text: str, cache: SourceCache) -> Any:

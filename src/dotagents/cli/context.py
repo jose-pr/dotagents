@@ -1,4 +1,4 @@
-"""`dotagents context` -- assemble the effective context for agents (Plan 04)."""
+"""`dotagents context` -- assemble the effective context for agents."""
 
 from pathlib import Path
 from typing import Optional
@@ -12,7 +12,7 @@ from dotagents.cli._common import (  # noqa: F401  (_write_stdout re-exported fo
 
 
 class Context(DotAgentsArgs):
-    """Assemble the effective context for agents (Plan 04).
+    """Assemble the effective context for agents.
 
     Roots (both configurable, never hardcoded -- D58/D79/D80): the user store is
     ``--agents-dir`` -> ``$AGENTS_HOME`` ->
@@ -128,11 +128,9 @@ class Context(DotAgentsArgs):
                 write_text_lf(self.out, blob)
                 self._logger_.info("Wrote JSON context to %s", self.out)
             else:
-                # default '-' -> stdout (json never writes native configs). Same
-                # cp1252-crash risk as the markdown path below -- a bare print()
-                # encodes with the console codepage and dies on any character
-                # outside Latin-1 (confirmed live: a `≥` in real assembled
-                # context crashed this exact line before the fix).
+                # default '-' -> stdout (json never writes native configs), as
+                # UTF-8: a bare print() encodes with the console codepage and
+                # dies on any character outside Latin-1.
                 _write_stdout(blob + "\n")
             return 0
 

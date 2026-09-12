@@ -73,15 +73,8 @@ class BuildPyz(LoggingArgs, Cmd):
 
         # This module lives at src/dotagents/cli/build_pyz.py, so the repo root
         # is parents[3] (cli -> dotagents -> src -> repo) and the dotagents
-        # package dir is parents[1].
-        #
-        # The repo's `tools/` is NOT bundled. It used to ride along as
-        # `dotagents/_tools` for compiled wrappers (`audit`, and a personal
-        # scanner) that shelled out to it; both wrappers are gone (audit is repo
-        # CI tooling, the scanner is a personal command module the user keeps in
-        # their own `.agents/`), nothing reads `_tools`, and
-        # `tools/audit.py`'s own docstring says it is not shipped in the .pyz --
-        # which is only true now that this stopped copying it.
+        # package dir is parents[1]. Only the package is bundled; the repo's
+        # `tools/` is CI tooling and never ships in the .pyz.
         repo_root = Path(__file__).resolve().parents[3]
         pyproject = repo_root / "pyproject.toml"
         dotagents_pkg_src = Path(__file__).resolve().parents[1]
@@ -128,14 +121,9 @@ class BuildPyz(LoggingArgs, Cmd):
             )
 
             # `dotagents.__version__` is a second, independently-maintained copy
-            # of pyproject.toml's `version` -- confirmed stale on a real release
-            # (pyproject.toml had already been bumped twice past what
-            # __version__ still said, so `dotagents --version` on a freshly
-            # built pyz reported a version two releases old). Rather than trust
-            # the source tree's __init__.py to have been bumped in lockstep,
-            # read pyproject.toml directly and rewrite the STAGED copy's
-            # __version__ to match -- the built artifact is then correct
-            # regardless of whether __init__.py itself was ever touched.
+            # of pyproject.toml's `version` and can lag it. Read pyproject.toml
+            # directly and rewrite the STAGED copy's `__version__` to match, so
+            # the built artifact is correct regardless of `__init__.py`.
             match = _PYPROJECT_VERSION_RE.search(pyproject.read_text(encoding="utf-8"))
             if match is None:
                 self._logger_.warning(

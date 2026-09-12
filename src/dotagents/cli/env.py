@@ -1,10 +1,8 @@
-"""`dotagents env` -- chained env-file assembly + env.py execution (plan 07).
+"""`dotagents env` -- chained env-file assembly + env.py execution.
 
-Self-contained block: all logic lives in `_env.py` (frozen contract B) and
-`_agents.stamp_identity` (plan 08). The only umbrella touch is registering
-`Env` on `Dotagents._subcommands_` (in `cli/__init__.py`). Never logs
-DOTAGENTS_*/AGENTS_* VALUES -- output goes to stdout for the caller to consume;
-the logger only ever names vars (Leakage rule).
+All assembly logic lives in `_env.py` (contract B) and `_agents.stamp_identity`;
+this module formats the result. Never logs env VALUES -- output goes to stdout
+for the caller to consume; the logger only ever names vars (Leakage rule).
 """
 
 import re
@@ -55,35 +53,17 @@ _DRIVE_LETTER_RE = re.compile(r"^([A-Za-z]):/")
 
 
 def _to_posix_path(segment: str) -> str:
-    """One path segment, converted to a form MSYS2/Cygwin bash can actually
-    resolve a PATH lookup through -- not just cosmetically POSIX-shaped.
+    """One path segment, converted to a form MSYS2/Cygwin bash can resolve a
+    PATH lookup through.
 
     Uses ``PureWindowsPath`` explicitly, NOT the platform-dependent bare
-    ``Path``. This distinction is load-bearing, not stylistic: `Path` resolves
-    to `PosixPath` on a POSIX host, and `PosixPath("C:\\Users\\x").as_posix()`
-    does NOT recognize `C:` as a drive or `\\` as a separator -- backslashes
-    pass through as literal filename characters. This code runs in CI on
-    Linux/macOS runners (the test suite exercises it there), so a bare `Path`
-    silently only worked when the CI happened to run on a Windows runner --
-    which for THIS job it does not. `PureWindowsPath` parses Windows syntax
-    unconditionally, everywhere, matching what the value actually is (a
-    Windows path string), independent of the host running the code.
-
-    `PureWindowsPath(...).as_posix()` alone still leaves a drive letter as
-    `C:/...`, which fails PATH lookup identically to the backslash form --
-    verified directly on Windows (`command -v grep` empty for `C:/Program
-    Files/Git/usr/bin`, populated for `/c/Program Files/Git/usr/bin`, same
-    directory). So a genuine drive-letter prefix is additionally rewritten to
-    its MSYS mount point (`C:/...` -> `/c/...`).
-
-    A UNC segment (`\\\\server\\share\\...`) is handled correctly by
-    `PureWindowsPath` natively -- it already preserves the double-slash UNC
-    root through `.as_posix()` (`//server/share/...`), unlike a naive
-    backslash-replace on a plain string, which collapses it to one slash.
-
-    An already-POSIX or relative segment (`.agents/bin`, `/etc/agents/bin`) is
-    parsed as a relative Windows path (backslashes are still separators there,
-    but there are none to convert) and passes through unchanged.
+    ``Path``: on a POSIX host `Path` is `PosixPath`, which treats `C:` and `\\`
+    as literal filename characters. A drive-letter prefix is additionally
+    rewritten to its MSYS mount point (`C:/...` -> `/c/...`), since bash does
+    not resolve `C:/...` in PATH either. A UNC segment keeps its double-slash
+    root through `.as_posix()` (`//server/share/...`). An already-POSIX or
+    relative segment (`.agents/bin`, `/etc/agents/bin`) passes through
+    unchanged.
     """
     posix = PureWindowsPath(segment).as_posix()
     m = _DRIVE_LETTER_RE.match(posix)
@@ -110,39 +90,21 @@ _MSYS_MOUNT_RE = re.compile(r"^/([A-Za-z])(/.*)?$")
 
 def _to_windows_path(segment: str) -> "str | None":
     """One path segment, converted to a form a native Windows process
-    (``cmd.exe``/``powershell.exe``) can actually resolve a PATH lookup
-    through -- the inverse of :func:`_to_posix_path`.
+    (``cmd.exe``/``powershell.exe``) can resolve a PATH lookup through -- the
+    inverse of :func:`_to_posix_path`. The caller's inherited ``PATH`` may
+    already hold POSIX-style entries (a WSL/MSYS shell), which PowerShell
+    would otherwise take as one opaque string.
 
-    Real machine bug this fixes: ``dotagents env`` was invoked from a genuine
-    Windows PowerShell terminal, but the process's own inherited ``PATH``
-    already contained POSIX/WSL-mount-style entries (``/mnt/c/Program
-    Files/...``) -- not something dotagents itself emits (its own bin dirs
-    resolve via native ``Path`` and are already Windows-native), but a
-    pre-existing condition of the caller's live environment. Emitted
-    unconverted into ``${env:PATH} = '...'``, the assignment is syntactically
-    VALID PowerShell (a single-quoted string can contain anything), but the
-    resulting ``PATH`` value is colon-joined POSIX paths with embedded spaces
-    -- ``powershell.exe`` splits it on nothing (a single opaque string) and
-    every subsequent bare-command PATH lookup in that session breaks, the
-    Windows-side mirror of the POSIX PATH bug ``_to_posix_path`` already
-    guards against.
+    Handles both mount conventions: ``/mnt/c/...`` (WSL) and ``/c/...``
+    (MSYS2/Git-Bash/Cygwin, what `_to_posix_path` produces) rewrite to
+    ``C:\\...``. A segment that already looks Windows-native (a backslash, or a
+    drive-letter prefix) passes through ``PureWindowsPath`` with separators
+    normalized. A relative segment just gets its separators normalized.
 
-    Handles the two mount conventions actually seen in practice:
-    ``/mnt/c/...`` (WSL's own mount point) and ``/c/...`` (MSYS2/Git-Bash/
-    Cygwin's mount point, i.e. exactly what `_to_posix_path` produces) --
-    both rewrite to ``C:\\...``. A segment that already looks Windows-native
-    (contains a backslash, or a drive-letter-colon prefix) passes through via
-    ``PureWindowsPath`` unchanged (backslashes normalized, forward slashes
-    converted) rather than being misparsed as a POSIX path.
-
-    Returns ``None`` for a segment with NO drive to recover (e.g. WSL-only
-    paths like ``/usr/bin`` or ``/home/x/.local/bin`` -- genuinely part of the
-    Linux filesystem inside WSL, not reachable from Windows at all under any
-    rewrite). Silently turning one of these into a relative ``\\usr\\bin``
-    would be worse than useless: it wouldn't error, but it would resolve
-    against Windows' cwd and could shadow an unrelated file there. Dropping
-    it is correct -- that directory has no Windows-side meaning, so a lookup
-    through it was never going to succeed either way.
+    Returns ``None`` for an absolute POSIX segment with no drive to recover
+    (``/usr/bin``): it has no Windows-side meaning, and emitting a relative
+    ``\\usr\\bin`` would resolve against the cwd and could shadow an unrelated
+    file.
     """
     if "\\" in segment or re.match(r"^[A-Za-z]:", segment):
         return str(PureWindowsPath(segment))
@@ -163,16 +125,11 @@ def _looks_like_posix_chunk(chunk: str) -> bool:
     something that needs further `:`-splitting, not a single already-native
     Windows path that merely happens to sit in the same PATH value.
 
-    A chunk containing a backslash is unambiguous: nothing POSIX ever has
-    one, so it is native and this returns False outright, before even
-    checking for mount points -- guards a pathological case like a Windows
-    path containing a literal `:` beyond its drive prefix (not realistic in
-    practice, but the check order makes the function correct regardless).
+    A chunk containing a backslash or a drive-letter prefix is native and
+    returns False before any mount-point check: `C:/a/tools` is a legal native
+    path, and splitting it on `:` would misread `/a/tools` as an MSYS mount.
     """
     if "\\" in chunk or re.match(r"^[A-Za-z]:", chunk):
-        # A backslash, or a drive-letter prefix (`C:/a/tools` -- forward
-        # slashes are legal in a native Windows path, and splitting THAT on `:`
-        # would misread `/a/tools` as an MSYS mount and emit `C;A:\tools`).
         return False
     return any(
         _WSL_MOUNT_RE.match(seg) or _MSYS_MOUNT_RE.match(seg)
@@ -185,26 +142,17 @@ def _to_windows_path_list(value: str) -> str:
     """Convert a PATH value back to an OS-native (Windows) ``;``-joined one,
     for a Windows-target shell-sourceable format (``powershell``, ``cmd``).
 
-    Handles the MIXED case, not just a purely POSIX value: `get_environment`
-    prepends dotagents' own bin dirs (already Windows-native, `;`-joined)
-    onto whatever `PATH` the caller's environment already held -- so a
-    genuinely POSIX-sourced `PATH` (WSL/MSYS pwsh inheriting a Linux-side
-    `PATH`) arrives here as ``<native-bin-dirs-joined-with-;>;<original-
-    colon-joined-POSIX-path>``, one string with BOTH separators live at once.
-    Confirmed live: an earlier version of this function split on `;` only
-    implicitly (via a value-wide backslash/`;` presence check bailing out
-    entirely), so the native PREFIX converted correctly but the still-POSIX
-    TAIL after it passed through completely untouched.
+    Handles the MIXED case: `get_environment` prepends dotagents' own bin dirs
+    (Windows-native, `;`-joined) onto whatever `PATH` the caller held, so a
+    POSIX-sourced `PATH` arrives as ``<native;-joined prefix>;<colon-joined
+    POSIX tail>`` with both separators live at once.
 
-    Splits on `;` FIRST (safe: a POSIX path segment never legitimately
-    contains a literal `;`), then for each chunk that looks POSIX
-    (`_looks_like_posix_chunk`) splits it again on `:` and converts each
-    piece; a chunk that is already native passes through as one segment
-    unchanged. Empty segments are dropped, same rationale as
-    :func:`_to_posix_path_list`; POSIX segments with no Windows equivalent
-    (`_to_windows_path` returning ``None`` -- WSL-only paths like
-    ``/usr/bin``) are dropped too, rather than emitted as a broken relative
-    path.
+    Splits on `;` FIRST (a POSIX segment never contains a literal `;`), then
+    splits each chunk that looks POSIX (`_looks_like_posix_chunk`) on `:` and
+    converts each piece; a native chunk passes through as one segment. Empty
+    segments are dropped (see :func:`_to_posix_path_list`), and so are POSIX
+    segments with no Windows equivalent (`_to_windows_path` returning
+    ``None``).
     """
     segments: "list[str]" = []
     for chunk in value.split(";"):
@@ -226,11 +174,8 @@ def _looks_like_posix_path_list(key: str, value: str) -> bool:
     """True if `key`/`value` is a PATH-shaped var containing at least one
     ALREADY-POSIX chunk that needs converting back to native Windows form for
     a Windows-target format (``powershell``/``cmd``) -- the inverse gate of
-    :func:`_looks_like_path_list`. Handles a value that MIXES native and
-    POSIX chunks (see `_to_windows_path_list`'s docstring for why that shape
-    occurs), not just a purely POSIX one -- checks every `;`-delimited chunk
-    rather than bailing out on the value as a whole the moment any `;` or
-    `\\` appears anywhere in it.
+    :func:`_looks_like_path_list`. Checks every `;`-delimited chunk, so a value
+    that MIXES native and POSIX chunks (see `_to_windows_path_list`) qualifies.
     """
     if not key.endswith("PATH"):
         return False
@@ -275,52 +220,29 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
 
     fmt = FORMAT_ALIASES.get(output_format, output_format)
 
-    # `get_environment` assembles PATH using the HOST OS's own convention
-    # (os.pathsep + native Path separators -- `;` and `\` on Windows), because
-    # that is what a Windows subprocess (cmd/PowerShell, or `dotagents` itself
-    # spawning a child) needs. Shell-sourceable POSIX formats need the opposite:
-    # bash/fish always use `:` and `/`, regardless of host OS. Left unconverted
-    # on Windows, `export PATH="C:\...;C:\..."` sourced into a POSIX shell (this
-    # is exactly what the SessionStart hook writes into $CLAUDE_ENV_FILE) hands
-    # bash a PATH it cannot parse -- every `;`-joined, backslash-laden segment
-    # becomes one broken entry, and EVERY bare-name command lookup breaks for
-    # the rest of that session. This is not cosmetic: it can take down `git`,
-    # `grep`, `python` -- anything resolved via PATH -- for the shell that
-    # sources it. Convert PATH-shaped values only, for POSIX target formats
-    # only; every other var (and every other format) is untouched.
+    # `get_environment` assembles PATH in the HOST OS's convention (`;` and `\`
+    # on Windows), which is what a native subprocess needs. POSIX shell formats
+    # need `:` and `/` regardless of host: a `;`-joined, backslash-laden PATH
+    # sourced into bash (the SessionStart hook writes this into
+    # $CLAUDE_ENV_FILE) breaks every bare-name command lookup for that shell.
+    # Convert PATH-shaped values only, for POSIX target formats only.
     if fmt in ("export", "dotenv", "fish"):
-        # PATHEXT is a Windows-only concept (extensionless exec resolution) with
-        # no POSIX meaning; dropped rather than emitted as noise.
+        # PATHEXT is Windows-only with no POSIX meaning; dropped.
         #
-        # A handful of Windows-native var names (`ProgramFiles(x86)`,
-        # `CommonProgramFiles(Arm)`, inherited from os.environ into base_env)
-        # contain parentheses -- not a legal POSIX shell identifier. `export
-        # FOO(X86)=...` is a hard bash SYNTAX ERROR, not a bad value: sourcing
-        # it aborts the rest of the file, so every var after the first offender
-        # in iteration order never gets set either. Worse than the PATH bug,
-        # same root cause (unfiltered OS-native env reaching a POSIX target).
+        # Windows-native var names with parentheses (`ProgramFiles(x86)`,
+        # inherited from os.environ) are not legal POSIX identifiers: `export
+        # FOO(X86)=...` is a bash SYNTAX ERROR that aborts the rest of the
+        # sourced file, so they are dropped too.
         env = {
             k: (_to_posix_path_list(v) if _looks_like_path_list(k, v) else v)
             for k, v in env.items()
             if k != "PATHEXT" and _POSIX_IDENTIFIER_RE.match(k)
         }
     elif fmt in ("powershell", "cmd"):
-        # The MIRROR bug, going the other way: confirmed live on a real
-        # machine running `dotagents env` from a genuine Windows PowerShell
-        # terminal, where the process's own inherited `PATH` already
-        # contained WSL/MSYS-mount-style entries (`/mnt/c/Program Files/...`)
-        # -- not something dotagents' own bin-path logic emits, a pre-existing
-        # condition of the caller's live environment (see `_to_windows_path`'s
-        # docstring). Left unconverted, `${env:PATH} = '/usr/bin:/mnt/c/...'`
-        # is syntactically valid PowerShell (a quoted string can hold
-        # anything) but semantically useless: powershell.exe's own PATH
-        # lookup expects `;`-joined, backslash-native segments, so the whole
-        # value becomes one opaque unusable string and every bare-command
-        # lookup breaks for that session -- the Windows-target mirror of the
-        # POSIX-target PATH bug already guarded above. Convert only
-        # PATH-shaped values that are ALREADY POSIX-style
-        # (`_looks_like_posix_path_list`); an ordinary already-native value is
-        # never touched.
+        # The mirror case: the caller's inherited `PATH` may hold WSL/MSYS-mount
+        # entries (`/mnt/c/...`), which PowerShell would take as one opaque
+        # string (see `_to_windows_path`). Convert only PATH-shaped values that
+        # are already POSIX-style; a native value is never touched.
         env = {
             k: (_to_windows_path_list(v) if _looks_like_posix_path_list(k, v) else v)
             for k, v in env.items()
@@ -337,15 +259,10 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
     if fmt == "dotenv":
         return "\n".join("%s=%s" % (k, _dotenv_value(env[k])) for k in keys)
     if fmt == "powershell":
-        # `${env:NAME}` (curly-brace form), not the bare `$env:NAME` sigil form.
-        # A handful of real Windows env vars have parens in their names
-        # (`ProgramFiles(x86)`, `CommonProgramFiles(Arm)`, inherited via
-        # os.environ) -- `$env:FOO(X86) = ...` is a PowerShell parse error
-        # ("Unexpected token '('"), the same class of bug D90 fixed for the
-        # export/dotenv/fish formats. The curly-brace form accepts ANY
-        # character in the name and is valid for every var, not just the
-        # special-cased ones, so it is used unconditionally rather than only
-        # for names that need it.
+        # `${env:NAME}` (curly-brace form), not the bare `$env:NAME` sigil:
+        # Windows env vars with parens in their names (`ProgramFiles(x86)`)
+        # make `$env:FOO(X86) = ...` a parse error, and the curly-brace form
+        # accepts any name, so it is used unconditionally.
         return "\n".join(
             "${env:%s} = '%s'" % (k, env[k].replace("'", "''")) for k in keys
         )
@@ -369,11 +286,9 @@ def _sh_quote(v: str) -> str:
     Single quotes, with an embedded ``'`` written as ``'\\''``: nothing inside
     single quotes is ever expanded, so a value containing ``$(...)``, backticks
     or ``$HOME`` is set verbatim instead of being EXECUTED when the SessionStart
-    hook's output is sourced from ``$CLAUDE_ENV_FILE`` (measured: a JSON-quoted
-    ``export K="a$(echo INJECTED)b"`` came back as ``aINJECTEDb``). A value with a
-    newline or another control character uses bash's ``$'...'`` form instead,
-    since a single-quoted string cannot carry an escape for them (and the old
-    JSON ``\\n`` was set as the two characters ``\\`` ``n``). Non-ASCII passes
+    hook's output is sourced from ``$CLAUDE_ENV_FILE``. A value with a newline
+    or another control character uses bash's ``$'...'`` form instead, since a
+    single-quoted string cannot carry an escape for them. Non-ASCII passes
     through as-is -- the file is written and sourced as UTF-8.
     """
     if any(ord(c) < 0x20 or c == "\x7f" for c in v):
@@ -483,11 +398,9 @@ class Env(DotAgentsArgs):
     "Emit only vars that differ from the current environment."
     ("--diff",)
 
-    # Both flags come from `DotAgentsArgs`; only their HELP is restated here,
-    # because this command's `-g` means something narrower than the base's (skip
-    # the project tiers, same store) and its store is always the user store. The
-    # flags, defaults and types are identical to the base's -- duho takes the
-    # subclass's declaration, so the strings below are what `--help` prints.
+    # Both flags come from `DotAgentsArgs`; only their HELP is restated here
+    # (same flags, defaults and types), because this command's `-g` is narrower
+    # than the base's and its store is always the user store.
     global_scope: bool = False
     "Skip project-level env files (the store root is unaffected)."
     ("--global", "-g")
@@ -529,9 +442,7 @@ class Env(DotAgentsArgs):
             env = dict(base)
             env.update(changes)
 
-        # UTF-8 bytes straight to the buffer: a bare print() encodes with the
-        # console codepage (cp1252 on a default Windows shell) and dies on the
-        # first non-Latin-1 character in any value -- the same failure
-        # `context` already guards against.
+        # UTF-8 straight to the buffer: a bare print() encodes with the console
+        # codepage and dies on the first non-Latin-1 character in any value.
         _write_stdout(_format_env(env, output_format) + "\n")
         return 0

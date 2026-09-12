@@ -9,7 +9,7 @@ Idempotence is the property that matters: ``dotagents init`` is re-run often, an
 merge that appended a duplicate hook each time would quietly grow the file until
 the agent ran our command N times per session.
 
-The schema (verified against current Claude Code docs, 2026-07-24) is::
+The schema (Claude Code's; Codex's is the same shape) is::
 
     hooks: { "<Event>": [ { "matcher"?: str,
                             "hooks": [ {"type": "command", "command": str,
@@ -43,12 +43,9 @@ def build_hook_entry(
     entirely when None rather than written as null -- an absent key is the
     documented "no matcher" / "default shell" form. ``shell`` (Claude) selects
     the interpreter for THIS hook's own ``command`` (``"bash"`` or
-    ``"powershell"``); ``command_windows`` (Codex, emitted as the camelCase
-    ``commandWindows`` key its docs specify) is a separate Windows-only command
-    OVERRIDE -- Codex runs ``command`` normally and substitutes
-    ``commandWindows`` for it on Windows, rather than picking an interpreter for
-    one shared string. Both are agent-specific vocabulary living in this one
-    shared merge function rather than duplicated per adapter.
+    ``"powershell"``); ``command_windows`` (Codex, emitted as ``commandWindows``)
+    is a separate Windows-only command that Codex substitutes for ``command``
+    on Windows.
     """
     hook: "dict[str, Any]" = {"type": "command", "command": command}
     if shell:
@@ -68,8 +65,7 @@ def _has_status(entry: Any, status_message: str) -> bool:
     """True if `entry` carries a hook stamped with our `statusMessage`.
 
     The status message is a stable label we choose, so it identifies our hook
-    across revisions of the command text -- unlike the command itself, which
-    changes and would leave the old version orphaned beside the new one.
+    across revisions of the command text.
     """
     if not isinstance(entry, dict):
         return False
@@ -109,25 +105,20 @@ def merge_hook(
 
     * absent / not-a-list ``existing`` -> a fresh single-entry list (changed).
     * an entry that is exactly what we would write -> kept as-is (unchanged);
-      one carrying our hook in an older shape (a revised ``shell`` / ``matcher``
-      / ``commandWindows`` / status, or an older command text under the same
+      one carrying our hook in a different shape (``shell`` / ``matcher`` /
+      ``commandWindows`` / status, or a different command text under the same
       status message) -> replaced in place; any later duplicate is dropped
       (changed), so repeated ``init`` runs converge instead of accumulating.
     * a matcher-object holding a foreign hook AND ours -> the foreign hook stays
-      verbatim in that entry, ours moves to its own entry (never drop a user's
-      hook because it happened to share an object with ours).
+      verbatim in that entry, ours moves to its own entry.
     * foreign entries -> preserved verbatim, untouched, in their original order.
     * malformed entries (bare strings, dicts without a ``hooks`` list, non-dicts)
       -> dropped, flagged changed. Never raises: a user's hand-edited settings
       file must not make ``init`` explode.
 
-    ``status_message`` doubles as our hook's IDENTITY. A hook carrying the same
-    status message is treated as an older shape of our own hook and replaced, not
-    left beside the new one. Without that, dedup is by exact command string, so
-    revising the command we write silently orphans the previous version and the
-    old (often broken) hook keeps running next to the new one. The status message
-    is a stable label we choose, which makes it a better key than the command text
-    it describes.
+    ``status_message`` doubles as our hook's IDENTITY: a hook carrying the same
+    status message is ours and gets replaced, so revising the command text
+    never leaves the previous version running beside the new one.
     """
     ours = build_hook_entry(
         command, matcher=matcher, status_message=status_message, shell=shell,
@@ -159,8 +150,7 @@ def merge_hook(
         if foreign:
             # A matcher-object holding BOTH a foreign hook and ours: the foreign
             # sibling stays, verbatim, in its own entry; ours moves to (or is
-            # refreshed in) our own entry below. Dropping the whole object took
-            # the user's hook with it (review 2026-09-09).
+            # refreshed in) our own entry below.
             kept = dict(entry)
             kept["hooks"] = foreign
             normalized.append(kept)
@@ -171,9 +161,9 @@ def merge_hook(
             continue
         seen_ours = True
         # Ours, and only ours: keep it exactly when it already equals what we
-        # would write, otherwise REPLACE it -- a revised `shell` / `matcher` /
-        # `commandWindows` / status must reach existing users even when the
-        # command text itself is unchanged.
+        # would write, otherwise REPLACE it -- a changed `shell` / `matcher` /
+        # `commandWindows` / status must land even when the command text is
+        # unchanged.
         if entry == ours:
             normalized.append(entry)
         else:
@@ -189,8 +179,8 @@ def merge_hook(
 
 def remove_hook(existing: Any, status_message: str) -> "tuple[list, bool]":
     """Retract our hook identified by ``status_message`` from ``existing`` --
-    the inverse of :func:`merge_hook`, for a hook this platform no longer
-    registers (a `shell: powershell` variant on a POSIX host). Returns
+    the inverse of :func:`merge_hook`, for a hook this platform does not
+    register (a `shell: powershell` variant on a POSIX host). Returns
     ``(list, changed)``. A foreign hook sharing an entry with ours stays; an
     entry left empty is dropped; a non-list ``existing`` is ``([], False)``."""
     if not isinstance(existing, list):

@@ -11,10 +11,6 @@ then sweeps any now-broken symlinks.
 Pure stdlib (``os``/``shutil``) -- no ``pathlib_next`` -- so it works in a plain
 ``pip install`` and inside the ``.pyz``. Symlink-preferred with a copy fallback is
 the contract; ``--copy`` forces the copy path up front (Windows / no-symlink).
-
-Ported from the precursor's ``managers/skills.py`` + ``helpers.py`` sync
-primitives; the external ``skills``-CLI registry (``register``/``skills.txt``) is
-deliberately **dropped** -- publish-to-shared-dir is the stdlib, useful part.
 """
 
 from __future__ import annotations
@@ -51,9 +47,8 @@ def _paths_match(source: Path, target: Path) -> bool:
 
     This is what ``unsync_path`` uses to decide "this copy is ours, remove it"
     from "the user edited it, leave it alone", and what ``resync_path`` uses to
-    detect drift -- so it has to see content, not just names. A name-only
-    check deleted a user-edited copy whose file set happened to match (review
-    2026-09-09). Skill dirs are small; hashing them is cheap."""
+    detect drift -- so it has to see content, not just names. Skill dirs are
+    small; hashing them is cheap."""
     if not source.exists() or not target.exists():
         return False
     if source.is_file() and target.is_file():
@@ -220,8 +215,8 @@ def resync_overlay_skills(
     overlay_dir: Path, shared_skills: Path, *, copy: bool = False, logger=None
 ) -> int:
     """Refresh already-published skills of this overlay (copy-mode drift). New
-    skills are published (as copies with ``copy``, the ``sync --copy`` form --
-    which used to be accepted and ignored); symlinks are inherently current."""
+    skills are published (as copies with ``copy``, the ``sync --copy`` form);
+    symlinks are inherently current."""
     skill_dirs = _overlay_skill_dirs(overlay_dir)
     if not skill_dirs or not shared_skills.is_dir():
         # Nothing published yet -> fall back to a fresh publish.

@@ -1,25 +1,19 @@
-"""Chained env-file assembly + ``env.py`` execution (plan 07).
-
-Ported from the precursor ``agentic`` under **frozen contract B** -- the
-observable behavior (what files are found, in what order, and how they are
-evaluated) is preserved verbatim; only the code shape is duho/dotagents-native.
+"""Chained env-file assembly + ``env.py`` execution (contract B).
 
 Contract B, the exact sequence :func:`get_environment` performs:
 
   1. **Bins onto PATH FIRST**, before any env eval. Each level's ``bin`` dir
      (contract-A precedence order, *except* project-root) is prepended to
      ``PATH`` so env scripts can call overlay helpers by name. **Libs onto
-     PYTHONPATH the same way** (added after contract B was frozen, so not part
-     of it): each level's ``lib`` dir that EXISTS is prepended to ``PYTHONPATH``
-     (:func:`get_lib_paths`), so an ``env.py`` -- and every subprocess that
-     inherits the env -- can ``import`` an overlay's library (an overlay ships
-     ``lib/<module>.py`` beside its ``cmds/``).
+     PYTHONPATH the same way**: each level's ``lib`` dir that EXISTS is
+     prepended to ``PYTHONPATH`` (:func:`get_lib_paths`), so an ``env.py`` --
+     and every subprocess that inherits the env -- can ``import`` an overlay's
+     library (an overlay ships ``lib/<module>.py`` beside its ``cmds/``).
   2. **Two tiers, in order**: ALL ``pre.env.py`` / ``pre.env`` / ``pre.local.env``
      first, THEN ALL ``env.py`` / ``env`` / ``local.env`` -- the concatenation of
-     two contract-A resolutions (:func:`resolve_env_files`). Amended
-     2026-09-09: the project-root level resolves ONLY ``pre.local.env`` /
-     ``local.env`` -- a checkout's own top-level ``env.py`` / ``env`` is never
-     executed or sourced (see :func:`resolve_env_files`).
+     two contract-A resolutions (:func:`resolve_env_files`). The project-root
+     level resolves ONLY ``pre.local.env`` / ``local.env``: a checkout's own
+     top-level ``env.py`` / ``env`` is never executed or sourced.
   3. **Within each tier**, files are in the contract-A precedence order: each
      store in ``Scope.stores`` -- system, user, project -- with its overlays
      first and itself second, then project-root.
@@ -34,7 +28,7 @@ Contract B, the exact sequence :func:`get_environment` performs:
   6. :func:`get_diff` returns only the vars that differ from the caller's base
      environment; :func:`get_environment` returns the full change set.
 
-Plan-08 identity/proxy model is wired into the output around the file chain:
+The identity/proxy model is wired into the output around the file chain:
 
   * **Identity** (:func:`dotagents._agents.stamp_identity`) is seeded BEFORE the
     file chain, so env files can branch on ``AGENTS_HARNESS`` and override the
@@ -73,7 +67,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from dotagents._overlays import Overlay  # noqa: F401  (re-exported; tests patch through here)
 from dotagents._scope import Scope, project_root_default
 
 
@@ -81,8 +74,7 @@ from dotagents._scope import Scope, project_root_default
 # CreateProcess wants SystemRoot; POSIX loaders want the temp dir). These are
 # backfilled from the real environment ONLY when the accumulated env lacks them,
 # so a child env.py always launches -- without leaking user config the chain did
-# not itself set. Not part of contract B (which is about what the chain
-# resolves/evaluates); purely making subprocess spawn portable.
+# not itself set.
 _SPAWN_BOOTSTRAP_VARS = (
     "SYSTEMROOT",
     "SystemRoot",
@@ -106,7 +98,7 @@ def _spawn_env(child_env: "dict[str, str]") -> "dict[str, str]":
 
 
 # --------------------------------------------------------------------------- #
-# Output-format aliases + calling-shell detection (plan 07, D83).
+# Output-format aliases + calling-shell detection (D83).
 # --------------------------------------------------------------------------- #
 
 #: Alias -> canonical output format. `_format_env` normalizes through this so the
@@ -206,10 +198,10 @@ def _detect_shell_format_win():  # pragma: no cover - exercised only on win32
 
     A ``cmd.exe`` whose OWN parent is another shell is skipped: that is the
     `dotagents.cmd` wrapper `_wrappers.py` writes (a batch file cannot `exec`,
-    so the chain from PowerShell is `python <- cmd.exe <- pwsh`). Stopping at
-    that `cmd` handed every PowerShell user `set "K=v"` lines -- measured with
-    a probe wrapper. A `cmd` whose parent is not a shell (Windows Terminal,
-    explorer, a scheduler) is a real interactive cmd and still wins.
+    so the chain from PowerShell is `python <- cmd.exe <- pwsh`, and stopping
+    there would hand a PowerShell user `set "K=v"` lines). A `cmd` whose
+    parent is not a shell (Windows Terminal, explorer, a scheduler) is a real
+    interactive cmd and still wins.
     """
     try:
         pmap = _win_ppid_exe_map()
@@ -316,15 +308,14 @@ def detect_shell_format() -> str:
 
 
 # --------------------------------------------------------------------------- #
-# File evaluators (ported from the precursor helpers.py -- keep the protocols).
+# File evaluators.
 # --------------------------------------------------------------------------- #
 
 
 #: Vars bash itself sets in the child that sources a plain env file. They are
 #: bash's, not the file's, and must not be reported as the file's changes:
-#: measured (Git Bash, `env -i`): `_`, `PWD` (in POSIX `/c/...` form -- emitted
-#: into a PowerShell session it is simply wrong), `OLDPWD`, `SHLVL`, and
-#: MSYS2's `MSYSTEM*` family.
+#: `_`, `PWD` (in POSIX `/c/...` form -- emitted into a PowerShell session it
+#: is simply wrong), `OLDPWD`, `SHLVL`, and MSYS2's `MSYSTEM*` family.
 _BASH_OWN_VARS = frozenset({"_", "PWD", "OLDPWD", "SHLVL"})
 _BASH_OWN_PREFIXES = ("MSYSTEM", "MINGW_", "MSYS2_")
 
@@ -380,12 +371,9 @@ def get_env_from_py(
     LINE, merged in order (a later line wins on a key). The per-line form is
     what makes overlay-managed blocks composable: each overlay's ``setup.py``
     appends its own block to the store's ``env.py`` and each block prints its
-    own object, so a store with two such overlays emits two lines -- which the
-    single-object reader rejected wholesale, silently dropping BOTH overlays'
-    vars (measured 2026-09-09 with net + private-sync). A non-zero exit or
-    unparseable output contributes nothing and is logged by NAME only -- never
-    abort assembly, and never echo the child's stdout (it may carry secret
-    values).
+    own object. A non-zero exit or unparseable output contributes nothing and
+    is logged by NAME only -- never abort assembly, and never echo the child's
+    stdout (it may carry secret values).
     """
     args = [interpreter(base_env), str(env_py), "--agent", level]
     if global_scope:
@@ -454,14 +442,10 @@ def get_env_from_file(
     quoted = json.dumps(str(env_file))
     spawn = _spawn_env(base_env)
 
-    # Resolve `bash` against the REAL environment's PATH, not `spawn`'s (which is
-    # `base_env`, the chain's ACCUMULATED PATH so far -- contract B step 1 prepends
-    # overlay bin dirs onto it, so by design it need not contain bash's actual
-    # install location, e.g. `/usr/local/bin` on macOS or Git's `bin` on Windows,
-    # where it is never `/usr/bin`). Passing a bare "bash" left resolution to the
-    # child process's own PATH (`spawn`'s), which only found it by coincidence
-    # where the OS happens to install bash under a directory contract B's PATH
-    # already contains -- true on Ubuntu's runner image, false on macOS/Windows.
+    # Resolve `bash` against the REAL environment's PATH, not `spawn`'s: that is
+    # `base_env`, the chain's ACCUMULATED PATH (contract B step 1 prepends overlay
+    # bin dirs onto it), which need not contain bash's install location
+    # (`/usr/local/bin` on macOS, Git's `bin` on Windows).
     import shutil
 
     bash = shutil.which("bash", path=os.environ.get("PATH")) or "bash"
@@ -495,8 +479,8 @@ def get_env_from_file(
 def get_bin_paths(scope: Scope) -> "list[Path]":
     """Each level's ``bin`` dir in contract-A precedence order, EXCEPT project-root.
 
-    Uses ``include_missing=True`` (precursor semantics, frozen contract B): a
-    bin dir is offered for every level even if absent, and
+    Uses ``include_missing=True``: a bin dir is offered for every level even
+    if absent, and
     :func:`get_environment` prepends ALL of them to ``PATH`` -- including the
     ones that do not exist (so a later-created ``<store>/bin`` is found without
     re-running ``env``). project-root's ``bin`` is explicitly excluded
@@ -520,8 +504,7 @@ def get_lib_paths(scope: Scope) -> "list[Path]":
     """Each level's ``lib`` dir in contract-A precedence order, EXCEPT project-root
     -- the ``PYTHONPATH`` counterpart of :func:`get_bin_paths`.
 
-    Only dirs that EXIST are returned (unlike ``bin``, whose include-missing
-    behaviour is frozen contract B): ``PYTHONPATH`` is read by every Python the
+    Only dirs that EXIST are returned (unlike ``bin``): ``PYTHONPATH`` is read by every Python the
     session spawns, and a dozen absent entries on it are noise a reader has to
     rule out. project-root's ``lib`` is excluded for the same reason as its
     ``bin``: a project's own top-level ``lib`` is not an agent library.
@@ -531,10 +514,10 @@ def get_lib_paths(scope: Scope) -> "list[Path]":
 
 
 def _prepend_missing(path_entries: "list[str]", new_entries: "list[str]") -> "list[str]":
-    """Prepend each new entry not already present, preserving precursor order.
+    """Prepend each new entry not already present.
 
-    The precursor inserts each new entry at position 0 in iteration order, so a
-    later new entry ends up EARLIER. Reproduced exactly.
+    Each new entry is inserted at position 0 in iteration order, so a later
+    new entry ends up EARLIER.
     """
     for entry in new_entries:
         if entry not in path_entries:
@@ -566,12 +549,9 @@ def resolve_env_files(scope: Scope) -> "list[tuple[str, Path, Optional[Path]]]":
     ``pre.local.env`` / ``local.env``. Only existing regular FILES are returned
     (a directory named ``env`` -- a common virtualenv name -- is not an env file).
 
-    **Amendment to contract B (2026-09-09):** project-root ``env.py`` / ``env``
-    are no longer resolved. Every session start ran the env chain, so a cloned
-    repository with a top-level ``env.py`` was executed the moment a session
-    opened in it -- code execution from an untrusted checkout. The
-    ``.agents/``-level files and the user-local ``local.env`` (which a checkout
-    does not normally carry) keep their behaviour.
+    project-root ``env.py`` / ``env`` are never resolved: the env chain runs at
+    every session start, so a checkout's top-level ``env.py`` would be code
+    execution from an untrusted repository the moment a session opened in it.
     """
     pre_tier = scope.paths(
         {"default": "pre.env.py", "project-root": ""},
@@ -587,7 +567,7 @@ def resolve_env_files(scope: Scope) -> "list[tuple[str, Path, Optional[Path]]]":
 
 
 # --------------------------------------------------------------------------- #
-# Proxy normalization (plan 08).
+# Proxy normalization.
 # --------------------------------------------------------------------------- #
 
 _PROXY_BASES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
@@ -604,7 +584,7 @@ _PROXY_SEED_ORDER = (
 
 
 def apply_proxy_model(osenv: "dict[str, str]") -> "dict[str, str]":
-    """Return the proxy changes for ``osenv`` per the plan-08 proxy model.
+    """Return the proxy changes for ``osenv`` per the proxy model.
 
     * Seed ``AGENTS_PROXY`` if unset, from the first populated
       :data:`_PROXY_SEED_ORDER` var (webfetch var wins, then the global proxy in
@@ -650,9 +630,9 @@ def get_environment(
     """Assemble the env CHANGES (vars this adds/overrides vs ``base_env``) for a
     :class:`Scope`.
 
-    Follows frozen contract B: identity seeded, PATH bins first, the two tiers
+    Follows contract B: identity seeded, PATH bins first, the two tiers
     chained (later overrides earlier), then proxy normalization. Returns only
-    what changed -- mirrors the precursor's ``env={}`` accumulator.
+    what changed.
     """
     from dotagents._agents import stamp_identity
 
@@ -669,7 +649,7 @@ def get_environment(
         env.update(changes)
         osenv.update(changes)
 
-    # --- Identity seed (plan 08) --- before the file chain so files can override.
+    # --- Identity seed --- before the file chain so files can override.
     _apply(stamp_identity(osenv, explicit=explicit, root=project_root))
 
     def _seed(key: str, value: "Optional[str]") -> None:
@@ -702,10 +682,10 @@ def get_environment(
         if not pinned:
             _apply({overlay.root_var: str(overlay.path)})
         elif pinned == store_copy and str(overlay.path) != store_copy:
-            # The session pinned the STORE's copy (the SessionStart env did), and
-            # a same-named PROJECT overlay now shadows it: re-point to the copy
-            # that is actually in play. Any other pin (a harness's own value) is
-            # respected as before.
+            # The session pinned the STORE's copy (as the SessionStart env does),
+            # and a same-named PROJECT overlay now shadows it: re-point to the
+            # copy that is actually in play. Any other pin (a harness's own
+            # value) is respected.
             _apply({overlay.root_var: str(overlay.path)})
 
     # --- Contract B step 1: bins onto PATH FIRST. ---
@@ -733,7 +713,7 @@ def get_environment(
             changes = get_env_from_file(path, osenv, logger=logger)
         _apply(changes)
 
-    # --- Proxy normalization (plan 08) --- after the chain so file-set proxies
+    # --- Proxy normalization --- after the chain so file-set proxies
     #     are normalized too.
     _apply(apply_proxy_model(osenv))
 
@@ -750,8 +730,7 @@ def get_diff(
     """Only the assembled vars that differ from ``base_env`` (current env).
 
     ``get_environment`` already returns changes vs ``base_env``, so the diff is
-    the subset whose value actually differs from the base -- identical to the
-    precursor's ``get_diff`` over ``os.environ``.
+    the subset whose value actually differs from the base.
     """
     base = dict(base_env if base_env is not None else os.environ)
     full = get_environment(

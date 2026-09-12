@@ -1,11 +1,9 @@
 """Filesystem write helpers shared by every module that writes a text file.
 
 One rule, one place: **files are LF-only, on every platform.** `Path.write_text`
-without `newline=` translates `\\n` to the platform default (CRLF on Windows),
-which is how the live `~/.agents/AGENTS.md` on a Windows dev box ended up CRLF on
-every line while the config's own always-on rule says LF. `Path.write_text(...,
-newline=)` is Python 3.10+, and this package's floor is 3.9, so the helpers
-open the file themselves.
+without `newline=` translates `\\n` to the platform default (CRLF on Windows).
+`Path.write_text(..., newline=)` is Python 3.10+, and this package's floor is
+3.9, so the helpers open the file themselves.
 """
 
 from __future__ import annotations

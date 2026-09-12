@@ -1,4 +1,4 @@
-"""Assemble effective context (Plan 04)."""
+"""Assemble the effective context an agent should see in a scope."""
 
 from __future__ import annotations
 
@@ -48,8 +48,7 @@ def _find_md_refs(text: str) -> "list[str]":
     """Collect on-demand markdown references, both backticked and bare.
 
     An `AGENTS.md` says "read kb/X.md before Y" as often bare as backticked, so
-    matching only backticks (the original bug) missed the very files the
-    generator exists to inline. This catches both. Excluded:
+    both forms are matched. Excluded:
     - the `<!-- Source: ... -->` provenance comments this module emits (they are
       absolute source paths, not on-demand pointers),
     - absolute / home paths (already-loaded, not on-demand),
@@ -98,9 +97,8 @@ def _inline_referenced_files(
 
     OPT-IN (``inline=True`` on the assemblers / ``context --inline``): the base
     AGENTS.md's own rule is "read the matching file BEFORE such a task; skip it
-    otherwise, never preemptively", and inlining every mention does the opposite
-    -- measured 2026-09-09, a 100 KB payload on every session start, most of it
-    a CHANGELOG and an API header that happened to be mentioned in prose."""
+    otherwise, never preemptively", and inlining every mention does the
+    opposite."""
     refs = _find_md_refs(text)
     excluded = set()
     for p in exclude:
@@ -191,17 +189,15 @@ def _resolve_and_filter_sources(
     )
     project_root = scope.project_root or _scope.project_root_default()
 
-    # Apply overlay priority (plan 02): overlays sort among themselves by their
-    # declared priority (lower first, read from the manifest by
-    # `Overlay.priority`; the unprioritized default is `DEFAULT_PRIORITY`, 500);
-    # non-overlay levels (system/user/project) keep the resolver's precedence
-    # order, placed after all overlays via a high sentinel. Stable sort preserves
-    # resolver order within equal keys.
+    # Apply overlay priority: overlays sort among themselves by their declared
+    # priority (lower first, read from the manifest by `Overlay.priority`; the
+    # unprioritized default is `DEFAULT_PRIORITY`, 500); non-overlay levels
+    # (system/user/project) keep the resolver's precedence order, placed after
+    # all overlays via a high sentinel. Stable sort preserves resolver order
+    # within equal keys.
     #
-    # An overlay entry is the one whose `root` is set (the resolver labels it
-    # with the overlay's NAME, not the literal "overlay" -- keying on that label
-    # meant no entry ever counted as an overlay, so priority ordering and
-    # placeholder expansion silently never happened; review 2026-09-09).
+    # An overlay entry is the one whose `root` is set: the resolver labels it
+    # with the overlay's NAME, not the literal "overlay".
     _NON_OVERLAY_SENTINEL = 10_000
 
     def _sort_key(item):
@@ -217,9 +213,8 @@ def _resolve_and_filter_sources(
     # means "relative to the PROJECT ROOT"; `~/` and `/` forms are absolute)
     # and, for a harness with an include mechanism (Claude's `@path` lines),
     # whatever its entry files actually include -- so the subtraction reflects
-    # what is loaded on THIS machine, not an assumption. Previously this was a
-    # bare `path.name == hl` filename match with no directory check at all, so
-    # ANY source file merely named "AGENTS.md" was suppressed.
+    # what is loaded on THIS machine, not an assumption. Paths are compared
+    # resolved, never by bare filename.
     harness_loads_resolved = agent.loaded_paths(project_root)
 
     filtered = []
@@ -274,8 +269,7 @@ def assemble_context(
     agent: _agents.Agent, scope: _scope.Scope, *, inline: bool = False
 ) -> str:
     """Assemble the effective context text (markdown) for the given agent in a
-    :class:`~dotagents._scope.Scope` (``Scope.of(agents_dir=, project_root=,
-    global_scope=)`` from the old triple).
+    :class:`~dotagents._scope.Scope`.
 
     Returns '' if, after subtracting what the agent's harness already loads,
     there is nothing new to emit (no empty double of already-loaded content).

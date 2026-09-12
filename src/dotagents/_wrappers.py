@@ -29,8 +29,7 @@ def write_wrappers(
     `dotagents.cmd`. A Windows box with Git Bash / WSL runs the sh one and cmd
     runs the `.cmd`, and the two never collide -- cmd.exe resolves `.cmd` via
     PATHEXT while sh picks the extensionless file. Writing only the platform's
-    "native" form (what the precursor did) breaks the other shell on the same box,
-    which on this project's own dev machine is the common case.
+    "native" form would break the other shell on the same box.
 
     `python` defaults to the interpreter running this code (`sys.executable`),
     embedded as an absolute path. A bare `python`/`python3` is NOT usable: on

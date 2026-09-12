@@ -56,25 +56,14 @@ def _write_stdout(text: str) -> None:
 
 class DotAgentsArgs(LoggingArgs, Cmd):
     """Shared ``-g/--global`` + ``--agents-dir`` fields for any command whose scope
-    is *where the store lives* (``_scope.resolve_scope``'s two axes) -- ``init``,
-    ``overlays add/remove/sync``, ``link-project``, and overlay-shipped commands
-    (e.g. the ``python`` overlay's ``pyvenv``) all redeclare this same pair today;
-    new commands should inherit this instead of copying the fields again.
+    is *where the store lives* (``_scope.resolve_scope``'s two axes). Subclass as
+    ``class Foo(DotAgentsArgs): ...`` -- it already inherits ``LoggingArgs``/``Cmd``,
+    do not list them again. A subclass may redeclare a field (same type/default)
+    to narrow its help text.
 
-    NOT retrofitted onto the existing duplicated commands -- each already ships
-    with slightly different field defaults/help text tuned to its own command
-    (``overlays add``'s ``agents_dir`` defaults eagerly to
-    ``Path.home() / ".agents"``, where ``resolve_scope`` itself treats ``None`` as
-    "unset, use the default") -- collapsing that difference is a separate, wider
-    change, not a side effect of adding this base. Mix in as the FIRST base so a
-    subclass's own ``_parsername_``/``__call__`` still take precedence:
-    ``class Foo(DotAgentsArgs): ...`` -- already inherits ``LoggingArgs``/``Cmd``
-    transitively, do not also list them.
-
-    Available both as ``dotagents.cli._common.DotAgentsArgs`` and re-exported at
-    ``dotagents.cli.DotAgentsArgs`` -- an overlay-shipped command module (which
-    always runs inside a real ``dotagents`` process, so ``dotagents.cli`` is
-    always importable there) should use the top-level import."""
+    Re-exported at ``dotagents.cli.DotAgentsArgs``; an overlay-shipped command
+    module (which always runs inside a real ``dotagents`` process) should use
+    that import."""
 
     global_scope: bool = False
     "Use the user scope (~/.agents) instead of the project scope."
@@ -93,27 +82,13 @@ class DotAgentsArgs(LoggingArgs, Cmd):
         )
 
 
-# NOTE: `_resolve_required_tool` was removed. It existed so a compiled wrapper
-# (`audit`, and a personal scanner) could locate a standalone script under
-# `tools/`. Neither wrapper exists now: `audit` is CI tooling for THIS repo
-# (`tools/audit.py`, not a dotagents command, not shipped), and personal tooling
-# lives in the user's own `.agents/` as a discovered command module. Nothing in
-# the package shells out to `tools/`.
-
-
 _scratch: "Path | None" = None
 
 
 def _scratch_dir() -> Path:
     """The ONE per-process temp directory for anything extracted out of a
     zipapp (package data, the repointed module sources), created lazily and
-    removed at interpreter exit.
-
-    Every `.pyz` run used to `mkdtemp` once per extracted item -- eight
-    module sources plus the `_overlay` data -- and never removed any of them:
-    632 `dotagents-*` directories were sitting in one machine's `%TEMP%`,
-    about 18 more per session start (review 2026-09-09). A plain install
-    never creates it."""
+    removed at interpreter exit. A plain install never creates it."""
     global _scratch
     if _scratch is None:
         import atexit
@@ -194,11 +169,10 @@ AGENTS_MD_PLACEHOLDER = "{{AGENTS_MD}}"
 
 def base_agents_text(src: "str | os.PathLike[str]", dest: "str | os.PathLike[str]") -> str:
     """The base AGENTS.md block for the store at ``dest``: the template
-    (``<src>/dotagents/templates/AGENTS.md``; a ``--from`` base laid
-    out the old way may keep it at ``<src>/AGENTS.md``) with ``{{AGENTS_MD}}`` rendered as the
-    ACTUAL path of the file being written, so the block's "annotate that you
-    read `…`" line names this store's file -- not a ``~/.agents`` the store
-    may not live at, and not the user store's file inside a project's."""
+    (``<src>/dotagents/templates/AGENTS.md``, falling back to ``<src>/AGENTS.md``
+    for a ``--from`` base that keeps it at its root) with ``{{AGENTS_MD}}``
+    rendered as the ACTUAL path of the file being written, so the block's
+    "annotate that you read `…`" line names this store's file."""
     src_path = Path(src)
     template = src_path / BASE_AGENTS_TEMPLATE
     if not template.is_file():
@@ -213,14 +187,12 @@ def _compose_block(base_text: str, overlays, logger) -> str:
 
     Rules append to "Always-on rules" and routing to "Load on demand", after the
     base's own -- the base carries the mechanism (D57) and should read first. The
-    overlays fold in **`(priority, name)` order** (plan 02 / D68), NOT the caller's
-    list order: lower `priority` (default `DEFAULT_PRIORITY`, 500) sorts earlier, so
-    a numerically higher-priority overlay lands *last* and wins on conflict -- the
-    same "lower sorts earlier / higher wins" convention `_context.py` uses. `name`
-    is the tiebreaker, so equal-priority overlays produce a stable, deterministic
-    block regardless of add-invocation or discovery order. Returns `base_text`
-    unchanged when nothing contributes, so `init` (which takes no overlays) is
-    completely unaffected. `overlays` are `Overlay` instances or overlay dirs."""
+    overlays fold in **`(priority, name)` order** (D68), NOT the caller's list
+    order: lower `priority` (default `DEFAULT_PRIORITY`, 500) sorts earlier, so a
+    numerically higher-priority overlay lands *last* and wins on conflict -- the
+    same convention `_context.py` uses. `name` is the tiebreaker, so the block is
+    deterministic regardless of discovery order. Returns `base_text` unchanged
+    when nothing contributes. `overlays` are `Overlay` instances or overlay dirs."""
     from dotagents._overlays import Overlay
 
     rules: "list[str]" = []
@@ -241,9 +213,8 @@ def _compose_block(base_text: str, overlays, logger) -> str:
         # Append after the last always-on bullet, i.e. just before the next heading.
         m = re.search(r"(?m)^## Load on demand", text)
         if m is None:
-            # A custom `--from` base without the heading: the rules still have
-            # to land somewhere -- at the end of the block, as the warning says
-            # (they used to be dropped while the warning claimed otherwise).
+            # A custom `--from` base without the heading: the rules land at the
+            # end of the block instead, as the warning says.
             logger.warning("base AGENTS.md has no 'Load on demand' heading; "
                            "appending overlay rules at the end of the block")
             end = re.search(r"(?m)^[ \t]*<!-- dotagents:end -->", text)
@@ -291,7 +262,7 @@ def _no_subcommand(cmd, hint: str) -> int:
 
 
 def _installed_overlay_dirs(scope, source, *, adding=None, dry_run=False) -> "list[Path]":
-    """The overlay dirs to recompose the managed block over (plan 02 / D68).
+    """The overlay dirs to recompose the managed block over (D68).
 
     Every overlay installed in `scope` contributes to the block, so the recompose is
     a pure function of *which* overlays are present -- not of add-invocation order.
@@ -415,16 +386,12 @@ def _apply_base(
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(source_path), str(target_path))
 
-    # Create `<dest>/dotagents/cmds/` and lay down the base overlay's docs for
-    # it (the README). The DIR is created unconditionally because it is the
-    # documented user extension point: a `*.py` command module dropped here is
-    # discovered with zero config. The bundled command modules themselves
-    # (`findings.py`, `launch.py`) are deliberately NOT copied: the bundled dir is always a
-    # discovery source (`cli._bundled_cmds_dir`), so a copy would add nothing --
-    # and, being create-if-absent, it would silently pin the version installed
-    # first and shadow every later one. A user who wants to customize a bundled
-    # command drops their own same-named module here; it overrides by precedence.
-    # Create-if-absent per file, exactly like the plain files.
+    # Create `<dest>/dotagents/cmds/` (the user extension point: a `*.py` command
+    # module dropped here is discovered with zero config) and lay down its docs
+    # (`*.md`, create-if-absent like the plain files). The bundled `.py` modules
+    # are deliberately NOT copied: the bundled dir is always a discovery source
+    # (`cli._bundled_cmds_dir`), and a create-if-absent copy would pin the
+    # first-installed version and shadow every later one.
     cmds_src = Path(src) / "dotagents" / "cmds"
     cmds_dest = dest / "dotagents" / "cmds"
     if not dry_run:
@@ -476,8 +443,7 @@ def _run_overlay_setup(dest_dir, name, *, scope, no_setup, dry_run, logger, sour
     clear error rather than a silent skip.
 
     On a `--dry-run` the installed dir may not exist yet, so the SOURCE overlay
-    (`source_dir`) is what gets inspected for a script -- a dry run used to
-    report nothing about setup at all."""
+    (`source_dir`) is what gets inspected for a script."""
     from dotagents._overlays import Overlay
 
     overlay = Overlay(dest_dir)

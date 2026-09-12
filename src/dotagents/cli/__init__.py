@@ -1,40 +1,28 @@
-"""dotagents CLI: init / context / env / overlays / build-pyz built-in
-subcommands, plus any user or overlay command modules discovered from a `cmds`
-directory (D76/D84).
+"""dotagents CLI: init / context / env / overlays / build-pyz / about built-in
+subcommands, plus command modules discovered from `cmds` directories (D76/D84).
 
-dotagents bundles ONE command module of its own, `findings`
-(`_overlay/dotagents/cmds/findings.py`). `link`/`sync` used to ship there too;
-they are now `link-project`/`sync-project`, shipped -- together with their logic
--- by the opt-in **private-sync** overlay, so plain dotagents carries no
-private-sync workflow (D85). The bundled cmds DIR is still laid down by `init`
-(README only): it is the user's documented drop-in point for their own commands,
-and a personal command module dropped there is discovered like any other, so
-private tooling never has to live in the repo (D84).
+The bundled command modules live in `_overlay/dotagents/cmds/` (`findings`,
+`launch`). `init` lays down that dir's README only, as the user's drop-in point:
+a `.py` command module placed in `<scope>/dotagents/cmds/` is discovered like any
+other (D84).
 
 The per-command classes live in sibling modules (`cli/init.py`, `cli/overlays.py`,
 ...); this package base holds the shared helpers (in `cli/_common.py`, re-exported
 here), the `Dotagents(LoggingArgs, Cli)` umbrella, `main()` (the `install.py` shim +
 `python -m dotagents` entrypoint), `_discover` (command-source resolution), and
-`_repoint_zipapp_sources` (the zipapp source-extraction shim). (`install.py` at the
-repo root is the entrypoint shim, unrelated to the removed `install` subcommand --
-`init` now lays down the base + optional `--bin-dir` wrappers, D82.)
+`_repoint_zipapp_sources` (the zipapp source-extraction shim).
 
-Dispatch (D76): `main()` routes through `duho.app`, not `duho.main`, so command
-discovery runs. Command MODULES are discovered from the bundled
-`_overlay/dotagents/cmds/` dir (which ships `findings`),
-from each installed overlay's `<overlay-root>/cmds/` -- this is how the
-private-sync overlay supplies `link-project`/`sync-project` -- and from a
-per-scope `cmds` dir (one `Scope.paths` Contract-A walk, `_cmds_dirs`).
-`app`'s DEFAULT dispatch is used (dotagents has no fan-out):
-a plain `(LoggingArgs, Cmd)` class command dispatches through `app` exactly as it
-did through `main` -- `app` calls the class's `__call__`.
+Dispatch: `main()` routes through `duho.app` (not `duho.main`) so command
+discovery runs; `app`'s default dispatch calls each command class's `__call__`.
+Command modules are discovered from the bundled cmds dir, from each installed
+overlay's `<overlay-root>/cmds/`, and from each scope's `dotagents/cmds` (one
+`Scope.paths` Contract-A walk, `_cmds_dirs`).
 
 `_compose_block` and `_package_data_dir` are re-exported at package level because
 other package modules import them as `dotagents.cli._compose_block` /
 `dotagents.cli._package_data_dir` (see `_overlays.py`, `_scope.py`). `DotAgentsArgs`
-is re-exported the same way, but for a different audience: an overlay-shipped
-command module (which always runs inside a real `dotagents` process) is meant to
-`from dotagents.cli import DotAgentsArgs`.
+is re-exported for overlay-shipped command modules, which always run inside a real
+`dotagents` process and should `from dotagents.cli import DotAgentsArgs`.
 """
 
 import logging
@@ -70,9 +58,7 @@ from dotagents.cli._common import (  # noqa: F401
 # Import each built-in command class to register it as a compiled subcommand.
 # Importing the command modules here (never the reverse) keeps the dependency
 # edges one-directional: command modules -> cli._common / dotagents._*, and
-# cli/__init__ -> command modules. link/sync are NOT imported here -- they left
-# the package entirely (D85: the private-sync overlay ships link-project/
-# sync-project as discovered command modules; see `_discover`).
+# cli/__init__ -> command modules.
 from dotagents.cli.about import About
 from dotagents.cli.build_pyz import BuildPyz
 from dotagents.cli.context import Context
@@ -90,13 +76,9 @@ from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
 _LOGGER = logging.getLogger("dotagents")
 
 # The compiled built-in command classes, in --help order. Together with the
-# bundled command modules (`findings`, `launch`) this is dotagents' WHOLE shipped surface:
-# link/sync left the package with their logic (D85 -- the private-sync overlay
-# supplies link-project/sync-project), personal tooling stays in the user's own
-# `<scope>/dotagents/cmds/` as discovered modules (D84), and audit is repo CI
-# tooling (`tools/audit.py`), not a command. `_discover` seeds the command set
-# with these, then layers discovered commands over them (later source wins on a
-# name clash).
+# bundled command modules (`findings`, `launch`) this is dotagents' whole shipped
+# surface. `_discover` seeds the command set with these, then layers discovered
+# commands over them (later source wins on a name clash).
 _BUILTIN_COMMANDS = [
     Init,
     BuildPyz,
@@ -106,22 +88,12 @@ _BUILTIN_COMMANDS = [
     About,
 ]
 
-# The cli submodules whose sources duho introspects for flag/help definitions.
-# Every module that defines a field-bearing BUILT-IN command class must be
-# repointed inside a zipapp (see `_repoint_zipapp_sources`). DISCOVERED command
-# modules themselves never need repointing: an overlay's cmds live on the real
-# filesystem, and the bundled cmds dir is extracted to real temp files by
-# `_package_data_dir` before import (so its `__file__` already exists -- see
-# `_bundled_cmds_dir`). BUT a discovered class can still INHERIT fields from a
-# base class defined in dotagents itself -- duho's AST introspection walks the
-# MRO and needs each base's module source too, not just the leaf class's own
-# module. `dotagents.cli._common` is exactly that case since `DotAgentsArgs`
-# was added there (confirmed live: an overlay command subclassing it lost its
-# `-g` short flag and `--global` degraded to the name-derived `--global-scope`
-# inside a built .pyz, because `_common`'s own `__file__` was still zip-internal
-# even though the discovered command module's own file was real on disk) -- so
-# `_common` must be repointed here too, even though it ships no command class
-# of its own and is never in `_BUILTIN_COMMANDS`.
+# The cli submodules whose sources duho introspects for flag/help definitions;
+# every one is repointed inside a zipapp (see `_repoint_zipapp_sources`).
+# Discovered command modules never need repointing (their files are real on
+# disk -- see `_bundled_cmds_dir`), but duho walks the MRO and reads each BASE
+# class's module too, so `_common` (home of `DotAgentsArgs`) must be listed even
+# though it ships no command class of its own.
 _COMMAND_MODULES = (
     "dotagents.cli",  # the umbrella itself: `Dotagents.cmdspath` lives here
     "dotagents.cli.init",
@@ -163,19 +135,16 @@ class Dotagents(LoggingArgs, Cli):
 
 
 def _bundled_cmds_dir() -> "Path | None":
-    """The bundled command-module dir shipped inside the package (D76).
+    """The bundled command-module dir, `<package>/_overlay/dotagents/cmds` (D76).
 
-    `<package>/_overlay/dotagents/cmds` is that dir. It ships `findings.py`
-    (the per-scope findings queue) and `launch.py` (start a harness with the
-    env and context applied) plus its README; `link`/`sync` left it for
-    the private-sync overlay (D85). It is always a discovery source -- `init`
-    lays down only the README as the user's drop-in point, never a copy of the
-    bundled modules (a create-if-absent copy would pin the first-installed
-    version). Resolved `.pyz`-safe via `_package_data_dir`, which
-    extracts a zip-backed `_overlay` to a real temp dir once -- so the modules
-    `discover_commands` imports from here always have a real on-disk `__file__`,
-    and the zipapp AST-introspection shim (`_repoint_zipapp_sources`) does NOT
-    need to cover them. Returns None if the package bundles no cmds dir."""
+    Ships `findings.py` (the per-scope findings queue), `launch.py` (start a
+    harness with the env and context applied) and a README. It is always a
+    discovery source; `init` lays down only the README (a create-if-absent copy
+    of the modules would pin the first-installed version). Resolved via
+    `_package_data_dir`, which extracts a zip-backed `_overlay` to a real temp
+    dir once, so the modules imported from here always have an on-disk
+    `__file__` and `_repoint_zipapp_sources` need not cover them. Returns None
+    if the package bundles no cmds dir."""
     base = _package_data_dir("_overlay")
     if base is None:
         return None
@@ -195,19 +164,14 @@ def _discover_modules(directory: Path) -> "list":
     """duho's per-directory discovery, made resilient per MODULE.
 
     duho's own loop catches only ImportError/NotImplementedError per file and
-    lets anything else propagate ("a real bug the author wants surfaced"),
-    which is right for an app that owns its commands -- but discovery runs
-    before EVERY dotagents invocation, including `env` / `context` inside the
-    SessionStart hooks, so one typo in `~/.agents/dotagents/cmds/foo.py` took
-    down env, context, init and even `--version` for the whole session (review
-    2026-09-09), and wrapping the whole directory instead dropped every
-    sibling command with it. So the loop is mirrored here with a catch-all
-    per file: the bad module is named, with its exception, and skipped;
-    the rest of the directory still loads. SystemExit included: a module that
-    `sys.exit()`s at import (a project-scope override refusing to load without
-    its user-scope base) is not an Exception, and it killed `init -g` in a
-    store that did not exist yet (2026-09-10). Falls back to duho's own
-    per-directory unit if a duho release moves these helpers."""
+    lets anything else propagate. Discovery runs before EVERY dotagents
+    invocation (including `env`/`context` inside the SessionStart hooks), so
+    one broken user module must not take down every command: the loop is
+    mirrored here with a catch-all per file -- the bad module is named, with
+    its exception, and skipped; the rest of the directory still loads.
+    SystemExit is included because a module that `sys.exit()`s at import is
+    not an Exception. Falls back to duho's own per-directory unit if a duho
+    release moves these helpers."""
     try:
         from duho.discovery import _commands_in_module, _import_from_path, _unique_module_name
     except ImportError:  # pragma: no cover -- a later duho without these internals
@@ -288,8 +252,8 @@ def _cmds_dirs(argv=None) -> "list[Path]":
     `resolve_user_store()` (`$AGENTS_HOME`, default
     `~/.agents`) -- the same resolver `env`/`context` use, so every user-store
     reader agrees; the project scope is `<cwd>/.agents`.
-    `include_missing=True` (precursor semantics): every level's cmds dir is offered
-    and the caller's `_discover_dir` skips the ones that don't exist."""
+    `include_missing=True`: every level's cmds dir is offered and the caller's
+    `_discover_dir` skips the ones that don't exist."""
     from dotagents import _scope
 
     scope = _scope.Scope.of(
@@ -394,9 +358,7 @@ def _repoint_zipapp_sources() -> None:
         # A package's source is its `__init__.py` (`dotagents.cli` ->
         # `cli/__init__.py`), a plain module's is `<name>.py`. Getting this
         # wrong is silent: the resource is simply not found and the module
-        # keeps its zip-internal `__file__` -- which is how the umbrella's
-        # `--cmdspath` help vanished from the .pyz while every subcommand's
-        # help survived.
+        # keeps its zip-internal `__file__`.
         if hasattr(mod, "__path__"):
             rel = (rest.replace(".", "/") + "/" if rest else "") + "__init__.py"
         else:
@@ -408,8 +370,7 @@ def _repoint_zipapp_sources() -> None:
             text = resource.read_text(encoding="utf-8")
         except (FileNotFoundError, ModuleNotFoundError, OSError, TypeError):
             continue
-        # Under the one per-process scratch dir (removed at exit) -- one
-        # `mkdtemp` per module, never cleaned, littered %TEMP% at ~9 dirs per run.
+        # Under the one per-process scratch dir, removed at exit.
         tmp = _scratch_dir() / "src" / (modname.replace(".", "_") + ".py")
         tmp.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(text, encoding="utf-8")
@@ -418,9 +379,9 @@ def _repoint_zipapp_sources() -> None:
 
 def main(argv=None) -> int:
     _repoint_zipapp_sources()
-    # `duho.app` (not `duho.main`) so command discovery runs. Default dispatch:
-    # dotagents has no fan-out, so `app` calls each command's `__call__` exactly
-    # as `duho.main` did. `commands=` is the resolved built-ins + discovered set.
+    # `duho.app` (not `duho.main`) so command discovery runs; default dispatch
+    # calls each command's `__call__`. `commands=` is the resolved built-ins +
+    # discovered set.
     return duho.app(
         Dotagents,
         commands=_discover(argv),

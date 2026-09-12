@@ -10,7 +10,7 @@ command is the mechanical side of that convention -- it never triages.
 ``<scope-root>/findings/`` where ``<scope-root>`` is ``Scope.agents_root`` --
 ``<project>/.agents`` by default, the user store (``~/.agents``, ``$AGENTS_HOME``)
 with ``-g``. ``--dir`` overrides the whole location for a queue that lives
-elsewhere (e.g. one kept at an older config's ``dotagents/findings/``).
+elsewhere.
 
 **Layout** (the queue discipline: active at the top level, addressed ones MOVED
 -- never deleted -- to ``processed/`` after a resolution is appended; a file in
@@ -28,12 +28,12 @@ line, the details in the body::
     name: context-inlining-missed-bare-refs
     description: bare kb/X.md references were never inlined
     status: active
-    created: 2026-09-09
+    created: YYYY-MM-DD
     ---
 
     <details: what happened, what it cost, evidence>
 
-    ## Resolution (2026-09-10)        <- appended by `done`
+    ## Resolution (YYYY-MM-DD)        <- appended by `done`
 
     <the decision, evidence, or why no action was needed>
 

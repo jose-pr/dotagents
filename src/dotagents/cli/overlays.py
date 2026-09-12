@@ -1,9 +1,8 @@
 """`dotagents overlays` -- add / remove / list / sync / show, with skills sync.
 
-Self-contained block (own module deps in `_scope.py` / `_skills.py` /
-`_overlays.py`); the only umbrella touch is registering `Overlays` on
-`Dotagents._subcommands_` (in `cli/__init__.py`). Discover-not-track: installed
-overlays are the dirs under `<scope>/overlays/`.
+Module deps live in `_scope.py` / `_skills.py` / `_overlays.py`; the umbrella
+registers `Overlays` on `Dotagents._subcommands_` (in `cli/__init__.py`).
+Discover-not-track: installed overlays are the dirs under `<scope>/overlays/`.
 """
 
 import shutil
@@ -24,12 +23,10 @@ from dotagents.cli._common import (
 
 
 def _validated_names(raw_names, what: str) -> "list[str]":
-    """Validate + normalize every requested name UP FRONT with the shared
-    overlay-name rule (D84), so `add My_Overlay` and `add my-overlay` resolve the
-    same overlay, a bad name (`.git`, `README.md`, `2fast`, a level name) is
-    rejected before anything is touched -- not after the first overlay was
-    already installed and its setup already run -- and never creates a junk dir
-    under overlays/."""
+    """Validate + normalize every requested name up front with the shared
+    overlay-name rule (D84): `add My_Overlay` and `add my-overlay` resolve the
+    same overlay, and a bad name (`.git`, `README.md`, `2fast`, a level name) is
+    rejected before anything is touched."""
     from dotagents._overlays import Overlay
 
     names = []
@@ -57,8 +54,8 @@ def _install_order(
     store and, for a project, the user store's too. A requirement in it is
     satisfied: it is neither copied again nor set up again (a venv build or a
     toolchain check should not rerun because a neighbour was added). A name
-    asked for explicitly is never treated that way: `add x` re-installs and
-    re-sets-up `x` as it always did."""
+    asked for explicitly is never treated that way: `add x` always re-installs
+    and re-sets-up `x`."""
     from dotagents._overlays import Overlay
 
     order: "list[str]" = []
@@ -201,9 +198,8 @@ class OverlayAdd(DotAgentsArgs):
                 )
 
         # Recompose the whole managed block from the pristine base over ALL installed
-        # overlays in (priority, name) order (plan 02 / D68), so a high-priority overlay
-        # lands last regardless of when it was added -- not merely appended after
-        # whatever was already in the block.
+        # overlays in (priority, name) order (D68), so a high-priority overlay
+        # lands last regardless of when it was added.
         overlay_dirs = _installed_overlay_dirs(
             scope, source, adding=order, dry_run=self.dry_run
         )
@@ -544,7 +540,7 @@ class OverlaySync(DotAgentsArgs):
                 )
 
         # Recompose the managed block over ALL installed overlays in (priority, name)
-        # order (plan 02 / D68) -- not just the pattern-matched subset synced above, so
+        # order (D68) -- not just the pattern-matched subset synced above, so
         # priority ordering holds across the full installed set.
         overlay_dirs = _installed_overlay_dirs(scope, source, dry_run=self.dry_run)
         base_block = base_agents_text(BASE_ROOT, scope.agents_root)

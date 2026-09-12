@@ -4,17 +4,16 @@ An overlay is a directory (optionally carrying an `overlay.toml` manifest) whose
 files install to the same relative path in the destination. Everything that
 depends only on ONE overlay -- its name rules, its manifest, its setup script,
 its files, what it contributes to the managed `AGENTS.md` block -- is a method or
-property of :class:`Overlay`. Two manifest keys are read:
+property of :class:`Overlay`. Manifest keys:
 
 * `routing` — lines appended to the core's "Load on demand" list.
 * `rules` — overlay-relative paths to markdown files whose `- **…` bullet blocks
   are appended to "Always-on rules".
+* `requires` — overlay names this one needs; `overlays add` installs them first.
+* `name`, `description`, `priority` — see :meth:`Overlay.read_manifest`.
 
 :func:`recompose_overlay_block` is the one operation over a *set* of overlays and
 stays a module function.
-
-`requires` (overlay names this one needs) is read too; `overlays add` installs
-them first (see `cli/overlays.py`), and `description` feeds `overlays show`.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ import subprocess
 from pathlib import Path
 from typing import Iterable, Optional
 
-# Default merge priority for an overlay that declares none (plan 02). Lower sorts
+# Default merge priority for an overlay that declares none. Lower sorts
 # earlier. 500 leaves generous headroom on both sides for overlays that want to
 # sort before (0..499) or after (501..) the unprioritized default.
 DEFAULT_PRIORITY = 500
@@ -40,12 +39,8 @@ DEFAULT_PRIORITY = 500
 def _strip_comments(text: str) -> str:
     """Drop `#` comments -- whole-line AND trailing -- leaving string contents
     untouched: a `#` inside `"..."`, `'...'`, `\"\"\"...\"\"\"` or `'''...'''`
-    (multi-line included) is data.
-
-    Whole-line stripping alone left `routing = ["a"] # note` for the array
-    reader, whose single-line form then failed on the trailing text and whose
-    multi-line form ran on to the NEXT array's `]` -- a rules PATH became a
-    routing line in AGENTS.md (review 2026-09-09)."""
+    (multi-line included) is data. Trailing comments must go too, or
+    `routing = ["a"] # note` reaches the array reader with text after its `]`."""
     out = []
     i, n = 0, len(text)
     quote: "Optional[str]" = None
@@ -120,10 +115,8 @@ def _parse_string_array(text: str, key: str) -> "list[str]":
     """Read a top-level `key = [...]` array of strings from (comment-stripped)
     TOML source.
 
-    A deliberately small reader rather than a TOML dependency: the floor is
-    Python 3.9, where `tomllib` does not exist, and pulling in `tomli` to read
-    two arrays would be a real dependency for a trivial need (D13). Handles the
-    forms these manifests actually use -- `"..."`, `'...'`, and the multi-line
+    A deliberately small reader rather than a TOML dependency: the Python 3.9
+    floor has no `tomllib` (D13). Handles `"..."`, `'...'`, and the multi-line
     `\"\"\"...\"\"\"` / `'''...'''` -- one or many per array, with the closing
     `]` on the same line or on its own (indented or not)."""
     body = _array_body(text, key)
@@ -146,11 +139,8 @@ def _parse_string(text: str, key: str) -> "Optional[str]":
 
 
 def _parse_priority(text: str) -> int:
-    """Read a top-level `priority = <int>` from (comment-stripped) TOML source
-    (plan 02).
-
-    Same minimal-reader rationale as `_parse_string_array`: no `tomllib` on the
-    3.9 floor. Missing/unparseable -> DEFAULT_PRIORITY."""
+    """Read a top-level `priority = <int>` from (comment-stripped) TOML source.
+    Missing/unparseable -> DEFAULT_PRIORITY."""
     m = re.search(r"(?m)^priority\s*=\s*(-?\d+)\s*$", text)
     if m is None:
         return DEFAULT_PRIORITY
@@ -192,11 +182,9 @@ class Overlay:
     #: allowed MID-name (``foo.bar``, ``v1.2``) but not as the first char, so
     #: ``.git``/``.hidden`` are excluded; a leading underscore (``__pycache__``) and
     #: a leading digit (``2fast``) are excluded too. One shared rule for
-    #: :meth:`discover` (which backs :meth:`installed`, the contract-A
-    #: overlay walk in ``Scope.paths`` and the ``env`` overlay roots) and
-    #: ``overlays add`` (D84). (Whether a path IS a directory is checked separately
-    #: with ``is_dir()``, which follows symlinks -- a symlink-to-dir is a valid
-    #: overlay.)
+    #: :meth:`discover` and ``overlays add`` (D84). Whether a path IS a directory
+    #: is checked separately with ``is_dir()``, which follows symlinks -- a
+    #: symlink-to-dir is a valid overlay.
     NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
 
     #: The optional manifest an overlay may carry at its root.
@@ -253,7 +241,7 @@ class Overlay:
 
     @staticmethod
     def normalize_name(name: str) -> str:
-        """THE canonical overlay name: lowercase, ``_`` -> ``-`` (precursor rule).
+        """THE canonical overlay name: lowercase, ``_`` -> ``-``.
 
         Every place that refers to an overlay by name goes through this one
         function, so ``My_Overlay`` and ``my-overlay`` are one overlay everywhere:
@@ -389,7 +377,7 @@ class Overlay:
 
     @property
     def priority(self) -> int:
-        """The manifest ``priority`` (plan 02), ``DEFAULT_PRIORITY`` when absent or
+        """The manifest ``priority``, ``DEFAULT_PRIORITY`` when absent or
         unparseable. Lower sorts earlier."""
         manifest = self.read_manifest()
         try:
@@ -399,16 +387,14 @@ class Overlay:
 
     @property
     def sort_key(self) -> "tuple[int, str, str]":
-        """The `(priority, name)` merge-order key (plan 02 / D68).
+        """The `(priority, name)` merge-order key (D68).
 
         Lower `priority` (default `DEFAULT_PRIORITY`, 500) sorts earlier; a
         numerically higher-priority overlay therefore lands *later* in the merged
-        AGENTS.md block and wins on conflict -- the same "lower sorts earlier /
-        higher wins" convention `_context.py` uses for its own priority ordering.
-        `name` is the stable tiebreaker for equal-priority overlays, keyed off
-        the manifest `name` (falling back to the directory name), then the
-        directory name itself (two dirs can carry the same manifest name), so
-        output is deterministic regardless of input order."""
+        AGENTS.md block and wins on conflict -- the same convention `_context.py`
+        uses. The tiebreaker is the manifest `name` (falling back to the directory
+        name), then the directory name itself (two dirs can carry the same
+        manifest name), so output is deterministic regardless of input order."""
         manifest = self.read_manifest()
         return (self.priority, str(manifest.get("name", self.name)), self.name)
 
@@ -416,13 +402,11 @@ class Overlay:
     def sort_by_priority(
         cls, overlays: "Iterable[Overlay | str | os.PathLike[str]]"
     ) -> "list[Overlay]":
-        """`overlays` (instances or dirs) sorted by `(priority, name)` (plan 02 / D68).
+        """`overlays` (instances or dirs) sorted by `(priority, name)` (D68).
 
-        Deterministic regardless of the caller's order: `overlays add` passes
-        overlays in add-invocation order and `overlays sync` in alphabetical
-        discovery order, but the *merged* block must not depend on either -- a
-        high-priority overlay's lines must always land last. See :attr:`sort_key`.
-        """
+        Deterministic regardless of the caller's order (`add` passes invocation
+        order, `sync` discovery order): a high-priority overlay's lines must
+        always land last. See :attr:`sort_key`."""
         return sorted((cls(o) for o in overlays), key=lambda o: o.sort_key)
 
     # -- setup script ---------------------------------------------------------
@@ -445,24 +429,20 @@ class Overlay:
         Returns the script's exit code, or ``None`` when the overlay has no setup
         script (nothing to run -- not an error). Presence of ``setup.py`` at the
         overlay root is the opt-in; the runner never second-guesses a script the
-        user chose to install (see the overlay-authoring contract).
+        user chose to install.
 
         **Idempotency is the overlay author's contract**: the script must be safe
         to run on every ``add``/``sync`` (check-then-act). The runner only
-        invokes it.
-
-        Invocation (pure stdlib subprocess, the same style the private-sync
-        overlay's sync hook uses):
+        invokes it:
 
         * **cwd** = the installed overlay dir, so the script sees its own files.
-        * **env** carries ``AGENTS_HOME`` = the resolved store path (D58
-          configurable store), so the script never hardcodes ``~/.agents``, and
-          ``AGENTS_OVERLAY_DIR`` = its own installed dir.
+        * **env** carries ``AGENTS_HOME`` = the resolved store path (D58), so the
+          script never hardcodes ``~/.agents``, and ``AGENTS_OVERLAY_DIR`` = its
+          own installed dir.
         * the script runs under the interpreter running dotagents.
 
-        A non-zero exit is surfaced (returned) so the caller can raise a clear
-        error -- never a silent skip. Never prints ``DOTAGENTS_*`` values
-        (Leakage)."""
+        A non-zero exit is returned so the caller can raise a clear error --
+        never a silent skip."""
         script = self.find_setup_script()
         if script is None:
             return None
@@ -560,18 +540,16 @@ class Overlay:
         return self._copy_into(self.files(), dest, dry_run, "overlay")
 
     def install_to(self, dest_overlay_dir: Path, dry_run: bool, overwrite: bool = False):
-        """Install the overlay as a *directory* under `<scope>/overlays/<name>/`
-        (the "install model = overlay-dirs" decision): the overlay is the
-        discoverable unit.
+        """Install the overlay as a *directory* under `<scope>/overlays/<name>/`:
+        the overlay is the discoverable unit.
 
-        Copies every file the overlay ships (minus its manifest / caches -- see
-        :meth:`files`) into `dest_overlay_dir`, create-if-absent so re-adding an
-        overlay never clobbers a file the user hand-edited inside the installed
-        copy (additive/no-clobber, mirroring :meth:`apply_to`); `overwrite`
-        (`sync --overwrite`) replaces files whose content differs from the
-        source. The overlay's own `overlay.toml` is copied too so a later
-        `sync`/`list`/`show` can re-read its manifest from the installed copy.
-        Returns (written, skipped) counts and log lines."""
+        Copies every file the overlay ships (minus caches -- see :meth:`files`)
+        into `dest_overlay_dir`, create-if-absent so re-adding an overlay never
+        clobbers a file the user hand-edited inside the installed copy;
+        `overwrite` (`sync --overwrite`) replaces files whose content differs
+        from the source. The overlay's own `overlay.toml` is copied too so a
+        later `sync`/`list`/`show` can re-read its manifest from the installed
+        copy. Returns (written, skipped) counts and log lines."""
         # Ship the manifest alongside the files so the installed dir is self-describing.
         sources = self.files()
         if self.manifest_path.is_file():
@@ -582,14 +560,13 @@ class Overlay:
         """Fold this overlay's D59 routing + rules into an already-installed
         AGENTS.md's managed block, in place (additive).
 
-        `init` composes these into the base text *before* first write; an
-        incremental `overlays add` instead re-composes the *existing* installed
-        file's managed block. Extracts the current block (between the dotagents
-        markers), runs the same `_compose_block` fold used at install time over
-        just that block text, and writes the result back between the markers --
-        content outside the block is never touched. A no-op (returns False) when
-        the overlay contributes nothing, the file is absent, or it carries no
-        managed block."""
+        Extracts the current block (between the dotagents markers), runs the
+        same `_compose_block` fold `init` uses over just that block text, and
+        writes the result back between the markers -- content outside the block
+        is never touched. A no-op (returns False) when the overlay contributes
+        nothing, the file is absent, or it carries no managed block. The
+        `overlays` command uses :func:`recompose_overlay_block` instead, which
+        also gets priority ordering right across overlays."""
         from dotagents._fs import write_text_lf
         from dotagents._merge import find_block
         from dotagents.cli import _compose_block
@@ -634,18 +611,13 @@ def recompose_overlay_block(
     logger,
 ) -> bool:
     """Rebuild AGENTS.md's managed block from the *pristine* base over ALL installed
-    overlays in `(priority, name)` order (plan 02 / D68), in place.
+    overlays in `(priority, name)` order (D68), in place.
 
-    This is what makes single-`overlays add` positioning correct: a lone `add` merges
-    one overlay, but its rules must land in the right slot *relative to overlays
-    already present in the block*. Incremental append (`Overlay.merge_rules_into`)
-    can only tack the newcomer on at the end, so a high-priority overlay added
-    *after* a low-priority one would wrongly sort last. Recomposing from the base
-    each time sidesteps that: `base_block` is the freshly-read base overlay's managed
-    block (no overlay content), `overlays` is every installed overlay in the scope
-    (instances or dirs), and `_compose_block` folds them in sorted order -- so the
-    block is a pure function of *which* overlays are installed, never *when* each
-    was added.
+    `base_block` is the base overlay's managed block (no overlay content),
+    `overlays` is every installed overlay in the scope (instances or dirs), and
+    `_compose_block` folds them in sorted order -- so the block is a pure
+    function of *which* overlays are installed, never *when* each was added
+    (an incremental append could only put a newcomer last).
 
     Only the managed block (between the dotagents markers) is rewritten; content
     outside the markers is untouched. Returns True if the file changed, False on a

@@ -44,9 +44,9 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   means no append flag and the context is merged into `Agent.context_target`
   as `context --write-agent` does — then runs `Agent.launch_command` resolved
   on the exported PATH, or `--command`). `init` copies neither into the store —
-  the bundled dir is always a discovery source. `link` / `sync` left the package with their logic (D85): the
-  opt-in **private-sync** overlay ships them, renamed `link-project` /
-  `sync-project`, from its own `cmds/` + `lib/_link.py`. A personal command module
+  the bundled dir is always a discovery source. `link-project` / `sync-project`
+  are shipped by the opt-in **private-sync** overlay from its own `cmds/` +
+  `lib/_link.py` (D85), not by the package. A personal command module
   dropped into a scope's `dotagents/cmds/` is discovered like any other, so private
   tooling never has to live in the repo (D84). `audit` is repo CI tooling
   (`tools/audit.py`), not a command.
@@ -108,13 +108,12 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   default). `-g` resolves the store through `resolve_user_store`
   (`--agents-dir` → `$AGENTS_HOME` → `~/.agents`), never the literal
   home dir; `--agents-dir` overrides the store in EITHER scope. The library
-  functions take a `Scope` only — no keyword-triple compatibility form: the CLI
-  is the public surface, the package internals have one caller.
+  functions take a `Scope` only.
   Installed overlays are **discovered** by presence (`Overlay.discover(scope.overlay_root)`
   for one scope, `Overlay.installed(...)` for what a session uses), not tracked in
   a registry. Nothing overlay-only lives here (name rules and discovery are
   `Overlay`'s).
-- `_context` — assemble the effective per-agent context (Plan 04):
+- `_context` — assemble the effective per-agent context:
   `assemble_context(agent, scope, *, inline=False)` /
   `assemble_context_data(agent, scope, *, inline=False)`. Sources are the contract-A
   walk (overlay `CONTEXT.md`s first, sorted by manifest `priority`, lower
@@ -124,7 +123,7 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   and one `<NAME_OVERLAY_ROOT>` per installed overlay (user store + project)
   expand. **Inlining the on-demand `.md` files a source mentions is opt-in**
   (`inline=True` / `context --inline`): the base rules say to read them only
-  when a task needs them, and inlining every mention made a 100 KB session
+  when a task needs them, so inlining every mention would bloat the session
   payload. Skills are listed, never inlined.
 - `_env` — chained env-file assembly + `env.py` execution (frozen contract B):
   `get_environment(scope, *, base_env, explicit, logger)` / `get_diff(scope, ...)`
@@ -135,20 +134,20 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `lib` onto PYTHONPATH the same way (`get_lib_paths`; not part of contract B), so
   an `env.py` and every subprocess can import an overlay's `lib/`; then two tiers
   (`pre.env*` then `env*`), later-overrides-earlier. Identity seeded before the
-  chain; proxy vars applied after. **Amended 2026-09-09:** the project-root level
+  chain; proxy vars applied after. The project-root level
   resolves only `pre.local.env` / `local.env` — a checkout's own top-level
-  `env.py` / `env` is never executed or sourced (it ran at every session start,
-  i.e. code execution from any cloned repo); only regular files count (a venv
+  `env.py` / `env` is never executed or sourced (that would be code execution
+  from any cloned repo at session start); only regular files count (a venv
   dir named `env` is not an env file); a plain file whose `source` fails
   contributes nothing (`source F || exit 1`, so the failure is visible); bash's
   own `PWD`/`OLDPWD`/`SHLVL`/`MSYSTEM*` are never reported as a file's changes.
 - **`Scope.paths(*names, include_missing=False)`** — the Contract-A precedence
-  walk / filename resolution (there is no `_resolve` module any more), store by
+  walk / filename resolution, store by
   store over `Scope.stores` — system (`Scope.system_root`, `/etc/agents` or
   `$AGENTS_SYSTEM_ROOT`), user, project — each store's overlays first, then the
   store itself; then project-root. The project store and project-root exist
   only in a project scope (`overlays add` installs into the project store by
-  default, since 2026-09-09 walked like any other). Each
+  default; it is walked like any other). Each
   tuple is `(level, path, root)`; an overlay entry's `level` is the overlay's
   dir name and `root` its dir (`root is None` for every other level — that is
   the overlay test). `LEVEL_NAMES` are reserved as overlay names.
@@ -175,7 +174,7 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `.agents/rules/dotagents.md`),
   `write_base_config(dest, ...)` (Claude also writes the `@` include into
   `~/.claude/CLAUDE.md` or `<project>/.claude/CLAUDE.md` — THE last mile; no
-  `<store>/CLAUDE.md` is written any more, nothing read it). The base overlay is
+  `<store>/CLAUDE.md` is written). The base overlay is
   `_overlay/dotagents/` only: `templates/AGENTS.md` (the block
   TEMPLATE, rendered by `cli._common.base_agents_text(src, dest)` —
   `{{AGENTS_MD}}` becomes the actual path of the store's `AGENTS.md`, so
@@ -209,16 +208,15 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   PowerShell tool) and `CodexAgent.wire_hooks` (`<CODEX_HOME|~/.codex>/hooks.json`,
   never `config.toml`: `SessionStart` context-only, plus a `PreToolUse` env-loader
   matched on `matcher: "Bash"`). Codex's hook JSON is structurally identical to
-  Claude's, including the SAME `updatedInput.command` rewrite mechanism on
-  `PreToolUse` — confirmed directly against Codex's own docs
-  (learn.chatgpt.com/docs/hooks), not assumed from Claude parity.
-  Gemini/Cursor/Copilot keep the base no-op — Gemini CLI proper has no hook
-  mechanism documented at all (checked directly). **Antigravity is a separate
+  Claude's, including the same `updatedInput.command` rewrite mechanism on
+  `PreToolUse` (learn.chatgpt.com/docs/hooks).
+  Gemini/Cursor/Copilot keep the base no-op — Gemini CLI documents no hook
+  mechanism. **Antigravity is a separate
   product** from Gemini CLI (Antigravity CLI/IDE/SDK family, shares only the
   `~/.gemini/` namespace for some files) and DOES wire a hook: see
-  `AntigravityAgent.wire_hooks` below. `PreToolUse` there is still allow/deny/ask
+  `AntigravityAgent.wire_hooks` below. `PreToolUse` there is allow/deny/ask
   only — no `updatedInput`, so no command-rewrite/env-loader path exists to hang
-  on it, unlike Claude/Codex. Revisit both conclusions if either framework changes.
+  on it, unlike Claude/Codex. Revisit if either framework changes.
 - **`AntigravityAgent.wire_hooks`** (`<AGENTS_HOME_ANTIGRAVITY|~/.gemini/config>/hooks.json`,
   keyed under a `"dotagents"` name per the docs' own example shape — a named-entry
   object, not Claude/Codex's flat `hooks.<Event>`): wires a single `PreInvocation`
@@ -230,30 +228,28 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `_overlay/dotagents/hooks/`) gates on `invocationNum == 0` to behave like a
   one-shot SessionStart rather than resending context every turn. Output shape is
   a bare `{"injectSteps": [{"ephemeralMessage": "..."}]}`, no `hookSpecificOutput`
-  wrapper — confirmed against the primary docs after an earlier pass here wrongly
-  concluded no useful injection was possible; `ephemeralMessage` is the one of the
+  wrapper; `ephemeralMessage` is the one of the
   three step types meant for free text (`toolCall` executes a tool,
-  `userMessage` impersonates the user). No detection marker exists anywhere in
-  Antigravity's docs, so `detect_env_vars = []` — explicit `--agents antigravity`
-  only, same posture as Codex's env-block precedent (writes touching an agent's
+  `userMessage` impersonates the user). Antigravity's docs define no detection
+  marker, so `detect_env_vars = []` — explicit `--agents antigravity`
+  only, as for Codex (writes touching an agent's
   own live config are opt-in, never inferred).
 - **`SessionStart`/`CwdChanged` register TWO handlers each ON WINDOWS**,
   bash-syntax (default shell) and a PowerShell-native equivalent (`shell:
   "powershell"`); **POSIX hosts get the bash handler only**, and `init` there
-  RETRACTS PowerShell entries an earlier install wrote (`_hooks.remove_hook`,
-  keyed by status message) — Claude Code on Linux ran such an entry through
-  bash, a syntax error every session (measured in WSL, 2026-09-10). The gate
+  REMOVES any PowerShell entries present (`_hooks.remove_hook`,
+  keyed by status message) — Claude Code on Linux runs such an entry through
+  bash, a syntax error every session. The gate
   is `ClaudeAgent._is_windows()` (`os.name == "nt"`, a seam tests patch; never
   "is pwsh installed"). hooks.md: `shell` "Defaults to bash, or to powershell
-  on Windows when Git Bash isn't installed" — verified directly that bash
-  syntax fed to `powershell -Command` on such a machine is a hard parse error,
+  on Windows when Git Bash isn't installed" — bash
+  syntax fed to `powershell -Command` is a hard parse error,
   not a soft failure, so every session there would silently get neither env
   nor context. Every handler in a matched group fires unconditionally
-  (hooks.md), so on Windows both always run —
-  and on a box with BOTH interpreters both used to succeed, injecting the same
-  context twice per session (two identical 100 KB payloads, measured
-  2026-09-09). The PowerShell variants therefore **select themselves: they run
-  only when `bash` is not on PATH** (`Get-Command bash`). The PowerShell
+  (hooks.md), so on Windows both always run; the PowerShell variants therefore
+  **select themselves: they run only when `bash` is not on PATH**
+  (`Get-Command bash`), otherwise a box with both interpreters would inject the
+  same context twice per session. The PowerShell
   `SessionStart` variant is context-only (`dotagents context`), not
   env+context: `$CLAUDE_ENV_FILE`'s documented effect is "subsequent BASH
   commands" regardless of which shell wrote it, so writing to it from a
@@ -261,28 +257,27 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   store as `$AGENTS_HOME`, else `~/.agents` (bash: `${AGENTS_HOME:-$HOME/.agents}`),
   and the bash `CwdChanged` handler re-pins `AGENTS_PROJECT_ROOT` into
   `$CLAUDE_ENV_FILE` when the new cwd carries a `.agents/` (the SessionStart pin
-  is only-if-unset, so without this a `cd` into another project kept the first
-  project's root for the rest of the session).
+  is only-if-unset, so without this a `cd` into another project would keep the
+  first project's root for the rest of the session).
 - **Windows only**: `ClaudeAgent._wire_powershell_pretooluse` additionally wires
   a no-matcher `PreToolUse` hook (fires on every tool call), `shell:
   "powershell"`, running `PRETOOLUSE_POWERSHELL_COMMAND` INLINE — deliberately
   not a `.ps1` file, since a script file is subject to PowerShell's execution
   policy (RemoteSigned/AllSigned/Restricted) and dotagents has no code-signing
-  certificate; verified directly that the inline form runs successfully even
-  under `Restricted`, which blocks every `.ps1` file outright. Closes a real
-  gap: `$CLAUDE_ENV_FILE` is Bash-tool-only (confirmed empirically that
-  `$env:CLAUDE_ENV_FILE` is empty inside a live PowerShell tool call), so the
+  certificate; the inline form runs even
+  under `Restricted`, which blocks every `.ps1` file outright. It is needed
+  because `$CLAUDE_ENV_FILE` is Bash-tool-only (`$env:CLAUDE_ENV_FILE` is
+  empty inside a PowerShell tool call), so the
   SessionStart env half never reaches the PowerShell tool. Uses `PreToolUse`'s
-  `updatedInput` to prepend a guarded env-loader (`AGENTS_RUNTIME_SET`,
-  matching the precursor's convention) to a `PowerShell` tool call's own
+  `updatedInput` to prepend a guarded env-loader (`AGENTS_RUNTIME_SET`)
+  to a `PowerShell` tool call's own
   command — not by trying to persist state across hook invocations, which are
   each their own fresh process and cannot. Each PowerShell TOOL call is a fresh
   process too, so the guard never carries over and the loader runs on every
   call: it therefore runs `env --diff` (the change set), not the whole
   environment through `Invoke-Expression`. Every literal `\` in the
   command constant must be a raw string — a bare `\b` in a normal Python string
-  literal silently becomes a backspace character, corrupting the emitted path;
-  caught once by testing a draft through a real PowerShell spawn.
+  literal silently becomes a backspace character, corrupting the emitted path.
 - **`CodexAgent._deploy_pretooluse_script`** covers the same env gap for Codex,
   which has NO env-persistence mechanism at any hook event (not Bash-only like
   Claude — none). Ships `pretooluse_codex_env.py` (`_overlay/dotagents/hooks/`),
@@ -292,10 +287,9 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `tool_name` check needed in the script. A FILE, not inlined like Claude's:
   Codex's docs show every hook example as `python3 <path>`, and a `.py` file
   has no execution-policy/signing concern (PowerShell-specific). Sets
-  `commandWindows` to `python "<path>"` (not `python3`) — verified directly
-  that `python3` resolves to the Microsoft Store app-execution-alias stub and
-  fails outright on this dev machine (exit 49), the same trap noted elsewhere
-  for `py`/venv creation.
+  `commandWindows` to `python "<path>"` (not `python3`): on Windows `python3`
+  can resolve to the Microsoft Store app-execution-alias stub and fail
+  outright (exit 49).
 
 ## Environment variables
 
@@ -327,16 +321,16 @@ Config / path / sync vars (`AGENTS_*`, non-secret — read, and some emitted):
   `SourceCache.materialize` into `<store>/.cache/overlays/uri/` (a directory
   synced with `PathSyncer(remove_missing=True)`, a file copied, once per
   process); `file://` is local; without the extra only an http(s) REGISTRY
-  works (stdlib fetch). `GitCache` is the old name of `SourceCache`.
+  works (stdlib fetch).
 - `AGENTS_CMDS_PATH` — extra command-module search paths (os.pathsep-split).
 - `AGENTS_OVERLAY_DIR` — set for an overlay's setup script (its own installed dir).
 - `AGENTS_REMOTE` / `AGENTS_SYNC_MESSAGE` — private-store sync (tokenless remote URL /
   commit message).
 
-The `DOTAGENTS_*` spellings of these are gone (0.5.0): readers take the `AGENTS_*`
-name only, and setters emit it only.
+Readers take the `AGENTS_*` name only, and setters emit it only; there is no
+`DOTAGENTS_*` spelling of any of these.
 
-Tool-internal / secret vars (`DOTAGENTS_*` — kept; read, **never printed**):
+Tool-internal / secret vars (`DOTAGENTS_*` — read, **never printed**):
 
 - `DOTAGENTS_AGENTS_TOKEN` — **secret** (fine-grained PAT) for private-store auth.
 - `DOTAGENTS_CLI_INSTALL` — pip spec to install the CLI itself (tool-specific).
@@ -367,8 +361,8 @@ with every level's existing `lib` prepended (both except project-root; the
 formatter treats any `*PATH` var as a path list for Windows/POSIX conversion).
 Deliberately NOT emitted, despite looking like they
 would be: `AGENTS_AGENT` (a named persona — nothing derives one, so there is
-nothing to emit) and `AGENTS_CODE_SESSION_ID` (dropped with the precursor's
-blanket `CLAUDE_*`→`AGENTS_*` rewrite). Do not branch on either. `resolve_scope` READS `AGENTS_PROJECT_ROOT` (then the
+nothing to emit) and `AGENTS_CODE_SESSION_ID`. Do not branch on either.
+`resolve_scope` READS `AGENTS_PROJECT_ROOT` (then the
 agent-native `CLAUDE_PROJECT_DIR`, then cwd) for the project scope's root.
 
 Every command READS both back, so the pin actually holds: `env` and `context`
@@ -396,7 +390,7 @@ the pinned root makes that cwd-independent. `-g/--global` on these two means
   zip-backed `Traversable` is extracted once), never `Path(__file__).exists()`
   (always False in a zipapp). Everything a `.pyz` run extracts — package data
   and the repointed module sources — lives under ONE per-process scratch dir
-  (`_common._scratch_dir()`), removed at interpreter exit; a `mkdtemp` per item
-  with no cleanup had littered a dev box's `%TEMP%` with 632 directories.
+  (`_common._scratch_dir()`), removed at interpreter exit, so a `.pyz` run
+  leaves nothing behind in `%TEMP%`.
 - **`pathlib_next` needs `typing_extensions` on Python < 3.10** (an upstream gap); a
   3.9 environment must `pip install typing_extensions`.

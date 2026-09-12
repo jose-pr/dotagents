@@ -4,8 +4,8 @@
     dotagents launch                       # the active agent (same detection as `context`)
     dotagents launch codex --dry-run       # print what would run, run nothing
 
-What happens, in order (all of it is what the SessionStart / env-loader hooks
-do for a session that is already running, done up front for one that is not):
+What happens, in order (what the SessionStart / env-loader hooks do for a
+running session, done up front here):
 
 1. **Environment.** The full ``dotagents env`` assembly for this scope --
    identity vars (``AGENT``, ``AGENTS_HARNESS``, ...), ``AGENTS_HOME`` /

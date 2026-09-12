@@ -1,4 +1,4 @@
-"""Managed-block merge for `init`'s AGENTS.md/CLAUDE.md (D-init-merge).
+"""Managed-block merge for `init`'s AGENTS.md/CLAUDE.md.
 
 `init` must never clobber a user-customized AGENTS.md. Content owned by dotagents
 is delimited by literal marker lines and treated as a block *within* the file:
@@ -7,11 +7,8 @@ markers are already there. Detection is by marker presence only, never by prose
 matching, so it survives user reformatting.
 
 A marker counts only when it is a LINE of its own (surrounding whitespace
-allowed). The base `AGENTS.md` itself *mentions* the marker names in prose
-("everything between the `dotagents:begin`/`dotagents:end` markers is managed"),
-and a substring match on such a mention replaced the sentence around it with
-the block while leaving the real block in place -- two managed blocks and a
-mangled sentence (review 2026-09-09).
+allowed): the base `AGENTS.md` itself *mentions* the marker names in prose, and
+a substring match would treat that mention as a block.
 """
 
 import re
@@ -185,9 +182,9 @@ def merge_context_block(target: Path, context_text: str, *, dry_run: bool = Fals
     """Write an assembled context into ``target`` as a managed
     ``dotagents:context`` block: created if the file is absent, refreshed in
     place if the block is there, appended after the user's own content
-    otherwise. Never a raw overwrite -- ``context --write-agent`` used to
-    replace the whole file, which for Codex was the store's ``AGENTS.md`` (a
-    context SOURCE), so every run re-inlined the previous run's output."""
+    otherwise. Never a raw overwrite: the target may be a context SOURCE (a
+    harness's own ``AGENTS.md``), and overwriting it would re-inline the
+    previous run's output."""
     block_text = "%s\n%s\n%s\n" % (
         CONTEXT_BEGIN_MARKER, context_text.strip(), CONTEXT_END_MARKER,
     )

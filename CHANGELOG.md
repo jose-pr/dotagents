@@ -24,8 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   once per run. `file://` is a local path. Without the extra an `http(s)://`
   registry file still works through the standard library, and anything else
   names the extra it needs. `build-pyz --extras uri,http` vendors the extra
-  into the zipapp. `GitCache` is now `SourceCache` (the old name stays as an
-  alias).
+  into the zipapp. `GitCache` is now `SourceCache`.
 
 ### Changed
 
