@@ -289,7 +289,8 @@ def test_registry_documents_and_entry_forms(tmp_path):
     assert reg.overlay_dir("two_alias") == tmp_path / "many" / "two", "aliases match by normalized name"
     with pytest.raises(SystemExit) as exc:
         reg.overlay_dir("web")
-    assert "does not exist" in str(exc.value) or "cannot reach" in str(exc.value)
+    # Resolved (and missing) with the uri extra; names the extra without it.
+    assert any(s in str(exc.value) for s in ("does not exist", "cannot reach", "uri extra")), str(exc.value)
     _write(tmp_path / "r.toml", '[overlays]\na = "/srv/a"\n')
     assert _sources.load_repo(str(tmp_path / "r.toml"), cache).entries == {"a": "/srv/a"}
     pytest.importorskip("yaml")
