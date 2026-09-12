@@ -78,9 +78,12 @@ class BuildPyz(LoggingArgs, Cmd):
             stage = Path(tmp) / "stage"
             stage.mkdir()
 
+            extras = ",".join(e.strip() for e in self.extras.split(",") if e.strip())
+            extras_spec = "[%s]" % extras if extras else ""
             self._logger_.info(
-                "vendoring duho==%s pathlib_next==%s via pip --target",
+                "vendoring duho==%s pathlib_next%s==%s via pip --target",
                 self.duho_version,
+                extras_spec,
                 self.pathlib_next_version,
             )
             rc = subprocess.call(
@@ -92,11 +95,7 @@ class BuildPyz(LoggingArgs, Cmd):
                     "--target",
                     str(stage),
                     "duho==%s" % self.duho_version,
-                    "pathlib_next%s==%s" % (
-                        "[%s]" % ",".join(e.strip() for e in self.extras.split(",") if e.strip())
-                        if self.extras.strip() else "",
-                        self.pathlib_next_version,
-                    ),
+                    "pathlib_next%s==%s" % (extras_spec, self.pathlib_next_version),
                 ]
             )
             if rc != 0:
