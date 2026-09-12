@@ -41,7 +41,7 @@ DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 # required tooling lives at top-level tools/.
 #
 # The example overlays themselves moved to a separate `overlays` orphan branch
-# (origin/overlays) -- main's tree is overlays-free (see D77). So the manifest
+# (origin/repo) -- main's tree is overlays-free (see D77). So the manifest
 # here scopes to what main actually ships: the base overlay + required tooling.
 # The overlays branch carries its own copy of the example content and its tests;
 # validating that content is the overlays branch's concern, not main's.
@@ -63,7 +63,7 @@ EXIST_ONLY = [
     "tools/audit.py",
     "tools/cloud-setup.sh",
 ]
-# Example-overlay files live on the `overlays` branch, not in main's tree, so the
+# Example-overlay files live on the `repo` branch, not in main's tree, so the
 # repo checkout (--root .) has no overlays/ dir to enumerate. Kept empty here and
 # guarded below (checked only when an overlays/ dir is present -- e.g. a CI job
 # that checks the overlays branch out into ./overlays for integration testing).
@@ -139,7 +139,7 @@ def _check_overlay_manifests(root):
 
 def _overlays_dir(root):
     """The directory holding `<name>/overlay.toml` entries. CI checks the
-    `overlays` branch out INTO ./overlays (so the overlays sit directly under
+    `repo` branch out INTO ./overlays (so the overlays sit directly under
     it); a local clone of that branch at ./overlays nests them one level down
     (./overlays/overlays/<name>/). Accept both."""
     ov = root / "overlays"
@@ -156,13 +156,13 @@ def check_templates(root):
     import shutil
     import tempfile
     import tomllib
-    # The reference/language templates moved to the `overlays` branch (D77), so a
+    # The reference/language templates moved to the `repo` branch (D77), so a
     # plain main checkout has no overlays/ dir to instantiate. Skip cleanly rather
     # than fail -- CI checks the templates on the overlays branch (or after checking
     # it out into ./overlays), where the source files actually live.
     if not (root / "overlays").is_dir():
         print("SKIP --check-templates: no overlays/ dir "
-              "(templates live on the `overlays` branch)")
+              "(templates live on the `repo` branch)")
         return []
     failures = []
     tmp = Path(tempfile.mkdtemp(prefix="agents_tpl_"))

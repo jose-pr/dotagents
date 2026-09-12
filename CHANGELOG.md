@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The example overlays' branch is `repo` (was `overlays`); its layout is the
+  same, `overlays/<name>` at the branch root. Specs that named the branch
+  change one word: `https://github.com/jose-pr/dotagents.git@repo#overlays/net`.
+  The cloud bootstrap's `DOTAGENTS_OVERLAYS_REF` default follows.
+
 ## [0.5.0] - 2026-09-10
 
 ### Added

@@ -5,7 +5,7 @@ me overlay ``<name>``". Two shapes:
 
 * a **directory of overlays** -- each subdirectory is an overlay,
   ``<dir>/<name>/`` (the ``.pyz``'s bundled ``overlays/``, a checkout of the
-  overlays branch, any folder);
+  `repo` branch's ``overlays/``, any folder);
 * a **registry** -- a JSON / TOML / YAML document mapping ``<name-or-alias>``
   to the **source** of that one overlay. Either the whole document is the
   mapping, or its ``overlays`` key is.

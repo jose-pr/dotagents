@@ -63,13 +63,14 @@ jobs:
           python-version: "3.12"
       - name: Fetch example overlays (separate branch)
         # The example overlays live on the `overlays` orphan branch, not in main's
-        # tree (D77). Check them out into ./overlays-src so the overlays-command
+        # tree (D77): they are on the `repo` branch, under overlays/<name>. Check
+        # that branch out into ./overlays-src so the overlays-command
         # integration steps below can resolve them via --repo overlays-src/overlays
         # (the branch keeps them at overlays/<name>/). The pure-unit pytest step
         # below uses tmp fixtures and needs none of this.
         uses: actions/checkout@v4
         with:
-          ref: overlays
+          ref: repo
           path: overlays-src
       - name: Install the dotagents CLI package
         run: python -m pip install -e .

@@ -46,7 +46,7 @@ them. Everything else is repo infrastructure.
 
 The **example overlays** — the `flows` workflow set, per-language `kb/` + templates,
 `references`, `release`, `private-sync`, `net`, `recovery`, `tools` — live on a separate
-[`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays), not in `main`'s
+[`repo` branch](https://github.com/jose-pr/dotagents/tree/repo), not in `main`'s
 tree: they are swappable payloads, not part of the tool. `dotagents overlays add <name>`
 resolves them from there (or from any `--repo`). See the
 [docs](https://jose-pr.github.io/dotagents/) for what each ships.
@@ -102,7 +102,8 @@ overlay's skills into the shared skills dir. See below.
 `dotagents overlays` manages opt-in overlays **by name**, resolving each name against
 **repos** in order — the first that offers the name wins. A repo is always a
 **collection** of overlays: a directory (each subdirectory an overlay, e.g. a checkout of
-the [`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays)) or a
+the [`repo` branch](https://github.com/jose-pr/dotagents/tree/repo), whose overlays sit
+under `overlays/<name>`) or a
 JSON/TOML/YAML registry file mapping names to **sources**. It lives at a local path, an
 `http(s)://` URL (a registry file, fetched), or inside a git repository named
 `<repo>[@<branch|tag|commit>][#<path>]`, where the path picks the directory or registry

@@ -233,7 +233,7 @@ dg_cli() { if command -v dotagents >/dev/null 2>&1; then dotagents "$@"; else py
 # <store>/overlays/private-sync) short-circuits the fetch entirely, for an
 # air-gapped or pinned setup.
 DOTAGENTS_OVERLAYS_REMOTE="${DOTAGENTS_OVERLAYS_REMOTE:-https://github.com/jose-pr/dotagents.git}"
-DOTAGENTS_OVERLAYS_REF="${DOTAGENTS_OVERLAYS_REF:-overlays}"
+DOTAGENTS_OVERLAYS_REF="${DOTAGENTS_OVERLAYS_REF:-repo}"
 
 _dg_have_link_project() {
     dg_cli --help 2>/dev/null | grep -q -- "link-project"
@@ -247,14 +247,14 @@ elif [ -n "${AGENTS_OVERLAYS_REPO:-}" ]; then
         || echo "dotagents: private-sync overlay install failed (AGENTS_OVERLAYS_REPO)"
 else
     _dg_ovl_tmp="$(mktemp -d 2>/dev/null || echo /tmp/dg-overlays.$$)"
-    echo "dotagents: fetching the overlays branch ($DOTAGENTS_OVERLAYS_REF) for private-sync"
+    echo "dotagents: fetching the example-overlays branch ($DOTAGENTS_OVERLAYS_REF) for private-sync"
     if dg_git clone --quiet --depth 1 --branch "$DOTAGENTS_OVERLAYS_REF" \
         "$DOTAGENTS_OVERLAYS_REMOTE" "$_dg_ovl_tmp/src" 2>/dev/null; then
         dg_cli overlays add private-sync --repo "$_dg_ovl_tmp/src/overlays" \
             --agents-dir "$AGENTS_DIR" -g \
             || echo "dotagents: private-sync overlay install failed"
     else
-        echo "dotagents: could not fetch the overlays branch; private-sync commands unavailable"
+        echo "dotagents: could not fetch the example-overlays branch; private-sync commands unavailable"
     fi
     rm -rf "$_dg_ovl_tmp" 2>/dev/null
 fi

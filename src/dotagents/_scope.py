@@ -347,8 +347,9 @@ def bundled_overlays_root() -> "Path | None":
     Two homes, tried in order: the packaged copy (``importlib.resources`` under the
     installed ``dotagents`` package -- extracted from a zipapp when needed, exactly
     like ``cli._package_data_dir``), then a repo checkout's top-level ``overlays/``
-    (dev use, mirroring ``BuildPyz``'s ``parents[2]`` reach). Returns ``None`` if
-    neither exists -- a plain ``pip install`` that bundled no overlays.
+    (dev use, mirroring ``BuildPyz``'s ``parents[2]`` reach) or the ``repo``
+    branch checked out as the worktree ``./repo`` (its ``overlays/``). Returns
+    ``None`` if none exists -- a plain ``pip install`` that bundled no overlays.
     """
     # Prefer the shared resolver in cli so zipapp extraction is cached once.
     try:
@@ -360,9 +361,10 @@ def bundled_overlays_root() -> "Path | None":
     except Exception:
         pass
 
-    repo_overlays = Path(__file__).resolve().parents[2] / "overlays"
-    if repo_overlays.is_dir():
-        return repo_overlays
+    checkout = Path(__file__).resolve().parents[2]
+    for candidate in (checkout / "overlays", checkout / "repo" / "overlays"):
+        if candidate.is_dir():
+            return candidate
     return None
 
 

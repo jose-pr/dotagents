@@ -19,7 +19,7 @@ an installed overlay — an already-present file is skipped.
 ## Example overlays
 
 The example overlays below live on this repo's separate
-[`overlays` branch](https://github.com/jose-pr/dotagents/tree/overlays), not in `main` —
+[`repo` branch](https://github.com/jose-pr/dotagents/tree/repo), not in `main` —
 they are **payloads riding on dotagents**, not part of the tool, so you swap them for
 your own. Name a checkout of that branch as a repo to install any with
 `dotagents overlays add <name> --repo <overlays-checkout>/overlays`.
@@ -67,7 +67,7 @@ first repo that offers the name wins. A repo is **always a collection** of overl
 in one of two shapes:
 
 - a **directory of overlays** — each subdirectory is an overlay, `<dir>/<name>/` (a
-  checkout of the `overlays` branch, any folder);
+  checkout of the `repo` branch has them under `overlays/`, any folder);
 - a **registry** — a JSON, TOML or YAML file mapping `<name-or-alias>` to the
   **source** of that one overlay (the whole document, or its `overlays` key).
 
@@ -104,8 +104,8 @@ The repos, in order:
 ```toml
 # ~/.agents/dotagents.toml
 [overlays]
-engineering = "https://github.com/you/dotagents.git@overlays#overlays/engineering"
-python      = "https://github.com/you/dotagents.git@overlays#overlays/python"
+engineering = "https://github.com/you/dotagents.git@repo#overlays/engineering"
+python      = "https://github.com/you/dotagents.git@repo#overlays/python"
 mytool      = "git@github.com:you/mytool-overlay.git@v2"      # no path: the repo root is the overlay
 local       = "~/src/overlays/local"                           # a local overlay directory
 mine        = "./overlays/mine"                                # relative to this file: ~/.agents/overlays/mine
@@ -113,7 +113,7 @@ mine        = "./overlays/mine"                                # relative to thi
 
 ```bash
 dotagents overlays add engineering -g                                  # from the registry above
-dotagents overlays add net --repo https://github.com/you/dotagents.git@overlays#overlays/net
+dotagents overlays add net --repo https://github.com/you/dotagents.git@repo#overlays/net
 dotagents overlays sync -g                                             # refetches git-sourced overlays
 ```
 
