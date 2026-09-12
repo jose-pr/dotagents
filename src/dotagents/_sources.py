@@ -22,18 +22,30 @@ Repos and sources are both written as a **spec**::
 does not end in ``.git``). ``<ref>`` (git only) is a branch, tag or commit --
 default the remote's default branch. ``<path>`` is a path inside the location.
 What the path names differs: for a **repo** it is the collection -- a
-directory (of overlays) or a registry file, the checkout root when absent --
-and an ``http(s)://`` location is a registry file, fetched; for a **source**
-it is the overlay's root directory, and when absent *the repository root is
-the overlay*.
+directory (of overlays) or a registry file, the checkout root when absent;
+for a **source** it is the overlay's root directory, and when absent *the
+repository root is the overlay*.
+
+A ``scheme://`` location that is not git is a **pathlib_next** path. With
+the ``uri`` extra installed (``dotagents-cli[uri]``; ``[http]``, ``[sftp]``,
+``[s3]`` add the schemes' own clients) any scheme pathlib_next speaks works
+the way a local path does: an ``http(s)://`` directory listing, an ``sftp``,
+``s3``, ``dav`` or ``github`` tree is a directory of overlays (as a repo) or
+one overlay (as a source), a file is a registry; so is an archive --
+``zip:<archive-uri>!/<inner>`` (``tar:``, ``archive:``), the archive local or
+at any URL. What is remote is
+materialized into ``<user store>/.cache/overlays/uri/`` (synced once per
+process) and used from there. ``file://`` is a local path, no copy. Without
+the extra an ``http(s)://`` location can still be a registry file (fetched
+with the standard library); anything else says which extra it needs.
 
 A source written as a **relative path** (``./python``, ``../shared/net``,
 ``overlays/rust``) is relative to the registry it is in: the registry file's
-directory for a local file, and for a registry inside a git checkout the
-same repository at the same ref, the path joined onto the registry file's
+directory for a local file, for a registry inside a git checkout the same
+repository at the same ref with the path joined onto the registry file's
 directory (``overlays/reg.toml`` saying ``./rust`` means
-``<repo>@<ref>#overlays/rust``). A registry fetched over http(s) has no
-overlays beside it, so a relative entry there is an error.
+``<repo>@<ref>#overlays/rust``), and for a registry at a URL the URL beside
+it (``https://h/cfg/reg.json`` saying ``./rust`` means ``https://h/cfg/rust``).
 
 Repos are consulted in order, and **the first that offers a name wins**:
 ``--repo`` values as given, then ``$AGENTS_OVERLAYS_REPO_<KEY>`` sorted by
@@ -52,6 +64,7 @@ from __future__ import annotations
 import hashlib
 import json
 import posixpath
+from urllib.parse import urljoin
 import os
 import re
 import subprocess
@@ -131,16 +144,114 @@ def parse_spec(text: str) -> Spec:
 # Git checkouts
 # --------------------------------------------------------------------------
 
-class GitCache(object):
-    """Cached clones under ``root``, one per repository location AND ref: two
-    registry entries naming the same repository at different refs (``@main``
-    for one overlay, ``@dev`` for another) must each see their own tree, since
-    the commands resolve every source before copying any."""
+def uri_path_class() -> "Any":
+    """``pathlib_next.uri.UriPath`` when the ``uri`` extra is installed, else
+    ``None`` -- the switch between "any scheme pathlib_next speaks" and the
+    standard-library http(s) registry fetch."""
+    try:
+        from pathlib_next.uri import UriPath
+    except ImportError:
+        return None
+    return UriPath
+
+
+def _local_from_file_url(url: str) -> Path:
+    """The local path a ``file://`` URL names."""
+    from urllib.parse import urlsplit
+    from urllib.request import url2pathname
+
+    parts = urlsplit(url)
+    path = url2pathname(parts.path)
+    if parts.netloc and parts.netloc not in ("", "localhost"):
+        # file://host/share/x -> a UNC path on Windows, a host-qualified one elsewhere.
+        path = "//%s%s" % (parts.netloc, path.replace("\\", "/"))
+    return Path(path)
+
+
+def url_scheme(location: str) -> str:
+    return location.split("://", 1)[0].lower()
+
+
+class SourceCache(object):
+    """What the commands fetch, under ``root``: git clones, one per repository
+    location AND ref (two registry entries naming the same repository at
+    different refs -- ``@main`` for one overlay, ``@dev`` for another -- must
+    each see their own tree, since the commands resolve every source before
+    copying any), and materializations of pathlib_next paths under ``uri/``
+    (a remote directory synced down, a remote file copied), each refreshed
+    once per process."""
 
     def __init__(self, root: Path, logger: Any = None):
         self.root = Path(root)
         self.logger = logger
         self._fresh: "set[str]" = set()  # locations fetched during this process
+
+    # --- pathlib_next paths ----------------------------------------------
+
+    def materialize(self, spec: Spec) -> Path:
+        """The local path a ``url`` spec resolves to: the path itself for
+        ``file://``; otherwise the remote (``location`` joined with ``path``)
+        brought into the cache -- a directory synced (deletions mirrored), a
+        file copied -- once per process. Needs the ``uri`` extra for anything
+        but ``file://``; a missing remote is an error naming it (redacted)."""
+        if spec.kind != "url":
+            raise ValueError("not a url spec: %r" % (spec,))
+        if url_scheme(spec.location) == "file":
+            target = _local_from_file_url(spec.location)
+            if spec.path:
+                target = target / spec.path
+            if not target.exists():
+                raise SystemExit("error: overlay source does not exist: %s" % target)
+            return target
+        UriPath = uri_path_class()
+        if UriPath is None:
+            raise SystemExit(
+                "error: %s: a %s:// source needs the pathlib_next uri extra "
+                "(pip install 'dotagents-cli[uri]', or [http] / [sftp] / [s3] for the "
+                "scheme's own client)" % (redact(spec.location), url_scheme(spec.location))
+            )
+        from pathlib_next import LocalPath
+        from pathlib_next.utils.sync import PathSyncer
+
+        remote = UriPath(spec.location)
+        if spec.path:
+            remote = remote / spec.path
+        shown = redact(spec.display())
+        try:
+            is_dir = remote.is_dir()
+            if not is_dir and not remote.exists():
+                raise SystemExit("error: %s does not exist" % shown)
+        except SystemExit:
+            raise
+        except Exception as exc:  # the scheme's client: 404, auth, network
+            raise SystemExit("error: cannot reach %s: %s" % (shown, redact(str(exc))))
+        local = self.root / "uri" / self._slug(spec.location, spec.path)
+        key = "uri:" + str(local)
+        if key in self._fresh:
+            return local / remote.name if not is_dir else local
+        local.mkdir(parents=True, exist_ok=True)
+        try:
+            if is_dir:
+                PathSyncer(remove_missing=True).sync(remote, LocalPath(local))
+                result = local
+            else:
+                result = local / (remote.name or "registry")
+                result.write_bytes(remote.read_bytes())
+        except Exception as exc:
+            raise SystemExit("error: cannot fetch %s: %s" % (shown, redact(str(exc))))
+        self._fresh.add(key)
+        if self.logger:
+            self.logger.info("fetched %s", shown)
+        return result
+
+    @staticmethod
+    def _slug(location: str, path: "Optional[str]") -> str:
+        stem = posixpath.basename((location.rstrip("/") + ("/" + path.strip("/") if path else "")))
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-.") or "source"
+        digest = hashlib.sha1(("%s#%s" % (location, path or "")).encode("utf-8")).hexdigest()[:12]
+        return "%s-%s" % (slug, digest)
+
+    # --- git ---------------------------------------------------------------
 
     def _git(self, args: "list[str]", cwd: "Optional[Path]", *, check: bool = True) -> "subprocess.CompletedProcess":
         env = dict(os.environ)
@@ -322,7 +433,7 @@ class RegistryRepo(object):
     process sees it."""
 
     def __init__(
-        self, origin: str, entries: "dict[str, str]", cache: GitCache, base: "Optional[Spec]" = None,
+        self, origin: str, entries: "dict[str, str]", cache: SourceCache, base: "Optional[Spec]" = None,
     ):
         self.origin = origin
         self.entries = entries
@@ -350,11 +461,6 @@ class RegistryRepo(object):
         if key is None:
             raise SystemExit("error: overlay %r not in registry %s" % (name, self.origin))
         spec = parse_spec(self.entries[key])
-        if spec.kind == "url":
-            raise SystemExit(
-                "error: registry %s: %r is an http(s) URL, which can only be a registry; "
-                "an overlay needs a directory or a git spec" % (self.origin, key)
-            )
         spec = resolve_relative(spec, self.base, origin=self.origin, key=key)
         target = locate(spec, self.cache)
         if not target.is_dir():
@@ -387,7 +493,7 @@ def resolve_relative(spec: Spec, base: "Optional[Spec]", *, origin: str, key: st
     ``base`` is a ``dir`` spec (the registry file's directory), a ``git`` spec
     (the repository, ref and the registry file's directory inside it -- the
     entry stays in the same repository at the same ref), or a ``url`` spec
-    (an http(s) registry, which has no overlays beside it: an error)."""
+    (the registry's URL: the entry is the URL beside it)."""
     if base is None or not is_relative(spec):
         return spec
     if base.kind == "dir":
@@ -406,13 +512,15 @@ def resolve_relative(spec: Spec, base: "Optional[Spec]", *, origin: str, key: st
                 % (origin, key, spec.location)
             )
         return Spec("git", base.location, base.ref, None if rel in ("", ".") else rel)
-    raise SystemExit(
-        "error: registry %s: %r (%s) is a relative path, but an http(s) registry has "
-        "no overlays beside it; use an absolute path or a git spec" % (origin, key, spec.location)
-    )
+    # A URL: RFC 3986 reference resolution against the registry's URL -- what
+    # a relative link in a document at that URL would mean.
+    rel = spec.location.replace("\\", "/")
+    if spec.path:
+        rel = rel.rstrip("/") + "/" + spec.path
+    return Spec("url", urljoin(base.location, rel), None, None)
 
 
-def locate(spec: Spec, cache: GitCache) -> Path:
+def locate(spec: Spec, cache: SourceCache) -> Path:
     """The local path a spec resolves to: a git checkout (plus ``path``), or a
     local path (plus ``path``). Raises when it does not exist."""
     if spec.kind == "git":
@@ -422,7 +530,7 @@ def locate(spec: Spec, cache: GitCache) -> Path:
             raise SystemExit("error: %s has no %r" % (redact(spec.location), spec.path))
         return target
     if spec.kind == "url":
-        raise ValueError("an http(s) URL has no local path")
+        return cache.materialize(spec)
     target = Path(spec.location).expanduser()
     if spec.path:
         target = target / spec.path
@@ -431,15 +539,23 @@ def locate(spec: Spec, cache: GitCache) -> Path:
     return target
 
 
-def load_repo(spec_text: str, cache: GitCache) -> Any:
+#: The old name; the cache holds more than git now.
+GitCache = SourceCache
+
+
+def load_repo(spec_text: str, cache: SourceCache) -> Any:
     """A :class:`DirRepo` or :class:`RegistryRepo` for a spec: what the spec
     resolves to decides -- a directory is a directory of overlays, a file is a
     registry, an ``http(s)://`` location is fetched as a registry."""
     spec = parse_spec(spec_text)
     origin = spec.display()
-    if spec.kind == "url":
+    if spec.kind == "url" and url_scheme(spec.location) != "file" and uri_path_class() is None:
+        # No uri extra: the standard library can still fetch an http(s)
+        # registry file; anything else is out of reach.
         from urllib.parse import urlsplit
 
+        if url_scheme(spec.location) not in ("http", "https"):
+            cache.materialize(spec)  # raises, naming the extra
         suffix = Path(urlsplit(spec.location).path).suffix
         entries = parse_document(_read_url(spec.location), suffix, origin)
         return RegistryRepo(origin, entries, cache, base=Spec("url", spec.location))
@@ -452,6 +568,9 @@ def load_repo(spec_text: str, cache: GitCache) -> Any:
     # file's directory as the path prefix.
     if spec.kind == "git":
         base = Spec("git", spec.location, spec.ref, posixpath.dirname(spec.path or "") or None)
+    elif spec.kind == "url" and url_scheme(spec.location) != "file":
+        location = spec.location.rstrip("/") + ("/" + spec.path.strip("/") if spec.path else "")
+        base = Spec("url", location)
     else:
         base = Spec("dir", str(target.parent))
     return RegistryRepo(origin, entries, cache, base=base)
@@ -490,7 +609,7 @@ class CompositeSource(object):
     wins. This is what the overlay commands talk to (``available`` /
     ``overlay_dir`` / ``root``)."""
 
-    def __init__(self, specs: "list[str]", cache: GitCache):
+    def __init__(self, specs: "list[str]", cache: SourceCache):
         self.specs = list(specs)
         self.cache = cache
         self._loaded: "dict[int, Any]" = {}
@@ -551,4 +670,4 @@ def resolve(
             "error: no overlay source. This build bundles no overlays; pass --repo <repo>, "
             "set AGENTS_OVERLAYS_REPO, or add a dotagents.{json,toml,yaml} registry to the store."
         )
-    return CompositeSource(ordered, GitCache(cache_root, logger))
+    return CompositeSource(ordered, SourceCache(cache_root, logger))

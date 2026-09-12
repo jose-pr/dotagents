@@ -40,6 +40,13 @@ class BuildPyz(LoggingArgs, Cmd):
 
     pathlib_next_version: str = "0.9.0"
     "Pinned pathlib_next version to vendor."
+
+    extras: str = ""
+    (
+        "pathlib_next extras to vendor too, comma-separated (uri, http, sftp, s3), "
+        "so the .pyz speaks those schemes for overlay sources; none by default."
+    )
+    ("--extras",)
     ("--pathlib-next-version",)
 
     def __call__(self) -> int:
@@ -85,7 +92,11 @@ class BuildPyz(LoggingArgs, Cmd):
                     "--target",
                     str(stage),
                     "duho==%s" % self.duho_version,
-                    "pathlib_next==%s" % self.pathlib_next_version,
+                    "pathlib_next%s==%s" % (
+                        "[%s]" % ",".join(e.strip() for e in self.extras.split(",") if e.strip())
+                        if self.extras.strip() else "",
+                        self.pathlib_next_version,
+                    ),
                 ]
             )
             if rc != 0:

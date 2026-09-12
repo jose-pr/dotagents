@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Overlay sources and repos can be any path `pathlib_next` speaks. With the
+  `uri` extra (`dotagents-cli[uri]`; `[http]`, `[sftp]`, `[s3]` add the schemes'
+  clients) an `http(s)://` directory listing, an `sftp`, `s3`, `dav` or
+  `github` tree is a directory of overlays or one overlay, a file is a
+  registry, an archive (`zip:<archive-uri>!/<inner>`, `tar:`, `archive:`, the
+  archive local or at a URL) is a tree too, and a relative registry entry resolves against the registry's
+  URL; remote content is materialized into `<user store>/.cache/overlays/uri/`
+  once per run. `file://` is a local path. Without the extra an `http(s)://`
+  registry file still works through the standard library, and anything else
+  names the extra it needs. `build-pyz --extras uri,http` vendors the extra
+  into the zipapp. `GitCache` is now `SourceCache` (the old name stays as an
+  alias).
+
 ### Changed
 
 - The base config's first line, "Startup: annotate that you read `…`", names

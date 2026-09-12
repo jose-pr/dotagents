@@ -237,10 +237,11 @@ def test_resolve_relative_forms():
     with pytest.raises(SystemExit) as exc:
         rr(parse_spec("../../out"), g, origin="r", key="k")
     assert "leaves the repository" in str(exc.value)
-    # An http(s) registry has nothing beside it.
-    with pytest.raises(SystemExit) as exc:
-        rr(parse_spec("./x"), Spec("url", "https://h/r.json"), origin="r", key="k")
-    assert "relative path" in str(exc.value)
+    # A URL registry: the entry is the URL beside it (RFC 3986 resolution).
+    assert rr(parse_spec("./x"), Spec("url", "https://h/cfg/r.json"), origin="r", key="k") == Spec(
+        "url", "https://h/cfg/x")
+    assert rr(parse_spec("../up/y#kb"), Spec("url", "https://h/cfg/r.json"), origin="r", key="k") == Spec(
+        "url", "https://h/up/y/kb")
 
 
 @needs_git
@@ -288,7 +289,7 @@ def test_registry_documents_and_entry_forms(tmp_path):
     assert reg.overlay_dir("two_alias") == tmp_path / "many" / "two", "aliases match by normalized name"
     with pytest.raises(SystemExit) as exc:
         reg.overlay_dir("web")
-    assert "can only be a registry" in str(exc.value)
+    assert "does not exist" in str(exc.value) or "cannot reach" in str(exc.value)
     _write(tmp_path / "r.toml", '[overlays]\na = "/srv/a"\n')
     assert _sources.load_repo(str(tmp_path / "r.toml"), cache).entries == {"a": "/srv/a"}
     pytest.importorskip("yaml")

@@ -319,6 +319,12 @@ Config / path / sync vars (`AGENTS_*`, non-secret — read, and some emitted):
   before the default; both after `--repo` and before the stores'
   `dotagents.{json,toml,yaml}` registries and the bundled `overlays/`.
   `_sources` is the module; `resolve_source(repos, scope=)` the entry point.
+  A non-git `scheme://` location is a pathlib_next `UriPath` when the `uri`
+  extra is installed (`_sources.uri_path_class()`), materialized by
+  `SourceCache.materialize` into `<store>/.cache/overlays/uri/` (a directory
+  synced with `PathSyncer(remove_missing=True)`, a file copied, once per
+  process); `file://` is local; without the extra only an http(s) REGISTRY
+  works (stdlib fetch). `GitCache` is the old name of `SourceCache`.
 - `AGENTS_CMDS_PATH` — extra command-module search paths (os.pathsep-split).
 - `AGENTS_OVERLAY_DIR` — set for an overlay's setup script (its own installed dir).
 - `AGENTS_REMOTE` / `AGENTS_SYNC_MESSAGE` — private-store sync (tokenless remote URL /

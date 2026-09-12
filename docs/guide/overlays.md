@@ -78,17 +78,29 @@ force git); `<ref>` is a branch, tag or commit; `<path>` is inside it. The two d
 in what the path names:
 
 - for a **repo**, the collection: a directory (of overlays) or a registry file in the
-  checkout, the checkout root with no path; an `http(s)://` location is a registry
-  file, fetched;
+  checkout, the checkout root with no path;
 - for a **source**, the overlay: the path is the overlay's root directory, and with no
   path **the repository root is the overlay**.
+
+A `scheme://` location that is not git is a **pathlib_next path**. With the `uri`
+extra (`pip install 'dotagents-cli[uri]'`; `[http]`, `[sftp]`, `[s3]` add the schemes'
+own clients) any scheme pathlib_next speaks works like a local path: an `http(s)://`
+directory listing, an `sftp`, `s3`, `dav` or `github` tree is a directory of overlays
+as a repo or one overlay as a source, a file is a registry; an archive is a tree too —
+`zip:<archive-uri>!/<inner path>` (`tar:`, or `archive:` to auto-detect), the archive
+itself local (`file:`) or at any URL: `zip:https://h/overlays.zip!/overlays`. Remote content is
+materialized into `<user store>/.cache/overlays/uri/`, synced once per run, and used
+from there; `file://` is a local path, no copy. Without the extra, an `http(s)://`
+location can still be a registry file (fetched with the standard library), and
+anything else says which extra it needs. The `.pyz` vendors none of this unless built
+with `build-pyz --extras uri,http`.
 
 A source written as a **relative path** (`./python`, `../shared/net`, `overlays/rust`)
 is relative to the registry it is in: the registry file's directory for a local file,
 and for a registry inside a git checkout the **same repository at the same ref**, with
 the path joined onto the registry file's directory (`overlays/reg.toml` saying `./rust`
-means `<repo>@<ref>#overlays/rust`). A registry fetched over `http(s)` has no overlays
-beside it, so a relative entry there is an error.
+means `<repo>@<ref>#overlays/rust`), and for a registry at a URL the URL beside it
+(`https://h/cfg/reg.json` saying `./rust` means `https://h/cfg/rust`).
 
 Checkouts are cached under `<user store>/.cache/overlays/` and refreshed on every
 `add`/`sync`.
