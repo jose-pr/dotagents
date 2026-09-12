@@ -64,7 +64,7 @@ touch a project directory.
 
 ```bash
 # 1. Lay down the per-user base into ~/.agents, then the overlays you want (from a
-#    checkout of the dotagents `overlays` branch, or $AGENTS_OVERLAYS_REPO).
+#    checkout of the dotagents `repo` branch, or $AGENTS_OVERLAYS_REPO).
 dotagents init -g
 dotagents overlays add engineering private-sync --repo <overlays-checkout>/overlays -g
 # 2. Make ~/.agents a git repo pointing at your private remote, and push.
