@@ -36,7 +36,7 @@ class Init(DotAgentsArgs):
     ("--dry-run",)
 
     force: bool = False
-    "Replace AGENTS.md/CLAUDE.md wholesale (with backup) instead of block-merging."
+    "Replace AGENTS.md wholesale (with backup) instead of block-merging."
     ("--force",)
 
     agents: "list[str]" = []

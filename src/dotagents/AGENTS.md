@@ -149,7 +149,7 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   tuple is `(level, path, root)`; an overlay entry's `level` is the overlay's
   dir name and `root` its dir (`root is None` for every other level — that is
   the overlay test). `LEVEL_NAMES` are reserved as overlay names.
-- `_merge` — managed-block merge for `init`'s `AGENTS.md` / `CLAUDE.md`, delimited by
+- `_merge` — managed-block merge for `init`'s `AGENTS.md`, delimited by
   `<!-- dotagents:begin -->` / `<!-- dotagents:end -->` marker LINES (a prose
   mention of a marker is not a marker; `find_block` returns the span). A begin
   with no end after it is refused; a base without markers is a usage error.
@@ -171,8 +171,13 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `.github/copilot-instructions.md`, pi `.pi/APPEND_SYSTEM.md`, Antigravity
   `.agents/rules/dotagents.md`),
   `write_base_config(dest, ...)` (Claude also writes the `@` include into
-  `~/.claude/CLAUDE.md` or `<project>/.claude/CLAUDE.md` — THE last mile; the
-  store's own `CLAUDE.md` is kept for the skeleton but no harness reads it).
+  `~/.claude/CLAUDE.md` or `<project>/.claude/CLAUDE.md` — THE last mile; no
+  `<store>/CLAUDE.md` is written any more, nothing read it). The base overlay is
+  `_overlay/dotagents/` only: `AGENTS.md` (the block TEMPLATE, rendered by
+  `cli._common.base_agents_text(src, dest)` — `{{AGENTS_MD}}` becomes the
+  actual path of the store's `AGENTS.md`, so "annotate that you read `…`"
+  names the real file; `init` and every recompose use it), `README.md`,
+  `DECISIONS.md`, `cmds/`, `hooks/`.
   The user scope is whatever `resolve_user_store()` returns, never the literal
   `~/.agents`.
 - `_skills` — publish an overlay's `skills/<name>/` into a scope's shared skills dir

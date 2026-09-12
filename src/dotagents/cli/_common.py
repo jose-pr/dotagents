@@ -177,12 +177,34 @@ BASE_ROOT = _package_data_dir("_overlay") or (
     Path(__file__).resolve().parent.parent / "_overlay"
 )
 
-# Base files that are create-if-absent only (never overwrite), i.e. everything
-# except the managed-block files (AGENTS.md/CLAUDE.md).
+# Base files that are create-if-absent only (never overwrite): everything the
+# base overlay ships except the AGENTS.md block template, which `init` renders
+# into `<store>/AGENTS.md` as a managed block.
 BASE_PLAIN_FILES = [
-    "README.md",
+    "dotagents/README.md",
     "dotagents/DECISIONS.md",
 ]
+
+#: Where the base AGENTS.md block template lives inside a base overlay dir.
+BASE_AGENTS_TEMPLATE = "dotagents/AGENTS.md"
+#: Rendered by `base_agents_text` as the actual path of the store's AGENTS.md.
+AGENTS_MD_PLACEHOLDER = "{{AGENTS_MD}}"
+
+
+def base_agents_text(src: "str | os.PathLike[str]", dest: "str | os.PathLike[str]") -> str:
+    """The base AGENTS.md block for the store at ``dest``: the template
+    (``<src>/dotagents/AGENTS.md``; a ``--from`` base laid out the old way may
+    keep it at ``<src>/AGENTS.md``) with ``{{AGENTS_MD}}`` rendered as the
+    ACTUAL path of the file being written, so the block's "annotate that you
+    read `…`" line names this store's file -- not a ``~/.agents`` the store
+    may not live at, and not the user store's file inside a project's."""
+    src_path = Path(src)
+    template = src_path / BASE_AGENTS_TEMPLATE
+    if not template.is_file():
+        template = src_path / "AGENTS.md"
+    text = template.read_text(encoding="utf-8")
+    agents_md = (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
+    return text.replace(AGENTS_MD_PLACEHOLDER, agents_md)
 
 
 def _compose_block(base_text: str, overlays, logger) -> str:
@@ -329,9 +351,9 @@ def _apply_base(
     agents: "list[str] | None" = None,
     wire_hooks: bool = False,
 ) -> None:
-    """Lay down the base overlay: managed-block merge AGENTS.md/CLAUDE.md (and,
-    for Claude, the `@` include in its own config dir), create-if-absent the
-    plain files. `init`'s body.
+    """Lay down the base overlay: managed-block merge AGENTS.md (rendered for
+    this store) and, for Claude, the `@` include in its own config dir;
+    create-if-absent the plain files. `init`'s body.
 
     With `wire_hooks`, each active agent also gets its hooks merged and the shared
     skills dir linked into its config dir (a no-op for adapters that don't
@@ -339,7 +361,7 @@ def _apply_base(
     already resolved."""
     from dotagents import _agents
 
-    base_agents = (Path(src) / "AGENTS.md").read_text(encoding="utf-8")
+    base_agents = base_agents_text(src, dest)
 
     # True only when the caller named agents with `--agents`. Writes that touch an
     # agent's own main config file are gated on this, so merely *running* under a

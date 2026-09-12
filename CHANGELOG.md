@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The base config's first line, "Startup: annotate that you read `…`", names
+  the actual path of the `AGENTS.md` it is in (`init` renders it per store, and
+  every `overlays add` / `remove` / `sync` recompose keeps it), not a literal
+  `~/.agents/AGENTS.md` that a relocated store or a project's own file never
+  was. The base overlay is `dotagents/` only: the template moved to
+  `_overlay/dotagents/AGENTS.md`, the store README to
+  `<store>/dotagents/README.md`, and `init` no longer writes a `<store>/CLAUDE.md`
+  (no harness read it; the include `init` writes into `~/.claude/CLAUDE.md` is
+  the real one). Existing stores keep the files they have.
 - The example overlays' branch is `repo` (was `overlays`); its layout is the
   same, `overlays/<name>` at the branch root. Specs that named the branch
   change one word: `https://github.com/jose-pr/dotagents.git@repo#overlays/net`.

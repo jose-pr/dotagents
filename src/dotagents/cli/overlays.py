@@ -14,6 +14,7 @@ from duho import Cli, LoggingArgs
 
 from dotagents.cli._common import (
     BASE_ROOT,
+    base_agents_text,
     DotAgentsArgs,
     _installed_overlay_dirs,
     _no_subcommand,
@@ -206,7 +207,7 @@ class OverlayAdd(DotAgentsArgs):
         overlay_dirs = _installed_overlay_dirs(
             scope, source, adding=order, dry_run=self.dry_run
         )
-        base_block = (BASE_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        base_block = base_agents_text(BASE_ROOT, scope.agents_root)
         if _overlays.recompose_overlay_block(
             agents_md, base_block, overlay_dirs, self.dry_run, self._logger_
         ):
@@ -273,7 +274,7 @@ class OverlayRemove(DotAgentsArgs):
                 for overlay in _overlays.Overlay.discover(scope.overlay_root)
                 if overlay.name not in removed_names
             ]
-            base_block = (BASE_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+            base_block = base_agents_text(BASE_ROOT, scope.agents_root)
             if _overlays.recompose_overlay_block(
                 scope.agents_root / "AGENTS.md", base_block, remaining,
                 self.dry_run, self._logger_,
@@ -546,7 +547,7 @@ class OverlaySync(DotAgentsArgs):
         # order (plan 02 / D68) -- not just the pattern-matched subset synced above, so
         # priority ordering holds across the full installed set.
         overlay_dirs = _installed_overlay_dirs(scope, source, dry_run=self.dry_run)
-        base_block = (BASE_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        base_block = base_agents_text(BASE_ROOT, scope.agents_root)
         if _overlays.recompose_overlay_block(
             agents_md, base_block, overlay_dirs, self.dry_run, self._logger_
         ):

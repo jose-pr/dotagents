@@ -11,7 +11,7 @@ by default (the `<cwd>/.agents` store, when run inside a project) or **user** wi
 
 | Command | What it does |
 | --- | --- |
-| `init` | Lay down the neutral base config; block-merge `AGENTS.md`/`CLAUDE.md`; `--bin-dir` also writes a PATH wrapper. |
+| `init` | Lay down the neutral base config; block-merge `AGENTS.md` (its first line names the file's own path); `--bin-dir` also writes a PATH wrapper. |
 | `overlays` | Manage opt-in overlays by name: `add` / `remove` / `list` / `sync` / `show`. |
 | `context` | Assemble the effective context for one or more agents. |
 | `env` | Assemble the chained env-file layers + identity vars, in a chosen format. |

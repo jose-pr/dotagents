@@ -181,27 +181,6 @@ def merge_include_line(
     )
 
 
-def merge_claude_md(
-    target: Path,
-    block_source_text: str,
-    *,
-    force: bool = False,
-    dry_run: bool = False,
-    backup_root: "Path | None" = None,
-) -> str:
-    """Same managed-block rule, but for the CLAUDE.md one-liner: if the file
-    already contains an `@AGENTS.md` reference (any form), leave it untouched
-    (branch "skipped (present)") instead of requiring exact marker match --
-    a bare `@AGENTS.md` file written by hand still counts as "present"."""
-    if not force and target.exists():
-        existing = target.read_text(encoding="utf-8")
-        if "@AGENTS.md" in existing:
-            return "skipped (present)"
-    return merge_block(
-        target, block_source_text, force=force, dry_run=dry_run, backup_root=backup_root
-    )
-
-
 def merge_context_block(target: Path, context_text: str, *, dry_run: bool = False) -> str:
     """Write an assembled context into ``target`` as a managed
     ``dotagents:context`` block: created if the file is absent, refreshed in

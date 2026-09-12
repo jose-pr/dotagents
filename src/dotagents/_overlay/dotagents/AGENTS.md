@@ -1,7 +1,7 @@
 <!-- dotagents:begin -->
 # Agent Directives
 
-Startup: annotate that you read `~/.agents/AGENTS.md`.
+Startup: annotate that you read `{{AGENTS_MD}}`.
 
 ## Always-on rules
 - **Permissions**: read any `AGENTS.md`; full read/write/create/delete inside any

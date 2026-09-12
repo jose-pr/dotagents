@@ -231,7 +231,7 @@ class ClaudeAgent(Agent):
         return "@" + target.as_posix()
 
     def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
-        from dotagents._merge import merge_block, merge_claude_md, merge_include_line, timestamped_backup_root
+        from dotagents._merge import merge_block, merge_include_line, timestamped_backup_root
 
         backup_root = timestamped_backup_root(dest) if force else None
 
@@ -242,17 +242,9 @@ class ClaudeAgent(Agent):
         )
         if logger: logger.info("%s: AGENTS.md", branch)
 
-        claude_md_src = src / "CLAUDE.md"
-        if claude_md_src.exists():
-            branch = merge_claude_md(
-                dest / "CLAUDE.md",
-                claude_md_src.read_text(encoding="utf-8"),
-                force=force, dry_run=dry_run, backup_root=backup_root,
-            )
-            if logger: logger.info("%s: CLAUDE.md", branch)
-
         # The last mile: Claude Code reads `~/.claude/CLAUDE.md` (user scope) or
-        # `<project>/.claude/CLAUDE.md` (project scope), never `<store>/CLAUDE.md`.
+        # `<project>/.claude/CLAUDE.md` (project scope), never a `<store>/CLAUDE.md`
+        # (the skeleton used to write one; nothing read it).
         # Without this include the store's AGENTS.md reaches no session at all.
         # A managed block, appended, and skipped when the include line is already
         # there by hand (this is exactly what a working hand-wired setup carries).
