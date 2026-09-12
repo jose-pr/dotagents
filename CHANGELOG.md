@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-12
+
 ### Added
 
 - `dotagents about`: `dotagents-cli <version>` and then, one per line, every
