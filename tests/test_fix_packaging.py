@@ -82,6 +82,34 @@ def built(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# What gets vendored
+# --------------------------------------------------------------------------
+
+
+def test_pip_launchers_are_not_vendored(built):
+    archive, _ = built
+    names = archive.namelist()
+    assert "fakedep/__init__.py" in names
+    assert not [n for n in names if n.startswith("bin/")], names
+
+
+def test_pip_resolves_pure_python_wheels_for_the_python_floor(built):
+    _, argv = built
+    requires = _pyproject()["project"]["requires-python"]
+    floor = re.fullmatch(r">=\s*([\d.]+)", requires).group(1)
+    assert "--only-binary=:all:" in argv
+    assert argv[argv.index("--platform") + 1] == "any"
+    assert argv[argv.index("--implementation") + 1] == "py"
+    assert argv[argv.index("--python-version") + 1] == floor
+
+
+def test_extras_help_says_sftp_cannot_be_vendored():
+    source = (SRC / "dotagents" / "cli" / "build_pyz.py").read_text(encoding="utf-8")
+    help_text = source[source.index("extras: str"):source.index('("--extras",)')]
+    assert "sftp" in help_text and "cannot" in help_text
+
+
+# --------------------------------------------------------------------------
 # How the archive is written
 # --------------------------------------------------------------------------
 

@@ -10,6 +10,13 @@ from pathlib import Path
 
 from duho import Cmd, LoggingArgs
 
+#: The interpreter the vendored dependencies are resolved for: the floor of
+#: pyproject.toml's `requires-python`. pip picks pure-Python wheels only
+#: (`--platform any --implementation py`), so the zipapp runs on any
+#: interpreter from this one up and never carries a native module zipimport
+#: could not load, or one built for the builder's OS and architecture.
+_VENDOR_PYTHON = "3.9"
+
 #: Names never copied into the .pyz: caches, plus the private files the wheel
 #: and sdist exclude too (pyproject.toml) -- `*.local.*` is the unshared
 #: per-machine override convention and `CLAUDE*` is agent config. Matched
@@ -74,8 +81,10 @@ class BuildPyz(LoggingArgs, Cmd):
 
     extras: str = ""
     (
-        "pathlib_next extras to vendor too, comma-separated (uri, http, sftp, s3), "
-        "so the .pyz speaks those schemes for overlay sources; none by default."
+        "pathlib_next extras to vendor too, comma-separated (uri, http, s3), "
+        "so the .pyz speaks those schemes for overlay sources; none by default. "
+        "Only pure-Python dependencies can be vendored, so sftp (cryptography, "
+        "bcrypt, pynacl) cannot."
     )
     ("--extras",)
 
@@ -117,12 +126,31 @@ class BuildPyz(LoggingArgs, Cmd):
                     "install",
                     "--target",
                     str(stage),
+                    # Pure-Python wheels resolved for the oldest supported
+                    # interpreter, whatever this build runs on (_VENDOR_PYTHON).
+                    "--only-binary=:all:",
+                    "--platform",
+                    "any",
+                    "--implementation",
+                    "py",
+                    "--python-version",
+                    _VENDOR_PYTHON,
                     "duho==%s" % self.duho_version,
                     "pathlib_next%s==%s" % (extras_spec, self.pathlib_next_version),
                 ]
             )
             if rc != 0:
+                if extras:
+                    self._logger_.error(
+                        "pip could not vendor pathlib_next%s; an extra whose "
+                        "dependencies ship only native wheels (sftp) cannot go "
+                        "into a zipapp",
+                        extras_spec,
+                    )
                 return rc
+            # pip's console-script launchers: native executables for the build
+            # machine that embed its interpreter path. A zipapp never runs them.
+            shutil.rmtree(stage / "bin", ignore_errors=True)
 
             # The package is copied as-is: `__version__` in `__init__.py` is
             # the single source of the version (pyproject.toml reads it too).
