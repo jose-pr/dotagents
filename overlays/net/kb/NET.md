@@ -73,17 +73,33 @@ build on `PATH` cannot break the shim.
 
 ## certifi shim — `$NET_OVERLAY_ROOT/lib/certifi`
 
-Not the real cert bundle: `certifi.where()` resolves a CA bundle from
-`$SSL_CERT_FILE` → `ssl.get_default_verify_paths()` → well-known OS paths → on
-Windows (which has no CA file for OpenSSL) the system ROOT and CA stores exported to
-`%LOCALAPPDATA%\dotagents\net\cacert.pem`, refreshed daily → the bundle of a real
-`certifi` if one is installed. With `$NET_OVERLAY_ROOT/lib` on `PYTHONPATH` ahead of
-any real `certifi` (every session has it), any library that `import certifi`
-verifies TLS through the OS trust store with no shipped certs.
+Not the real cert bundle, and never falls back to one: `certifi.where()` names a CA
+bundle FILE from the OS trust store —
+
+1. an explicit override: `$SSL_CERT_FILE`, `$REQUESTS_CA_BUNDLE`, `$CURL_CA_BUNDLE`;
+2. the system's bundle file: OpenSSL's default, then the well-known OS paths;
+3. otherwise a bundle **built from the system's certificates** — the Windows ROOT and
+   CA stores (Windows keeps its roots there, not in a file), a hashed certs directory
+   (`$SSL_CERT_DIR`, OpenSSL's default, `/etc/ssl/certs`), whatever OpenSSL loads by
+   default — written to a per-user file (`%TEMP%\dotagents-net\cacert.pem`;
+   `$XDG_RUNTIME_DIR` or `~/.cache` on POSIX, never a shared `/tmp`), a cache rebuilt
+   when it is older than a minute;
+4. nothing: `None`, and a one-time note on stderr naming the variables to set (a bare
+   container with no trust store).
+
+With `$NET_OVERLAY_ROOT/lib` on `PYTHONPATH` ahead of any real `certifi` (every
+session has it), any library that `import certifi` verifies TLS through the OS trust
+store with no shipped certs.
 
     python -m certifi        # prints the resolved OS CA bundle path
 
 ## httplib — `$NET_OVERLAY_ROOT/lib/httplib` (on `PYTHONPATH`)
+
+TLS: a session with `verify=True` (the default) verifies through an
+`ssl.create_default_context()` — the OS trust store itself (the certificate store on
+Windows), shared for a minute and then rebuilt — and names no CA file, so it needs
+neither `certifi` nor its shim. `verify=<bundle>` and `$REQUESTS_CA_BUNDLE` /
+`$CURL_CA_BUNDLE` still win; `verify=False` never touches the shared context.
 
 A small session toolkit. `proxy`/`jar` are pure stdlib; `session`/`fetch` import
 `requests` (+`urllib3`) **lazily** — that is the overlay's one *optional*
