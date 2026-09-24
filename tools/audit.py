@@ -2,64 +2,59 @@
 """Audit THIS REPO's structure. CI tooling -- not a shipped dotagents feature.
 
 Every path this checks is a path in the dotagents SOURCE REPO
-(`src/dotagents/_overlay/...`, `tools/...`) and the size budget sizes a repo file.
-It validates that this repo still ships what it is supposed to ship. It is **not**
-a validator for an installed `~/.agents` config -- run against one, everything in
-the manifest would be "missing", because an installed config has no `src/` tree.
+(`src/dotagents/_overlay/...`, `tools/...`) or in a checkout of the `repo`
+branch, which holds the example overlays under `overlays/<name>/`. It is **not**
+a validator for an installed `~/.agents` config, which has no `src/` tree.
 
-So it deliberately lives in `tools/` (repo CI tooling, like `cloud-setup.sh`) and
-is **not** a `dotagents` subcommand, not bundled in the package, and not shipped in
-the `.pyz`: a user of dotagents has no use for it.
+So it lives in `tools/` (repo CI tooling, like `cloud-setup.sh`) and is **not** a
+`dotagents` subcommand, not bundled in the package, and not shipped in the
+`.pyz`: a user of dotagents has no use for it.
 
 Personal-leak / hygiene scanning (machine paths, usernames, private repo names) is
 NOT this tool's job (D84) -- that is a personal command module in the user's
 private `.agents/`, run locally before a push.
 
 Usage (what CI runs):
-  python tools/audit.py --root .                    existence + forbidden-pattern
-                                                    (BASE_PATTERNS) scan + sizes
-  python tools/audit.py --check-templates --root .  instantiate + parse-check the
-                                                    reference templates (3.11+)
-  python tools/audit.py --probe <path> --root .     add one file to the manifest
-                                                    (negative tests)
+  python tools/audit.py --root . [--overlays DIR]
+      the required files exist; every file of the base overlay
+      (src/dotagents/_overlay/) is free of the forbidden patterns; size budget
+      (warning only); and, when an overlays dir is found, every `rules` path an
+      overlay.toml declares resolves to a rules file.
+  python tools/audit.py --check-templates --root . [--overlays DIR]
+      instantiate + parse-check the overlays' reference templates (3.11+).
+      Without an overlays dir it fails with NOT CHECKED.
+  python tools/audit.py --probe <path> --root .
+      scan one extra file too (negative tests)
 
-Exit 1 on missing manifest files, forbidden patterns, or failed template checks.
-Size budgets only warn. Scope is a closed manifest -- never a tree walk.
+The overlays dir is --overlays DIR, else the first of <root>/overlays,
+<root>/repo and <root>/overlays-src that holds overlays, either directly
+(<dir>/<name>/overlay.toml) or as a `repo` branch checkout
+(<dir>/overlays/<name>/overlay.toml).
+
+Exit 1 on missing required files, forbidden patterns, unresolved rules paths, or
+failed (or unrunnable) template checks.
 """
-import re
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 # This audits the REPO, so the default root is the repo (this file is tools/audit.py,
-# so parents[1] is the checkout root) -- not `~/.agents`, which has no `src/` tree and
-# would report every manifest entry missing.
+# so parents[1] is the checkout root) -- not `~/.agents`, which has no `src/` tree.
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 
-# Manifest paths are relative to a repo checkout root (--root .). The config is
-# now a base overlay (src/dotagents/_overlay) plus opt-in example overlays; the
-# required tooling lives at top-level tools/.
-#
-# The example overlays themselves moved to a separate `overlays` orphan branch
-# (origin/repo) -- main's tree is overlays-free (see D77). So the manifest
-# here scopes to what main actually ships: the base overlay + required tooling.
-# The overlays branch carries its own copy of the example content and its tests;
-# validating that content is the overlays branch's concern, not main's.
-SCAN = [
+# The overlay manifest check reads overlay.toml with the CLI's own reader, so it
+# can never disagree with what `overlays add` does. Prefer this checkout's copy
+# of the package over any installed one.
+sys.path.insert(0, str(DEFAULT_ROOT / "src"))
+
+#: The base overlay `init` lays down. Every file under it is scanned.
+BASE_OVERLAY = "src/dotagents/_overlay"
+
+#: Files main must ship: the base overlay's template, bundled command modules and
+#: hook scripts, and this repo's CI tooling.
+REQUIRED = [
     "src/dotagents/_overlay/dotagents/templates/AGENTS.md",
     "src/dotagents/_overlay/dotagents/templates/PROJECT.md",
-]
-REFS = []
-# The personal leak scanner is no longer a required tool of main: it is a personal
-# command module in the user's private `.agents/` (D84), so main's tree does not
-# ship it and it is not in this manifest.
-# The auditor itself is repo CI tooling only: this file is BOTH the script (run it
-# directly, which is what CI does) and a duho command class defined at the bottom of
-# it -- but it is NOT shipped. There is no `dotagents audit` command, nothing bundles
-# it into `src/dotagents/_overlay/dotagents/cmds/` (that dir holds the bundled
-# `findings` and `launch` modules), and the `.pyz` CI job asserts `audit` is absent
-# from the built artifact's help.
-EXIST_ONLY = [
     "src/dotagents/_overlay/dotagents/cmds/findings.py",
     "src/dotagents/_overlay/dotagents/cmds/launch.py",
     "src/dotagents/_overlay/dotagents/hooks/preinvocation_antigravity_context.py",
@@ -68,21 +63,14 @@ EXIST_ONLY = [
     "tools/audit.py",
     "tools/cloud-setup.sh",
 ]
-# Example-overlay files live on the `repo` branch, not in main's tree, so the
-# repo checkout (--root .) has no overlays/ dir to enumerate. Kept empty here and
-# guarded below (checked only when an overlays/ dir is present -- e.g. a CI job
-# that checks the overlays branch out into ./overlays for integration testing).
-EXAMPLES = []
 
 # Generic, structural forbidden patterns only (D84). No personal/machine markers
 # live here -- that is the personal scanner's concern, run locally, from the user's
 # private `.agents/`. `file:///~` is a broken tilde-in-file-URI that should never ship.
 BASE_PATTERNS = ["file:///" + "~"]
-REF_PATTERNS = BASE_PATTERNS
 
 # The base overlay's AGENTS.md is the only always-loaded file main ships, so it
-# is the one with a size budget here. The flow files (PLAN/EXEC/REVIEW/REPO) and
-# their budgets live with the overlay content on the `overlays` branch (D77).
+# is the one with a size budget here.
 BUDGETS = {"src/dotagents/_overlay/dotagents/templates/AGENTS.md": 2500}
 
 SUBST = {"<project_name>": "demopkg", "<gh_org>": "demoorg",
@@ -90,90 +78,101 @@ SUBST = {"<project_name>": "demopkg", "<gh_org>": "demoorg",
          "<copyright_holder>": "Demo", "<msrv>": "1.70"}
 
 
-def audit(root, probe=None):
+def _holds_overlays(path: Path) -> bool:
+    return any(path.glob("*/overlay.toml"))
+
+
+def find_overlays(root: Path, overlays: Optional[Path] = None) -> Optional[Path]:
+    """The directory holding `<name>/overlay.toml` entries, or None.
+
+    `overlays` (the --overlays flag) is the only candidate when given; a
+    `repo` branch checkout is accepted in place of its `overlays/` subdir."""
+    candidates = [overlays] if overlays is not None else [
+        root / "overlays", root / "repo", root / "overlays-src",
+    ]
+    for cand in candidates:
+        for path in (cand, cand / "overlays"):
+            if path.is_dir() and _holds_overlays(path):
+                return path
+    return None
+
+
+def _scan(path: Path, rel: str, failures: List[str]) -> None:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for pat in BASE_PATTERNS:
+        if pat in text:
+            failures.append("FORBIDDEN %r in %s" % (pat, rel))
+
+
+def audit(root: Path, probe: Optional[Path] = None,
+          overlays: Optional[Path] = None) -> List[str]:
     print("root: %s" % root)
-    failures, table = [], []
-    jobs = [(p, BASE_PATTERNS) for p in SCAN] + [(p, REF_PATTERNS) for p in REFS] \
-        + [(p, None) for p in EXIST_ONLY]
-    if (root / "overlays").is_dir():
-        jobs += [(p, REF_PATTERNS) for p in EXAMPLES]
-    if probe:
-        jobs.append((probe, BASE_PATTERNS))
-    width = max(len(str(rel)) for rel, _ in jobs) + 2
-    for rel, patterns in jobs:
-        path = Path(rel) if probe and rel is probe else root / rel
-        if not path.is_file():
+    failures: List[str] = []
+    for rel in REQUIRED:
+        if not (root / rel).is_file():
             failures.append("MISSING: %s" % rel)
-            continue
-        size = path.stat().st_size
-        table.append("%-*s%7d" % (width, rel, size))
-        if patterns:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            for pat in patterns:
-                if pat in text:
-                    failures.append("FORBIDDEN %r in %s" % (pat, rel))
-        if BUDGETS.get(rel) and size > BUDGETS[rel]:
-            print("WARN: %s is %dB (budget %dB)" % (rel, size, BUDGETS[rel]))
-    print("\n".join(table))
-    failures += _check_overlay_manifests(root)
+
+    base = root / BASE_OVERLAY
+    scanned = [p for p in sorted(base.rglob("*"))
+               if p.is_file() and "__pycache__" not in p.parts]
+    for path in scanned:
+        _scan(path, path.relative_to(root).as_posix(), failures)
+    print("scanned %d files under %s" % (len(scanned), BASE_OVERLAY))
+    if probe is not None:
+        if probe.is_file():
+            _scan(probe, str(probe), failures)
+        else:
+            failures.append("MISSING: %s" % probe)
+
+    for rel, budget in BUDGETS.items():
+        path = root / rel
+        if path.is_file() and path.stat().st_size > budget:
+            print("WARN: %s is %dB (budget %dB)" % (rel, path.stat().st_size, budget))
+
+    ov = find_overlays(root, overlays)
+    if ov is None and overlays is not None:
+        failures.append("MISSING: no overlays under --overlays %s" % overlays)
+    elif ov is None:
+        print("NOT CHECKED overlay manifests: no overlays dir found "
+              "(pass --overlays DIR, a checkout of the `repo` branch)")
+    else:
+        failures += check_overlay_manifests(ov)
     return failures
 
 
-def _check_overlay_manifests(root):
-    """Every `rules` path in an overlay.toml must exist.
+def check_overlay_manifests(overlays_dir: Path) -> List[str]:
+    """Every `rules` path in an overlay.toml must resolve to a rules file.
 
-    A typo there silently drops an always-on rule from every install -- the exact
-    failure that let three rules live only in the install target and nowhere in
-    source. Cheap to catch here, invisible otherwise."""
-    failures = []
-    overlays = _overlays_dir(root)
-    if not overlays.is_dir():
-        return failures
-    for manifest in sorted(overlays.glob("*/overlay.toml")):
-        text = manifest.read_text(encoding="utf-8", errors="replace")
-        block = re.search(r"(?ms)^rules\s*=\s*\[(.*?)\]", text)
-        if not block:
-            continue
-        for rel in re.findall(r'"([^"\n]+)"', block.group(1)):
-            if not (manifest.parent / rel).is_file():
-                failures.append(
-                    "MISSING rules file %r declared by %s"
-                    % (rel, manifest.relative_to(root).as_posix())
-                )
+    A typo there silently drops an always-on rule from every install. Read with
+    the CLI's own manifest reader and rules extractor, so this check sees exactly
+    what `overlays add` would merge."""
+    from dotagents._overlays import Overlay
+
+    failures: List[str] = []
+    found = Overlay.discover(overlays_dir)
+    for overlay in found:
+        rules = overlay.read_manifest()["rules"]
+        _blocks, warnings = overlay.rule_blocks(rules)
+        failures += ["overlays/%s: %s" % (overlay.name, w) for w in warnings]
+    print("checked the manifests of %d overlays in %s" % (len(found), overlays_dir))
     return failures
 
 
-def _overlays_dir(root):
-    """The directory holding `<name>/overlay.toml` entries. CI checks the
-    `repo` branch out INTO ./overlays (so the overlays sit directly under
-    it); a local clone of that branch at ./overlays nests them one level down
-    (./overlays/overlays/<name>/). Accept both."""
-    ov = root / "overlays"
-    if (ov / "overlays").is_dir() and not any(ov.glob("*/overlay.toml")):
-        return ov / "overlays"
-    return ov
-
-def check_templates(root):
+def check_templates(root: Path, overlays: Optional[Path] = None) -> List[str]:
+    ov = find_overlays(root, overlays)
+    if ov is None:
+        return ["NOT CHECKED: no overlays dir found; the templates live on the "
+                "`repo` branch (pass --overlays DIR)"]
     if sys.version_info < (3, 11):
-        sys.stderr.write("--check-templates needs Python 3.11+ (tomllib); "
-                         "run via: py -3.12\n")
-        return ["python too old for --check-templates"]
+        return ["NOT CHECKED: --check-templates needs Python 3.11+ (tomllib)"]
     import json
     import shutil
     import tempfile
     import tomllib
-    # The reference/language templates moved to the `repo` branch (D77), so a
-    # plain main checkout has no overlays/ dir to instantiate. Skip cleanly rather
-    # than fail -- CI checks the templates on the overlays branch (or after checking
-    # it out into ./overlays), where the source files actually live.
-    if not (root / "overlays").is_dir():
-        print("SKIP --check-templates: no overlays/ dir "
-              "(templates live on the `repo` branch)")
-        return []
-    failures = []
+    print("overlays: %s" % ov)
+    failures: List[str] = []
     tmp = Path(tempfile.mkdtemp(prefix="agents_tpl_"))
     try:
-        ov = _overlays_dir(root)
         refs_dir = ov / "engineering" / "references"
         sources = [(refs_dir / n, n) for n in
                    ["README.md", "CHANGELOG.md", ".gitignore", "docs-index.md"]]
@@ -214,7 +213,7 @@ def check_templates(root):
         ck("README.md", lambda: has("README.md", ["img.shields.io", "## Install", "Optional", "## Development", "## License"]))
         ck("CHANGELOG.md", lambda: has("CHANGELOG.md", ["[Unreleased]", "## [", "]: http"]))
         # No "AGENTS.md" (D54: no repo-root one) and no trailing slash on
-        # .agents (D55/1c9bf7c: `dotagents link-project` makes it a symlink, which a
+        # .agents (D55: `dotagents link-project` makes it a symlink, which a
         # directory-only pattern would not match).
         ck(".gitignore", lambda: has(".gitignore",
                                      ["\n.agents\n", "*.local.*", "CLAUDE*", ".claude"]))
@@ -229,18 +228,17 @@ def check_templates(root):
 # (it is not in the bundled `dotagents/cmds/` dir and never ships in the
 # package -- `tests/test_audit_leak.py` pins that). It is run directly
 # (`python tools/audit.py --root .`); `__main__` dispatches through duho for
-# the argument definition and help text, which is why the CI job that runs it
-# has to `pip install duho` (or `-e .`) first.
-#
-# Everything above this line is stdlib-only, so the audit logic itself carries
-# no package/duho dependency; only the command surface does.
+# the argument definition and help text, and the manifest check reads
+# overlay.toml with dotagents' own reader, so the CI job that runs it installs
+# the package (`pip install -e .`) first.
 # --------------------------------------------------------------------------- #
 
 from duho import Cmd, LoggingArgs  # noqa: E402
 
 
 class Audit(LoggingArgs, Cmd):
-    """Audit dotagents-config structure (manifest, forbidden patterns, budgets).
+    """Audit the dotagents repo's structure (required files, forbidden patterns,
+    overlay manifests, reference templates).
 
     Structural only -- personal-leak/hygiene scanning is a personal tool's job (D84).
     """
@@ -251,20 +249,29 @@ class Audit(LoggingArgs, Cmd):
     "Repo checkout to audit (default: this checkout's root)."
     ("--root",)
 
+    overlays: Optional[Path] = None
+    (
+        "Directory of example overlays (a checkout of the `repo` branch, or its "
+        "overlays/ dir). Default: the first of <root>/overlays, <root>/repo, "
+        "<root>/overlays-src that holds overlays."
+    )
+    ("--overlays",)
+
     probe: Optional[Path] = None
-    "Add one extra file to the scan manifest (negative tests)."
+    "Scan one extra file for forbidden patterns (negative tests)."
     ("--probe",)
 
     check_templates_: bool = False
-    "Instantiate references/ templates in a temp dir and parse-check them (3.11+)."
+    "Instantiate the overlays' reference templates in a temp dir and parse-check them (3.11+)."
     ("--check-templates",)
 
     def __call__(self) -> int:
         root = Path(self.root).expanduser().resolve()
+        overlays = Path(self.overlays).expanduser().resolve() if self.overlays else None
         if self.check_templates_:
-            failures = check_templates(root)
+            failures = check_templates(root, overlays)
         else:
-            failures = audit(root, Path(self.probe) if self.probe else None)
+            failures = audit(root, Path(self.probe) if self.probe else None, overlays)
         if failures:
             print("FAIL")
             for f in failures:
