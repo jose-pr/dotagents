@@ -5,14 +5,14 @@ overlay do it: this file is declared by the overlay's `rules` key, and applying 
 overlay merges the leading bullet run below into that section. They are
 **opinions**, not mechanisms: nothing in the `dotagents` CLI depends on them, which
 is why they live here rather than in the neutral base overlay. Each one exists
-because its absence cost something real (see the D-numbers in `design/`).
+because its absence cost something real.
 
 Everything from the first `## ` heading down is documentation, not merged.
 
 - **`<project>/.agents/` is private and never committed**: it is the working area for
   an agent working *on* this repo. Keep it out of the project's history — a slashless
   `.agents` line in `.gitignore` (a directory-only `.agents/` won't match the symlink
-  `dotagents link` creates). Linking it to a per-project store in one private repo is
+  `dotagents link-project` creates). Linking it to a per-project store in one private repo is
   the sync workflow; a plain untracked directory works just as well.
 - **`AGENTS.md`, three kinds** (placement rule and per-language answers:
   `$ENGINEERING_OVERLAY_ROOT/flows/REPO.md`):
@@ -89,17 +89,17 @@ Everything from the first `## ` heading down is documentation, not merged.
 ## Why these are not in the base
 
 `dotagents init` promises "a minimal, neutral starter … imposes none of this repo's
-own opinions". The base overlay therefore carries only what the tool's own code
-depends on: `.agents` as the link target (`_link.py`), the two kinds of `AGENTS.md`,
-the secrets/leakage guard, and the managed-marker contract (`_merge.py`).
+own opinions". The base overlay's always-on rules are therefore only the ones the
+tool itself relies on: reading every level's `AGENTS.md`, the permissions inside
+`.agents/`, the findings queue for config misses, and the managed-marker contract
+of the `AGENTS.md` block.
 
-Everything here is convention on top of that. `plans/` is a case in point — the CLI
-seeds an empty `plans/` dir into a new store as a convenience, but nothing in the
-tool reads or requires that layout. `findings/` has a command (`dotagents findings`
+Everything here is convention on top of that. `plans/` is a case in point — nothing
+in the tool reads or requires that layout. `findings/` has a command (`dotagents findings`
 manages `<scope>/findings/`), but using it is likewise opt-in: nothing else in the
 tool depends on a findings queue existing. A user who files work differently
 should not have to fight their own config.
 
-`Releases` in particular is opinionated *and* important (D02
-argues it must be always-on rather than gated behind loading a flow file). Opt in
+`Releases` in particular is opinionated *and* important — always-on rather than
+gated behind loading a flow file, because a release is irreversible. Opt in
 deliberately rather than inheriting it silently.

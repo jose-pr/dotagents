@@ -39,11 +39,12 @@ release (so it stays current between them).
   (a broken docs site must block the release without the release owning deployment).
   Publish steps are re-run-safe (e.g. `skip-existing` on the registry upload).
   Prefer the registry's OIDC / trusted publishing over stored long-lived token secrets.
-- **Docs workflow** owns **all** Pages deploys, on three triggers: `release:
-  published` (a `v*` release ships its matching docs — the release workflow only gates
-  on a strict docs build, then its published release fires this deploy), push to the
-  default branch touching docs sources (main = latest, between releases), and
-  `workflow_dispatch` (manual redeploy of any ref). It self-enables Pages every run. The
+- **Docs workflow** owns **all** Pages deploys, on two triggers: push to the default
+  branch touching docs sources (main = latest, between releases) and
+  `workflow_dispatch` (manual redeploy of any ref) — which is also how a release ships
+  its matching docs: the release workflow gates on a strict docs build, then
+  dispatches this workflow at its tag. It does not listen for `release: published`:
+  a release created with the workflow's `GITHUB_TOKEN` starts no other workflow. It self-enables Pages every run. The
   docs site is a required deliverable even if nothing else needs it. Ecosystems that
   host API docs externally (e.g. Rust/docs.rs) only need this workflow for a narrative guide.
 - **Hosted docs site (GitHub Pages) — settings that must live in the workflow, not in
@@ -64,9 +65,10 @@ release (so it stays current between them).
     `environment: name: github-pages`. YAML schema linters flag `github-pages` as an
     invalid environment value — it is a false positive (GitHub reserves that name);
     do not "fix" it.
-  - **Never gate publish on the docs job.** Keep `docs-build`/`docs-deploy` off the
-    dependency chain of build → release → publish, so a docs-only problem can never
-    block a package that already passed its tests.
+  - **Never gate publish on the docs *deploy*.** The strict docs *build* (the
+    release's docs-gate) gates the release; the deploy stays off the build →
+    release → publish chain, so a Pages problem can never block a package that
+    already passed its tests.
   - **Two repo settings the workflow cannot set for itself** (both produce errors that
     name an API endpoint rather than the setting, so check them first):
     - *Default workflow permissions must be read **and** write* (repo → Settings →
@@ -113,7 +115,7 @@ release (so it stays current between them).
   `/.*` + `!/.gitignore` + `!/.gitattributes` (re-include `!/.github/` only when
   CI exists) — a category beats a list, same philosophy as Cargo's
   `exclude = [".*"]` (decided 2026-08-02, first applied in one repo).
-  It additionally keeps `.agents` (slashless — `dotagents link` makes it a
+  It additionally keeps `.agents` (slashless — `dotagents link-project` makes it a
   symlink, which a directory-only `.agents/` won't match), `CLAUDE*`, `.claude`
   for nested occurrences the root-anchored rule can't reach, plus the
   language's build output.
@@ -128,8 +130,7 @@ release (so it stays current between them).
     wheel). Rust: `<crate>/AGENTS.md` (the crate root *is* the shipped root).
     Per-module headers below that root suit large surfaces. Must be
     **self-contained** — no repo-relative links; an installed consumer has no repo.
-  - **Repo-root `AGENTS.md`** (committed, expected by default — decided
-    2026-08-02): repo-level orientation — layout, cross-cutting rules, build/test
+  - **Repo-root `AGENTS.md`** (committed, optional): repo-level orientation — layout, cross-cutting rules, build/test
     commands, environments, CI, release. The split mirrors Python's convention:
     repo info at the root, per-package/crate API info in each package's own
     header (a multi-crate workspace shows the per-crate shape). Not the API header, and it does
