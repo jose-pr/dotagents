@@ -1,6 +1,6 @@
 """Unit coverage for `build-pyz` and for what the built artifacts carry.
 
-The version-stamping regex, the dependency pins, and a real staging of the
+The dependency pins, and a real staging of the
 package into a zipapp (with pip's vendoring step stubbed out, so no network).
 The wheel/sdist case builds for real with ``python -m build --no-isolation``
 and skips when `build`/`hatchling` are not installed (the `dev` extra has both).
@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parents[1]
 SRC = REPO / "src"
 
 from dotagents.cli import build_pyz
-from dotagents.cli.build_pyz import BuildPyz, _PYPROJECT_VERSION_RE
+from dotagents.cli.build_pyz import BuildPyz
 
 #: Files planted in a copy of the tree that must never reach an artifact.
 PRIVATE = ("AGENTS.local.md", "config.local.toml", "CLAUDE.md", "CLAUDE.local.md")
@@ -44,41 +44,6 @@ def test_no_tools_bundling_surface():
     )
     assert "_tools" not in code
     assert "tools_dir" not in code
-
-
-def test_matches_real_pyproject_version_line():
-    text = (
-        '[project]\n'
-        'name = "dotagents-cli"\n'
-        'version = "0.3.2"\n'
-        'authors = [{ name = "Jose A." }]\n'
-    )
-    match = _PYPROJECT_VERSION_RE.search(text)
-    assert match is not None
-    assert match.group(1) == "0.3.2"
-
-
-def test_ignores_the_word_version_inside_another_value():
-    # A quoted value that merely contains the word "version" is not a match:
-    # the pattern wants a line that STARTS with `version =`. It is not
-    # table-aware -- the first such line in the file wins, whatever table it
-    # sits in -- which holds for this repo's pyproject, where `[project]`'s
-    # comes first.
-    text = 'description = "the version field below is what matters"\nversion = "1.2.3"\n'
-    match = _PYPROJECT_VERSION_RE.search(text)
-    assert match is not None
-    assert match.group(1) == "1.2.3"
-
-
-def test_reads_the_real_repo_pyproject_toml():
-    """Regression: __init__.py's __version__ went stale for two releases
-    because nothing enforced it matched pyproject.toml. This pins that the
-    two are in sync RIGHT NOW -- bump both together, or this fails."""
-    from dotagents import __version__
-
-    match = _PYPROJECT_VERSION_RE.search((REPO / "pyproject.toml").read_text(encoding="utf-8"))
-    assert match is not None
-    assert __version__ == match.group(1)
 
 
 def test_vendored_pins_are_the_declared_floors():
@@ -169,3 +134,8 @@ def test_wheel_and_sdist_leave_private_files_out(tmp_path):
         next(n for n in zipfile.ZipFile(wheel).namelist() if n.endswith(".dist-info/METADATA"))
     ).decode("utf-8")
     assert "License-Expression: MIT" in metadata
+    # The version is single-sourced from `dotagents.__version__`.
+    from dotagents import __version__
+
+    assert "\nVersion: %s\n" % __version__ in metadata
+    assert wheel.name.startswith("dotagents_cli-%s-" % __version__)

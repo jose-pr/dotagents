@@ -8,7 +8,9 @@ build-backend = "hatchling.build"
 # command.
 [project]
 name = "dotagents-cli"
-version = "0.5.1"
+# The version lives in one place, `src/dotagents/__init__.py`'s `__version__`
+# (tool.hatch.version below); bump it there.
+dynamic = ["version"]
 authors = [{ name = "Jose A." }]
 description = "The dotagents CLI: install and manage a portable ~/.agents config for AI coding agents"
 readme = "README.md"
@@ -59,6 +61,9 @@ Issues = "https://github.com/jose-pr/dotagents/issues"
 # Private files never ship, even when present in the tree: `*.local.*` is the
 # unshared per-machine override convention and `CLAUDE*` is agent config. Hatchling
 # also honours .gitignore, which lists both; these excludes hold without it.
+[tool.hatch.version]
+path = "src/dotagents/__init__.py"
+
 [tool.hatch.build.targets.sdist]
 exclude = ["/.*", "/dist", "*.local.*", "CLAUDE*"]
 
