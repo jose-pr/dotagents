@@ -144,9 +144,8 @@ def _tracked_agents_files(project_dir: Path) -> int:
 
     Adoption is destructive to *tracked* content: it copies the directory into
     the store and then removes it, which git records as deleting every one of
-    those files. A repo that deliberately tracks its ``.agents/`` (the dotagents
-    repo itself does -- its sanitized design log is public) must therefore never
-    be linked. The D43 git-checkout guard does not cover this: a tracked plain
+    those files. A repo that deliberately tracks its ``.agents/`` must therefore
+    never be linked. The D43 git-checkout guard does not cover this: a tracked plain
     directory has no ``.git`` of its own. Returns 0 when not a git repo."""
     try:
         res = subprocess.run(

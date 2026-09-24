@@ -7,14 +7,14 @@ any of it into the (often public) project repos.
 ## The model
 
 Your global `~/.agents` **is** a private git repo. Its root is the per-user config
-(`AGENTS.md`, `flows/`, `kb/`, the `dotagents/` design log). A new `projects/` tree
-holds each project's private `.agents` payload:
+(`AGENTS.md`, the installed `overlays/`, the `findings/` queue). A new `projects/`
+tree holds each project's private `.agents` payload:
 
 ```
 ~/.agents/                       # = clone of your private repo
-├── AGENTS.md  CLAUDE.md          # per-user config (dotagents-managed block + your edits)
-├── flows/  kb/  references/      # your global overlays
-├── dotagents/                    # design log — private + synced too
+├── AGENTS.md                     # per-user config (dotagents-managed block + your edits)
+├── overlays/                     # your installed global overlays
+├── findings/                     # the user-scope findings queue — private + synced too
 └── projects/                     # per-project private .agents payloads
     ├── <project-a>/              # plans/  kb/  findings/  AGENTS.md (user-managed)
     └── <project-b>/ ...

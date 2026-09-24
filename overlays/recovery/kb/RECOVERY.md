@@ -1,8 +1,7 @@
 # Recovering Lost Agent Config / Files
 
 Read this when `~/.agents` (or any agent-authored file) is lost or corrupted and needs
-reconstruction. Distilled from a real loss+recovery of `~/.agents` (recorded in the
-config's design log).
+reconstruction. Distilled from a real loss+recovery of `~/.agents`.
 
 ## Priority order of sources (best first)
 
@@ -46,8 +45,9 @@ config's design log).
 4. **Verify, don't trust**: byte-compare restored files against exact snapshots where
    they exist; for deterministically-transformed files, re-apply the transform to the
    exact original and compare.
-5. Record provenance afterward (in the config's design log): what was restored from
-   where, what remains lossy, what should be regenerated later.
+5. Record provenance afterward (a finding — `dotagents findings add -g` — or wherever
+   you keep notes): what was restored from where, what remains lossy, what should be
+   regenerated later.
 6. Only delete the quarantine dir once everything worth keeping is merged and the
    provenance note exists.
 7. After restoring, run your config's own audit tool, if it has one — it checks the
