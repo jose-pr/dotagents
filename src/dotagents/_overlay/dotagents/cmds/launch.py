@@ -12,8 +12,9 @@ running session, done up front here):
    ``AGENTS_PROJECT_ROOT`` / ``AGENTS_PYTHON``, one ``<NAME>_OVERLAY_ROOT``
    per installed overlay, the PATH / PYTHONPATH prepends, the env-file chain --
    is applied to this process and handed to the child, so the harness and
-   everything it spawns see it. ``-g`` skips the project tiers (the same
-   narrowed meaning as ``env`` / ``context``), never "another store".
+   everything it spawns see it; a variable a layer unset is removed from
+   both. ``-g`` skips the project tiers (the same narrowed meaning as
+   ``env`` / ``context``), never "another store".
 2. **Context.** ``dotagents context`` for that agent (what the harness does
    not already load by itself). It is written to a file (one per agent and
    project under ``<user store>/.cache/launch/``, overwritten by the next
@@ -234,6 +235,10 @@ class Launch(DotAgentsArgs):
             scope, base_env=dict(os.environ), explicit=agent.name, logger=self._logger_
         )
         os.environ.update(changes)
+        # A layer that UNSET a variable (an env.py printing null, `unset` in a
+        # plain env file) means the harness must not inherit it either.
+        for key in getattr(changes, "removed", ()):
+            os.environ.pop(key, None)
         env = dict(os.environ)
 
         # 2. The harness, resolved before anything is written: a launch that
@@ -297,8 +302,12 @@ class Launch(DotAgentsArgs):
             _refuse_cmd_exe_metachars(exe, argv[1:])
 
         if self.dry_run:
+            removed = sorted(getattr(changes, "removed", ()))
             _write_stdout(
-                "%s\nenv: %s\n" % (_describe(argv), ", ".join(sorted(changes)) or "(no changes)")
+                "%s\nenv: %s\n%s" % (
+                    _describe(argv), ", ".join(sorted(changes)) or "(no changes)",
+                    "unset: %s\n" % ", ".join(removed) if removed else "",
+                )
             )
             return 0
         self._logger_.debug("%s", _describe(argv))

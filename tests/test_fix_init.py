@@ -351,6 +351,37 @@ def test_which_skips_relative_entries_and_honours_pathext(launch_mod, tmp_path, 
     assert launch_mod._which("no-such-tool-xyz", str(fakebin), ".EXE") is None
 
 
+def test_a_variable_an_env_layer_unset_does_not_reach_the_harness(launch_mod, monkeypatch, tmp_path):
+    """`os.environ.update(changes)` ignored `changes.removed`, so the child
+    still inherited a variable an env.py had unset (printed as null)."""
+    (tmp_path / "store" / "env.py").write_text(
+        "import json\nprint(json.dumps({'DROP_ME': None, 'KEEP': 'yes'}))\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("DROP_ME", "secret")
+    program = tmp_path / "bin" / ("h.cmd" if os.name == "nt" else "h")
+    program.parent.mkdir()
+    program.write_text("@echo off\r\n" if os.name == "nt" else "#!/bin/sh\n")
+    program.chmod(program.stat().st_mode | stat.S_IXUSR)
+
+    _argv, env = _launch(launch_mod, monkeypatch, agent="claude", command=str(program), no_context=True)
+
+    assert env["KEEP"] == "yes"
+    assert "DROP_ME" not in env and "DROP_ME" not in os.environ
+
+
+def test_launch_dry_run_names_the_unset_variables(launch_mod, monkeypatch, tmp_path, capsys):
+    (tmp_path / "store" / "env.py").write_text(
+        "import json\nprint(json.dumps({'DROP_ME': None}))\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("DROP_ME", "secret")
+    cmd = launch_mod.Launch()
+    cmd._passthrough_ = []
+    cmd.agent, cmd.command, cmd.no_context, cmd.dry_run = "claude", "no-such-xyz", True, True
+    assert cmd() == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[2] == "unset: DROP_ME"
+
+
 # --------------------------------------------------------------------------- #
 # overlays: the setup helper that set AGENTS_HOME to the scope store is gone
 # --------------------------------------------------------------------------- #
