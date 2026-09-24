@@ -283,11 +283,7 @@ def _summary(command) -> str:
 @pytest.mark.parametrize(
     "name",
     [
-        pytest.param(
-            "init",
-            marks=pytest.mark.xfail(reason="cli/init.py's summary is fixed separately", strict=False),
-        ),
-        "build-pyz", "context", "env", "overlays", "about", "findings", "launch",
+        "init", "build-pyz", "context", "env", "overlays", "about", "findings", "launch",
     ],
 )
 def test_every_command_summary_is_a_whole_sentence(name):
@@ -296,6 +292,15 @@ def test_every_command_summary_is_a_whole_sentence(name):
     commands = cli._discover([])
     command = dict(zip(_names(commands), commands))[name]
     assert _summary(command).endswith("."), _summary(command)
+
+
+def test_every_overlays_subcommand_summary_is_a_whole_sentence():
+    from dotagents.cli import overlays
+
+    subs = overlays.Overlays._subcommands_
+    assert subs
+    for sub in subs:
+        assert _summary(sub).endswith("."), (sub, _summary(sub))
 
 
 def test_every_findings_subcommand_summary_is_a_whole_sentence(findings_mod):

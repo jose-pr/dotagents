@@ -15,9 +15,10 @@ from dotagents.cli._common import (
 
 
 class Init(DotAgentsArgs):
-    """Lay down the neutral base config -- the store's `AGENTS.md` managed block
-    plus each harness's include and hooks -- never the opinionated overlays
-    (those come from `overlays add`).
+    """Lay down the base config: the store's AGENTS.md and each harness's hooks.
+
+    That is the store's `AGENTS.md` managed block plus each harness's include
+    and hooks -- never the opinionated overlays (those come from `overlays add`).
 
     Scope: **project** by default (``<cwd>/.agents``), or the **user** store with
     ``-g/--global`` (``~/.agents``). ``--dest`` overrides the resolved location.

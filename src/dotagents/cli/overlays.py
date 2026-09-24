@@ -237,8 +237,10 @@ class OverlayAdd(DotAgentsArgs):
 
 
 class OverlayRemove(DotAgentsArgs):
-    """Remove installed overlay(s): delete the overlay dir, unpublish its skills,
-    and recompose ``AGENTS.md``'s managed block over what remains.
+    """Remove installed overlays, unpublish their skills, recompose AGENTS.md.
+
+    Each overlay dir is deleted, its skills unpublished, and ``AGENTS.md``'s
+    managed block recomposed over what remains.
 
     Deletes only ``<scope>/.agents/overlays/<name>/`` and unpublishes only the
     skills that overlay published (matched to its own ``skills/``, by content) --
@@ -305,9 +307,11 @@ class OverlayRemove(DotAgentsArgs):
 
 
 class OverlayList(DotAgentsArgs):
-    """List overlays: those installed in the scope (plus, in the project scope,
-    the user store's -- both are in play for a project session; a same-named
-    project overlay shadows the store's copy), and those available from source.
+    """List the overlays installed in the scope and those available from source.
+
+    In the project scope the user store's are listed too -- both are in play
+    for a project session; a same-named project overlay shadows the store's
+    copy.
 
     ``installed`` is discovered by presence under ``<scope>/.agents/overlays/``; no
     registry file. ``available`` is what the source offers (``*`` = installed in
@@ -394,8 +398,10 @@ class OverlayList(DotAgentsArgs):
 
 
 class OverlayShow(DotAgentsArgs):
-    """Describe one overlay: where it is, what its manifest declares (description,
-    priority, requires, routing, rules), its setup script, skills and file count.
+    """Describe one overlay: where it is, its manifest, skills and file count.
+
+    The manifest part is what it declares (description, priority, requires,
+    routing, rules) and its setup script.
 
     Looks at the INSTALLED copy in the scope first (in the project scope, then
     the user store's -- the one a project session would use), else the source's."""
