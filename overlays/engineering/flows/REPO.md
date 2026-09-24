@@ -119,6 +119,13 @@ release (so it stays current between them).
   symlink, which a directory-only `.agents/` won't match), `CLAUDE*`, `.claude`
   for nested occurrences the root-anchored rule can't reach, plus the
   language's build output.
+- `.gitattributes`: from `references/` (`* text=auto eol=lf`), created WITH the repo —
+  and added to an existing repo that lacks it before you edit it. It is what makes
+  the LF-only rule hold for every tool, not just the careful ones. Verify git sees
+  it: `git status --porcelain --ignored -- .gitattributes` must print `??`, `A` or
+  `M`, never `!!` (a `.*` ignore without `!/.gitattributes` swallows it silently;
+  `git check-ignore`'s exit code cannot tell an ignore from a negation, so it is
+  not the test).
 - `AGENTS.md` — three distinct roles; keep them separate, never merge:
   - **Shipped API header** (committed): the public API header-file-style (exports
     with signatures/args/defaults, return-or-contract, env vars, gotchas) so a
