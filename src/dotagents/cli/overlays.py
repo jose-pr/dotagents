@@ -213,7 +213,8 @@ def _recompose(scope, logger, *, dry_run: bool, extra: "Optional[list[Path]]" = 
     if _overlays.recompose_overlay_block(
         scope.agents_root / "AGENTS.md", base_block, dirs, dry_run, logger
     ):
-        logger.info("recomposed overlay rules/routing in AGENTS.md")
+        logger.info("%s overlay rules/routing in AGENTS.md",
+                    "would recompose" if dry_run else "recomposed")
 
 
 def _log_install(logger, verb: str, name: str, result, dry_run: bool) -> None:

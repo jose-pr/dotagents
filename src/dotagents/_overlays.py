@@ -961,7 +961,7 @@ def recompose_overlay_block(
         # the block rather than drop the overlays' rules and routing.
         if not dry_run:
             write_text_lf(agents_md, _compose_block(_extract_block(base_block), list(overlays), logger) + "\n")
-        logger.info("created %s with the managed block", agents_md)
+        logger.info("%s %s with the managed block", "would create" if dry_run else "created", agents_md)
         return True
     existing = agents_md.read_text(encoding="utf-8")
     span = find_block(existing)

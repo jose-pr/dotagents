@@ -795,3 +795,30 @@ def test_add_says_init_links_new_skills(world, caplog):
         _add(src, store, "withskill")
     assert any("re-run `dotagents init" in r.getMessage() and "hello" in r.getMessage()
                for r in caplog.records)
+
+
+# --------------------------------------------------------------------------
+# Neatness pass: dry-run wording, a missing name, list marks, source == install
+# --------------------------------------------------------------------------
+
+def test_a_dry_run_says_it_would_recompose(world, caplog):
+    src, store = world
+    _overlay(src, "routed", routing=["- ROUTED -> x.md"])
+    with caplog.at_level(logging.INFO):
+        assert _add(src, store, "routed", dry_run=True) == 0
+    messages = [r.getMessage() for r in caplog.records]
+    assert "would recompose overlay rules/routing in AGENTS.md" in messages
+    assert not any(m.startswith("recomposed") for m in messages), messages
+    assert "ROUTED" not in (store / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_a_dry_run_into_a_store_without_agents_md_says_it_would_create_it(world, caplog):
+    src, store = world
+    (store / "AGENTS.md").unlink()
+    _overlay(src, "routed", routing=["- ROUTED -> x.md"])
+    with caplog.at_level(logging.INFO):
+        assert _add(src, store, "routed", dry_run=True) == 0
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith("would create") and "AGENTS.md" in m for m in messages), messages
+    assert not any(m.startswith("created") for m in messages), messages
+    assert not (store / "AGENTS.md").exists()
