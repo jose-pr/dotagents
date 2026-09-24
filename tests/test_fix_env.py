@@ -170,6 +170,79 @@ def test_windowsapps_bash_ahead_of_git_is_not_used(tmp_path, monkeypatch):
     assert os.path.normcase(str(_WINDOWSAPPS)) not in os.path.normcase(bash)
 
 
+_BASH = getattr(_env, "find_bash", lambda: shutil.which("bash"))()
+needs_bash = pytest.mark.skipif(_BASH is None, reason="needs a working bash")
+windows_only = pytest.mark.skipif(os.name != "nt", reason="MSYS2 env rewriting is Windows-only")
+
+
+# --------------------------------------------------------------------------
+# env-01: what MSYS2 bash rewrites at startup is not the file's change.
+# --------------------------------------------------------------------------
+
+@needs_bash
+@windows_only
+def test_plain_env_file_change_set_is_exactly_what_it_exports(tmp_path):
+    """Against the REAL environment, Git Bash's startup rewriting (PATH, HOME,
+    TEMP, TMP, SHELL into /c/... form; PROCESSOR_ARCHITECTURE under an x64
+    bash on ARM64) came back as changes the file made."""
+    env_file = tmp_path / "env"
+    env_file.write_text("export ONLY=me\n", encoding="utf-8")
+    changes = _env.get_env_from_file(env_file, base_env=dict(os.environ))
+    assert dict(changes) == {"ONLY": "me"}
+
+
+@needs_bash
+@windows_only
+def test_a_path_the_file_extends_comes_back_in_windows_form(tmp_path):
+    """The file's own addition is converted with cygpath and spliced onto the
+    caller's PATH verbatim -- no POSIX segments, no Git launcher dirs."""
+    base = dict(os.environ)
+    env_file = tmp_path / "env"
+    env_file.write_text('export PATH="/c/dotagents-probe:$PATH"\n', encoding="utf-8")
+    changes = _env.get_env_from_file(env_file, base_env=base)
+    assert set(changes) == {"PATH"}
+    assert changes["PATH"] == "C:\\dotagents-probe;" + base["PATH"]
+
+
+@needs_bash
+@windows_only
+def test_an_env_py_after_a_plain_file_sees_the_native_environment(roots):
+    """The chain poisoning: an env.py after a plain file got TEMP=/tmp and a
+    POSIX PATH, so it could not even find git."""
+    agents_dir, project_root = roots
+    (agents_dir / "env").write_text("export ONLY=me\n", encoding="utf-8")
+    (project_root / ".agents" / "env.py").write_text(
+        "import json, os, shutil\n"
+        "print(json.dumps({'SEEN_TEMP': os.environ.get('TEMP', ''),"
+        " 'SEEN_GIT': shutil.which('git') or ''}))\n",
+        encoding="utf-8",
+    )
+    base = dict(os.environ)
+    env = _run(agents_dir, project_root, base)
+    assert env["ONLY"] == "me"
+    assert env["SEEN_TEMP"] == base.get("TEMP", "")
+    if shutil.which("git"):
+        assert env["SEEN_GIT"]
+    for rewritten in ("HOME", "TEMP", "TMP", "SHELL", "PROCESSOR_ARCHITECTURE"):
+        assert rewritten not in env
+
+
+@needs_bash
+def test_a_file_that_exits_early_is_a_failed_source(tmp_path, caplog):
+    """`exit 0` inside the file ended bash before `env -0` ran: an empty
+    stdout with rc 0 looked like a file that changed nothing."""
+    import logging
+
+    env_file = tmp_path / "env"
+    env_file.write_text("export BEFORE=1\nexit 0\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="t"):
+        changes = _env.get_env_from_file(
+            env_file, base_env=dict(os.environ), logger=logging.getLogger("t")
+        )
+    assert "BEFORE" not in changes
+    assert any("source failed" in r.getMessage() for r in caplog.records)
+
+
 def test_find_bash_warns_once_when_there_is_none(monkeypatch, caplog):
     import logging
 

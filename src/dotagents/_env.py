@@ -333,24 +333,123 @@ def _is_bash_own_var(key: str) -> bool:
     return key in _BASH_OWN_VARS or key.startswith(_BASH_OWN_PREFIXES)
 
 
-def _changed_env(env_dump: bytes, base_env: "dict[str, str]") -> "dict[str, str]":
-    """Parse a NUL-delimited ``env -0`` dump into the vars that changed vs base.
-
-    Bytes that are not valid UTF-8 are kept via ``surrogateescape`` rather than
-    aborting the whole assembly on one odd value (Python's own ``os.environ``
-    uses the same trick on POSIX)."""
-    sourced: "dict[str, str]" = {}
-    for entry in env_dump.split(b"\0"):
+def _parse_env_entries(entries: "Iterable[bytes]") -> "dict[str, str]":
+    """``KEY=value`` entries (``env -0`` records) into a dict; bash's own vars
+    and entries without ``=`` are skipped. Bytes that are not valid UTF-8 are
+    kept via ``surrogateescape`` rather than aborting the whole assembly on
+    one odd value (Python's own ``os.environ`` uses the same trick on POSIX)."""
+    out: "dict[str, str]" = {}
+    for entry in entries:
         if not entry or b"=" not in entry:
             continue
         key, value = entry.split(b"=", 1)
         name = key.decode("utf-8", "surrogateescape")
         if _is_bash_own_var(name):
             continue
-        sourced[name] = value.decode("utf-8", "surrogateescape")
+        out[name] = value.decode("utf-8", "surrogateescape")
+    return out
+
+
+def _changed_env(env_dump: bytes, base_env: "dict[str, str]") -> "dict[str, str]":
+    """Parse a NUL-delimited ``env -0`` dump into the vars that changed vs base."""
+    sourced = _parse_env_entries(env_dump.split(b"\0"))
     return {
         k: v for k, v in sourced.items() if k not in base_env or base_env[k] != v
     }
+
+
+#: Section markers in the sourcing script's output. Each is printed as its own
+#: NUL-terminated record and has no ``=``, so no ``env -0`` record can equal it.
+_SNAP_AFTER = b"@@dotagents:after@@"
+_SNAP_NATIVE = b"@@dotagents:native@@"
+
+#: The script :func:`get_env_from_file` runs as ``bash -c <script> bash <file>``.
+#:
+#: Both snapshots come from ONE bash process, so whatever bash itself does to
+#: the environment at startup cancels out: MSYS2 / Cygwin rewrite PATH, HOME,
+#: TEMP/TMP, SHELL, ORIGINAL_PATH into POSIX form, Git's ``bin/bash.exe``
+#: prepends its own dirs to PATH, and an x64 bash on ARM64 reports another
+#: PROCESSOR_ARCHITECTURE. Only a key whose value the FILE changed differs.
+#:
+#: Under MSYS2 / Cygwin the ``env`` and ``cygpath`` there are addressed as
+#: ``/usr/bin/...`` (``usr/bin/bash.exe`` started from a Windows PATH does not
+#: have them on it), and every ``*PATH`` variable the file changed is converted
+#: back to Windows form by ``cygpath -w -p`` -- after (``A:``) and, when it
+#: existed, before (``B:``) -- so the caller can splice the file's additions
+#: onto the Windows value it passed in. A value already in Windows form
+#: (``;``, ``\``, or a drive prefix) is left for the caller as it is.
+_SOURCE_SCRIPT = r"""
+__da_env=env
+__da_msys=
+case "$OSTYPE" in msys*|cygwin*) __da_msys=1; __da_env=/usr/bin/env ;; esac
+if [ -n "$__da_msys" ]; then
+  for __da_n in $(compgen -e); do
+    case "$__da_n" in *PATH) printf -v "__da_b_$__da_n" '%s' "${!__da_n}" ;; esac
+  done
+fi
+"$__da_env" -0 || exit 1
+set -a
+source "$1" >/dev/null 2>&1 || exit 1
+set +a +e +u
+printf '%s\0' '@@dotagents:after@@'
+"$__da_env" -0 || exit 1
+IFS=$' \t\n'
+if [ -n "$__da_msys" ]; then
+  printf '%s\0' '@@dotagents:native@@'
+  for __da_n in $(compgen -e); do
+    case "$__da_n" in *PATH) ;; *) continue ;; esac
+    __da_b=__da_b_$__da_n
+    if [ -n "${!__da_b+x}" ] && [ "${!__da_b}" = "${!__da_n}" ]; then continue; fi
+    case "${!__da_n}" in *\;*|*\\*|[A-Za-z]:*) continue ;; esac
+    printf 'A:%s=%s\0' "$__da_n" "$(/usr/bin/cygpath -w -p -- "${!__da_n}")"
+    if [ -n "${!__da_b+x}" ]; then
+      case "${!__da_b}" in
+        *\;*|*\\*|[A-Za-z]:*) ;;
+        *) printf 'B:%s=%s\0' "$__da_n" "$(/usr/bin/cygpath -w -p -- "${!__da_b}")" ;;
+      esac
+    fi
+  done
+fi
+exit 0
+"""
+
+
+def _env_lookup(env: "dict[str, str]", key: str) -> "Optional[str]":
+    """``env[key]``, case-insensitively on Windows (MSYS2 reports ``Path`` as
+    ``PATH``)."""
+    if key in env:
+        return env[key]
+    if os.name == "nt":
+        folded = key.upper()
+        for k, v in env.items():
+            if k.upper() == folded:
+                return v
+    return None
+
+
+def _splice_native(
+    native_after: str, native_before: "Optional[str]", original: "Optional[str]"
+) -> str:
+    """The file's new ``*PATH`` value in Windows form, keeping the caller's
+    original value verbatim where the file kept it.
+
+    ``native_before`` / ``native_after`` are bash's own view converted by
+    ``cygpath``; the before view may carry dirs bash added at startup (Git's
+    launcher prepends ``/mingw64/bin:/usr/bin``). When the file only added
+    around the old value (``PATH=/x:$PATH``), the old block is found in the
+    new one and replaced by ``original`` -- so neither the launcher's dirs
+    nor a round-trip through ``cygpath`` leak into the result. Anything else
+    (the file rewrote the value) is returned as converted."""
+    after = [s for s in native_after.split(";") if s]
+    if native_before is not None and original is not None:
+        before = [s for s in native_before.split(";") if s]
+        n = len(before)
+        if n:
+            for i in range(len(after) - n + 1):
+                if after[i:i + n] == before:
+                    parts = after[:i] + ([original] if original else []) + after[i + n:]
+                    return ";".join(parts)
+    return ";".join(after)
 
 
 def interpreter(osenv: "dict[str, str]") -> str:
@@ -555,11 +654,13 @@ def get_env_from_file(
 ) -> "dict[str, str]":
     """Source a plain env file in bash and return the vars it changed.
 
-    Runs ``set -a; source <file> || exit 1; env -0`` so exported assignments
-    are captured. If ``bash`` is unavailable, or the source FAILS (a missing
-    file, a directory, a syntax error -- ``|| exit 1`` is what makes that
-    visible; a bare ``;`` list would run ``env -0`` regardless and report rc 0),
-    the file contributes nothing -- logged by name, never fatal.
+    Runs :data:`_SOURCE_SCRIPT`: an ``env -0`` snapshot, ``set -a; source
+    <file> || exit 1``, a second snapshot -- in one bash process, so only what
+    the file changed differs (an MSYS2 bash's own PATH/HOME/TEMP rewriting
+    cancels out), with a changed ``*PATH`` value converted back to Windows form
+    under MSYS2 / Cygwin. If no bash is found (:func:`find_bash`), or the
+    source FAILS (a missing file, a directory, a syntax error, an ``exit`` in
+    the file), the file contributes nothing -- logged by name, never fatal.
     """
     spawn = _spawn_env(base_env)
 
@@ -571,8 +672,7 @@ def get_env_from_file(
             # The path is bash's `$1`, never spliced into the script: a
             # JSON-quoted path lost non-ASCII characters (`\u00e9`) and
             # expanded `$` / backticks inside the double quotes.
-            [bash, "-c", 'set -a; source "$1" >/dev/null 2>&1 || exit 1; env -0',
-             "bash", str(env_file)],
+            [bash, "-c", _SOURCE_SCRIPT, "bash", str(env_file)],
             capture_output=True,
             text=False,
             check=False,
@@ -582,14 +682,31 @@ def get_env_from_file(
         if logger:
             logger.warning("cannot source env file (no bash?): %s (%s)", env_file, e)
         return {}
-    if proc.returncode != 0:
+    records = proc.stdout.split(b"\0")
+    # A file that calls `exit` itself ends the shell before the second
+    # snapshot: that is a failure too, not an empty change set.
+    if proc.returncode != 0 or _SNAP_AFTER not in records:
         if logger:
             logger.warning("env file source failed: %s", env_file)
         return {}
-    # Compare against the spawn env (bootstrap-backfilled) so the bootstrap vars
-    # are not misreported as "changes"; only what the sourced file actually set
-    # relative to what the child inherited counts.
-    return _changed_env(proc.stdout, spawn)
+    cut = records.index(_SNAP_AFTER)
+    tail = records[cut + 1:]
+    native_at = tail.index(_SNAP_NATIVE) if _SNAP_NATIVE in tail else len(tail)
+    before = _parse_env_entries(records[:cut])
+    after = _parse_env_entries(tail[:native_at])
+    native = _parse_env_entries(tail[native_at + 1:])
+
+    changes: "dict[str, str]" = {}
+    for key, value in after.items():
+        if key in before and before[key] == value:
+            continue
+        converted = native.get("A:" + key)
+        if converted is not None:
+            value = _splice_native(
+                converted, native.get("B:" + key), _env_lookup(spawn, key)
+            )
+        changes[key] = value
+    return changes
 
 
 # --------------------------------------------------------------------------- #
