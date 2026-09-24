@@ -165,12 +165,15 @@ o=$(AGENTS_HOME="$(native "$store")" pyz env --format export -g)
 has "$o" "FROM_PINNED_STORE"
 o=$(pyz env --diff --format json -g)
 "$PYTHON" -c "import sys, json; json.load(sys.stdin)" <<<"$o"
-# Each shell format emits its own syntax.
-has "$(pyz env --format export -g)" "export AGENT="
-has "$(pyz env --format powershell -g)" "\${env:AGENT} = '"
-has "$(pyz env --format cmd -g)" 'set "AGENT='
-has_re "$(pyz env --format dotenv -g)" "^AGENT="
-has "$(pyz env -g)" "AGENT"
+# Each shell format emits its own syntax, for a variable the smoke sets itself
+# (identity vars like AGENT are stamped only inside a harness, so a runner has
+# none), and --diff so a failure prints the change set, not the environment.
+pinned_env() { AGENTS_HOME="$(native "$store")" pyz env --diff "$@" -g; }
+has "$(pinned_env --format export)" "export FROM_PINNED_STORE='yes'"
+has "$(pinned_env --format powershell)" "\${env:FROM_PINNED_STORE} = 'yes'"
+has "$(pinned_env --format cmd)" 'set "FROM_PINNED_STORE=yes"'
+has_re "$(pinned_env --format dotenv)" "^FROM_PINNED_STORE=yes$"
+has "$(pinned_env)" "FROM_PINNED_STORE"
 
 # overlays add: positional and aliased flags.
 h=$(pyz overlays add --help)
