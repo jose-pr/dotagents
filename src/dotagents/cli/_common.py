@@ -216,7 +216,7 @@ def store_base(dest: "str | os.PathLike[str]", logger=None) -> Path:
     if not recorded:
         return BASE_ROOT
     try:
-        return Path(_resolve_from(recorded, BASE_ROOT))
+        return _resolve_from(recorded, BASE_ROOT, logger=logger)
     except SystemExit as exc:
         if logger is not None:
             logger.warning("recorded base %r unusable (%s); using the bundled one", recorded, exc)
@@ -454,22 +454,85 @@ class _Quiet(object):
 _QUIET = _Quiet()
 
 
-def _resolve_from(from_arg: "str | None", default: Path) -> Path:
-    """Resolve --from to a local directory Path. A bare local path/dir is used
-    directly; a URI string is constructed via pathlib_next's UriPath (lazy
-    import so the `uri` extra is only required when actually used)."""
+#: Where a dotagents checkout keeps its base overlay, relative to the checkout root.
+CHECKOUT_BASE = "src/dotagents/_overlay"
+
+
+def _base_overlay_dir(target: Path, shown: str) -> Path:
+    """The base overlay at ``target``: ``target`` itself when it carries a
+    block template (``dotagents/templates/AGENTS.md``, or ``AGENTS.md`` at its
+    root), or its ``src/dotagents/_overlay`` when ``target`` is a dotagents
+    checkout. Anything else is a usage error naming ``shown``."""
+    if (target / BASE_AGENTS_TEMPLATE).is_file():
+        return target
+    checkout = target / CHECKOUT_BASE
+    if (checkout / BASE_AGENTS_TEMPLATE).is_file():
+        return checkout
+    if (target / "AGENTS.md").is_file():
+        return target
+    raise SystemExit(
+        "error: --from %s is not a base overlay: it has no %s (or AGENTS.md at its "
+        "root), and it is not a dotagents checkout (%s/%s)"
+        % (shown, BASE_AGENTS_TEMPLATE, CHECKOUT_BASE, BASE_AGENTS_TEMPLATE)
+    )
+
+
+def _resolve_from(
+    from_arg: "str | None", default: Path, *, cache_root: "Path | None" = None, logger=None
+) -> Path:
+    """Resolve ``--from`` to a LOCAL base overlay directory.
+
+    ``from_arg`` is a local directory, or an overlay source spec as ``overlays``
+    reads one (``_sources``: a ``file:`` / ``http(s):`` / ``sftp:`` / ``s3:`` /
+    ``zip:`` URI -- the ``uri`` extra for anything but ``file:`` -- or a git
+    repository ``<repo>[@ref][#path]``). A remote is materialized into
+    ``cache_root`` (default ``<user store>/.cache/overlays``, the overlay
+    cache) and used from there. Either may be the base overlay itself or a
+    dotagents checkout (its ``src/dotagents/_overlay``). Every failure is a
+    ``SystemExit`` with a one-line message; credentials in a URL never reach it."""
     if from_arg is None:
         return default
-    candidate = Path(from_arg)
+    from dotagents import _sources
+
+    candidate = Path(from_arg).expanduser()
     if candidate.exists():
-        return candidate
-    if "://" in from_arg or from_arg.startswith(("http:", "https:", "sftp:", "s3:", "zip:")):
-        try:
-            from pathlib_next import UriPath
-        except ImportError as e:
-            raise SystemExit(
-                'error: --from %r needs URI support. Install it with: pip install "dotagents-cli[uri]"'
-                % from_arg
-            ) from e
-        return UriPath(from_arg)
-    raise SystemExit("error: --from path does not exist: %s" % from_arg)
+        return _base_overlay_dir(candidate, from_arg)
+    try:
+        spec = _sources.parse_spec(from_arg)
+    except ValueError as exc:
+        raise SystemExit("error: --from %r: %s" % (from_arg, exc))
+    if spec.kind == "dir":
+        raise SystemExit("error: --from path does not exist: %s" % from_arg)
+    shown = spec.display()
+    if cache_root is None:
+        cache_root = resolve_user_store(None) / ".cache" / "overlays"
+    try:
+        target = _sources.locate(spec, _sources.SourceCache(Path(cache_root), logger))
+    except SystemExit as exc:
+        message = str(exc.code if exc.code is not None else exc)
+        if message.startswith("error: "):
+            message = message[len("error: "):]
+        raise SystemExit("error: --from %s: %s" % (shown, message)) from None
+    if not target.is_dir():
+        raise SystemExit("error: --from %s is a file, not a base overlay directory" % shown)
+    return _base_overlay_dir(target, shown)
+
+
+def recorded_from(from_arg: str, logger=None) -> str:
+    """How ``--from`` is recorded in the store config: a local path made
+    absolute (so it resolves from any cwd), anything else with its credentials
+    and query values removed -- the store may be kept in git. A record that
+    lost its credentials is fetched without them later, which is said once."""
+    from dotagents._sources import redact
+
+    local = Path(from_arg).expanduser()
+    if local.exists():
+        return str(local.resolve())
+    shown = redact(from_arg)
+    if shown != from_arg and logger is not None:
+        logger.warning(
+            "the recorded base %s leaves out the URL's credentials: later `init` and "
+            "`overlays` runs fetch it without them (use a credential helper or "
+            "netrc, or a local copy)", shown,
+        )
+    return shown

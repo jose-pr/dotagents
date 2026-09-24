@@ -52,6 +52,108 @@ def _init(dest: Path, *extra: str) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# init --from: checkout roots, URIs, git -- one resolver, clean errors
+# --------------------------------------------------------------------------- #
+
+
+def test_from_a_dotagents_checkout_uses_its_bundled_base(tmp_path):
+    """A checkout root used to fail with FileNotFoundError: the template lives
+    under src/dotagents/_overlay, not at the root."""
+    assert _resolve_from(str(ROOT), BASE_ROOT) == ROOT / "src" / "dotagents" / "_overlay"
+    dest = tmp_path / "store"
+    assert _init(dest, "--from", str(ROOT)) == 0
+    assert "## Always-on rules" in (dest / "AGENTS.md").read_text(encoding="utf-8")
+    assert read_store_config(dest) == {"base": str(ROOT.resolve())}
+
+
+def test_from_a_dir_that_is_no_base_is_a_usage_error(tmp_path, capsys):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(SystemExit) as exc:
+        _resolve_from(str(empty), BASE_ROOT)
+    assert "is not a base overlay" in str(exc.value)
+    assert _init(tmp_path / "store", "--from", str(empty)) != 0
+    assert not (tmp_path / "store" / "AGENTS.md").exists()
+
+
+def test_from_a_file_uri_is_the_local_dir(tmp_path):
+    base = _base(tmp_path / "b")
+    dest = tmp_path / "store"
+    assert _init(dest, "--from", base.resolve().as_uri()) == 0
+    assert "# CUSTOM BASE" in (dest / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def _stub_scheme(monkeypatch, served: Path, seen: list):
+    """`stub://` materializes to ``served`` (the remote half is `_sources`'
+    own business, tested there); records each spec it was asked for."""
+    real = _sources.SourceCache.materialize
+
+    def materialize(self, spec):
+        if _sources.url_scheme(spec.location) != "stub":
+            return real(self, spec)
+        seen.append((spec, self.root))
+        if "missing" in spec.location:
+            raise _sources.SourceError("error: %s does not exist" % spec.display())
+        return served
+
+    monkeypatch.setattr(_sources.SourceCache, "materialize", materialize)
+
+
+def test_from_a_remote_scheme_goes_through_the_overlay_source_cache(tmp_path, monkeypatch, caplog):
+    """Every remote scheme crashed in `Path(UriPath(...))` (`fspath for https`);
+    `--from` now materializes the way `overlays` sources do, into the user
+    store's overlay cache, and records the location without its credentials."""
+    served = _base(tmp_path / "served")
+    seen: list = []
+    _stub_scheme(monkeypatch, served, seen)
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user"))
+    dest = tmp_path / "store"
+    with caplog.at_level(logging.WARNING):
+        assert _init(dest, "--from", "stub://alice:s3cret@host/base") == 0
+    assert "# CUSTOM BASE" in (dest / "AGENTS.md").read_text(encoding="utf-8")
+    (spec, cache_root), = seen
+    assert spec.kind == "url" and cache_root == tmp_path / "user" / ".cache" / "overlays"
+    assert read_store_config(dest) == {"base": "stub://host/base"}
+    assert "s3cret" not in (dest / STORE_CONFIG).read_text(encoding="utf-8")
+    assert "credentials" in caplog.text and "s3cret" not in caplog.text
+
+    # The recorded base is what a later plain `init` composes over.
+    assert _init(dest) == 0
+    assert "# CUSTOM BASE" in (dest / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_an_unreachable_remote_is_a_one_line_error(tmp_path, monkeypatch, capsys):
+    _stub_scheme(monkeypatch, tmp_path, [])
+    with pytest.raises(SystemExit) as exc:
+        _resolve_from("stub://bob:pw@host/missing", BASE_ROOT, cache_root=tmp_path / "c")
+    message = str(exc.value)
+    assert message.startswith("error: --from stub://host/missing") and "pw" not in message
+
+
+needs_uri = pytest.mark.skipif(_sources.uri_path_class() is None, reason="needs pathlib_next[http]")
+
+
+@needs_uri
+def test_from_an_http_directory(tmp_path, monkeypatch):
+    www = tmp_path / "www"
+    _base(www / "base", "HTTP BASE")
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(www))
+    handler.log_message = lambda *a: None
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user"))
+    try:
+        url = "http://127.0.0.1:%d/base" % httpd.server_address[1]
+        dest = tmp_path / "store"
+        assert _init(dest, "--from", url) == 0
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    assert "# HTTP BASE" in (dest / "AGENTS.md").read_text(encoding="utf-8")
+    assert read_store_config(dest) == {"base": url}
+
+
+# --------------------------------------------------------------------------- #
 # Atomic writes through a symlink; the mode survives
 # --------------------------------------------------------------------------- #
 
