@@ -48,9 +48,11 @@ def test_init_flag_reaches_the_adapter(tmp_path, monkeypatch):
     from dotagents.cli._common import BASE_ROOT, _apply_base
 
     seen = []
+    # `init` also runs a dry-run pass first (it validates the settings files
+    # before writing anything); only the real pass is counted.
     monkeypatch.setattr(
         ClaudeAgent, "wire_hooks",
-        lambda self, dest, **kw: seen.append(self.powershell_env_hook),
+        lambda self, dest, **kw: kw["dry_run"] or seen.append(self.powershell_env_hook),
     )
     monkeypatch.setattr(ClaudeAgent, "write_base_config", lambda self, *a, **kw: None)
     import logging

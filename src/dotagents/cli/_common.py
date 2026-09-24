@@ -410,6 +410,21 @@ def _apply_base(
         if not any(a.name == "claude" for a in active_agents):
             active_agents.append(_agents.ClaudeAgent())
 
+    for agent in active_agents:
+        if scope_level is not None:
+            agent.scope_level = scope_level
+            agent.project_root = project_root
+        if isinstance(agent, _agents.ClaudeAgent):
+            agent.powershell_env_hook = powershell_env_hook
+
+    if wire_hooks:
+        # Read every settings file the hooks merge into BEFORE anything is
+        # written: a corrupt one (invalid JSON, not UTF-8) raises here, not
+        # after AGENTS.md and the includes, which left a half-initialised store.
+        # A dry run of the same wiring reads exactly those files and writes none.
+        for agent in active_agents:
+            agent.wire_hooks(dest, dry_run=True, logger=_QUIET)
+
     # The store's AGENTS.md is written HERE, once, whatever agents are
     # selected: `context` and `overlays` depend on it. Adapters only add their
     # harness's last mile to it (an include, a pointer).
@@ -422,16 +437,21 @@ def _apply_base(
     logger.info("%s: AGENTS.md", branch)
 
     for agent in active_agents:
-        if scope_level is not None:
-            agent.scope_level = scope_level
-            agent.project_root = project_root
         agent.write_base_config(
             dest, src, base_agents, force=force, dry_run=dry_run, logger=logger
         )
         if wire_hooks:
-            if isinstance(agent, _agents.ClaudeAgent):
-                agent.powershell_env_hook = powershell_env_hook
             agent.wire_hooks(dest, dry_run=dry_run, logger=logger)
+
+
+class _Quiet(object):
+    """A logger that drops everything (the settings pre-flight's)."""
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+_QUIET = _Quiet()
 
 
 def _resolve_from(from_arg: "str | None", default: Path) -> Path:

@@ -106,6 +106,41 @@ def test_atomic_write_keeps_the_mode_and_a_new_file_is_not_0600(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# settings.json: a BOM is fine; a corrupt file stops init before any write
+# --------------------------------------------------------------------------- #
+
+
+def test_a_bom_in_settings_json_is_accepted_and_not_written_back(tmp_path):
+    settings = Path.home() / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_bytes(b'\xef\xbb\xbf{"theme": "dark"}\n')
+
+    assert _hooks.load_settings(settings) == {"theme": "dark"}
+    assert _main(["init", "-g", "--agents", "claude"]) == 0
+
+    raw = settings.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf")
+    data = json.loads(raw.decode("utf-8"))
+    assert data["theme"] == "dark" and "SessionStart" in data["hooks"]
+
+
+@pytest.mark.parametrize("content", [b"{not json", b"\xff\xfe{}"])
+def test_a_corrupt_settings_file_stops_init_before_anything_is_written(content):
+    """The error fired after AGENTS.md and the CLAUDE.md include were written,
+    leaving a half-initialised store."""
+    settings = Path.home() / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_bytes(content)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["init", "-g", "--agents", "claude"])
+    assert str(settings) in str(exc.value)
+    assert not (Path.home() / ".agents").exists()
+    assert not (Path.home() / ".claude" / "CLAUDE.md").exists()
+    assert settings.read_bytes() == content
+
+
+# --------------------------------------------------------------------------- #
 # overlays: the setup helper that set AGENTS_HOME to the scope store is gone
 # --------------------------------------------------------------------------- #
 

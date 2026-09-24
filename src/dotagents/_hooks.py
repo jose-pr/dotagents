@@ -242,11 +242,18 @@ def load_settings(path: Path) -> "dict[str, Any]":
 
     A missing or empty file yields ``{}``. Invalid JSON raises ``SystemExit`` with
     the path and parse error: silently starting from ``{}`` there would overwrite a
-    user's whole settings file on the next write.
+    user's whole settings file on the next write. A UTF-8 byte-order mark (what
+    Windows PowerShell 5's ``-Encoding UTF8`` writes) is accepted; the file is
+    written back without one.
     """
     if not path.is_file():
         return {}
-    raw = path.read_text(encoding="utf-8").strip()
+    try:
+        raw = path.read_text(encoding="utf-8-sig").strip()
+    except UnicodeDecodeError as exc:
+        raise SystemExit(
+            "error: %s is not UTF-8 text (%s). Fix or move it, then re-run." % (path, exc)
+        ) from exc
     if not raw:
         return {}
     try:
