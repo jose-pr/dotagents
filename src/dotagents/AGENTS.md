@@ -114,7 +114,13 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   contract-A walk, typed `list[tuple[str, Path, Optional[Path]]]`). `Scope.of(agents_dir=, project_root=, global_scope=)`
   builds one from resolved parts (what `env` / `context` / `_cmds_dirs` do);
   `resolve_scope(global_scope, agents_dir=None, project_root=None)` is the
-  install-command form; `resolve_user_store(agents_dir=None)` (the home of the
+  install-command form, whose project root is `install_project_root()`: the
+  pin (`$AGENTS_PROJECT_ROOT`, then `$CLAUDE_PROJECT_DIR`) while the cwd is
+  inside it, else the nearest ancestor of the cwd with a `.git` or its own
+  `.agents` (not the user/system store's parent), else the cwd, with a
+  warning. A project whose `.agents` IS the user store (run from `~`)
+  collapses to the user scope, keeping the project root, and `Scope.stores`
+  lists a directory once; `resolve_user_store(agents_dir=None)` (the home of the
   chain `dotagents.cli` re-exports) and `resolve_source(...)`. Scope = *where
   installed overlays live*, source = *where an overlay comes from* (bundled by
   default). `-g` resolves the store through `resolve_user_store`
@@ -126,17 +132,24 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   a registry. Nothing overlay-only lives here (name rules and discovery are
   `Overlay`'s).
 - `_context` — assemble the effective per-agent context:
-  `assemble_context(agent, scope, *, inline=False)` /
-  `assemble_context_data(agent, scope, *, inline=False)`. Sources are the contract-A
-  walk (overlay `CONTEXT.md`s first, sorted by manifest `priority`, lower
-  first; then the store / project `AGENTS.md` + `AGENTS.local.md`), minus what
+  `assemble_context(agent, scope, *, inline=False, expand_vars=True)` /
+  `assemble_context_data(agent, scope, *, inline=False, expand_vars=True)`.
+  Sources are the contract-A walk (overlay `CONTEXT.md`s first, sorted by
+  `Overlay.sort_key` — priority, then manifest name, then dir — and always
+  before the stores; then the store / project `AGENTS.md` + `AGENTS.local.md`), minus what
   the harness loads itself (`Agent.loaded_paths(project_root)` — for Claude,
   whatever its entry files actually `@`-include, recursively). `<PROJECT_ROOT>`
   and one `<NAME_OVERLAY_ROOT>` per installed overlay (user store + project)
-  expand. **Inlining the on-demand `.md` files a source mentions is opt-in**
+  expand, and with `expand_vars` (every output but `--write-agent`'s file and
+  the file `launch` merges into a project) so do `$NAME_OVERLAY_ROOT` /
+  `${NAME_OVERLAY_ROOT}`. **Inlining the on-demand `.md` files a source mentions is opt-in**
   (`inline=True` / `context --inline`): the base rules say to read them only
   when a task needs them, so inlining every mention would bloat the session
-  payload. Skills are listed, never inlined.
+  payload; each reference resolves against its own source's directory, a
+  project's also against `<project>/.agents`, and a user/system source never
+  into the project. Skills are listed, never inlined: `- **name** (<SKILL.md
+  path>): desc` (JSON: `name`, `description`, `path`), collected in contract-A
+  order so a later (project) skill wins, reading only the leading frontmatter.
 - `_env` — chained env-file assembly + `env.py` execution (frozen contract B):
   `get_environment(scope, *, base_env, explicit, logger)` / `get_diff(scope, ...)`
   / `resolve_env_files(scope)` / `get_bin_paths(scope)` / `get_lib_paths(scope)`
@@ -430,7 +443,8 @@ Deliberately NOT emitted, despite looking like they
 would be: `AGENTS_AGENT` (a named persona — nothing derives one, so there is
 nothing to emit) and `AGENTS_CODE_SESSION_ID`. Do not branch on either.
 `resolve_scope` READS `AGENTS_PROJECT_ROOT` (then the
-agent-native `CLAUDE_PROJECT_DIR`, then cwd) for the project scope's root.
+agent-native `CLAUDE_PROJECT_DIR`) for the project scope's root while the cwd is
+inside it, and warns and uses the cwd's own project otherwise (see `_scope`).
 
 Every command READS both back, so the pin actually holds: `env` and `context`
 resolve their user store through `cli.resolve_user_store()` (`--agents-dir` →

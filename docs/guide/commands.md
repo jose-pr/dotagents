@@ -4,8 +4,14 @@ The `dotagents` CLI is an umbrella of subcommands. Run it as the installed
 `dotagents` wrapper, as `python -m dotagents`, via the `python install.py <cmd>`
 dev shim (from a source checkout), or from a built `dotagents.pyz`. Most commands
 take a scope flag: **project**
-by default (the `<cwd>/.agents` store, when run inside a project) or **user** with
-`-g` / `--global` (the `~/.agents` store, configurable).
+by default (the `.agents` store of the project you are in) or **user** with
+`-g` / `--global` (the `~/.agents` store, configurable). Commands that write
+(`init`, `overlays`, `findings`) honour a pinned `$AGENTS_PROJECT_ROOT` while the
+current directory is inside it; outside it they use the nearest directory up with a
+`.git` or its own `.agents`, else the current directory, and warn. `env` and
+`context` keep the pin, so what they assemble is the same in every subdirectory.
+`--agents-dir` names the store the scope resolves to: the project store for
+`init` / `overlays` / `findings` without `-g`, the user store otherwise.
 
 ## Command set
 
@@ -43,7 +49,7 @@ subcommand, no registration needed; see
 See [Install](install.md) for the full walkthrough. In brief:
 
 ```bash
-dotagents init                          # base config into <cwd>/.agents (project scope)
+dotagents init                          # base config into <project>/.agents (project scope)
 dotagents init -g                       # ...into ~/.agents (user scope)
 dotagents init --bin-dir ~/.local/bin   # also write a `dotagents` command on PATH
 dotagents init --no-hooks               # skip agent hook wiring + the skills link
@@ -156,7 +162,8 @@ dotagents context --inline                     # also inline the on-demand .md f
 dotagents context --write-agent --agents codex # merge a managed block into <project>/AGENTS.md
 ```
 
-- `[output]` — positional destination. Default `-` (stdout); a path writes that file.
+- `[output]` — positional destination. Default `-` (stdout); a path writes that
+  file, for one agent (several agents need stdout or `--format json`).
 - `--write-agent` — merge the context into each agent's own instruction file under
   the project root (not with `-g`), as a managed `dotagents:context` block refreshed
   in place:
@@ -167,13 +174,23 @@ dotagents context --write-agent --agents codex # merge a managed block into <pro
   `.agents/rules/dotagents.md`. Prefer the hook where the harness has one; this is
   the static alternative. Mutually exclusive with `[output]` and `--format json`.
 - `--inline` — also append the on-demand `.md` files the sources reference (bare or
-  backticked relative paths). Off by default: the base rules say to read those
-  only when a task needs them, and inlining every mention makes a very large
-  session payload.
-- `--agents <a,b>` — which agents to generate for (default: the active agent).
+  backticked relative paths, and `$<NAME>_OVERLAY_ROOT/...` / `<PROJECT_ROOT>/...`
+  references). Each reference resolves against the directory of the source that
+  mentions it; a project's references also search its `.agents`, and a user or
+  system source never resolves into the project. Off by default: the base rules
+  say to read those only when a task needs them, and inlining every mention
+  makes a very large session payload.
+- `--agents <a,b>` — which agents to generate for (default: the active agent);
+  names or harness ids (`claude-code`). Exits 2 when none is known.
 - `--format markdown|system-reminder|json` — output shape.
 - `-g` / `--global` — skip the project-level context files (the store is unaffected).
 - `--agents-dir <dir>` — user store override for this run.
+
+On stdout and in JSON, `$<NAME>_OVERLAY_ROOT` is expanded to the installed overlay's
+directory, so a harness without the env still finds the file; `--write-agent` keeps
+the variable, because its file may be committed. Skills are listed with the path of
+their `SKILL.md` (JSON: a `path` key), a project skill winning over a same-named user
+one.
 
 Roots: the store is `--agents-dir` → `$AGENTS_HOME` → `~/.agents`, and the project
 root is `$AGENTS_PROJECT_ROOT` → `$CLAUDE_PROJECT_DIR` → the cwd. A `SessionStart`

@@ -47,6 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   of a per-process temp directory that a killed session left behind.
 - `findings remove` deletes only active findings; a processed finding keeps
   its resolution and must be reopened first.
+- `init`, `overlays` and `findings` honour a pinned `$AGENTS_PROJECT_ROOT`
+  only while the current directory is inside it. After a `cd` out of it they
+  use the project the current directory is in (the nearest directory up with
+  a `.git` or its own `.agents`) and warn; they used to write into the
+  session's first project. `env` and `context` keep the pin.
+- `context` output on stdout and in JSON, and the context `launch` hands
+  over, expand `$<NAME>_OVERLAY_ROOT` to the overlay's directory, so a
+  harness without the dotagents env can follow overlay routing. A file
+  written by `context --write-agent`, or merged by `launch`, keeps the
+  variable, because it may be committed.
+- The skills listing names each skill's `SKILL.md`, and JSON skill entries
+  gain a `path` key.
 - The base rule for a config miss ends at the findings queue: triage closes a
   finding with `dotagents findings done -g <name> -r "<resolution>"`, and the
   resolution is the record. It no longer points at `dotagents/DECISIONS.md`.
@@ -89,6 +101,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A session started in the home directory walks the user store once; it ran
+  every `env.py` twice and sent every `AGENTS.md` and `CONTEXT.md` twice.
+  `init` and `overlays` run from the home directory target the user store
+  instead of writing a project block over it.
+- `context` orders overlay sources the way the managed block orders overlay
+  rules: priority, then manifest name, then directory. An overlay with a very
+  high priority no longer sorts after the store's `AGENTS.md`.
+- The skills listing lets a project skill override a same-named user skill,
+  reads only the leading frontmatter, and joins a folded or literal
+  description instead of showing `>`.
+- `context --inline` inlines files referenced through
+  `$<NAME>_OVERLAY_ROOT`, `${<NAME>_OVERLAY_ROOT}`, `<NAME_OVERLAY_ROOT>` and
+  `<PROJECT_ROOT>`; resolves each source's references against its own
+  directory; searches the project store for the project's references; and
+  never resolves a user-store reference into the project.
+- `context` with several agents and an output file is an error instead of
+  keeping only the last agent. `--agents` that names no known agent exits 2,
+  harness ids such as `claude-code` are accepted, and an empty result gets no
+  system-reminder wrapper.
+- `--agents-dir` after `--` (an argument for the harness `launch` runs) no
+  longer changes which command modules are discovered, and a project store
+  named with `--agents-dir` no longer replaces the user store's commands.
 - A command module that imports but whose parser cannot be built (an
   unresolvable annotation, `X | None` on Python 3.9, a duplicate flag, or a
   flag the umbrella owns) no longer breaks every `dotagents` invocation; it is

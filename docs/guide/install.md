@@ -14,14 +14,17 @@ hooks that hand `dotagents env` / `dotagents context` to the harnesses that have
 is a marker-delimited **managed block**, so re-running `init` never clobbers anything
 you added around it.
 
-**Scope**: project by default (`<cwd>/.agents`), or the user store with `-g`/`--global`
-(`~/.agents`). A project store's block is a minimal one — a Startup line and empty
+**Scope**: project by default — the project you are in: `<project>/.agents`, where the project is a pinned
+`$AGENTS_PROJECT_ROOT` while you are inside it, else the nearest directory up
+with a `.git` or its own `.agents`, else the current directory; from `~` that is the
+user store — or the user store with `-g`/`--global` (`~/.agents`). A command that writes
+from outside a pinned root says which project it used. A project store's block is a minimal one — a Startup line and empty
 "Always-on rules" / "Load on demand" sections for its overlays — because every session
 already reads the user store's rules. `--dest` overrides explicitly. `--bin-dir` additionally writes a
 `dotagents` wrapper command onto your PATH.
 
 ```bash
-dotagents init                          # project: <cwd>/.agents
+dotagents init                          # project: <project>/.agents
 dotagents init -g                       # user store: ~/.agents
 dotagents init --bin-dir ~/.local/bin   # also write a `dotagents` command on PATH
 dotagents init --dry-run                # show what would happen

@@ -138,8 +138,9 @@ directory name upper-cased, `-`/`.` → `_`: `private-sync` → `PRIVATE_SYNC_OV
 That variable is how overlay content refers to itself and to other overlays: a
 routing line reads `$ENGINEERING_OVERLAY_ROOT/flows/PLAN.md`, never `~/.agents/flows/PLAN.md`
 — overlays install under `overlays/<name>/`, and the store itself can live anywhere
-(`$AGENTS_HOME`). In a `CONTEXT.md` the angle-bracket form `<ENGINEERING_OVERLAY_ROOT>` is
-expanded by `dotagents context` at assembly time. An overlay that needs to export
+(`$AGENTS_HOME`). `dotagents context` expands both forms, `$ENGINEERING_OVERLAY_ROOT` and
+`<ENGINEERING_OVERLAY_ROOT>`, at assembly time for its stdout and JSON output; a file
+written by `context --write-agent` keeps the variable. An overlay that needs to export
 something of its own ships an `env.py` at its root: `dotagents env` runs it and reads a
 JSON object of env changes from its stdout.
 

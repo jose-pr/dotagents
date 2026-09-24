@@ -76,11 +76,12 @@ include in `~/.claude/CLAUDE.md` for the user store, `<project>/.claude/CLAUDE.m
 project), and wires each supporting agent's hooks so `dotagents context` reaches it
 automatically at session start (`--no-hooks` opts out) — but imposes no opinions (those
 come from `overlays add`). The block is marker-delimited, so re-running `init` never
-clobbers what you've added around it. **Scope**: project by default (`<cwd>/.agents`),
+clobbers what you've added around it. **Scope**: project by default (the `.agents` of
+the project you are in — the nearest directory up with a `.git` or its own `.agents`),
 or the user store with `-g`/`--global` (`~/.agents`).
 
 ```bash
-dotagents init                          # project: <cwd>/.agents
+dotagents init                          # project: <project>/.agents
 dotagents init -g                       # user store: ~/.agents
 dotagents init --bin-dir ~/.local/bin   # also write a `dotagents` command on PATH
 dotagents init --dry-run                # show what would happen
