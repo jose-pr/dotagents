@@ -1,8 +1,8 @@
 """`dotagents overlays` -- add / remove / list / sync / show, with skills sync.
 
-Module deps live in `_scope.py` / `_skills.py` / `_overlays.py`; the umbrella
-registers `Overlays` on `Dotagents._subcommands_` (in `cli/__init__.py`).
-Discover-not-track: installed overlays are the dirs under `<scope>/overlays/`.
+The logic lives in `_scope.py` / `_sources.py` / `_skills.py` / `_overlays.py`;
+`cli/__init__.py` lists the `Overlays` umbrella in `_BUILTIN_COMMANDS`.
+Discover-not-track: installed overlays are the dirs under `<store>/overlays/`.
 Each carries an install record (`Overlay.INSTALL_RECORD`): the repo it came
 from, which `sync` resolves it from again, and the digest of every file
 installed, which lets `sync` prune what the source dropped.
@@ -350,27 +350,9 @@ def _unmet_requires(overlays) -> "dict[str, list[str]]":
     return unmet
 
 
-class OverlayAdd(DotAgentsArgs):
-    """Install overlay(s) by name into a scope, and publish their skills.
-
-    Resolves each ``<name>`` against the source (``--repo``,
-    the env repos, the stores' registries), installs what
-    its manifest ``requires`` first, copies it into
-    ``<scope>/.agents/overlays/<name>/`` (discoverable) with a record of the
-    repo it came from, merges its routing and rules into the installed
-    ``AGENTS.md`` managed block, and publishes its ``skills/`` from the
-    INSTALLED copy into the shared ``<scope>/.agents/skills/``, linking them
-    into each agent's own skills dir that ``init`` already wired for the
-    scope (Claude's ``<config>/skills/``; otherwise re-run ``init``). ``--copy``
-    mirrors skills as real dirs instead of symlinks (Windows / no-symlink). An
-    overlay whose setup fails on a fresh install is rolled back; the managed
-    block is recomposed over whatever is installed either way."""
-
-    _parsername_ = "add"
-
-    name: "list[str]" = []
-    "Overlay name(s) to install (resolved against the source)."
-    ("name",)
+class _RepoArgs(DotAgentsArgs):
+    """The ``--repo`` field of every command that resolves overlays by name
+    (``add``, ``list``, ``show``, ``sync``). Not a command of its own."""
 
     repo: "list[str]" = []
     ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
@@ -378,6 +360,29 @@ class OverlayAdd(DotAgentsArgs):
      "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
      "dotagents.{json,toml,yaml}. The first repo offering a name wins.")
     ("--repo",)
+
+
+class OverlayAdd(_RepoArgs):
+    """Install overlay(s) by name into a scope, and publish their skills.
+
+    Resolves each ``<name>`` against the source (``--repo``, the env repos,
+    the stores' registries), installs what its manifest ``requires`` first,
+    copies it into ``<store>/overlays/<name>/`` with a record of the repo it
+    came from, and publishes its ``skills/`` from the INSTALLED copy into the
+    shared ``<store>/skills/``, linking them into each agent's own skills dir
+    that ``init`` already wired for the scope (Claude's ``<config>/skills/``;
+    otherwise re-run ``init``). ``--copy`` mirrors skills as real dirs instead
+    of symlinks (Windows / no-symlink). The ``AGENTS.md`` managed block is then
+    rebuilt from the pristine base over every installed overlay's routing and
+    rules, in (priority, name) order. An overlay whose setup fails on a fresh
+    install is rolled back; the block is recomposed over whatever is installed
+    either way."""
+
+    _parsername_ = "add"
+
+    name: "list[str]" = []
+    "Overlay name(s) to install (resolved against the source)."
+    ("name",)
 
     copy: bool = False
     "Copy skills into the shared dir instead of symlinking (no-symlink fallback)."
@@ -447,7 +452,7 @@ class OverlayRemove(DotAgentsArgs):
     agent's own skills dir ``init`` wired), and ``AGENTS.md``'s managed block
     recomposed over what remains.
 
-    Deletes only ``<scope>/.agents/overlays/<name>/`` (a symlinked or
+    Deletes only ``<store>/overlays/<name>/`` (a symlinked or
     junctioned overlay is unlinked, its target untouched) and unpublishes only
     the skills that overlay published (matched to its own ``skills/``, by
     content) -- and only once the delete succeeded. Refuses an overlay another
@@ -547,14 +552,14 @@ class OverlayRemove(DotAgentsArgs):
         return 0
 
 
-class OverlayList(DotAgentsArgs):
+class OverlayList(_RepoArgs):
     """List the overlays installed in the scope and those available from source.
 
     In the project scope the user store's are listed too -- both are in play
     for a project session; a same-named project overlay shadows the store's
     copy.
 
-    ``installed`` is discovered by presence under ``<scope>/.agents/overlays/``; no
+    ``installed`` is discovered by presence under ``<store>/overlays/``; no
     registry file. An installed overlay whose ``requires`` no installed overlay
     provides is flagged. ``available`` is what the source offers (``*`` =
     installed in either scope; a repo that cannot be loaded is a warning, the
@@ -562,13 +567,6 @@ class OverlayList(DotAgentsArgs):
     object."""
 
     _parsername_ = "list"
-
-    repo: "list[str]" = []
-    ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
-     "mapping names to sources, or a git `<repo>[@ref][#path]`; consulted before "
-     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
-     "dotagents.{json,toml,yaml}. The first repo offering a name wins.")
-    ("--repo",)
 
     json: bool = False
     "Emit JSON instead of plain text."
@@ -654,7 +652,7 @@ class OverlayList(DotAgentsArgs):
         return 0
 
 
-class OverlayShow(DotAgentsArgs):
+class OverlayShow(_RepoArgs):
     """Describe one overlay: where it is, its manifest, skills and file count.
 
     The manifest part is what it declares (description, priority, requires,
@@ -670,13 +668,6 @@ class OverlayShow(DotAgentsArgs):
     name: str = ""
     "Overlay name."
     ("name",)
-
-    repo: "list[str]" = []
-    ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
-     "mapping names to sources, or a git `<repo>[@ref][#path]`; consulted before "
-     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
-     "dotagents.{json,toml,yaml}. The first repo offering a name wins.")
-    ("--repo",)
 
     json: bool = False
     "Emit JSON instead of plain text."
@@ -752,35 +743,28 @@ class OverlayShow(DotAgentsArgs):
         return 0
 
 
-class OverlaySync(DotAgentsArgs):
+class OverlaySync(_RepoArgs):
     """Refresh installed overlays from source, and resync their skills.
 
     Each installed overlay is fetched again from the repo it was INSTALLED
     from (its install record) -- not from whichever repo now offers the name
-    first -- unless ``--repo`` is given, which resolves it through that chain
-    instead. New files land and ``overlay.toml`` is always refreshed; an
-    existing file that differs from the source is kept and reported unless
-    ``--overwrite``, which replaces it (backed up first). A file the source no
-    longer ships is removed when it is unmodified, and kept (reported) when it
-    was edited here unless ``--prune``. A ``requires`` added upstream is
-    installed. Rules/routing are re-merged. An optional ``<glob>`` filters
-    which installed overlays to sync (``sync 'py*'``). A repo that cannot be
-    loaded fails the sync (after the others are synced); a repo that no
-    longer offers an overlay is a warning."""
+    first -- unless ``--repo`` is given, which replaces each recorded source:
+    the overlay resolves through that chain instead. New files land and
+    ``overlay.toml`` is always refreshed; an existing file that differs from
+    the source is kept and reported unless ``--overwrite``, which replaces it
+    (backed up first). A file the source no longer ships is removed when it
+    is unmodified, and kept (reported) when it was edited here unless
+    ``--prune``. A ``requires`` added upstream is installed. The managed
+    block is recomposed over every installed overlay. An optional ``<glob>``
+    filters which installed overlays to sync (``sync 'py*'``). A repo that
+    cannot be loaded fails the sync (after the others are synced); a repo
+    that no longer offers an overlay is a warning."""
 
     _parsername_ = "sync"
 
     pattern: Optional[str] = None
     "Glob over installed overlay names to sync (default: all)."
     ("pattern",)
-
-    repo: "list[str]" = []
-    ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
-     "mapping names to sources, or a git `<repo>[@ref][#path]`; consulted before "
-     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
-     "dotagents.{json,toml,yaml}. The first repo offering a name wins. Given, it "
-     "replaces each overlay's recorded source.")
-    ("--repo",)
 
     copy: bool = False
     "Copy skills into the shared dir instead of symlinking (no-symlink fallback)."
