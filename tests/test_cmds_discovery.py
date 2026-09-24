@@ -384,8 +384,6 @@ class Unres(LoggingArgs, Cmd):
 '''
 
 
-@pytest.mark.xfail(strict=True, reason="open (review 2026-09-23 cli-01): discovery isolates "
-                   "import failures only; one failing at parser build breaks every command")
 @pytest.mark.parametrize("body", [DUPLICATE_FLAG, UNRESOLVED_ANNOTATION],
                          ids=["duplicate-flag", "unresolved-annotation"])
 def test_a_module_failing_at_parser_build_does_not_take_the_cli_down(monkeypatch, tmp_path, body, capsys):

@@ -19,10 +19,9 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
+from dotagents import cli
 
-from dotagents import cli  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
 
 CMDS = ROOT / "src" / "dotagents" / "_overlay" / "dotagents" / "cmds"
 

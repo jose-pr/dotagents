@@ -118,8 +118,6 @@ def test_reinit_after_overlays_add_keeps_the_overlay_routing(tmp_path):
     assert (store / "AGENTS.md").read_text(encoding="utf-8") == after_add
 
 
-@pytest.mark.xfail(strict=True, reason="open (review 2026-09-23 adapters-06): an unknown "
-                   "--agents name is a warning and init exits 0 having configured nothing")
 def test_init_with_an_unknown_agent_is_a_usage_error(tmp_path):
     assert _main(["init", "--dest", str(tmp_path / "s"), "--agents", "claud", "--no-hooks"]) == 2
 

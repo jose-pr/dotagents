@@ -89,7 +89,6 @@ def test_relative_and_empty_path_entries_are_dropped(roots, tmp_path):
 # A session at the home directory: the project store IS the user store.
 # --------------------------------------------------------------------------
 
-@_open("scope-context-02", "the user store is walked twice when the project root is ~")
 def test_home_as_project_walks_the_user_store_once(tmp_path):
     home = tmp_path / "home"
     store = home / ".agents"
@@ -137,7 +136,6 @@ def test_powershell_output_survives_typographic_quotes(tmp_path, value):
 
 @pytest.mark.skipif(os.name != "nt", reason="the Windows PreToolUse loader")
 @needs_powershell
-@_open("env-09", "env writes UTF-8 but PowerShell decodes a native pipe with the OEM code page")
 def test_non_ascii_survives_the_real_loader_pipe(tmp_path, monkeypatch):
     """The PreToolUse loader pipes `dotagents.cmd env --diff --format
     powershell` into Invoke-Expression; a stub `dotagents.cmd` in the store

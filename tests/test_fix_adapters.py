@@ -13,10 +13,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from dotagents import _agents, _merge  # noqa: E402
-from dotagents.cli._common import BASE_ROOT, _apply_base  # noqa: E402
+from dotagents import _agents, _merge
+from dotagents.cli._common import BASE_ROOT, _apply_base
 
 BASE = "<!-- dotagents:begin -->\nBASE RULES\n<!-- dotagents:end -->\n"
 

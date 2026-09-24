@@ -7,14 +7,12 @@ auto-approved every PowerShell call after `init -g` on Windows.
 """
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from dotagents._agents import ClaudeAgent  # noqa: E402
+from dotagents._agents import ClaudeAgent
 
 
 @pytest.fixture(autouse=True)

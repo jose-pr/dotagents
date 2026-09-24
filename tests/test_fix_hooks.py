@@ -14,10 +14,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from dotagents import _hooks, _wrappers  # noqa: E402
-from dotagents._agents import ClaudeAgent  # noqa: E402
+from dotagents import _hooks, _wrappers
+from dotagents._agents import ClaudeAgent
 
 WINDOWS = os.name == "nt"
 POWERSHELL = shutil.which("powershell") if WINDOWS else None

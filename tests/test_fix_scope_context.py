@@ -10,17 +10,11 @@ first so a hooked shell cannot leak the real checkout into a test.
 import json
 import logging
 import os
-import sys
-from pathlib import Path
-
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(SRC))
-
-from dotagents import _agents, _context, _env, _scope  # noqa: E402
-from dotagents._fs import write_text_lf  # noqa: E402
-from dotagents._scope import Scope  # noqa: E402
+from dotagents import _agents, _context, _env, _scope
+from dotagents._fs import write_text_lf
+from dotagents._scope import Scope
 
 
 @pytest.fixture(autouse=True)

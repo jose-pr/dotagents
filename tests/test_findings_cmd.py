@@ -299,7 +299,6 @@ def _open(issue, why):
     return pytest.mark.xfail(strict=True, reason="open (review 2026-09-23 %s): %s" % (issue, why))
 
 
-@_open("cli-04", "stdin is decoded with the locale code page, not as UTF-8")
 def test_cmd_body_from_stdin_is_read_as_utf8_bytes(findings_mod, tmp_path, monkeypatch, capsys):
     """What a pipe really delivers: bytes, behind a text layer that decodes
     with the console code page (cp1252 on a default Windows shell)."""
@@ -314,7 +313,6 @@ def test_cmd_body_from_stdin_is_read_as_utf8_bytes(findings_mod, tmp_path, monke
     assert text.strip() in (d / "piped.md").read_text(encoding="utf-8")
 
 
-@_open("cli-03", "files are read as strict UTF-8; one non-UTF-8 note breaks every subcommand")
 def test_a_non_utf8_note_does_not_break_the_queue(findings_mod, tmp_path):
     root = tmp_path / "findings"
     root.mkdir()
@@ -324,7 +322,6 @@ def test_a_non_utf8_note_does_not_break_the_queue(findings_mod, tmp_path):
     assert "second" in [f.name for f in store.active()]
 
 
-@_open("cli-03", "a UTF-8 BOM hides the frontmatter")
 def test_a_bom_note_keeps_its_frontmatter(findings_mod, tmp_path):
     root = tmp_path / "findings"
     root.mkdir()
