@@ -459,6 +459,23 @@ def test_compose_block_without_load_on_demand_heading_keeps_rules(tmp_path):
     assert out.index("keep me.") < out.index("<!-- dotagents:end -->")
 
 
+def test_compose_block_skips_a_fenced_end_marker(tmp_path):
+    """The block ends at its end-marker LINE outside code fences, as `_merge`
+    reads it: a fenced example of the marker in the base is documentation."""
+    from dotagents.cli import _compose_block
+
+    ov = _overlay(tmp_path, "ov", routing=["- ROUTED -> kb/X.md"])
+    base = (
+        "<!-- dotagents:begin -->\n# Directives\n\n## Load on demand\n"
+        "The block ends like this:\n\n```\n<!-- dotagents:end -->\n```\n\n"
+        "<!-- dotagents:end -->\n"
+    )
+    out = _compose_block(base, [ov], _logger())
+    fence_end = out.index("```\n\n") + len("```\n\n")
+    assert out.index("- ROUTED") >= fence_end, out
+    assert out.rstrip().endswith("- ROUTED -> kb/X.md\n<!-- dotagents:end -->"), out
+
+
 def test_scratch_dir_is_one_dir_removed_at_exit():
     from dotagents.cli._common import _scratch_dir
 

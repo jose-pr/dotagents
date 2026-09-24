@@ -264,7 +264,14 @@ def _compose_block(base_text: str, overlays, logger) -> str:
     same convention `_context.py` uses. `name` is the tiebreaker, so the block is
     deterministic regardless of discovery order. Returns `base_text` unchanged
     when nothing contributes. `overlays` are `Overlay` instances or overlay dirs."""
+    from dotagents._merge import END_MARKER, _marker_lines
     from dotagents._overlays import Overlay
+
+    def block_end(text: str) -> int:
+        # The managed block's end marker line (outside fences), as `_merge`
+        # matches it; the end of the text when there is none.
+        ends = _marker_lines(text, END_MARKER)
+        return ends[0].start() if ends else len(text)
 
     rules: "list[str]" = []
     routing: "list[str]" = []
@@ -288,8 +295,7 @@ def _compose_block(base_text: str, overlays, logger) -> str:
             # end of the block instead, as the warning says.
             logger.warning("base AGENTS.md has no 'Load on demand' heading; "
                            "appending overlay rules at the end of the block")
-            end = re.search(r"(?m)^[ \t]*<!-- dotagents:end -->", text)
-            insert_at = end.start() if end else len(text)
+            insert_at = block_end(text)
             text = text[:insert_at] + "\n".join(rules) + "\n\n" + text[insert_at:]
         else:
             text = text[: m.start()] + "\n".join(rules) + "\n\n" + text[m.start():]
@@ -303,8 +309,7 @@ def _compose_block(base_text: str, overlays, logger) -> str:
         # token is an environment variable it can resolve, not a literal path.
         if any("_OVERLAY_ROOT" in line for line in routing):
             routing = [OVERLAY_ROOT_NOTE] + routing
-        end = re.search(r"(?m)^[ \t]*<!-- dotagents:end -->", text)
-        insert_at = end.start() if end else len(text)
+        insert_at = block_end(text)
         text = text[:insert_at] + "\n".join(routing) + "\n" + text[insert_at:]
     return text
 
