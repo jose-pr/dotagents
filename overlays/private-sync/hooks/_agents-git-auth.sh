@@ -3,7 +3,10 @@
 # repo when DOTAGENTS_AGENTS_TOKEN is set:
 #
 #   * a credential helper that reads the token from the environment at auth time
-#     (the secret is never written to .git/config or any file on disk), and
+#     (the secret is never written to .git/config or any file on disk), offered
+#     only for the private repo ($AGENTS_REMOTE, else github.com) through git's
+#     GIT_CONFIG_* environment -- ~/.gitconfig is never written, and
+#     another github.com repo is never offered the token -- and
 #   * in environments that transparently rewrite github.com git traffic to a
 #     scoped in-session proxy (a hosted agent runner does this, and the proxy
 #     will not serve a private repo outside the session's authorized scope), an
@@ -27,10 +30,18 @@ _dotagents_git_auth() {
         | awk 'tolower($2) ~ /^https:\/\/github\.com/ {print; exit}')
 
     if [ -z "$_dg_rewrite" ]; then
-        # Normal environment: a global credential helper is enough.
-        git config --global credential."https://github.com".helper "$_dg_helper"
-        git config --global credential."https://github.com".useHttpPath false
-        unset _dg_helper _dg_rewrite
+        # Normal environment: the helper for the private repo only, as
+        # GIT_CONFIG_KEY_n/VALUE_n entries appended to any the caller has. The
+        # empty value first clears broader helpers for that URL, so the token
+        # is the credential git presents for it.
+        _dg_scope="${AGENTS_REMOTE:-https://github.com}"
+        _dg_n="${GIT_CONFIG_COUNT:-0}"
+        export "GIT_CONFIG_KEY_$_dg_n=credential.$_dg_scope.helper" "GIT_CONFIG_VALUE_$_dg_n="
+        _dg_n=$((_dg_n + 1))
+        export "GIT_CONFIG_KEY_$_dg_n=credential.$_dg_scope.helper" "GIT_CONFIG_VALUE_$_dg_n=$_dg_helper"
+        GIT_CONFIG_COUNT=$((_dg_n + 1))
+        export GIT_CONFIG_COUNT
+        unset _dg_helper _dg_rewrite _dg_scope _dg_n
         return 0
     fi
 

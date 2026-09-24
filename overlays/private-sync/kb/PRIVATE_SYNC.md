@@ -146,8 +146,10 @@ to that scoped proxy, which won't serve a repo outside session scope — so a pl
 `git clone`/`push` of the private repo would be redirected and fail. The hooks handle
 this automatically: `hooks/_agents-git-auth.sh` (sourced by both hooks) detects a
 github→proxy rewrite and, when a token is present, points git at an isolated config that
-bypasses the rewrite so the token authenticates directly against `github.com`. Nothing
-to configure beyond `DOTAGENTS_AGENTS_TOKEN`.
+bypasses the rewrite so the token authenticates directly against `github.com`. Without a
+rewrite it offers the token only for `$AGENTS_REMOTE` (else github.com), through git's
+`GIT_CONFIG_*` environment for the hook's own git and `dotagents` calls; it never
+writes `~/.gitconfig`. Nothing to configure beyond `DOTAGENTS_AGENTS_TOKEN`.
 
 ## Gotchas
 
