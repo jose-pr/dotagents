@@ -17,6 +17,8 @@ the user scope is pointed with `$AGENTS_HOME` and the project scope with
 import os
 from pathlib import Path
 
+import pytest
+
 from dotagents import cli
 
 
@@ -347,3 +349,51 @@ def test_project_overrides_user_scope(monkeypatch, tmp_path):
     assert getattr(toy[0], "marker", None) == "project"
 
 
+# A module that imports cleanly but whose command cannot become a parser.
+DUPLICATE_FLAG = '''\
+from duho import Cmd, LoggingArgs
+
+
+class Dup(LoggingArgs, Cmd):
+    _parsername_ = "dup"
+
+    a: str = ""
+    ("--same",)
+
+    b: str = ""
+    ("--same",)
+
+    def __call__(self) -> int:
+        return 0
+'''
+
+UNRESOLVED_ANNOTATION = '''\
+from __future__ import annotations
+
+from duho import Cmd, LoggingArgs
+
+
+class Unres(LoggingArgs, Cmd):
+    _parsername_ = "unres"
+
+    out: Path | None = None
+    ("--out",)
+
+    def __call__(self) -> int:
+        return 0
+'''
+
+
+@pytest.mark.xfail(strict=True, reason="open (review 2026-09-23 cli-01): discovery isolates "
+                   "import failures only; one failing at parser build breaks every command")
+@pytest.mark.parametrize("body", [DUPLICATE_FLAG, UNRESOLVED_ANNOTATION],
+                         ids=["duplicate-flag", "unresolved-annotation"])
+def test_a_module_failing_at_parser_build_does_not_take_the_cli_down(monkeypatch, tmp_path, body, capsys):
+    cmds = tmp_path / "cmds"
+    _write(cmds / "bad.py", body)
+    monkeypatch.setenv("AGENTS_CMDS_PATH", str(cmds))
+    try:
+        rc = cli.main(["about"])
+    except SystemExit as exc:
+        rc = exc.code
+    assert rc == 0

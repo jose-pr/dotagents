@@ -89,7 +89,46 @@ def _isolate(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", str(SRC))
     monkeypatch.setattr(_agents.ClaudeAgent, "_walk_stop", tmp_path_factory.getbasetemp())
     monkeypatch.chdir(cwd)
-    return home
+    saved_logging = _logging_state()
+    yield home
+    _restore_logging(saved_logging)
+
+
+def _loggers():
+    import logging
+
+    yield logging.getLogger()
+    for logger in list(logging.Logger.manager.loggerDict.values()):
+        if isinstance(logger, logging.Logger):
+            yield logger
+
+
+def _logging_state():
+    """Every logger's level/handlers/propagate/disabled. `cli.main` runs
+    duho's logging setup -- levels on named loggers, a StreamHandler on the
+    root bound to that test's captured stderr -- which would otherwise leak
+    into later tests (a caplog assertion then sees INFO records it never
+    used to)."""
+    return {id(lg): (lg.level, list(lg.handlers), lg.propagate, lg.disabled) for lg in _loggers()}
+
+
+def _restore_logging(saved):
+    import logging
+
+    root = logging.getLogger()
+    for lg in _loggers():
+        level, handlers, propagate, disabled = saved.get(id(lg), (logging.NOTSET, [], True, False))
+        lg.setLevel(level)
+        lg.propagate, lg.disabled = propagate, disabled
+        if lg is root:
+            # pytest attaches its own (StreamHandler subclass) capture handlers
+            # to the root per phase and removes them itself: drop only plain
+            # StreamHandlers added during the test.
+            for h in list(root.handlers):
+                if h not in handlers and type(h) is logging.StreamHandler:
+                    root.removeHandler(h)
+        else:
+            lg.handlers[:] = handlers
 
 
 #: Files and directories under the real home that dotagents writes to.
