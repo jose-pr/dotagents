@@ -31,7 +31,8 @@ running session, done up front here):
    ``--command`` for a program under another name. Everything after the first
    literal ``--`` is passed through untouched (duho's ``_passthrough_``
    convention), after the flags dotagents adds, so yours win where the
-   harness takes the last value. The exit code is the harness's.
+   harness takes the last value. The exit code is the harness's (``128 + N``
+   when a signal N killed it).
 
 The command is bundled with dotagents (discovered from the package, like
 ``findings``); a same-named ``launch.py`` in a scope's ``dotagents/cmds/``
@@ -56,13 +57,18 @@ def _spawn(argv: "list[str]", env: "dict[str, str]") -> int:
     """Run ``argv`` with ``env`` on the real terminal streams and return its
     exit code. Ctrl-C reaches the child through the shared console; this
     keeps waiting for the child's real exit code instead of dying first and
-    leaving an orphan under a half-torn-down parent."""
+    leaving an orphan under a half-torn-down parent.
+
+    A child killed by signal N reports ``-N`` (POSIX); that is returned as the
+    shell's ``128 + N``, since a negative exit status would be truncated to
+    ``256 - N`` on the way out."""
     proc = subprocess.Popen(argv, env=env)
     while True:
         try:
-            return proc.wait()
+            rc = proc.wait()
         except KeyboardInterrupt:
             continue
+        return 128 - rc if rc < 0 else rc
 
 
 def _git_tracks(root: Path, rel: str) -> bool:

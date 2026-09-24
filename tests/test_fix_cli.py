@@ -396,3 +396,43 @@ def test_paths_print_as_utf8_on_a_legacy_console(findings_mod, tmp_path, monkeyp
     d = tmp_path / "q\u2192"
     assert _run(findings_mod.Findings.Add, description="arrow dir", dir=d) == 0
     assert raw.getvalue().decode("utf-8").strip() == str(d / "arrow-dir.md")
+
+
+# --------------------------------------------------------------------------- #
+# launch
+# --------------------------------------------------------------------------- #
+
+
+def _program(tmp_path, name="fake-harness", suffix=None):
+    """An executable file `shutil.which` accepts, in a dir of its own."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    if os.name == "nt":
+        p = bin_dir / (name + (suffix or ".cmd"))
+        p.write_text("@echo off\r\n")
+    else:
+        p = bin_dir / name
+        p.write_text("#!/bin/sh\n")
+        p.chmod(p.stat().st_mode | stat.S_IXUSR)
+    return p
+
+
+def _capture_spawn(monkeypatch, launch_mod):
+    calls = []
+    monkeypatch.setattr(launch_mod, "_spawn", lambda argv, env: calls.append(list(argv)) or 0)
+    return calls
+
+
+def _context_is(monkeypatch, text):
+    from dotagents import _context
+
+    monkeypatch.setattr(_context, "assemble_context", lambda agent, scope, inline=False: text)
+
+
+def test_a_signal_killed_harness_exits_128_plus_n(launch_mod, monkeypatch):
+    class Proc:
+        def wait(self):
+            return -2
+
+    monkeypatch.setattr(launch_mod.subprocess, "Popen", lambda argv, env: Proc())
+    assert launch_mod._spawn(["x"], {}) == 130
