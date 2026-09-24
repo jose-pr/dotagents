@@ -24,6 +24,17 @@ Shipped as a file, not inlined: Codex documents hook commands as
 `python3 ~/.codex/hooks/*.py`, and a `.py` file has no execution-policy or
 signing concern (that constraint is PowerShell-specific).
 
+Native Windows: Codex runs the shell tool through PowerShell there, which
+cannot parse the POSIX prefix below -- every command in the session failed.
+Until a PowerShell form is verified against Codex's own Windows tool input,
+the hook passes commands through unchanged (no env) instead of breaking them;
+SessionStart still delivers the context. `DOTAGENTS_HOOK_SHELL=posix|windows`
+overrides the platform check (tool-internal, for tests).
+
+`permissionDecision: "allow"` is required, not a shortcut: Codex applies
+`updatedInput` only together with it and asks for approval through its
+separate PermissionRequest event.
+
 Fails safe on any error: never lets a hook bug break the user's tool call.
 """
 
@@ -32,7 +43,16 @@ import os
 import sys
 
 
+def _windows_shell() -> bool:
+    forced = os.environ.get("DOTAGENTS_HOOK_SHELL", "").lower()
+    if forced in ("posix", "windows"):
+        return forced == "windows"
+    return os.name == "nt"
+
+
 def main() -> int:
+    if _windows_shell():
+        return 0
     try:
         hook_input = json.load(sys.stdin)
     except Exception:

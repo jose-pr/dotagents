@@ -755,9 +755,13 @@ class CodexAgent(Agent):
     # should pass --no-hooks.
     # Same PATH prefix as Claude's hook, for the same reason: `<scope>/bin/`
     # holds the wrapper `init` wrote.
-    SESSION_START_COMMAND = (
-        'PATH="$PWD/.agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH" dotagents context --agents codex'
-    )
+    # SessionStart is a SCRIPT (`sessionstart_codex_context.py`), not a shell
+    # line: Codex runs hook commands through the platform shell, and on native
+    # Windows that is cmd.exe, which read `PATH="..." dotagents context` as its
+    # own PATH builtin and ran nothing. Both hooks run under the absolute
+    # interpreter `init` ran with -- a bare `python`/`python3` may be missing or
+    # the Microsoft Store alias stub.
+    SESSION_START_HOOK_SCRIPT = "sessionstart_codex_context.py"
 
     # PreToolUse gives Codex the LIVE env half SessionStart cannot: its
     # PreToolUse supports `updatedInput.command` with the same JSON shape as
@@ -813,7 +817,9 @@ class CodexAgent(Agent):
         root = self._config_root(config_root)
 
         self.remove_env_block(dry_run=dry_run, logger=logger, config_root=root)
-        script_changed = self._deploy_pretooluse_script(root, dry_run=dry_run, logger=logger)
+        script_changed = False
+        for name in (self.SESSION_START_HOOK_SCRIPT, self.PRETOOLUSE_HOOK_SCRIPT):
+            script_changed |= self._deploy_script(root, name, dry_run=dry_run, logger=logger)
 
         hooks_path = root / "hooks.json"
         data = _hooks.load_settings(hooks_path)
@@ -821,29 +827,25 @@ class CodexAgent(Agent):
         if not isinstance(hooks, dict):
             hooks = {}
 
+        # Absolute interpreter and script, quoted for a possible space: this
+        # hooks.json is machine-local config written on the machine it runs on.
+        # `commandWindows` is Codex's documented Windows-only override.
+        ss_command, ss_command_windows = self.hook_commands(root, self.SESSION_START_HOOK_SCRIPT)
         session_start, ss_changed = _hooks.merge_hook(
             hooks.get("SessionStart"),
-            self.SESSION_START_COMMAND,
+            ss_command,
             status_message="Loading agent context",
+            command_windows=ss_command_windows,
         )
         hooks["SessionStart"] = session_start
 
-        # Absolute path, quoted for a possible space: this hooks.json is
-        # machine-local config written on the machine it runs on, so unlike
-        # the Bash SessionStart snippets it need not be portable.
-        #
-        # `commandWindows` uses `python`, not `python3`: on Windows `python3`
-        # is commonly a Microsoft Store app-execution-alias stub that silently
-        # no-ops. `commandWindows` is Codex's documented Windows-only override.
-        script_path = (root / "hooks" / self.PRETOOLUSE_HOOK_SCRIPT).resolve()
-        pretooluse_command = 'python3 "%s"' % script_path.as_posix()
-        pretooluse_command_windows = 'python "%s"' % str(script_path)
+        pt_command, pt_command_windows = self.hook_commands(root, self.PRETOOLUSE_HOOK_SCRIPT)
         pretooluse, pt_changed = _hooks.merge_hook(
             hooks.get("PreToolUse"),
-            pretooluse_command,
+            pt_command,
             matcher="Bash",
             status_message="Loading agent env",
-            command_windows=pretooluse_command_windows,
+            command_windows=pt_command_windows,
         )
         hooks["PreToolUse"] = pretooluse
 
@@ -861,22 +863,35 @@ class CodexAgent(Agent):
         if logger:
             logger.info("wired SessionStart + PreToolUse hooks: %s", hooks_path)
 
-    def _deploy_pretooluse_script(self, root: Path, *, dry_run: bool, logger) -> bool:
-        """Copies `pretooluse_codex_env.py` to `<codex-home>/hooks/`
-        (create-or-refresh: the script has no user-editable region). Returns
+    @staticmethod
+    def hook_commands(root: Path, script_name: str) -> "tuple[str, str]":
+        """``(command, commandWindows)`` running the deployed ``script_name``
+        under the absolute interpreter running ``init``."""
+        import sys
+
+        script = (Path(root) / "hooks" / script_name).resolve()
+        python = Path(sys.executable)
+        return (
+            '"%s" "%s"' % (python.as_posix(), script.as_posix()),
+            '"%s" "%s"' % (python, script),
+        )
+
+    def _deploy_script(self, root: Path, name: str, *, dry_run: bool, logger) -> bool:
+        """Copies a packaged hook script to `<codex-home>/hooks/`
+        (create-or-refresh: the scripts have no user-editable region). Returns
         whether it changed."""
         import shutil
 
         from dotagents.cli._common import BASE_ROOT
 
-        src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / self.PRETOOLUSE_HOOK_SCRIPT
+        src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / name
         if not src_script.is_file():
             if logger:
-                logger.warning("Codex PreToolUse script missing from package: %s", src_script)
+                logger.warning("Codex hook script missing from package: %s", src_script)
             return False
 
         dest_dir = root / "hooks"
-        dest_script = dest_dir / self.PRETOOLUSE_HOOK_SCRIPT
+        dest_script = dest_dir / name
         changed = not dest_script.is_file() or (
             dest_script.read_bytes() != src_script.read_bytes()
         )

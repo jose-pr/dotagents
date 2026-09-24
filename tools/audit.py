@@ -63,6 +63,7 @@ EXIST_ONLY = [
     "src/dotagents/_overlay/dotagents/cmds/launch.py",
     "src/dotagents/_overlay/dotagents/hooks/preinvocation_antigravity_context.py",
     "src/dotagents/_overlay/dotagents/hooks/pretooluse_codex_env.py",
+    "src/dotagents/_overlay/dotagents/hooks/sessionstart_codex_context.py",
     "tools/audit.py",
     "tools/cloud-setup.sh",
 ]

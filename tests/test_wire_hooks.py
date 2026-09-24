@@ -117,7 +117,7 @@ def test_hook_prefixes_scope_bin_on_path():
     delivering nothing -- which is exactly what happened on the dev box.
     """
     store_bin = "${AGENTS_HOME:-$HOME/.agents}/bin"
-    for cmd in (ClaudeAgent.SESSION_START_COMMAND, CodexAgent.SESSION_START_COMMAND):
+    for cmd in (ClaudeAgent.SESSION_START_COMMAND,):
         assert ".agents/bin" in cmd
         assert store_bin in cmd, "the store is $AGENTS_HOME when set, ~/.agents otherwise"
         assert "$PATH" in cmd, "must PREPEND, not replace, the inherited PATH"
@@ -454,28 +454,52 @@ class TestCodexHooks:
     (learn.chatgpt.com/docs/hooks, "To rewrite a supported tool call without
     blocking") -- structurally the same JSON shape as Claude's PowerShell hook."""
 
-    def test_wires_session_start_into_hooks_json(self, tmp_path):
+    def test_wires_session_start_as_a_script_under_the_absolute_interpreter(self, tmp_path):
+        """A shell line broke on native Windows (cmd.exe read `PATH="..."` as its
+        PATH builtin and ran nothing); a bare `python3` may not exist there."""
         dest, root = tmp_path / "agents", tmp_path / "codex"
         dest.mkdir()
         CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
         data = json.loads((root / "hooks.json").read_text(encoding="utf-8"))
-        assert _commands(data["hooks"]["SessionStart"]) == [
-            CodexAgent.SESSION_START_COMMAND
-        ]
-        assert "dotagents context" in CodexAgent.SESSION_START_COMMAND
-        # Without it `context` resolves the agent from the hook's environment,
-        # lands on Claude, and subtracts what Claude loads: Codex got nothing.
-        assert "dotagents context --agents codex" in CodexAgent.SESSION_START_COMMAND
+        hook = data["hooks"]["SessionStart"][0]["hooks"][0]
+        command, command_windows = CodexAgent.hook_commands(root, CodexAgent.SESSION_START_HOOK_SCRIPT)
+        assert hook["command"] == command and hook["commandWindows"] == command_windows
+        assert Path(sys.executable).as_posix() in command
+        assert (root / "hooks" / CodexAgent.SESSION_START_HOOK_SCRIPT).is_file()
+
+    def test_session_start_script_runs_context_for_codex(self, tmp_path, monkeypatch):
+        """End to end, with a stub `dotagents` on the project bin: the script
+        prints what `dotagents context --agents codex` printed. Without the
+        flag `context` resolved Claude and gave Codex nothing."""
+        import subprocess
+
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
+        CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        project = tmp_path / "proj"
+        stub_bin = project / ".agents" / "bin"
+        stub_bin.mkdir(parents=True)
+        if os.name == "nt":
+            (stub_bin / "dotagents.cmd").write_text("@echo off\r\necho STUB %*\r\n", encoding="utf-8")
+        else:
+            (stub_bin / "dotagents").write_text('#!/bin/sh\necho STUB "$@"\n', encoding="utf-8")
+            (stub_bin / "dotagents").chmod(0o755)
+        proc = subprocess.run(
+            [sys.executable, str(root / "hooks" / CodexAgent.SESSION_START_HOOK_SCRIPT)],
+            cwd=str(project), capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "STUB context --agents codex" in proc.stdout
 
     def test_session_start_has_no_env_write(self, tmp_path):
         """SessionStart itself still carries no CLAUDE_ENV_FILE-style write --
         that mechanism does not exist for Codex at any hook event. The env half
         is PreToolUse's job, checked in TestCodexPreToolUse below."""
-        dest, root = tmp_path / "agents", tmp_path / "codex"
-        dest.mkdir()
-        CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
-        assert "ENV_FILE" not in CodexAgent.SESSION_START_COMMAND
+        from dotagents.cli._common import BASE_ROOT
+
+        script = Path(BASE_ROOT) / "dotagents" / "hooks" / CodexAgent.SESSION_START_HOOK_SCRIPT
+        assert "ENV_FILE" not in script.read_text(encoding="utf-8").split('"""', 2)[2]
 
     def test_targets_hooks_json_not_config_toml(self, tmp_path):
         """Never rewrite the user's main TOML config."""
@@ -515,6 +539,28 @@ class TestCodexPreToolUse:
     tool, so unlike Claude's no-matcher hook this one can filter at the
     settings level instead of checking tool_name at runtime)."""
 
+    @pytest.fixture(autouse=True)
+    def _posix_shell(self, monkeypatch):
+        # The script passes commands through untouched on a Windows shell;
+        # these tests exercise the POSIX rewrite on every host.
+        monkeypatch.setenv("DOTAGENTS_HOOK_SHELL", "posix")
+
+    def test_windows_shell_passes_commands_through(self, tmp_path, monkeypatch):
+        """Codex runs its shell tool through PowerShell on native Windows, which
+        cannot parse the POSIX prefix: every command in the session failed."""
+        import subprocess
+
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
+        CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        monkeypatch.setenv("DOTAGENTS_HOOK_SHELL", "windows")
+        proc = subprocess.run(
+            [sys.executable, str(root / "hooks" / CodexAgent.PRETOOLUSE_HOOK_SCRIPT)],
+            input='{"tool_name":"Bash","tool_input":{"command":"Get-ChildItem"}}',
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0 and proc.stdout == ""
+
     def test_deploys_script_and_wires_pretooluse(self, tmp_path):
         dest, root = tmp_path / "agents", tmp_path / "codex"
         dest.mkdir()
@@ -532,14 +578,12 @@ class TestCodexPreToolUse:
         assert len(entries) == 1
         assert entries[0]["matcher"] == "Bash"
         hook = entries[0]["hooks"][0]
-        assert "python3" in hook["command"]
         assert str(script) in hook["command"] or script.as_posix() in hook["command"]
-        # commandWindows uses `python`, not `python3` -- on Windows `python3` is
-        # commonly a Microsoft Store app-execution-alias stub that silently
-        # no-ops; verified directly on the dev machine (exit code 49, "Python
-        # was not found... install from the Microsoft Store").
-        assert hook["commandWindows"].startswith("python ")
-        assert "python3" not in hook["commandWindows"]
+        # The absolute interpreter that ran init, in both forms: on Windows a
+        # bare `python3` is commonly the Microsoft Store alias stub (exit 49,
+        # "Python was not found"), and a bare `python` may not exist on POSIX.
+        assert Path(sys.executable).as_posix() in hook["command"]
+        assert str(Path(sys.executable)) in hook["commandWindows"]
 
     def test_script_output_is_valid_json_and_rewrites_command(self, tmp_path):
         """The real end-to-end property: run the deployed script exactly as
