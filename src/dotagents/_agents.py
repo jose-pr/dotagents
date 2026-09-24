@@ -269,8 +269,12 @@ class ClaudeAgent(Agent):
     # `<scope>/bin/`, so the hook finds `dotagents` with no global install and
     # no PATH edit. Project scope comes first so a project's own wrapper wins.
     # The store is `$AGENTS_HOME` when set, `~/.agents` otherwise -- the chain
-    # `resolve_user_store` walks.
-    _HOOK_PATH = 'PATH=".agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH"'
+    # `resolve_user_store` walks. The project entry is ABSOLUTE (`$PWD`, the
+    # project dir a hook runs in): `dotagents env` re-emits this PATH into the
+    # session, and a relative `.agents/bin` there resolved against whatever
+    # directory a later command ran in. `$PWD`, not `$CLAUDE_PROJECT_DIR`: that
+    # is a `C:\...` path on Windows, and its colon would split a bash PATH.
+    _HOOK_PATH = 'PATH="$PWD/.agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH"'
     SESSION_START_COMMAND = (
         'if [ -n "$CLAUDE_ENV_FILE" ]; then '
         '%(path)s dotagents env --diff --format export >> "$CLAUDE_ENV_FILE"; '
@@ -713,7 +717,7 @@ class CodexAgent(Agent):
     # Same PATH prefix as Claude's hook, for the same reason: `<scope>/bin/`
     # holds the wrapper `init` wrote.
     SESSION_START_COMMAND = (
-        'PATH=".agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH" dotagents context --agents codex'
+        'PATH="$PWD/.agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH" dotagents context --agents codex'
     )
 
     # PreToolUse gives Codex the LIVE env half SessionStart cannot: its

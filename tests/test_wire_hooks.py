@@ -124,6 +124,9 @@ def test_hook_prefixes_scope_bin_on_path():
         assert cmd.index(".agents/bin") < cmd.index(store_bin), (
             "project scope should win over the user store"
         )
+        # Absolute: `dotagents env` re-emits this PATH into the session, where a
+        # relative `.agents/bin` resolved against every later cwd.
+        assert '"$PWD/.agents/bin:' in cmd and 'PATH=".agents/bin' not in cmd
 
 
 def test_env_hook_appends_and_is_guarded():
@@ -600,7 +603,8 @@ class TestCodexPreToolUse:
         value, path = run.stdout.split(":", 1)
         assert value == "yes", run.stdout + run.stderr
         assert '"' not in path, "PATH must not carry literal quote characters"
-        assert path.startswith(".agents/bin:"), path
+        first = path.split(":", 1)[0]
+        assert first.startswith("/") and first.endswith("/.agents/bin"), path
 
     def test_script_guard_skips_when_already_set(self, tmp_path):
         import subprocess

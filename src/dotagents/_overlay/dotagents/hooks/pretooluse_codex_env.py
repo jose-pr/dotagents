@@ -56,7 +56,7 @@ def main() -> int:
     # a LITERAL quote character that ends up inside PATH.
     prefix = (
         'if [ -z "$AGENTS_RUNTIME_SET" ]; then export AGENTS_RUNTIME_SET=1; '
-        'eval "$(PATH=".agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH" '
+        'eval "$(PATH="$PWD/.agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH" '
         'dotagents env --diff --format export 2>/dev/null)"; fi; '
     )
 
