@@ -19,6 +19,7 @@ installs it into the scope's overlays directory. Installed overlays are then
 
 `overlays remove` deletes `<store>/overlays/<name>/` outright, so never author an
 overlay inside that directory: keep your source elsewhere and install it from there.
+`add` and `sync` refuse a source that lies inside `<store>/overlays/`.
 
 Overlays are **additive**. `add` / `sync` never clobber a file you hand-edited inside
 an installed overlay — a file that differs from the source is kept and reported.

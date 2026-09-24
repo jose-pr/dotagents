@@ -839,3 +839,34 @@ def test_a_missing_overlay_name_is_a_usage_error(world, command, capsys):
     assert rc == 2
     assert "overlay name" in capsys.readouterr().err
     assert not (store / "overlays").exists()
+
+
+def _registry_at_the_install_dir(store):
+    """The overlay's only copy authored where `add` installs it, named by a
+    registry beside it -- the setup the docs' old example led to."""
+    mine = store / "overlays" / "mine"
+    (mine / "kb").mkdir(parents=True)
+    (mine / "kb" / "MINE.md").write_text("only copy\n", encoding="utf-8")
+    (store / "dotagents.json").write_text(json.dumps({"mine": "./overlays/mine"}), encoding="utf-8")
+    return mine
+
+
+def test_add_refuses_a_source_inside_the_install_root(world):
+    _src, store = world
+    mine = _registry_at_the_install_dir(store)
+    with pytest.raises(SystemExit, match="inside"):
+        _add(None, store, "mine")
+    assert (mine / "kb" / "MINE.md").read_text(encoding="utf-8") == "only copy\n"
+    assert not (mine / Overlay.INSTALL_RECORD).exists()
+
+
+def test_sync_refuses_a_source_inside_the_install_root(world, caplog):
+    src, store = world
+    _overlay(src, "mine", files=[("kb/MINE.md", "v1\n")])
+    _add(src, store, "mine")
+    installed = store / "overlays" / "mine"
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(SystemExit, match="sync failed for: mine"):
+            _sync(store, repo=[str(store / "overlays")])
+    assert any("inside" in r.getMessage() for r in caplog.records)
+    assert (installed / "kb" / "MINE.md").read_text(encoding="utf-8") == "v1\n"

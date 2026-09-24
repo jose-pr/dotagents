@@ -224,6 +224,22 @@ def _usage_error(message: str) -> int:
     return 2
 
 
+def _source_inside_install_root(scope, name: str, src: Path) -> "Optional[str]":
+    """Why ``src`` cannot be the source of overlay ``name`` in ``scope``, or
+    None. A source inside ``<store>/overlays/`` is (or overlaps) an install
+    dir: `add` would copy it onto itself and `remove` would then delete the
+    only copy."""
+    from dotagents._scope import _is_within
+
+    if not _is_within(src, scope.overlay_root):
+        return None
+    return (
+        "overlay %s: its source %s is inside %s, where overlays are installed "
+        "(and `overlays remove` deletes them); keep the source elsewhere"
+        % (name, src, scope.overlay_root)
+    )
+
+
 def _log_install(logger, verb: str, name: str, result, dry_run: bool) -> None:
     """One summary line per overlay, and a warning naming every file left
     alone although it differs from the source."""
@@ -428,6 +444,10 @@ class OverlayAdd(_RepoArgs):
             installed=installed,
         )
         located = {name: source.locate(name) for name in order}
+        for name in order:
+            problem = _source_inside_install_root(scope, name, located[name][0])
+            if problem:
+                raise SystemExit("error: " + problem)
 
         skills: "list[str]" = []
         try:
@@ -870,6 +890,11 @@ class OverlaySync(_RepoArgs):
                     continue
                 if overlay_src is None:
                     continue
+                problem = _source_inside_install_root(scope, name, overlay_src)
+                if problem:
+                    self._logger_.error("%s", problem)
+                    failures.append(name)
+                    continue
                 result = _overlays.Overlay(overlay_src).install_to(
                     dest_dir, self.dry_run, overwrite=self.overwrite, prune=self.prune,
                     backup_root=_backup_root(scope, name), source=source_record(origin),
@@ -906,6 +931,11 @@ class OverlaySync(_RepoArgs):
                 )
                 for dep in order:
                     src, origin = chain.locate(dep)
+                    problem = _source_inside_install_root(scope, dep, src)
+                    if problem:
+                        self._logger_.error("%s", problem)
+                        failures.append(dep)
+                        continue
                     skills += _install_one(
                         scope, dep, src, origin, copy=self.copy, no_setup=self.no_setup,
                         dry_run=self.dry_run, logger=self._logger_,

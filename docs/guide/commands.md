@@ -176,7 +176,8 @@ dotagents overlays show python             # describe one: manifest, requires, s
   each overlay came from, and publishes skills from the installed copy, never
   replacing a skill already in the shared `skills/` dir (and links them into
   Claude's skills dir when `init` wired Claude for the store). A fresh install whose setup
-  script fails is rolled back.
+  script fails is rolled back. A source inside the store's own `overlays/` directory
+  is refused (by `sync` too): `remove` would delete the only copy.
 - `add`, `remove` and `show` without an overlay name are usage errors (exit 2), and
   a `--dry-run` says what it would write (`would recompose ...`) instead of reporting
   it as done.
