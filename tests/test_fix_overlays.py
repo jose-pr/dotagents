@@ -841,6 +841,16 @@ def test_a_missing_overlay_name_is_a_usage_error(world, command, capsys):
     assert not (store / "overlays").exists()
 
 
+def test_list_marks_an_installed_overlay_whose_source_name_differs(world, capsys):
+    src, store = world
+    _overlay(src, "My_Overlay")
+    _add(src, store, "My_Overlay")
+    assert (store / "overlays" / "my-overlay").is_dir()
+    capsys.readouterr()
+    _run(OverlayList, repo=[str(src)], global_scope=True, agents_dir=store, json=False)
+    assert "  My_Overlay *" in capsys.readouterr().out.splitlines()
+
+
 def _registry_at_the_install_dir(store):
     """The overlay's only copy authored where `add` installs it, named by a
     registry beside it -- the setup the docs' old example led to."""
