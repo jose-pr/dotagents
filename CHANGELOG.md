@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `dotagents/cmds/` with its README. A scope's `dotagents/cmds/` is still where
   your own command modules go; create it when you add your first one (the
   docs' authoring guide shows how).
+- `init --agents codex` no longer writes a static `[shell_environment_policy]`
+  snapshot into `~/.codex/config.toml`: it pinned the project `init` ran from
+  into Codex's global config and could leave the file unparseable. Codex gets
+  the env from its `PreToolUse` hook, live. The next `init` that wires Codex's
+  hooks removes a block an earlier release wrote and leaves the rest of the
+  file alone.
 
 ### Changed
 

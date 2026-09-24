@@ -82,7 +82,7 @@ overlay skills change.
 
 Codex ships a [hooks framework](https://learn.chatgpt.com/docs/hooks) whose JSON is
 structurally identical to Claude's, so the same merge applies. `init` writes a
-`SessionStart` hook running `dotagents context` into `~/.codex/hooks.json` (or
+`SessionStart` hook running `dotagents context --agents codex` into `~/.codex/hooks.json` (or
 `$CODEX_HOME/hooks.json`) — Codex adds a SessionStart hook's plain stdout as extra
 developer context.
 
@@ -90,44 +90,17 @@ We target `hooks.json` rather than `config.toml` so your main config is never re
 for hooks — if you keep inline `[hooks]` in `config.toml`, Codex warns about the split,
 so use `--no-hooks` and add the hook there yourself.
 
-**Env is a static snapshot, not a hook**, and it is written **only when you name the
-agent explicitly**:
+**Env comes from a `PreToolUse` hook.** Codex has no `$CLAUDE_ENV_FILE` equivalent
+and does not read `.env` files, so `init` also wires a `PreToolUse` hook (matched on
+Codex's `Bash` tool) that prepends the `dotagents env` change set to each command
+through `updatedInput`. The env is live: change your env layers and the next command
+sees it.
 
-```bash
-dotagents init --agents codex          # writes the env block
-dotagents init                         # never writes it, even if Codex is detected
-```
-
-This edits your main `config.toml` with values that go stale, so it has to be asked
-for — being detected is not consent.
-
-Codex has no `$CLAUDE_ENV_FILE` equivalent, does not read `.env` files, and has no
-event that fires before config load (hooks are defined *in* the config, and its
-earliest event is `SessionStart`). The only mechanism is
-`shell_environment_policy.set`, so `init --agents codex` writes a marker-delimited
-managed block into `config.toml`:
-
-```toml
-# dotagents:begin
-[shell_environment_policy]
-set = {AGENT = "codex", AGENTS_HARNESS = "codex", AGENTS_VENDOR = "openai", AGENTS_HOME = "...", AGENTS_PROJECT_ROOT = "...", AGENTS_PYTHON = "..."}
-# dotagents:end
-```
-
-Consequences worth knowing:
-
-- **The values are frozen at `init` time.** Change your env layers and Codex keeps the
-  old values until you re-run `dotagents init`. There is no way around this.
-- The block is **appended** and refreshed in place; content outside the markers — the
-  rest of your config — is never touched. Add your own settings outside the markers.
-- `set` **merges** on top of what `inherit` admits, so your existing environment is
-  unaffected.
-- The identity vars describe **the agent the file is for**, not whoever ran the
-  command: `dotagents init --agents codex` from a Claude session still writes
-  `AGENT = "codex"`.
-- `PATH` is deliberately **excluded** — a machine-specific absolute list that, since
-  `set` overrides per subprocess, would replace the inherited `PATH` of everything
-  Codex spawns.
+Earlier releases wrote a static `[shell_environment_policy]` snapshot into your
+`config.toml` on `init --agents codex`. It pinned one project's paths into the
+global config and could produce invalid TOML, so it is gone: `init` removes a block
+it left there (between `# dotagents:begin` / `# dotagents:end`) and touches nothing
+else in the file.
 
 Other agents (Gemini, Cursor, Copilot) are not wired: without a verified hook schema,
 inventing one is how a silently-broken hook gets shipped.
@@ -150,9 +123,10 @@ and set up before the overlay that needs it (`--no-requires` to skip); a require
 the scope already has, in its own store or the user store for a project, is satisfied
 and left alone, while a name you ask for explicitly is always (re)installed and set up.
 It validates every name before touching anything, and publishes skills from the
-installed copy. `remove` recomposes `AGENTS.md`'s managed block over the overlays that remain, so
-an overlay's rules and routing leave with it. `sync` never clobbers an installed file
-unless `--overwrite`.
+installed copy, never replacing a skill already in the shared `skills/` dir. `remove`
+recomposes `AGENTS.md`'s managed block over the overlays that remain, so an overlay's
+rules and routing leave with it. `sync` never clobbers an installed file, or a
+published skill copy you edited, unless `--overwrite`.
 
 ## context
 
