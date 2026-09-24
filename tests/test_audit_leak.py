@@ -15,7 +15,7 @@ Covered here:
   5. its checks can fail: a forbidden pattern, an unresolved overlay `rules`
      path, and a template check with no overlays to check all exit 1.
 
-Run from repo root: ``PYTHONPATH=src python -m pytest tests/test_audit_leak.py``.
+Run from repo root: ``python -m pytest tests/test_audit_leak.py``.
 """
 
 import subprocess
@@ -24,7 +24,6 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SRC = REPO / "src"
-sys.path.insert(0, str(SRC))
 
 AUDIT = REPO / "tools" / "audit.py"
 
@@ -57,15 +56,20 @@ def test_standalone_help_exposes_flags():
 
 
 def test_audit_is_not_a_dotagents_command():
-    """A user of dotagents gets no `audit` -- it only validates THIS repo."""
+    """A user of dotagents gets no `audit` -- it only validates THIS repo.
+
+    Asked of the package's own surface only -- the compiled built-ins plus the
+    bundled command modules -- so no store's or overlay's cmds module is
+    imported to answer it."""
     from dotagents import cli
 
     assert not (SRC / "dotagents" / "cli" / "audit.py").exists()
-    names = set()
-    for command in cli._discover([]):
-        name = getattr(command, "_parsername_", None) or getattr(command, "__name__", "")
-        names.add(str(name))
-    assert "audit" not in names
+    by_name = {}
+    for command in cli._BUILTIN_COMMANDS:
+        by_name[getattr(command, "_parsername_", None) or command.__name__] = command
+    cli._discover_dir(cli._bundled_cmds_dir(), by_name)
+    assert "findings" in by_name and "launch" in by_name, "the bundled modules were discovered"
+    assert "audit" not in by_name
 
 
 def test_no_personal_tooling_is_in_the_repo():

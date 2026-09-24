@@ -3,25 +3,21 @@ built-in commands plus command modules from the bundled cmds dir, each installed
 overlay's `cmds/`, the per-scope cmds dirs (user + project), `$AGENTS_CMDS_PATH`,
 and `--cmdspath`.
 
-dotagents bundles ONE command module, `findings`. Since D85 `link`/`sync` are
-the private-sync overlay's `link-project`/`sync-project`, so the baseline
-surface is the built-ins plus `findings`, and an OVERLAY's cmds dir is what adds
-a private-sync command.
+dotagents bundles two command modules, `findings` and `launch`. Since D85
+`link`/`sync` are the private-sync overlay's `link-project`/`sync-project`, so
+the baseline surface is the built-ins plus `findings` and `launch`, and an
+OVERLAY's cmds dir is what adds a private-sync command.
 
-Filesystem-only (tmp_path); no network. NEVER exports HOME/USERPROFILE -- the
-user scope is redirected via `$AGENTS_HOME` and the project scope via
-`monkeypatch.chdir`, so a real `~/.agents` is never touched.
+Filesystem-only (tmp_path); no network. tests/conftest.py isolates every test
+(tmp home, no inherited scope vars, an absent system store); on top of that
+the user scope is pointed with `$AGENTS_HOME` and the project scope with
+`monkeypatch.chdir`.
 """
 
 import os
-import sys
 from pathlib import Path
 
-import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from dotagents import cli  # noqa: E402
+from dotagents import cli
 
 
 TOY = '''\
@@ -44,8 +40,8 @@ class Toy(LoggingArgs, Cmd):
 '''
 
 # A command module that shadows the built-in `init` command, to prove
-# later-source-wins dedup by _parsername_. (It used to shadow the bundled `link`;
-# dotagents bundles no command module since D85, so a built-in is the target.)
+# later-source-wins dedup by _parsername_. (It used to shadow the bundled `link`,
+# which left the package with D85; a compiled built-in is the target now.)
 SHADOW_INIT = '''\
 """A command module claiming the `init` name (shadow test)."""
 
@@ -76,22 +72,8 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-@pytest.fixture(autouse=True)
-def _clear_project_root_vars(monkeypatch):
-    """The project scope must come from `monkeypatch.chdir`, so the pinned
-    project-root vars have to be cleared first (same as `test_scope.py`):
-    `project_root_default()` reads `$AGENTS_PROJECT_ROOT`, then
-    `$CLAUDE_PROJECT_DIR`, BEFORE the cwd. In an agent session dotagents' own
-    env-loader hook pins `$AGENTS_PROJECT_ROOT` to the real checkout, and then
-    the real repo's private `.agents/dotagents/cmds/` leaked into every
-    "fresh install" assertion here (measured 2026-09-09: three failures from
-    the harness's PowerShell tool, none from a shell without the hook)."""
-    for var in ("AGENTS_PROJECT_ROOT", "CLAUDE_PROJECT_DIR"):
-        monkeypatch.delenv(var, raising=False)
-
-
 # --------------------------------------------------------------------------- #
-# Baseline: built-ins + the bundled `findings` module, nothing else
+# Baseline: built-ins + the bundled `findings` and `launch` modules, nothing else
 # --------------------------------------------------------------------------- #
 
 

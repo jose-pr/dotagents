@@ -1,7 +1,5 @@
 """Scope resolution: project-by-default, -g for user, and the
 ``AGENTS_PROJECT_ROOT`` / agent-native project-root env-var precedence."""
-import os
-from pathlib import Path
 
 import pytest
 
@@ -17,13 +15,9 @@ def discover_overlays(scope):
     """Names of the overlays installed in ONE scope (the former _scope helper)."""
     return [o.name for o in Overlay.discover(scope.overlay_root)]
 
-_ROOT_VARS = ("AGENTS_PROJECT_ROOT", "CLAUDE_PROJECT_DIR")
 
-
-@pytest.fixture(autouse=True)
-def _clear_root_vars(monkeypatch):
-    for v in _ROOT_VARS:
-        monkeypatch.delenv(v, raising=False)
+# The project-root vars start cleared (tests/conftest.py); each test below
+# sets the ones it is about.
 
 
 def test_default_scope_is_project(tmp_path, monkeypatch):

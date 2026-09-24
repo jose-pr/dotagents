@@ -65,3 +65,7 @@ exclude = ["/.*", "/dist", "*.local.*", "CLAUDE*"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/dotagents"]
 exclude = ["*.local.*", "CLAUDE*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

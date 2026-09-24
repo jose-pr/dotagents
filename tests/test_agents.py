@@ -8,17 +8,12 @@ harness with no blanket-rewrite junk.
 Run from the repo root: ``python -m pytest tests/``.
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 
-# Make src/ importable regardless of cwd / install state.
-SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(SRC))
-
-from dotagents import _agents  # noqa: E402
-from dotagents._agents import (  # noqa: E402
+from dotagents import _agents
+from dotagents._agents import (
     ClaudeAgent,
     CodexAgent,
     CopilotAgent,

@@ -9,14 +9,11 @@ without symlink privilege.
 
 import logging
 import os
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from dotagents import _overlays, _scope, _skills  # noqa: E402
+from dotagents import _overlays, _scope, _skills
 
 
 # --------------------------------------------------------------------------- #
@@ -159,8 +156,7 @@ def logger():
 # Source resolution
 # --------------------------------------------------------------------------- #
 
-def test_source_resolution_explicit_repo(tmp_path, monkeypatch):
-    monkeypatch.delenv("AGENTS_OVERLAYS_REPO", raising=False)
+def test_source_resolution_explicit_repo(tmp_path):
     src = make_source(tmp_path)
     source = _scope.resolve_source([str(src)])
     assert sorted(n for n in source.available() if n in ("plain", "py-demo")) == ["plain", "py-demo"]
@@ -185,13 +181,10 @@ def test_source_resolution_keyed_env_repo_beats_the_default(tmp_path, monkeypatc
 
 
 def test_source_resolution_no_bundled_errors(tmp_path, monkeypatch):
-    # main ships no bundled overlays/ (they live on the `overlays` branch, D77),
-    # and this test env packages none. With no repo anywhere, resolve_source
-    # must fail with a clear "no overlay source" error, not silently pick nothing.
-    monkeypatch.delenv("AGENTS_OVERLAYS_REPO", raising=False)
-    for k in list(__import__("os").environ):
-        if k.startswith("AGENTS_OVERLAYS_REPO_"):
-            monkeypatch.delenv(k)
+    # main ships no bundled overlays/ (they live on the `repo` branch, D77),
+    # and this test env packages none. With no repo anywhere (conftest clears
+    # every AGENTS_OVERLAYS_REPO* var), resolve_source must fail with a clear
+    # "no overlay source" error, not silently pick nothing.
     monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "empty-store"))
     if _scope.bundled_overlays_root() is not None:
         pytest.skip("this build/checkout bundles overlays; default-source error N/A")
@@ -685,8 +678,6 @@ def test_setup_runs_on_sync(tmp_path):
          agents_dir=scope.agents_root, copy=True, dry_run=False)
     # Ran once on add + once on sync.
     assert (scope.agents_root / "RUNS").read_text(encoding="utf-8") == "xx"
-
-
 
 
 # --------------------------------------------------------------------------- #

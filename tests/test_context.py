@@ -11,15 +11,11 @@ import json
 import os
 import shutil
 import sys
-from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(SRC))
-
-from dotagents import _agents, _context, _overlays  # noqa: E402
-from dotagents._scope import Scope  # noqa: E402
+from dotagents import _agents, _context, _overlays
+from dotagents._scope import Scope
 
 
 def S(agents_dir, project_root, global_scope=False):

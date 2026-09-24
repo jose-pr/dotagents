@@ -2,17 +2,10 @@
 line -- the bundle's packages from a .pyz, the installed dependencies from a
 plain install -- and the build-pyz side that records the bundle."""
 import json
-import sys
-from pathlib import Path
 
-import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
-from dotagents import __version__  # noqa: E402
-from dotagents.cli import about  # noqa: E402
-from dotagents.cli.build_pyz import _dist_info_name_version  # noqa: E402
+from dotagents import __version__
+from dotagents.cli import about
+from dotagents.cli.build_pyz import _dist_info_name_version
 
 
 def _run(**kwargs):

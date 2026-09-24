@@ -4,14 +4,14 @@ Claude gets both halves (env via `$CLAUDE_ENV_FILE` + context via stdout) plus t
 skills link; Codex gets the context half into `hooks.json` (no env-file equivalent
 exists); every other adapter stays a no-op.
 
-Every test redirects `config_root` at a tmp_path -- nothing here may touch the
-real `~/.claude` or `~/.codex`. `test_never_touches_real_home` asserts that.
-
-Run: ``PYTHONPATH=src python -m pytest tests/test_wire_hooks.py``
+Tests pass an explicit `config_root` under tmp_path. tests/conftest.py also
+points the home at a tmp dir for every test, so a call that omits it still
+lands in tmp -- `test_default_config_root_follows_the_isolated_home` pins that
+-- and its session guard fails the run if the real `~/.claude` or `~/.codex`
+changed.
 """
 
 import json
-import logging
 import os
 import shutil
 import sys
@@ -22,24 +22,7 @@ import pytest
 from _shell import BASH
 from dotagents._fs import write_text_lf
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from dotagents._agents import AntigravityAgent, ClaudeAgent, CodexAgent  # noqa: E402
-
-
-@pytest.fixture(autouse=True)
-def _isolated_home(tmp_path, monkeypatch):
-    """Redirect `Path.home()` for every test in this file to a throwaway dir.
-
-    Backstop against any test in this module that forgets to pass
-    `config_root=` and would otherwise land in the real `~/.claude`.
-    `test_never_touches_real_home` is the primary check; this fixture ensures
-    any call that forgets it
-    -- present or added later -- still lands in an isolated directory instead of
-    the real `~/.agents/hooks/`, because `Path.home()` itself no longer resolves
-    there for the duration of the test.
-    """
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+from dotagents._agents import AntigravityAgent, ClaudeAgent, CodexAgent
 
 
 def _toml_load(text):
@@ -771,25 +754,23 @@ def test_project_scope_writes_the_gitignored_local_settings(tmp_path):
     )
 
 
-def test_never_touches_real_home(tmp_path, monkeypatch):
-    """Guard: a stray default must never let a test write to the user's real
-    ~/.claude/settings.json.
+def test_default_config_root_follows_the_isolated_home(tmp_path):
+    """No `config_root`: the user store's hooks go to `Path.home()/.claude`,
+    which conftest has pointed at a tmp dir -- so a test that forgets the
+    argument writes there, never into the real `~/.claude`."""
+    from conftest import REAL_HOME
 
-    Undoes the module's autouse `_isolated_home` patch for the DURATION OF THE
-    PRE/POST CHECKS ONLY (via `monkeypatch.undo()`, then re-applied), so
-    `Path.home()` here resolves to the machine's genuine home directory --
-    otherwise this test would compare the fake home's before/after state,
-    which is always equal and proves nothing.
-    """
-    monkeypatch.undo()
-    real_settings = Path.home() / ".claude" / "settings.json"
-    before_settings = real_settings.read_text(encoding="utf-8") if real_settings.is_file() else None
+    home = Path.home()
+    assert home != REAL_HOME and tmp_path.parent in home.parents
+    real_settings = REAL_HOME / ".claude" / "settings.json"
+    before = real_settings.read_bytes() if real_settings.is_file() else None
 
-    dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
-    ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+    store = home / ".agents"
+    store.mkdir()
+    ClaudeAgent().wire_hooks(store, dry_run=False, logger=None)
 
-    after_settings = real_settings.read_text(encoding="utf-8") if real_settings.is_file() else None
-    assert after_settings == before_settings, "the real ~/.claude/settings.json was modified"
+    assert (home / ".claude" / "settings.json").is_file()
+    assert (real_settings.read_bytes() if real_settings.is_file() else None) == before
 
 
 class TestAntigravityHooks:
@@ -860,7 +841,13 @@ class TestAntigravityHooks:
 
     def test_script_only_injects_on_first_invocation(self, tmp_path):
         """The real property that makes this behave like SessionStart at all:
-        gate on invocationNum == 0, run for real via subprocess."""
+        gate on invocationNum == 0, run for real via subprocess.
+
+        Hermetic: no `dotagents` in the cwd's `.agents/bin`, in the (tmp)
+        store's `bin`, or on a PATH holding only an empty dir -- so the first
+        invocation finds nothing to run and injects nothing, instead of
+        spawning whatever `dotagents` the developer has installed against
+        their real store."""
         import subprocess
         import sys
 
@@ -868,10 +855,13 @@ class TestAntigravityHooks:
         dest.mkdir()
         AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
         script = root / "hooks" / AntigravityAgent.PREINVOCATION_HOOK_SCRIPT
+        empty_bin = tmp_path / "empty-bin"
+        empty_bin.mkdir()
 
         first = subprocess.run(
             [sys.executable, str(script)],
             input='{"invocationNum": 0}', capture_output=True, text=True,
+            cwd=str(tmp_path), env=dict(os.environ, PATH=str(empty_bin)),
         )
         second = subprocess.run(
             [sys.executable, str(script)],
@@ -885,9 +875,8 @@ class TestAntigravityHooks:
             "invocationNum != 0 must produce no output (no-op every later turn)"
         )
         assert third.returncode == 0 and third.stdout.strip() == ""
-        # first (invocationNum 0) may or may not find a real dotagents on
-        # PATH in this test environment -- only assert it never crashes.
         assert first.returncode == 0, first.stderr
+        assert first.stdout.strip() == "", "no dotagents anywhere: nothing to inject"
 
     def test_script_output_shape_when_it_fires(self, tmp_path, monkeypatch):
         """When it DOES have something to inject, the output must be the bare

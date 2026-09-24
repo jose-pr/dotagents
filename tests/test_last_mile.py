@@ -7,22 +7,20 @@ writes where Claude reads it, the live include-based subtraction, and
 `--write-agent` landing in the harness's real file as a managed block -- plus
 the managed-block merge rules it relies on.
 
-tmp dirs only. HOME/USERPROFILE and AGENTS_HOME are redirected in every test.
+tmp dirs only. tests/conftest.py points HOME/USERPROFILE at a tmp dir and
+clears AGENTS_HOME for every test; the `home` fixture below additionally
+places that home under this test's tmp_path, with a `.agents` store in it.
 """
 
 import json
 import logging
 import os
-import sys
 from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(SRC))
-
-from dotagents import _agents, _hooks, _merge  # noqa: E402
-from dotagents._fs import write_text_lf  # noqa: E402
+from dotagents import _agents, _hooks, _merge
+from dotagents._fs import write_text_lf
 
 BASE = "<!-- dotagents:begin -->\nBASE RULES\n<!-- dotagents:end -->\n"
 
@@ -33,7 +31,6 @@ def home(tmp_path, monkeypatch):
     (fake / ".agents").mkdir(parents=True)
     monkeypatch.setenv("USERPROFILE" if os.name == "nt" else "HOME", str(fake))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake))
-    monkeypatch.delenv("AGENTS_HOME", raising=False)
     return fake
 
 
@@ -134,8 +131,8 @@ def test_claude_reads_a_root_agents_md_only_while_no_claude_file_exists(home, tm
     """Claude reads AGENTS.md as a fallback. A project-scope `init` creates
     `.claude/CLAUDE.md`; after that a static "AGENTS.md" entry subtracted a
     committed root AGENTS.md that reached neither Claude nor `context`."""
-    # Bound the upward walk: the machine's real home (an ancestor of tmp_path,
-    # not the faked one) carries its own `.claude/CLAUDE.md`.
+    # Bound the upward walk at this test's own dir (conftest bounds it at
+    # pytest's base temp dir), so only the files below decide the answer.
     monkeypatch.setattr(_agents.ClaudeAgent, "_walk_stop", tmp_path)
     project = tmp_path / "proj"
     project.mkdir()
@@ -318,8 +315,3 @@ def test_write_settings_is_lf_atomic_and_keeps_unicode(tmp_path):
 def test_unknown_explicit_agent_does_not_override_a_pinned_identity():
     env = {"AGENTS_HARNESS": "codex", "AGENT": "codex", "AGENTS_VENDOR": "openai"}
     assert _agents.stamp_identity(env, explicit="typo", root=Path("/nonexistent")) == {}
-
-
-def test_codex_home_alone_is_not_a_runtime_marker():
-    assert not _agents.CodexAgent().detect_env({"CODEX_HOME": "/x"})
-    assert _agents.CodexAgent().detect_env({"CODEX_SANDBOX_NETWORK_DISABLED": "1"})

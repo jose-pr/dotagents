@@ -11,34 +11,22 @@ These tests exercise the CLI classes end-to-end instead: they set
 command, and assert the assembled output came from the configured roots
 (D58/D79/D80). Every one of them fails on the pre-fix code.
 
-tmp dirs only, no network. HOME/USERPROFILE are NEVER exported (a real
-`~/.agents` must stay untouched) -- the user store is redirected with
-`$AGENTS_HOME` and the project root with `$AGENTS_PROJECT_ROOT`, which is the
-whole point of the fix.
+tmp dirs only, no network. tests/conftest.py already points the home at a
+tmp dir and clears the scope vars; each test then opts into `$AGENTS_HOME` /
+`$AGENTS_PROJECT_ROOT` (the whole point of the fix) pointing at tmp roots.
 
 Run from the repo root: ``python -m pytest tests/``.
 """
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(SRC))
-
-from dotagents.cli._common import resolve_user_store  # noqa: E402
-from dotagents.cli.context import Context  # noqa: E402
-from dotagents.cli.env import Env  # noqa: E402
-
-
-SCOPE_VARS = (
-    "AGENTS_HOME",
-    "AGENTS_PROJECT_ROOT",
-    "CLAUDE_PROJECT_DIR",
-)
+from dotagents.cli._common import resolve_user_store
+from dotagents.cli.context import Context
+from dotagents.cli.env import Env
 
 
 def _py_emit(mapping):
@@ -48,16 +36,14 @@ def _py_emit(mapping):
 
 @pytest.fixture
 def roots(tmp_path, monkeypatch):
-    """A user store + a project root + an unrelated cwd, with every scope var
-    cleared so each test opts into exactly the ones it is about."""
+    """A user store + a project root + an unrelated cwd. The scope vars start
+    cleared (conftest), so each test opts into exactly the ones it is about."""
     store = tmp_path / "store"
     project = tmp_path / "proj"
     elsewhere = tmp_path / "elsewhere"
     (project / ".agents").mkdir(parents=True)
     store.mkdir()
     elsewhere.mkdir()
-    for var in SCOPE_VARS:
-        monkeypatch.delenv(var, raising=False)
     monkeypatch.chdir(elsewhere)
     return store, project, elsewhere
 

@@ -20,10 +20,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SRC = REPO / "src"
-sys.path.insert(0, str(SRC))
 
-from dotagents.cli import build_pyz  # noqa: E402
-from dotagents.cli.build_pyz import BuildPyz, _PYPROJECT_VERSION_RE  # noqa: E402
+from dotagents.cli import build_pyz
+from dotagents.cli.build_pyz import BuildPyz, _PYPROJECT_VERSION_RE
 
 #: Files planted in a copy of the tree that must never reach an artifact.
 PRIVATE = ("AGENTS.local.md", "config.local.toml", "CLAUDE.md", "CLAUDE.local.md")

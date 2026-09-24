@@ -7,18 +7,14 @@ import functools
 import http.server
 import json
 import shutil
-import sys
 import tarfile
 import threading
 from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
-from dotagents import _sources  # noqa: E402
-from dotagents._sources import DirRepo, RegistryRepo, SourceCache, Spec  # noqa: E402
+from dotagents import _sources
+from dotagents._sources import DirRepo, RegistryRepo, SourceCache, Spec
 
 needs_uri = pytest.mark.skipif(_sources.uri_path_class() is None, reason="needs pathlib_next[http]")
 

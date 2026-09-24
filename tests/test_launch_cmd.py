@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 MODULE_PATH = ROOT / "src" / "dotagents" / "_overlay" / "dotagents" / "cmds" / "launch.py"
 
@@ -38,15 +37,11 @@ def launch_mod():
 
 @pytest.fixture(autouse=True)
 def _isolated_scope(monkeypatch, tmp_path):
-    """A fresh store and project under tmp_path; no harness markers from the
-    session running the tests; and os.environ restored afterwards, because
-    `launch` exports the assembled env into this process on purpose."""
+    """A fresh store and project under tmp_path (tests/conftest.py has already
+    dropped the session's scope vars and harness markers), and os.environ
+    restored afterwards, because `launch` exports the assembled env into this
+    process on purpose."""
     saved = dict(os.environ)
-    for var in (
-        "AGENTS_PROJECT_ROOT", "AGENTS_HOME", "AGENTS_HARNESS", "AGENTS_CONTEXT_FILE",
-        "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "GEMINI_CLI", "CODEX_SANDBOX",
-    ):
-        monkeypatch.delenv(var, raising=False)
     store = tmp_path / "store"
     store.mkdir()
     monkeypatch.setenv("AGENTS_HOME", str(store))

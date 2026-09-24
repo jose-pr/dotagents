@@ -3,22 +3,15 @@ store (its first line names the file's actual path) and lays down nothing
 beside it: no `dotagents/` dir, no design log, no CLAUDE.md, no store-root
 README. The recomposes keep the rendered path."""
 import logging
-import sys
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
-from dotagents.cli._common import BASE_ROOT, _apply_base, base_agents_text  # noqa: E402
-from dotagents.cli.overlays import OverlayAdd  # noqa: E402
+from dotagents.cli._common import BASE_ROOT, _apply_base, base_agents_text
+from dotagents.cli.overlays import OverlayAdd
 
 
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
-    for v in ("AGENTS_HOME", "AGENTS_PROJECT_ROOT"):
-        monkeypatch.delenv(v, raising=False)
     monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user"))
     monkeypatch.chdir(tmp_path)
 

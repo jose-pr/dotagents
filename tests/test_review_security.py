@@ -8,18 +8,15 @@ tmp dirs only; HOME/USERPROFILE and the scope vars are redirected.
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from _shell import BASH
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from dotagents import _env, _sources  # noqa: E402
-from dotagents._agents import ClaudeAgent  # noqa: E402
-from dotagents.cli.env import _format_env  # noqa: E402
+from dotagents import _env, _sources
+from dotagents._agents import ClaudeAgent
+from dotagents.cli.env import _format_env
 
 needs_bash = pytest.mark.skipif(BASH is None, reason="needs a working bash")
 
