@@ -140,7 +140,12 @@ class Context(DotAgentsArgs):
 
         # --- markdown / system-reminder text paths ---
         for agent in active_agents:
-            text = _context.assemble_context(agent, scope, inline=self.inline)
+            # `$<NAME>_OVERLAY_ROOT` expands for a reader with no populated
+            # shell, except in --write-agent's file, which may be committed:
+            # the expansion is a machine path.
+            text = _context.assemble_context(
+                agent, scope, inline=self.inline, expand_vars=not self.write_agent
+            )
 
             if self.format == "system-reminder":
                 text = (

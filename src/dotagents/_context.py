@@ -11,15 +11,33 @@ from dotagents import _overlays
 from dotagents import _scope
 
 
-def _expand_placeholders(text: str, project_root: Path, overlay_roots: list[Path]) -> str:
+#: A ``$NAME`` / ``${NAME}`` shell-variable reference.
+_SHELL_VAR = re.compile(r'\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_]))')
+
+
+def _expand_placeholders(
+    text: str, project_root: Path, overlay_roots: "list[Path]", *, env_vars: bool = False
+) -> str:
     """Expand <PROJECT_ROOT> and <OVERLAY_NAME_OVERLAY_ROOT> placeholders.
 
     The placeholder name is exactly the env var ``dotagents env`` emits for the
     same overlay (:attr:`_overlays.Overlay.root_var`), so a context file and an
-    env file refer to an overlay's install dir by one name."""
+    env file refer to an overlay's install dir by one name.
+
+    ``env_vars=True`` also expands ``$<NAME>_OVERLAY_ROOT`` /
+    ``${<NAME>_OVERLAY_ROOT}`` for every installed overlay -- the form overlay
+    routing lines use, which only a shell that ``dotagents env`` populated can
+    resolve. Only for output that is handed over and discarded (stdout, JSON,
+    ``launch``); a file that may be committed keeps the variable, since the
+    expansion is a machine path."""
     text = text.replace("<PROJECT_ROOT>", str(project_root))
-    for ov in overlay_roots:
-        text = text.replace(f"<{_overlays.Overlay(ov).root_var}>", str(ov))
+    roots = {_overlays.Overlay(ov).root_var: str(ov) for ov in overlay_roots}
+    for var, value in roots.items():
+        text = text.replace("<%s>" % var, value)
+    if env_vars and roots:
+        text = _SHELL_VAR.sub(
+            lambda m: roots.get(m.group(1) or m.group(2), m.group(0)), text
+        )
     return text
 
 
@@ -33,8 +51,16 @@ def _overlay_roots(scope: _scope.Scope) -> "list[Path]":
 
 # A relative path token ending in .md: one or more path segments, no spaces,
 # no leading slash or `~` (absolute paths are already-known files, not on-demand
-# pointers), at least the trailing `.md`. Used for the BARE reference pass.
-_BARE_MD_REF = re.compile(r'(?<![\w`./~-])((?:[\w.-]+/)*[\w.-]+\.md)\b')
+# pointers), at least the trailing `.md`. Used for the BARE reference pass. Not
+# after `$` either: `$FOO/x.md` is a variable's path, not a relative one.
+_BARE_MD_REF = re.compile(r'(?<![\w`./~$-])((?:[\w.-]+/)*[\w.-]+\.md)\b')
+
+#: A reference through a root placeholder or variable: ``$NAME_OVERLAY_ROOT/x.md``,
+#: ``${NAME_OVERLAY_ROOT}/x.md``, ``<NAME_OVERLAY_ROOT>/x.md``, ``<PROJECT_ROOT>/x.md``.
+_VAR_MD_REF = re.compile(
+    r'(?:\$\{(?P<braced>[A-Z0-9_]+)\}|\$(?P<bare>[A-Z0-9_]+)|<(?P<angle>[A-Z0-9_]+)>)'
+    r'/(?P<rel>(?:[\w.-]+/)*[\w.-]+\.md)\b'
+)
 
 #: Bare filenames (no directory) that name a harness-walked context file rather
 #: than an on-demand target -- and would match every mention of the word.
@@ -42,6 +68,21 @@ _HARNESS_FILENAMES = frozenset({
     "AGENTS.md", "AGENTS.local.md", "CONTEXT.md", "CLAUDE.md", "CLAUDE.local.md",
     "GEMINI.md",
 })
+
+#: The `<!-- Source: ... -->` provenance comments this module emits.
+_SOURCE_COMMENT = re.compile(r'(?m)^<!-- Source:.*?-->\s*$')
+
+
+def _find_var_refs(text: str) -> "list[tuple[str, str, str, str]]":
+    """References through a root variable or placeholder, as
+    ``(ref-as-written, form, NAME, relative path)`` with ``form`` ``"$"`` or
+    ``"<>"``. Order-preserving, de-duplicated."""
+    seen: "dict[str, tuple[str, str, str, str]]" = {}
+    for m in _VAR_MD_REF.finditer(_SOURCE_COMMENT.sub("", text)):
+        name = m.group("braced") or m.group("bare") or m.group("angle")
+        form = "<>" if m.group("angle") else "$"
+        seen.setdefault(m.group(0), (m.group(0), form, name, m.group("rel")))
+    return list(seen.values())
 
 
 def _find_md_refs(text: str) -> "list[str]":
@@ -52,6 +93,8 @@ def _find_md_refs(text: str) -> "list[str]":
     - the `<!-- Source: ... -->` provenance comments this module emits (they are
       absolute source paths, not on-demand pointers),
     - absolute / home paths (already-loaded, not on-demand),
+    - references through a root variable or placeholder (:func:`_find_var_refs`
+      resolves those),
     - harness-walked context files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, ...,
       bare or under `.agents/`) -- a source or a harness load, never an
       on-demand pointer, and inlining one double-sends it.
@@ -69,13 +112,13 @@ def _find_md_refs(text: str) -> "list[str]":
             return
         seen[ref] = None
 
-    # Drop the provenance comments before scanning so their absolute paths don't
-    # get re-read as references.
-    scannable = re.sub(r'(?m)^<!-- Source:.*?-->\s*$', '', text)
+    # Drop the provenance comments and the variable references before scanning
+    # so neither is re-read as a relative reference.
+    scannable = _VAR_MD_REF.sub("", _SOURCE_COMMENT.sub("", text))
 
     # Backticked refs first (highest confidence).
     for m in re.findall(r'`([^`]+?\.md)`', scannable):
-        if not m.startswith(("/", "~")):
+        if not m.startswith(("/", "~", "$", "<")):
             _add(m)
     # Bare refs.
     for m in _BARE_MD_REF.findall(scannable):
@@ -83,47 +126,95 @@ def _find_md_refs(text: str) -> "list[str]":
     return list(seen)
 
 
+def _source_search_roots(
+    scope: _scope.Scope, level: str, path: Path, root: "Optional[Path]"
+) -> "list[Path]":
+    """Where a source's relative references resolve: the source's own
+    directory -- the overlay root, or the store it sits in -- and, for the
+    project's own sources only, the rest of the project. A user or system
+    source never resolves into the project (or a cwd repo under ``-g``)."""
+    if root is not None:
+        return [root]
+    roots = [path.parent]
+    if level in ("project", "project-root"):
+        for extra in (scope.project_store, scope.project_root):
+            if extra is not None and extra not in roots:
+                roots.append(extra)
+    return roots
+
+
 def _inline_referenced_files(
-    text: str, search_roots: list[Path], exclude: "Iterable[Path]" = ()
+    text: str,
+    sources: "list[tuple[str, str, list[Path]]]",
+    *,
+    var_roots: "dict[str, Path]",
+    allowed_roots: "list[Path]",
+    exclude: "Iterable[Path]" = (),
 ) -> str:
-    """Find markdown file references (backticked or bare) and inline them.
+    """Find markdown file references (backticked, bare, or through a root
+    variable) in each source and append the files they name.
 
     This defeats unreliable on-demand loading: an `AGENTS.md` that merely points
     at `kb/X.md` gets that file's content appended inline so the agent never has
-    to fetch it. Only references that resolve to a real file under a search root
-    are inlined; unresolved references are left as-is, and a file in ``exclude``
-    (a source already emitted, or one the harness loads itself) is never
-    inlined twice.
+    to fetch it. ``sources`` is ``(owner, content, search_roots)`` per emitted
+    source: a relative reference resolves against THAT source's roots
+    (:func:`_source_search_roots`), so an overlay's ``kb/X.md`` is the
+    overlay's own file, never a same-named one in the store or the project. A
+    ``$NAME_OVERLAY_ROOT/...`` / ``<NAME_OVERLAY_ROOT>/...`` /
+    ``<PROJECT_ROOT>/...`` reference resolves through ``var_roots`` and is kept
+    only when it lands under an installed overlay or store
+    (``allowed_roots``) or under the source's own roots. Unresolved references
+    are left as-is, and a file in ``exclude`` (a source already emitted, or one
+    the harness loads itself) is never inlined twice.
 
     OPT-IN (``inline=True`` on the assemblers / ``context --inline``): the base
     AGENTS.md's own rule is "read the matching file BEFORE such a task; skip it
     otherwise, never preemptively", and inlining every mention does the
     opposite."""
-    refs = _find_md_refs(text)
-    excluded = set()
-    for p in exclude:
-        try:
-            excluded.add(Path(p).resolve())
-        except OSError:
-            pass
+    excluded = {_scope._path_key(p) for p in exclude}
 
-    inlined: "dict[str, str]" = {}
-    for ref in refs:
-        for root in search_roots:
-            cand = root / ref
-            try:
-                if cand.is_file():
-                    if cand.resolve() in excluded:
-                        break
-                    inlined[ref] = cand.read_text(encoding="utf-8")
+    #: resolved-path key -> (heading, file)
+    inlined: "dict[str, tuple[str, Path]]" = {}
+    headings: "set[str]" = set()
+
+    def _take(ref: str, owner: str, cand: Path) -> bool:
+        try:
+            if not cand.is_file():
+                return False
+        except OSError:
+            return False
+        key = _scope._path_key(cand)
+        if key in excluded or key in inlined:
+            return True
+        heading = ref if ref not in headings else "%s (%s)" % (ref, owner)
+        headings.add(heading)
+        inlined[key] = (heading, cand)
+        return True
+
+    for owner, content, roots in sources:
+        for ref, form, name, rel in _find_var_refs(content):
+            if name == "PROJECT_ROOT":
+                base = var_roots.get(name) if form == "<>" else None
+            else:
+                base = var_roots.get(name)
+            if base is None:
+                continue
+            cand = base / rel
+            if any(_scope._is_within(cand, r) for r in [*allowed_roots, *roots]):
+                _take(ref, owner, cand)
+        for ref in _find_md_refs(content):
+            for root in roots:
+                if _take(ref, owner, root / ref):
                     break
-            except OSError:
-                pass
 
     if inlined:
         appends = ["\n\n## On-Demand Files (Inlined)\n"]
-        for ref, content in inlined.items():
-            appends.append(f"### {ref}\n\n{content}\n")
+        for heading, path in inlined.values():
+            try:
+                body = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            appends.append("### %s\n\n%s\n" % (heading, body))
         return text + "\n".join(appends)
     return text
 
@@ -266,16 +357,17 @@ def _resolve_and_filter_sources(
 
 
 def _assemble(
-    agent: _agents.Agent, scope: _scope.Scope, inline: bool
+    agent: _agents.Agent, scope: _scope.Scope, inline: bool, expand_vars: bool
 ) -> "tuple[str, list[str]]":
     """The shared body of both assemblers: ``(text, source_paths)``."""
     filtered_sources, harness_loaded = _resolve_and_filter_sources(agent, scope)
     project_root = scope.project_root or _scope.project_root_default()
+    overlay_roots = _overlay_roots(scope)
 
     assembled_parts = []
-    search_roots = [project_root, scope.user_root]
     source_paths: "list[str]" = []
     emitted: "list[Path]" = []
+    ref_sources: "list[tuple[str, str, list[Path]]]" = []
 
     for level, path, root in filtered_sources:
         try:
@@ -284,23 +376,28 @@ def _assemble(
             continue
         source_paths.append(str(path))
         emitted.append(path)
-        if root:
-            search_roots.append(root)
+        ref_sources.append((level, content, _source_search_roots(scope, level, path, root)))
         assembled_parts.append(f"<!-- Source: {path} -->\n{content.strip()}\n")
 
     text = "\n\n".join(assembled_parts)
     if inline and text:
+        var_roots = {_overlays.Overlay(ov).root_var: ov for ov in overlay_roots}
+        var_roots["PROJECT_ROOT"] = project_root
         text = _inline_referenced_files(
-            text, search_roots, exclude=[*emitted, *harness_loaded]
+            text, ref_sources,
+            var_roots=var_roots,
+            allowed_roots=[*scope.stores, *overlay_roots],
+            exclude=[*emitted, *harness_loaded],
         )
     # Placeholders last, so ones inside inlined files expand too; every
     # installed overlay gets a root, matching `dotagents env`.
-    text = _expand_placeholders(text, project_root, _overlay_roots(scope))
+    text = _expand_placeholders(text, project_root, overlay_roots, env_vars=expand_vars)
     return text, source_paths
 
 
 def assemble_context(
-    agent: _agents.Agent, scope: _scope.Scope, *, inline: bool = False
+    agent: _agents.Agent, scope: _scope.Scope, *, inline: bool = False,
+    expand_vars: bool = True,
 ) -> str:
     """Assemble the effective context text (markdown) for the given agent in a
     :class:`~dotagents._scope.Scope`.
@@ -308,8 +405,12 @@ def assemble_context(
     Returns '' if, after subtracting what the agent's harness already loads,
     there is nothing new to emit (no empty double of already-loaded content).
     ``inline=True`` appends the on-demand files the sources reference (see
-    :func:`_inline_referenced_files` for why that is opt-in)."""
-    text, source_paths = _assemble(agent, scope, inline)
+    :func:`_inline_referenced_files` for why that is opt-in).
+    ``expand_vars`` (default on) replaces ``$<NAME>_OVERLAY_ROOT`` with the
+    overlay's directory, for a reader with no populated shell; pass ``False``
+    for text written into a file that may be committed (see
+    :func:`_expand_placeholders`)."""
+    text, source_paths = _assemble(agent, scope, inline, expand_vars)
     if not source_paths:
         return ""
     text += _get_skills_listing(scope)
@@ -317,7 +418,8 @@ def assemble_context(
 
 
 def assemble_context_data(
-    agent: _agents.Agent, scope: _scope.Scope, *, inline: bool = False
+    agent: _agents.Agent, scope: _scope.Scope, *, inline: bool = False,
+    expand_vars: bool = True,
 ) -> "dict[str, object]":
     """Structured form of the assembled context, for ``--format json``.
 
@@ -333,7 +435,7 @@ def assemble_context_data(
     markdown format emits, but WITHOUT the skills listing appended -- skills are
     their own structured field so a consumer can render them separately and
     keep the opt-in distinction."""
-    text, source_paths = _assemble(agent, scope, inline)
+    text, source_paths = _assemble(agent, scope, inline, expand_vars)
 
     skills = [
         {"name": n, "description": d, "path": str(p)} for n, d, p in _collect_skills(scope)

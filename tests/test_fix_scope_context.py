@@ -161,6 +161,74 @@ def _cli(**fields):
 
 
 # --------------------------------------------------------------------------
+# scope-context-05: --inline resolves each source's refs against its own dir
+# --------------------------------------------------------------------------
+
+def test_inline_resolves_overlay_variable_refs_and_each_sources_own_dir(ctx):
+    store, project, ov = ctx
+    write_text_lf(store / "AGENTS.md", "- Python work -> $PY_OVERLAY_ROOT/kb/PYTHON.md\n")
+    write_text_lf(store / "kb" / "PYTHON.md", "STORE-KB-SHADOWS-OVERLAY\n")
+    write_text_lf(ov / "CONTEXT.md", "Read kb/PYTHON.md, and `${PY_OVERLAY_ROOT}/kb/STYLE.md`.\n")
+    write_text_lf(ov / "kb" / "PYTHON.md", "PY-KB-BODY\n")
+    write_text_lf(ov / "kb" / "STYLE.md", "PY-STYLE-BODY\n")
+    write_text_lf(project / ".agents" / "AGENTS.md", "Before a release read kb/RELEASE.md.\n")
+    write_text_lf(project / ".agents" / "kb" / "RELEASE.md", "PROJECT-KB-BODY\n")
+
+    scope = Scope.of(agents_dir=store, project_root=project)
+    text = _gemini(scope, inline=True)
+    inlined = text.split("## On-Demand Files (Inlined)", 1)[1]
+    assert inlined.count("PY-KB-BODY") == 1          # via $VAR and via the overlay's own kb/
+    assert "PY-STYLE-BODY" in inlined                 # ${VAR} form
+    assert "STORE-KB-SHADOWS-OVERLAY" not in inlined  # the store's same-named file
+    assert "PROJECT-KB-BODY" in inlined               # the project store is a search root
+    assert "### PYTHON_OVERLAY_ROOT" not in inlined
+
+
+def test_inline_never_resolves_a_user_ref_into_the_project(ctx):
+    store, project, ov = ctx
+    write_text_lf(store / "AGENTS.md", "see kb/ONLY-HERE.md\n")
+    write_text_lf(project / "kb" / "ONLY-HERE.md", "CWD-REPO-BODY\n")
+    for global_scope in (True, False):
+        scope = Scope.of(agents_dir=store, project_root=project, global_scope=global_scope)
+        assert "CWD-REPO-BODY" not in _gemini(scope, inline=True)
+
+
+def test_var_refs_are_not_misread_as_relative_refs():
+    text = "a $PY_OVERLAY_ROOT/kb/A.md b ${PY_OVERLAY_ROOT}/kb/B.md `$X/kb/C.md` $lower/kb/D.md"
+    assert _context._find_md_refs(text) == []
+
+
+# --------------------------------------------------------------------------
+# scope-context-06: $NAME_OVERLAY_ROOT expands in handed-over output only
+# --------------------------------------------------------------------------
+
+def test_overlay_root_variables_expand_in_transient_output(ctx):
+    store, project, ov = ctx
+    write_text_lf(
+        store / "AGENTS.md",
+        "- Python -> $PY_OVERLAY_ROOT/kb/PYTHON.md and ${PY_OVERLAY_ROOT}/x.md, $NOPE_OVERLAY_ROOT/y.md\n",
+    )
+    scope = Scope.of(agents_dir=store, project_root=project)
+    text = _gemini(scope)
+    assert "%s/kb/PYTHON.md" % ov in text and "%s/x.md" % ov in text
+    assert "$PY_OVERLAY_ROOT" not in text and "${PY_OVERLAY_ROOT}" not in text
+    assert "$NOPE_OVERLAY_ROOT/y.md" in text  # not an installed overlay
+    data = _context.assemble_context_data(_agents.GeminiAgent(), scope)
+    assert "$PY_OVERLAY_ROOT" not in data["context"]
+
+
+def test_write_agent_keeps_the_variable_and_stdout_expands_it(ctx, capsys):
+    store, project, ov = ctx
+    write_text_lf(store / "AGENTS.md", "- Python -> $PY_OVERLAY_ROOT/kb/PYTHON.md\n")
+    assert _cli()() == 0
+    assert "%s/kb/PYTHON.md" % ov in capsys.readouterr().out
+    assert _cli(write_agent=True)() == 0
+    written = (project / "GEMINI.md").read_text(encoding="utf-8")
+    assert "$PY_OVERLAY_ROOT/kb/PYTHON.md" in written
+    assert "%s/kb" % ov not in written
+
+
+# --------------------------------------------------------------------------
 # scope-context-07 / -08: skills precedence, frontmatter, and path
 # --------------------------------------------------------------------------
 
