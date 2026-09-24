@@ -77,7 +77,8 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   and `'''...'''` strings and an indented closing `]` all parse) / `.priority` /
   `.sort_key` (`(priority, manifest name, dir name)`),
   `.find_setup_script()` / `.run_setup(agents_dir=, dry_run=, logger=)`,
-  `.files()` / `.rule_blocks(rel_paths)` / `.apply_to(dest, dry_run)` /
+  `.files()` (skips `Overlay.SKIP_PARTS` — `.git` and tool caches — and
+  `*.pyc`) / `.rule_blocks(rel_paths)` / `.apply_to(dest, dry_run)` /
   `.install_to(dest_overlay_dir, dry_run, overwrite=False)` (self-describing:
   ships the manifest; `overwrite` replaces files whose content differs) /
   `.merge_rules_into(agents_md, dry_run, logger)`. `Overlay.discover(root)` is the
@@ -202,7 +203,11 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   (symlink-preferred, copy fallback); unpublish removes only what the overlay
   published — a copy counts as the overlay's only when its file set AND bytes
   match the source, so a user-edited copy is kept — then sweeps broken
-  symlinks. Pure stdlib. `ClaudeAgent.wire_hooks` links the scope's skills
+  symlinks. Publishing never replaces a skill already at the target (kept,
+  warned). Each published COPY's tree digest is recorded in
+  `<skills>/.dotagents-published.json`; `resync_overlay_skills(...,
+  overwrite=False)` refreshes a copy only while it still matches that digest
+  (`sync --overwrite` replaces an edited one). Pure stdlib. `ClaudeAgent.wire_hooks` links the scope's skills
   into `<config>/skills/<name>` PER SKILL (a same-named skill the user placed
   there is a conflict and stays), never the whole directory.
 - `_hooks` — additive, idempotent merge of our hooks into an agent's `settings.json`.

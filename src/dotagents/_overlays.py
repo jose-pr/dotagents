@@ -470,13 +470,28 @@ class Overlay:
 
     # -- files + what they contribute -----------------------------------------
 
+    #: Path components never installed: VCS metadata (a whole-repository
+    #: overlay's clone root carries `.git`) and tool caches. Named, not "every
+    #: dot-name": an overlay may ship real dotfiles (a `references/.gitignore`).
+    SKIP_PARTS = frozenset({
+        ".git", ".hg", ".svn", "__pycache__", ".mypy_cache", ".pytest_cache",
+        ".ruff_cache", ".tox", ".venv", "node_modules",
+    })
+
     def files(self) -> "list[Path]":
-        """Files the overlay installs (everything except its manifest / caches)."""
-        return [
-            p
-            for p in sorted(self.path.rglob("*"))
-            if p.is_file() and p.name != self.MANIFEST_NAME and "__pycache__" not in p.parts
-        ]
+        """Files the overlay installs: everything except its manifest, VCS
+        metadata and tool caches (:attr:`SKIP_PARTS`) and compiled ``*.pyc``."""
+        out = []
+        for p in sorted(self.path.rglob("*")):
+            rel = p.relative_to(self.path)
+            if (
+                p.is_file()
+                and p.name != self.MANIFEST_NAME
+                and p.suffix != ".pyc"
+                and not self.SKIP_PARTS.intersection(rel.parts)
+            ):
+                out.append(p)
+        return out
 
     def rule_blocks(self, rel_paths: "list[str]") -> "tuple[list[str], list[str]]":
         """Extract `- **…` bullet blocks from each referenced markdown file.

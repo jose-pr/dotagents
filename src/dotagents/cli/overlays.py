@@ -6,6 +6,7 @@ Discover-not-track: installed overlays are the dirs under `<scope>/overlays/`.
 """
 
 import shutil
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -99,6 +100,27 @@ def _install_order(
         visit(name, [])
     return order
 
+
+
+def _remove_tree(path: Path) -> None:
+    """Delete an installed overlay dir: a symlink/junction to one is unlinked
+    (never followed), and a read-only file inside (git objects on Windows) is
+    made writable and retried instead of failing the removal half-way."""
+    import os
+    import stat
+
+    if os.path.islink(str(path)) or (hasattr(os.path, "isjunction") and os.path.isjunction(str(path))):
+        os.unlink(str(path))
+        return
+
+    def _retry(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(str(path), onexc=_retry)
+    else:  # pragma: no cover -- exercised on the 3.9 leg
+        shutil.rmtree(str(path), onerror=_retry)
 
 class OverlayAdd(DotAgentsArgs):
     """Install overlay(s) by name into a scope, and publish their skills.
@@ -257,7 +279,7 @@ class OverlayRemove(DotAgentsArgs):
                 )
                 if removed:
                     self._logger_.info("unpublished %d skill(s) from %s", removed, name)
-                shutil.rmtree(str(overlay_dir))
+                _remove_tree(overlay_dir)
             removed_names.append(name)
             self._logger_.info(
                 "removed overlay %s (%s)%s",
@@ -528,7 +550,7 @@ class OverlaySync(DotAgentsArgs):
             if not self.dry_run:
                 _skills.resync_overlay_skills(
                     dest_dir, scope.shared_skills_dir, copy=self.copy,
-                    logger=self._logger_,
+                    overwrite=self.overwrite, logger=self._logger_,
                 )
             rc = _run_overlay_setup(
                 dest_dir, name, scope=scope, no_setup=self.no_setup,

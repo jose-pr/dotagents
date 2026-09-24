@@ -401,6 +401,76 @@ def test_clean_broken_syncs(tmp_path):
     assert not os.path.lexists(str(link))
 
 
+def test_publish_keeps_a_skill_the_user_placed(tmp_path):
+    """A conflicting target used to be force-replaced (rmtree'd): a skill the
+    user wrote under the same name was deleted without a backup."""
+    src = make_source(tmp_path)
+    scope = make_scope(tmp_path)
+    mine = scope.shared_skills_dir / "py-lint"
+    mine.mkdir(parents=True)
+    (mine / "SKILL.md").write_text("MY OWN SKILL\n", encoding="utf-8")
+    n = _skills.publish_overlay_skills(src / "py-demo", scope.shared_skills_dir, copy=True, logger=logger())
+    assert n == 0
+    assert (mine / "SKILL.md").read_text(encoding="utf-8") == "MY OWN SKILL\n"
+
+
+def test_resync_keeps_a_locally_edited_copy_unless_overwrite(tmp_path):
+    src = make_source(tmp_path)
+    scope = make_scope(tmp_path)
+    _skills.publish_overlay_skills(src / "py-demo", scope.shared_skills_dir, copy=True)
+    target = scope.shared_skills_dir / "py-lint"
+    (target / "notes.md").write_text("MY NOTES\n", encoding="utf-8")
+    assert _skills.resync_overlay_skills(src / "py-demo", scope.shared_skills_dir, copy=True, logger=logger()) == 0
+    assert (target / "notes.md").is_file()
+    assert _skills.resync_overlay_skills(
+        src / "py-demo", scope.shared_skills_dir, copy=True, overwrite=True, logger=logger()) == 1
+    assert not (target / "notes.md").exists()
+
+
+def test_resync_refreshes_an_unedited_copy_when_the_source_changes(tmp_path):
+    src = make_source(tmp_path)
+    scope = make_scope(tmp_path)
+    _skills.publish_overlay_skills(src / "py-demo", scope.shared_skills_dir, copy=True)
+    skill_md = src / "py-demo" / "skills" / "py-lint" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text(encoding="utf-8") + "\nUPSTREAM CHANGE\n", encoding="utf-8")
+    assert _skills.resync_overlay_skills(src / "py-demo", scope.shared_skills_dir, copy=True, logger=logger()) == 1
+    target_md = scope.shared_skills_dir / "py-lint" / "SKILL.md"
+    assert "UPSTREAM CHANGE" in target_md.read_text(encoding="utf-8")
+    # The record follows the refresh: a second edit-free sync is a no-op.
+    assert _skills.resync_overlay_skills(src / "py-demo", scope.shared_skills_dir, copy=True, logger=logger()) == 0
+
+
+def test_overlay_files_skip_vcs_metadata_and_caches(tmp_path):
+    """A whole-repository overlay (a git spec with no #path) copied its clone's
+    .git into the store."""
+    ov = tmp_path / "whole"
+    for rel in ("overlay.toml", "kb/X.md", "references/.gitignore", ".git/HEAD",
+                ".git/objects/ab/cdef", "sub/.git", "__pycache__/m.cpython-314.pyc",
+                "lib/m.pyc", ".mypy_cache/x.json", "node_modules/p/index.js"):
+        p = ov / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x\n", encoding="utf-8")
+    got = [p.relative_to(ov).as_posix() for p in Overlay(ov).files()]
+    assert got == ["kb/X.md", "references/.gitignore"]
+
+
+def test_remove_deletes_read_only_files(tmp_path):
+    """Read-only files (git objects on Windows) made `overlays remove` fail
+    half-way, leaving a half-deleted overlay."""
+    import stat
+    from dotagents.cli import OverlayAdd, OverlayRemove
+
+    src = make_source(tmp_path)
+    scope = make_scope(tmp_path)
+    assert _run(OverlayAdd, name=["py-demo"], repo=[str(src)], global_scope=True,
+                agents_dir=scope.agents_root, copy=True, dry_run=False) == 0
+    ro = scope.overlay_root / "py-demo" / "kb" / "PY.md"
+    os.chmod(str(ro), stat.S_IREAD)
+    assert _run(OverlayRemove, name=["py-demo"], global_scope=True,
+                agents_dir=scope.agents_root, dry_run=False) == 0
+    assert not (scope.overlay_root / "py-demo").exists()
+
+
 def test_resync_republishes_missing(tmp_path):
     src = make_source(tmp_path)
     scope = make_scope(tmp_path)

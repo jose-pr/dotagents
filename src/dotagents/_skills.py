@@ -16,9 +16,15 @@ the contract; ``--copy`` forces the copy path up front (Windows / no-symlink).
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 from pathlib import Path
+
+#: Beside the published skills: the tree digest of each COPY at the moment it
+#: was published, so a later sync can tell "unchanged since we copied it"
+#: (refresh silently) from "edited here" (keep, unless ``--overwrite``).
+PUBLISHED_RECORD = ".dotagents-published.json"
 
 
 class SyncResult:
@@ -63,6 +69,48 @@ def _paths_match(source: Path, target: Path) -> bool:
         except OSError:
             return False
     return False
+
+
+def _tree_digest(path: Path) -> str:
+    """One digest over a file or a directory's (relative path, bytes) pairs."""
+    if path.is_file():
+        return _digest(path)
+    h = hashlib.sha256()
+    for p in sorted(path.rglob("*")):
+        if p.is_file():
+            h.update(p.relative_to(path).as_posix().encode("utf-8") + b"\0")
+            h.update(_digest(p).encode("ascii") + b"\n")
+    return h.hexdigest()
+
+
+def _load_record(shared_skills: Path) -> "dict[str, str]":
+    try:
+        data = json.loads((shared_skills / PUBLISHED_RECORD).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_record(shared_skills: Path, record: "dict[str, str]") -> None:
+    from dotagents._fs import write_text_lf
+
+    path = shared_skills / PUBLISHED_RECORD
+    if not record:
+        if path.exists():
+            path.unlink()
+        return
+    write_text_lf(path, json.dumps(record, indent=1, sort_keys=True) + "\n")
+
+
+def _note_published(shared_skills: Path, name: str, result: "SyncResult") -> None:
+    """Record a copy's digest (a symlink needs none: it is always current)."""
+    record = _load_record(shared_skills)
+    target = shared_skills / name
+    if result.mode == "copy" and target.is_dir() and not os.path.islink(str(target)):
+        record[name] = _tree_digest(target)
+    else:
+        record.pop(name, None)
+    _save_record(shared_skills, record)
 
 
 def _resolves_to(target: Path, source: Path) -> bool:
@@ -132,10 +180,20 @@ def unsync_path(target: Path, source: Path) -> SyncResult:
         return SyncResult(False, "copy", "removal failed: %s" % exc)
 
 
-def resync_path(source: Path, target: Path, *, prefer_symlink: bool = True) -> SyncResult:
+def resync_path(
+    source: Path,
+    target: Path,
+    *,
+    prefer_symlink: bool = True,
+    published_digest: "str | None" = None,
+    overwrite: bool = False,
+) -> SyncResult:
     """Refresh a published skill from its overlay source. A symlink is inherently
-    current; a copy is re-copied when its content drifted; an unpublished skill
-    is published (symlink-preferred unless ``prefer_symlink`` is False)."""
+    current; an unpublished skill is published (symlink-preferred unless
+    ``prefer_symlink`` is False). A copy that differs from the source is
+    re-copied only when it is still exactly what was published
+    (``published_digest``) or ``overwrite`` is set -- otherwise it was edited
+    in place (or placed by hand) and is kept, reported as a conflict."""
     if not source.exists():
         return SyncResult(False, "error", "source does not exist")
     if not os.path.lexists(str(target)):
@@ -144,6 +202,11 @@ def resync_path(source: Path, target: Path, *, prefer_symlink: bool = True) -> S
         return SyncResult(True, "symlink", "symlink is current")
     if _paths_match(source, target):
         return SyncResult(True, "copy", "current")
+    if not overwrite and (published_digest is None or _tree_digest(target) != published_digest):
+        return SyncResult(
+            False, "conflict",
+            "modified here since it was published; kept (sync --overwrite replaces it)",
+        )
     return sync_path(source, target, prefer_symlink=False, force=True)
 
 
@@ -188,9 +251,10 @@ def publish_overlay_skills(
 ) -> int:
     """Publish each ``overlay_dir/skills/<name>/`` into ``shared_skills``.
 
-    Symlink-preferred unless ``copy`` forces copies. A conflicting target is
-    overwritten (the overlay owns its skill names). Returns the count published.
-    Sweeps broken syncs first so a stale symlink can't block a re-publish."""
+    Symlink-preferred unless ``copy`` forces copies. A target that already
+    holds something else (a skill the user placed or edited) is kept and
+    reported, never replaced. Returns the count published. Sweeps broken syncs
+    first so a stale symlink can't block a re-publish."""
     clean_broken_syncs(shared_skills, logger=logger)
     skill_dirs = _overlay_skill_dirs(overlay_dir)
     if not skill_dirs:
@@ -200,9 +264,8 @@ def publish_overlay_skills(
     for skill_dir in skill_dirs:
         target = shared_skills / skill_dir.name
         result = sync_path(skill_dir, target, prefer_symlink=not copy, force=False)
-        if not result and result.mode == "conflict":
-            result = sync_path(skill_dir, target, prefer_symlink=not copy, force=True)
         if result:
+            _note_published(shared_skills, skill_dir.name, result)
             published += 1
             if logger is not None and "already" not in result.message:
                 logger.info("skill %s: %s", skill_dir.name, result.message)
@@ -212,23 +275,39 @@ def publish_overlay_skills(
 
 
 def resync_overlay_skills(
-    overlay_dir: Path, shared_skills: Path, *, copy: bool = False, logger=None
+    overlay_dir: Path,
+    shared_skills: Path,
+    *,
+    copy: bool = False,
+    overwrite: bool = False,
+    logger=None,
 ) -> int:
     """Refresh already-published skills of this overlay (copy-mode drift). New
     skills are published (as copies with ``copy``, the ``sync --copy`` form);
-    symlinks are inherently current."""
+    symlinks are inherently current. A copy edited since it was published is
+    kept unless ``overwrite`` (``sync --overwrite``)."""
     skill_dirs = _overlay_skill_dirs(overlay_dir)
     if not skill_dirs or not shared_skills.is_dir():
         # Nothing published yet -> fall back to a fresh publish.
         return publish_overlay_skills(overlay_dir, shared_skills, copy=copy, logger=logger)
+    record = _load_record(shared_skills)
     updated = 0
     for skill_dir in skill_dirs:
         target = shared_skills / skill_dir.name
-        result = resync_path(skill_dir, target, prefer_symlink=not copy)
-        if result and result.mode == "copy" and "current" not in result.message:
-            updated += 1
+        result = resync_path(
+            skill_dir, target, prefer_symlink=not copy,
+            published_digest=record.get(skill_dir.name), overwrite=overwrite,
+        )
+        if not result:
             if logger is not None:
-                logger.info("skill %s: %s", skill_dir.name, result.message)
+                logger.warning("kept skill %s: %s", skill_dir.name, result.message)
+            continue
+        if "current" in result.message:
+            continue
+        _note_published(shared_skills, skill_dir.name, result)
+        updated += 1
+        if logger is not None:
+            logger.info("skill %s: %s", skill_dir.name, result.message)
     return updated
 
 
@@ -242,6 +321,9 @@ def remove_overlay_skills(overlay_dir: Path, shared_skills: Path, *, logger=None
         target = shared_skills / skill_dir.name
         result = unsync_path(target, skill_dir)
         if result and result.mode != "none":
+            record = _load_record(shared_skills)
+            if record.pop(skill_dir.name, None) is not None:
+                _save_record(shared_skills, record)
             removed += 1
             if logger is not None:
                 logger.info("removed skill: %s (%s)", skill_dir.name, result.mode)
