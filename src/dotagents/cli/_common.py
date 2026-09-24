@@ -453,27 +453,3 @@ def _resolve_from(from_arg: "str | None", default: Path) -> Path:
             ) from e
         return UriPath(from_arg)
     raise SystemExit("error: --from path does not exist: %s" % from_arg)
-
-
-def _run_overlay_setup(dest_dir, name, *, scope, no_setup, dry_run, logger, source_dir=None):
-    """Run an installed overlay's `setup` script, honoring `--no-setup`.
-
-    Thin wrapper over `Overlay.run_setup` that resolves the store path from the
-    scope (D58 configurable store, passed as `AGENTS_HOME`) and short-circuits
-    when `--no-setup` is given or the overlay ships no script. Returns the setup
-    exit code (0 when skipped / absent), so a non-zero result surfaces as a
-    clear error rather than a silent skip.
-
-    On a `--dry-run` the installed dir may not exist yet, so the SOURCE overlay
-    (`source_dir`) is what gets inspected for a script."""
-    from dotagents._overlays import Overlay
-
-    overlay = Overlay(dest_dir)
-    if dry_run and source_dir is not None and overlay.find_setup_script() is None:
-        overlay = Overlay(source_dir)
-    if no_setup:
-        if overlay.find_setup_script() is not None:
-            logger.info("skipping setup for %s (--no-setup)", name)
-        return 0
-    rc = overlay.run_setup(agents_dir=scope.agents_root, dry_run=dry_run, logger=logger)
-    return rc or 0

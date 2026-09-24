@@ -105,3 +105,15 @@ def test_atomic_write_keeps_the_mode_and_a_new_file_is_not_0600(tmp_path):
     assert stat.S_IMODE(fresh.stat().st_mode) == stat.S_IMODE(plain.stat().st_mode)
 
 
+# --------------------------------------------------------------------------- #
+# overlays: the setup helper that set AGENTS_HOME to the scope store is gone
+# --------------------------------------------------------------------------- #
+
+
+def test_the_old_overlay_setup_helper_is_gone():
+    """`_run_overlay_setup` passed the scope store as `AGENTS_HOME` and had no
+    caller left; `Overlay.run_setup(scope_root=, scope_level=)` replaced it."""
+    from dotagents.cli import _common
+
+    assert not hasattr(cli, "_run_overlay_setup")
+    assert not hasattr(_common, "_run_overlay_setup")
