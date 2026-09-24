@@ -170,7 +170,7 @@ def merge_block(
     if force:
         if not target.exists():
             if not dry_run:
-                write_text_lf(target, block_source_text)
+                write_text_lf(target, block_source_text, atomic=True)
             return "created"
         if target.read_text(encoding="utf-8-sig") == block_source_text:
             return "unchanged"
@@ -178,12 +178,12 @@ def merge_block(
         if backup_root is not None:
             backed_up = dry_run or _backup(target, backup_root)
         if not dry_run:
-            write_text_lf(target, block_source_text)
+            write_text_lf(target, block_source_text, atomic=True)
         return "replaced (--force, backed up)" if backed_up else "replaced (--force)"
 
     if not target.exists():
         if not dry_run:
-            write_text_lf(target, block_source_text)
+            write_text_lf(target, block_source_text, atomic=True)
         return "created"
 
     # utf-8-sig: a leading BOM (PowerShell 5's `-Encoding UTF8`) would otherwise
@@ -197,7 +197,7 @@ def merge_block(
         if new_text == existing:
             return "skipped (present)"
         if not dry_run:
-            write_text_lf(target, new_text)
+            write_text_lf(target, new_text, atomic=True)
         return "block-refreshed"
     if _marker_lines(existing, begin_marker):
         raise SystemExit(
@@ -211,7 +211,7 @@ def merge_block(
     else:
         new_text = block + "\n\n" + existing
     if not dry_run:
-        write_text_lf(target, new_text)
+        write_text_lf(target, new_text, atomic=True)
     return "block-inserted"
 
 
@@ -238,7 +238,7 @@ def remove_block(
     if head.endswith("\n\n"):
         head = head[:-1]
     if not dry_run:
-        write_text_lf(target, head + tail)
+        write_text_lf(target, head + tail, atomic=True)
     return "removed"
 
 def _import_target(entry: Path, ref: str) -> "Path | None":

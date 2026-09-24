@@ -183,6 +183,25 @@ def test_settings_write_keeps_a_symlink_and_updates_its_target(tmp_path):
     assert [p.name for p in dotfiles.iterdir()] == ["claude-settings.json"], "no temp file left"
 
 
+def test_a_managed_block_merged_into_a_symlinked_file_keeps_the_link(tmp_path):
+    """`~/.claude/CLAUDE.md` or Codex's config kept in a dotfiles repo. The
+    block merge writes atomically now (a crash never leaves the file half
+    written); this guards that the atomic path still writes the link's target
+    rather than replacing the link, as a naive temp-and-rename would."""
+    from dotagents import _merge
+
+    real = tmp_path / "dotfiles" / "CLAUDE.md"
+    real.parent.mkdir()
+    real.write_text("# mine\n", encoding="utf-8")
+    link = tmp_path / "CLAUDE.md"
+    _symlink(real, link)
+    block = "%s\nBASE\n%s\n" % (_merge.BEGIN_MARKER, _merge.END_MARKER)
+    _merge.merge_block(link, block, force=False, dry_run=False)
+    assert link.is_symlink()
+    assert "# mine" in real.read_text(encoding="utf-8") and "BASE" in real.read_text(encoding="utf-8")
+    assert [p.name for p in real.parent.iterdir()] == ["CLAUDE.md"], "no temp file left"
+
+
 def test_atomic_write_through_a_dangling_link_creates_its_target(tmp_path):
     real = tmp_path / "dotfiles" / "hooks.json"
     real.parent.mkdir()
