@@ -593,6 +593,83 @@ def test_path_conversion_still_happens_on_windows(monkeypatch):
     assert cli_env._format_env({"PATH": r"C:\a;D:\b"}, "export") == "export PATH='/c/a:/d/b'"
 
 
+# --------------------------------------------------------------------------
+# env-12: the data formats round-trip through their named reader.
+# --------------------------------------------------------------------------
+
+_DATA_VALUES = {
+    "BIN": "0b101",
+    "DATE": "2024-01-01",
+    "UNDERSCORE": "1_000",
+    "SEXAGESIMAL": "1:30",
+    "CR": "a\rb",
+    "NL": "x\ny",
+    "UNI": "caf\u00e9 \U0001F600",
+    "LS": "a\u2028b",
+    "NEL": "a\x85b",
+    "CTRL": "a\x01b",
+    "TAB": "a\tb",
+    "LEAD": " lead",
+    "TILDE": "~",
+    "YES": "yes",
+    "EMPTY": "",
+    "QUOTES": "it's \"q\"",
+    "BS": "C:\\x\\y",
+    "Y": "key is a YAML 1.1 bool",
+}
+
+
+def test_yaml_round_trips_every_value():
+    """Plain scalars read back typed (`'0b101'` -> 5, a date -> date) and a
+    raw CR made the whole document unparseable."""
+    yaml = pytest.importorskip("yaml")
+    from dotagents.cli.env import _format_env
+
+    assert yaml.safe_load(_format_env(_DATA_VALUES, "yaml")) == _DATA_VALUES
+
+
+def test_ini_round_trips_through_configparser_or_says_it_cannot():
+    """No escaping: a newline injected keys, `%` raised InterpolationSyntaxError
+    and leading whitespace was lost -- all silently."""
+    import configparser
+    from dotagents.cli.env import _format_env
+
+    fine = {"PCT": "100%", "MULTI": "x\ny\n\nz", "HASH": "#not-a-comment", "EQ": "a=b"}
+    unholdable = {"LEAD": " lead", "CR": "a\rb", "INDENT": "x\n  y", "CMT": "x\n#c"}
+    out = _format_env(dict(fine, **unholdable), "ini")
+    parser = configparser.ConfigParser()
+    parser.optionxform = str
+    parser.read_string(out)
+    assert dict(parser["env"]) == fine
+    for key in unholdable:
+        assert "; %s omitted" % key in out
+
+
+def test_dotenv_single_quotes_what_double_quotes_or_bare_would_change():
+    from dotagents.cli.env import _format_env
+
+    assert _format_env({"D": "$HOME"}, "dotenv") == "D='$HOME'"
+    assert _format_env({"Q": "'quoted'"}, "dotenv") == "Q='\\'quoted\\''"
+    assert _format_env({"C": "a\rb"}, "dotenv") == "C='a\rb'"
+    assert _format_env({"P": r"C:\x"}, "dotenv") == r"P=C:\x"
+
+
+def test_dotenv_round_trips_through_python_dotenv():
+    import io
+
+    dotenv = pytest.importorskip("dotenv")
+    from dotagents.cli.env import _format_env
+
+    values = {
+        "DOLLAR": "$HOME and ${HOME}", "SQ": "'quoted'", "DQ": '"dq"', "CR": "a\rb",
+        "BS": "back\\slash'", "SP": "a b", "HASH": "a #b", "NL": "x\ny",
+        "WIN": "C:\\x\\y", "MID": "abc'def", "EMPTY": "",
+    }
+    text = _format_env(values, "dotenv") + "\n"
+    got = dotenv.dotenv_values(stream=io.StringIO(text), interpolate=False)
+    assert dict(got) == values
+
+
 def test_find_bash_warns_once_when_there_is_none(monkeypatch, caplog):
     import logging
 

@@ -19,18 +19,60 @@ _POSIX_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _dotenv_value(v: str) -> str:
-    """Dotenv quoting: bare unless the value needs quoting.
+    """Dotenv quoting for ONE target reader, python-dotenv (``dotenv_values``
+    / ``load_dotenv``): bare unless the value needs quoting.
 
-    A value with whitespace, ``#``, ``"`` or a newline is wrapped in double
-    quotes with ``"``, ``\\`` and newline backslash-escaped; otherwise emitted
-    bare (the ``.env`` / ``docker --env-file`` convention).
+    * A value with ``$``, a CR, or a quote character at either end is
+      single-quoted, with ``\\`` and ``'`` backslash-escaped (python-dotenv
+      decodes exactly those two in single quotes, and a bare or double-quoted
+      value would lose the surrounding quotes or the CR).
+    * Else a value with whitespace, ``#``, ``"`` or a newline is
+      double-quoted, with ``"``, ``\\`` and newline backslash-escaped.
+    * Else it is emitted bare.
+
+    Limitation: python-dotenv's default ``interpolate=True`` expands
+    ``${NAME}`` in EVERY quoting style, single quotes included, and has no
+    escape for it; a value containing ``${`` reads back verbatim only with
+    ``interpolate=False``. ``docker --env-file`` is a different format (no
+    quote handling at all) and is not a target.
     """
     if v == "":
         return ""
+    if "$" in v or "\r" in v or v[0] in "'\"" or v[-1] in "'\"":
+        return "'%s'" % v.replace("\\", "\\\\").replace("'", "\\'")
     if any(c in v for c in " \t#\"\n") or v.strip() != v:
         esc = v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
         return '"%s"' % esc
     return v
+
+
+def _ini_value(v: str) -> "Optional[str]":
+    """The INI value for ONE target reader, Python's ``configparser`` (its
+    default ``BasicInterpolation``), or ``None`` when that reader cannot hold
+    the value verbatim.
+
+    ``%`` is doubled (a bare ``%`` raised ``InterpolationSyntaxError``); a
+    newline becomes a continuation line (the next line indented by a tab).
+    configparser strips surrounding whitespace, drops a CR, strips each
+    continuation line's leading whitespace and treats a continuation line
+    that starts with ``#`` or ``;`` as a comment -- a value that runs into
+    any of those has no INI spelling. (configparser also lowercases keys by
+    default; a reader that needs them as emitted sets ``optionxform = str``.)
+    """
+    if "\r" in v or v.strip() != v:
+        return None
+    lines = v.replace("%", "%%").split("\n")
+    for line in lines[1:]:
+        if line[:1].isspace() or line.startswith(("#", ";")):
+            return None
+    return "\n\t".join(lines)
+
+
+def _ini_key_ok(k: str) -> bool:
+    """A key configparser reads back as itself (modulo its lowercasing): no
+    ``=`` / ``:`` delimiter inside, no leading comment or section character,
+    no surrounding whitespace."""
+    return bool(k) and k.strip() == k and not any(c in k for c in "=:") and k[0] not in "#;["
 
 
 def _looks_like_path_list(key: str, value: str) -> bool:
@@ -211,8 +253,8 @@ def _format_env(
       in a value is expanded or executed when sourced; the POSIX default a
       SessionStart hook sources.
     * ``dotenv`` (alias ``env``) -- bare ``KEY=value`` (no ``export``), value
-      quoted only when it contains whitespace/``#``/``"``/newline (``.env`` /
-      ``docker --env-file`` rules). Distinct from ``export``: assigns, doesn't
+      quoted only when it needs it, for python-dotenv (see
+      :func:`_dotenv_value`). Distinct from ``export``: assigns, doesn't
       source+export.
     * ``powershell`` (aliases ``pwsh``/``ps``) -- ``$env:KEY = 'value'``,
       single-quoted, ``'`` escaped as ``''``.
@@ -226,8 +268,10 @@ def _format_env(
     Data forms:
 
     * ``json`` -- a sorted JSON object.
-    * ``ini``  -- ``KEY=value`` lines under a ``[env]`` section.
-    * ``yaml`` -- ``KEY: value`` lines (values quoted when ambiguous).
+    * ``ini``  -- ``KEY=value`` lines under a ``[env]`` section, for Python's
+      ``configparser`` (see :func:`_ini_value`); a var it cannot hold verbatim
+      is named in a ``;`` comment instead.
+    * ``yaml`` -- ``KEY: "value"`` lines, every value double-quoted.
 
     Aliases are normalized here via :data:`dotagents._env.FORMAT_ALIASES`. Values
     are emitted verbatim (this is the point of the command); callers must treat
@@ -283,10 +327,18 @@ def _format_env(
         data.update((k, None) for k in gone)
         return _json.dumps(data, indent=2, sort_keys=True)
     if fmt == "ini":
-        return "\n".join(["[env]"] + ["%s=%s" % (k, env[k]) for k in keys])
+        ini = ["[env]"]
+        for k in keys:
+            value = _ini_value(env[k])
+            if value is None or not _ini_key_ok(k):
+                # Said in a comment rather than silently dropped or mangled.
+                ini.append("; %s omitted: not representable in INI" % (k if _ini_key_ok(k) else "a var"))
+            else:
+                ini.append("%s=%s" % (k, value))
+        return "\n".join(ini)
     if fmt == "yaml":
         lines = [(k, _yaml_value(env[k])) for k in keys] + [(k, "null") for k in gone]
-        return "\n".join("%s: %s" % kv for kv in sorted(lines))
+        return "\n".join("%s: %s" % (_yaml_key(k), v) for k, v in sorted(lines))
     if fmt == "dotenv":
         return "\n".join("%s=%s" % (k, _dotenv_value(env[k])) for k in keys)
     if fmt == "powershell":
@@ -379,21 +431,47 @@ _YAML_TYPED_RE = re.compile(
 
 
 def _yaml_value(v: str) -> str:
-    """Quote a value unless a YAML reader would read it back as exactly this
-    string: empty, typed-looking (``true``, ``123``, ``null``), containing a
-    YAML indicator, or with surrounding whitespace all get JSON (double-quote)
-    quoting, which YAML accepts verbatim."""
-    import json as _json
+    """A YAML double-quoted scalar, ALWAYS: a plain scalar reads back typed
+    whenever it looks like anything (a date, ``0b101``, ``1_000``, a YAML 1.1
+    sexagesimal ``1:30``), and no fixed list catches every form. Escapes are
+    YAML's own: ``\\\\``, ``\\"``, ``\\n``/``\\r``/``\\t``, and ``\\x``/``\\u``
+    for every other character YAML does not allow raw in a stream (C0/C1
+    controls, DEL, U+2028/U+2029 line breaks, the BOM, surrogates,
+    U+FFFE/U+FFFF). Everything else is emitted as itself, so the document
+    stays readable UTF-8."""
+    out = ['"']
+    for c in v:
+        o = ord(c)
+        if c == "\\":
+            out.append("\\\\")
+        elif c == '"':
+            out.append('\\"')
+        elif c == "\n":
+            out.append("\\n")
+        elif c == "\r":
+            out.append("\\r")
+        elif c == "\t":
+            out.append("\\t")
+        elif o < 0x20 or 0x7F <= o <= 0x9F:
+            out.append("\\x%02x" % o)
+        elif o in (0x2028, 0x2029, 0xFEFF, 0xFFFE, 0xFFFF) or 0xD800 <= o <= 0xDFFF:
+            out.append("\\u%04x" % o)
+        else:
+            out.append(c)
+    out.append('"')
+    return "".join(out)
 
-    if (
-        v == ""
-        or _YAML_TYPED_RE.match(v)
-        or any(c in v for c in ":#'\"\n\t")
-        or v.strip() != v
-        or v[0] in "-?[]{}&*!|>%@`,"
-    ):
-        return _json.dumps(v)
-    return v
+
+_YAML_PLAIN_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _yaml_key(k: str) -> str:
+    """A key bare when it is a plain identifier YAML reads as a string, else
+    quoted like a value (``Y`` / ``NO`` / ``ON`` are booleans to a YAML 1.1
+    reader, and a Windows name like ``ProgramFiles(x86)`` is safer quoted)."""
+    if _YAML_PLAIN_KEY_RE.match(k) and not _YAML_TYPED_RE.match(k):
+        return k
+    return _yaml_value(k)
 
 
 class Env(DotAgentsArgs):

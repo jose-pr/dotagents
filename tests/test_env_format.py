@@ -89,6 +89,8 @@ def test_fish_escapes_backslashes():
 
 
 def test_yaml_quotes_typed_looking_values():
+    # Every value is double-quoted: no plain-scalar list catches every typed form.
+    # The key `N` is quoted too: YAML 1.1 reads a bare `N` as a boolean.
     out = _format_env(
         {"B": "true", "N": "123", "Z": "null", "F": "1e3", "S": "plain", "D": "-x"},
         "yaml",
@@ -97,8 +99,8 @@ def test_yaml_quotes_typed_looking_values():
         'B: "true"',
         'D: "-x"',
         'F: "1e3"',
-        'N: "123"',
-        'S: plain',
+        '"N": "123"',
+        'S: "plain"',
         'Z: "null"',
     ])
 
