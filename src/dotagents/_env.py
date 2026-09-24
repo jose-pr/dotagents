@@ -837,10 +837,27 @@ def _prepend_missing(path_entries: "list[str]", new_entries: "list[str]") -> "li
     return path_entries
 
 
+def _anchored(entry: str) -> bool:
+    """A path entry that does not depend on the current directory: absolute,
+    or rooted (a Windows ``/x`` or ``\\x`` is drive-relative, and Python 3.13+
+    no longer calls it absolute, but it never follows a ``cd``)."""
+    return bool(entry) and (os.path.isabs(entry) or entry[0] in "/\\")
+
+
 def _prepended_path_var(osenv: "dict[str, str]", var: str, entries: "list[str]") -> "Optional[str]":
     """The new value of an ``os.pathsep``-joined path var with ``entries``
-    prepended (:func:`_prepend_missing` order), or ``None`` if nothing changes."""
-    current = osenv.get(var, "").split(os.pathsep) if osenv.get(var) else []
+    prepended (:func:`_prepend_missing` order), or ``None`` if nothing changes.
+
+    ``entries`` always land at the front in that order, even when the inherited
+    value already holds some of them elsewhere: precedence is contract A's,
+    never the caller's. Empty and relative inherited entries are dropped -- they
+    resolve against whatever directory a later command runs in, the same hazard
+    as ``.`` on ``PATH``."""
+    ours = {os.path.normcase(e) for e in entries}
+    current = [
+        e for e in (osenv.get(var) or "").split(os.pathsep)
+        if _anchored(e) and os.path.normcase(e) not in ours
+    ]
     updated = os.pathsep.join(_prepend_missing(current, entries))
     return updated if updated != osenv.get(var, "") else None
 

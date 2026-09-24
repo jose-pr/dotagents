@@ -73,14 +73,33 @@ def test_a_malformed_env_py_does_not_abort_the_assembly(roots, shape):
 # PATH: no relative or empty entries survive into the assembled PATH.
 # --------------------------------------------------------------------------
 
-@_open("trust-03", "relative and empty inherited PATH entries are kept")
 def test_relative_and_empty_path_entries_are_dropped(roots, tmp_path):
     agents_dir, project_root = roots
     absolute = str(tmp_path / "abs-bin")
     base = {"PATH": os.pathsep.join([absolute, "", "relative/bin", "."])}
     parts = _run(agents_dir, project_root, base)["PATH"].split(os.pathsep)
     assert absolute in parts
-    assert all(p and os.path.isabs(p) for p in parts), parts
+    assert all(_env._anchored(p) for p in parts), parts
+
+
+def test_managed_bins_lead_path_in_contract_a_order_whatever_the_caller_had(roots, tmp_path):
+    """A caller PATH that already holds the user bin (the hook prefix used to
+    put it there) left it where it was, behind the system and overlay bins."""
+    agents_dir, project_root = roots
+    overlay = agents_dir / "overlays" / "x"  # a bin that must sort AFTER the user bin
+    overlay.mkdir(parents=True)
+    (overlay / "overlay.toml").write_text('name = "x"\n', encoding="utf-8")
+    user_bin = str(agents_dir / "bin")
+    other = str(tmp_path / "other-bin")
+    base = {"PATH": os.pathsep.join([user_bin, other])}
+    parts = _run(agents_dir, project_root, base)["PATH"].split(os.pathsep)
+    managed = [str(p) for p in _env.get_bin_paths(
+        Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=False))]
+    assert parts[:len(managed)] == list(reversed(managed))
+    assert parts.count(user_bin) == 1 and parts[-1] == other
+    # Idempotent: applying the result again changes nothing.
+    again = _run(agents_dir, project_root, {"PATH": os.pathsep.join(parts)})
+    assert "PATH" not in again or again["PATH"] == os.pathsep.join(parts)
 
 
 # --------------------------------------------------------------------------
