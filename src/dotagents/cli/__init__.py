@@ -87,23 +87,6 @@ _BUILTIN_COMMANDS = [
     About,
 ]
 
-# The cli submodules whose sources duho introspects for flag/help definitions;
-# every one is repointed inside a zipapp (see `_repoint_zipapp_sources`).
-# Discovered command modules never need repointing (their files are real on
-# disk -- see `_bundled_cmds_dir`), but duho walks the MRO and reads each BASE
-# class's module too, so `_common` (home of `DotAgentsArgs`) must be listed even
-# though it ships no command class of its own.
-_COMMAND_MODULES = (
-    "dotagents.cli",  # the umbrella itself: `Dotagents.cmdspath` lives here
-    "dotagents.cli.init",
-    "dotagents.cli.context",
-    "dotagents.cli.env",
-    "dotagents.cli.overlays",
-    "dotagents.cli.build_pyz",
-    "dotagents.cli.about",
-    "dotagents.cli._common",
-)
-
 #: Extra env-var command search paths (os.pathsep-split), additive to the scope
 #: walk.
 CMDS_PATH_ENV = "AGENTS_CMDS_PATH"
@@ -131,6 +114,35 @@ class Dotagents(LoggingArgs, Cli):
             self,
             "pick a subcommand, e.g. `init`, `overlays`, `context`, `env`, `build-pyz`",
         )
+
+
+def _command_modules(commands) -> "tuple[str, ...]":
+    """Every module duho reads a field definition from for ``commands``: the
+    module of each class in each command's MRO, and of its nested
+    ``_subcommands_``, restricted to ``dotagents.*`` / ``duho.*``.
+
+    duho walks the MRO and parses each BASE class's module too, so `_common`
+    (home of `DotAgentsArgs`) and `duho.presets` (`LoggingArgs`) belong here
+    although they ship no command of their own. Derived rather than listed, so a
+    new built-in cannot be left out: a module missing here keeps working in a
+    plain install and loses its flags and help only inside a `.pyz`."""
+    seen: "dict[str, None]" = {}
+    pending = list(commands)
+    while pending:
+        command = pending.pop(0)
+        for klass in getattr(command, "__mro__", ()):
+            module = getattr(klass, "__module__", "") or ""
+            if module == "dotagents" or module.startswith(("dotagents.", "duho.")):
+                seen.setdefault(module, None)
+        pending.extend(getattr(command, "_subcommands_", None) or [])
+    return tuple(seen)
+
+
+# The modules whose sources duho introspects for flag/help definitions; every
+# one is repointed inside a zipapp (see `_repoint_zipapp_sources`). Discovered
+# command modules never need repointing: their files are real on disk (see
+# `_bundled_cmds_dir`).
+_COMMAND_MODULES = _command_modules([Dotagents, *_BUILTIN_COMMANDS])
 
 
 def _bundled_cmds_dir() -> "Path | None":
@@ -397,9 +409,10 @@ def _repoint_zipapp_sources() -> None:
     so the read succeeds. A no-op for a plain install, where `__file__` already
     exists on disk.
 
-    Each BUILT-IN command class lives in its own `dotagents.cli.<x>` module, so
-    EVERY such module is repointed (plus duho's `LoggingArgs` preset,
-    `duho.presets`). DISCOVERED command modules do NOT need repointing: an
+    Every module in `_COMMAND_MODULES` is repointed: each built-in command's
+    own `dotagents.cli.<x>` module and the modules of its base classes (duho's
+    `LoggingArgs` preset, `duho.presets`, among them). DISCOVERED command
+    modules do NOT need repointing: an
     overlay's or a scope's cmds live on the real filesystem, and for the bundled
     `_overlay/dotagents/cmds` dir `_package_data_dir` extracts a zip-backed
     `_overlay` to real temp files before `discover_commands` imports from it, so
@@ -410,7 +423,7 @@ def _repoint_zipapp_sources() -> None:
     _module_index raises."""
     import importlib.resources as _ir
 
-    for modname in _COMMAND_MODULES + ("duho.presets",):
+    for modname in _COMMAND_MODULES:
         mod = sys.modules.get(modname)
         if mod is None:
             continue
