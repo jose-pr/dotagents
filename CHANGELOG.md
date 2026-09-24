@@ -55,6 +55,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   init --agents codex` to update the hook.
 - `tools/cloud-setup.sh` installs `dotagents-cli` by default; the `dotagents`
   name it used is not this project on PyPI.
+- `overlays add` / `sync` never delete a skill you placed or edited in the
+  shared `skills/` dir. A same-named skill already there is kept, with a
+  warning; a published copy you edited is kept on `sync` unless you pass
+  `--overwrite`, while an untouched copy still follows its overlay (the digest
+  of each copy is recorded in `skills/.dotagents-published.json`).
+- An overlay installed from a whole repository no longer copies the clone's
+  `.git`, nor tool caches (`__pycache__`, `.mypy_cache`, `node_modules`, …),
+  into the store. `overlays remove` deletes read-only files (git objects on
+  Windows) and unlinks a symlinked overlay instead of failing half-way; an
+  overlay that already carries a `.git` copy is removed cleanly.
+- `dotagents` with no subcommand logs its hint instead of raising when no
+  parser has been built.
 
 ## [0.5.1] - 2026-09-12
 
