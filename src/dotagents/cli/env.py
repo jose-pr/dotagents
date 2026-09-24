@@ -7,7 +7,7 @@ for the caller to consume; the logger only ever names vars (Leakage rule).
 
 import re
 from pathlib import Path, PureWindowsPath
-from typing import Optional
+from typing import Iterable, Optional
 
 from dotagents.cli._common import DotAgentsArgs, _write_stdout, resolve_user_store
 
@@ -182,8 +182,19 @@ def _looks_like_posix_path_list(key: str, value: str) -> bool:
     return any(_looks_like_posix_chunk(chunk) for chunk in value.split(";") if chunk)
 
 
-def _format_env(env: "dict[str, str]", output_format: str) -> str:
+def _format_env(
+    env: "dict[str, str]",
+    output_format: str,
+    removed: "Optional[Iterable[str]]" = None,
+) -> str:
     """Render the assembled env in the requested (canonical or aliased) format.
+
+    ``removed`` names vars to UNSET (default: ``env.removed`` when ``env`` is
+    an :class:`dotagents._env.EnvChanges`). They are rendered after the
+    assignments: ``unset K`` (export), ``set -e K`` (fish),
+    ``${env:K} = $null`` (powershell), ``set "K="`` (cmd), ``null`` (json,
+    yaml). ``dotenv`` and ``ini`` have no way to say "unset", so a removal is
+    left out of them.
 
     Shell-sourceable / assignment forms, one var per line:
 
@@ -219,6 +230,9 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
     from dotagents._env import FORMAT_ALIASES
 
     fmt = FORMAT_ALIASES.get(output_format, output_format)
+    if removed is None:
+        removed = getattr(env, "removed", ())
+    gone = sorted(k for k in set(removed) if k not in env)
 
     # `get_environment` assembles PATH in the HOST OS's convention (`;` and `\`
     # on Windows), which is what a native subprocess needs. POSIX shell formats
@@ -251,11 +265,14 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
     keys = sorted(env)
 
     if fmt == "json":
-        return _json.dumps({k: env[k] for k in keys}, indent=2, sort_keys=True)
+        data: "dict[str, Optional[str]]" = {k: env[k] for k in keys}
+        data.update((k, None) for k in gone)
+        return _json.dumps(data, indent=2, sort_keys=True)
     if fmt == "ini":
         return "\n".join(["[env]"] + ["%s=%s" % (k, env[k]) for k in keys])
     if fmt == "yaml":
-        return "\n".join("%s: %s" % (k, _yaml_value(env[k])) for k in keys)
+        lines = [(k, _yaml_value(env[k])) for k in keys] + [(k, "null") for k in gone]
+        return "\n".join("%s: %s" % kv for kv in sorted(lines))
     if fmt == "dotenv":
         return "\n".join("%s=%s" % (k, _dotenv_value(env[k])) for k in keys)
     if fmt == "powershell":
@@ -267,22 +284,29 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
         # undoubled `’` ended the string and the rest ran as code in the
         # `Invoke-Expression` loader. A name with `}` or a backtick cannot sit
         # inside `${env:...}` at all, so it is left out.
+        ok = [k for k in keys if not any(c in k for c in "}`")]
         return "\n".join(
-            "${env:%s} = '%s'" % (k, _ps_quote_body(env[k]))
-            for k in keys if not any(c in k for c in "}`")
+            ["${env:%s} = '%s'" % (k, _ps_quote_body(env[k])) for k in ok]
+            + ["${env:%s} = $null" % k for k in gone if not any(c in k for c in "}`")]
         )
     if fmt == "cmd":
-        return "\n".join('set "%s=%s"' % (k, _cmd_value(env[k])) for k in keys)
+        return "\n".join(
+            ['set "%s=%s"' % (k, _cmd_value(env[k])) for k in keys]
+            + ['set "%s="' % k for k in gone]
+        )
     if fmt == "fish":
         # fish single quotes: only `\` and `'` are escapes, and BOTH must be
         # escaped -- an unescaped `\\` in the value would collapse to `\`.
         return "\n".join(
-            "set -gx %s '%s'"
-            % (k, env[k].replace("\\", "\\\\").replace("'", "\\'"))
-            for k in keys
+            ["set -gx %s '%s'" % (k, env[k].replace("\\", "\\\\").replace("'", "\\'"))
+             for k in keys]
+            + ["set -e %s" % k for k in gone if _POSIX_IDENTIFIER_RE.match(k)]
         )
     # default / "export"
-    return "\n".join("export %s=%s" % (k, _sh_quote(env[k])) for k in keys)
+    return "\n".join(
+        ["export %s=%s" % (k, _sh_quote(env[k])) for k in keys]
+        + ["unset %s" % k for k in gone if _POSIX_IDENTIFIER_RE.match(k)]
+    )
 
 
 _PS_SINGLE_QUOTES = "'\u2018\u2019\u201a\u201b"
@@ -376,6 +400,8 @@ class Env(DotAgentsArgs):
     ``--diff`` emits only the vars that differ from the current environment (what
     a SessionStart hook injects); the default emits the full assembled env merged
     over the current one. Output is sensitive -- it may carry secret values.
+    A var an env layer unsets (``null`` from an ``env.py``, ``unset`` in a
+    plain file) is emitted as an unset where the format has one.
 
     ``--format`` selects the emitted syntax and defaults to ``auto``, which
     detects the CALLING shell (parent-process chain) and picks a matching format
@@ -451,14 +477,19 @@ class Env(DotAgentsArgs):
 
         if self.diff:
             env = _env.get_diff(scope, base_env=base, logger=self._logger_)
+            removed = env.removed
         else:
             changes = _env.get_environment(scope, base_env=base, logger=self._logger_)
+            removed = changes.removed
             # Inherited DOTAGENTS_* values are tool-internal secrets that are
             # never printed; only a change the env layers make shows up.
-            env = {k: v for k, v in base.items() if not k.startswith("DOTAGENTS_")}
+            env = {
+                k: v for k, v in base.items()
+                if not k.startswith("DOTAGENTS_") and k not in removed
+            }
             env.update(changes)
 
         # UTF-8 straight to the buffer: a bare print() encodes with the console
         # codepage and dies on the first non-Latin-1 character in any value.
-        _write_stdout(_format_env(env, output_format) + "\n")
+        _write_stdout(_format_env(env, output_format, removed) + "\n")
         return 0

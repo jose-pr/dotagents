@@ -21,12 +21,20 @@ Contract B, the exact sequence :func:`get_environment` performs:
      ACCUMULATED environment of every file before it; the result also
      accumulates. Later files win on conflicting keys.
   5. **``.py`` files are EXECUTED** (:func:`get_env_from_py` runs the script as
-     ``env.py --level <level> [--global]`` and reads back its env changes as JSON -- one object, or one object per line
-     merged in order, so overlay-managed blocks appended to one ``env.py`` can
-     each print their own); plain files are **sourced**
-     (:func:`get_env_from_file`, via ``bash ... env -0``).
+     ``env.py --level <level> [--global]`` and reads back its env changes as
+     JSON -- one object, or one object per line merged in order, so
+     overlay-managed blocks appended to one ``env.py`` can each print their
+     own); plain files are **sourced** (:func:`get_env_from_file`, via bash:
+     an ``env -0`` snapshot before and after the ``source``, in one process).
   6. :func:`get_diff` returns only the vars that differ from the caller's base
-     environment; :func:`get_environment` returns the full change set.
+     environment; :func:`get_environment` returns the full change set. Both
+     are an :class:`EnvChanges`: the vars set, plus ``removed`` -- the base
+     vars a layer unset (an ``env.py`` printing ``null`` for a key, a plain
+     file running ``unset``) and no later layer set again.
+
+An ``env.py`` value must be a JSON string, or ``null`` to unset the variable;
+any other JSON type is skipped with a warning naming the key (it used to be
+``str()``-coerced: ``false`` became ``False``, an array its Python repr).
 
 The identity/proxy model is wired into the output around the file chain:
 
@@ -74,9 +82,27 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from dotagents._scope import Scope, project_root_default
+
+
+class EnvChanges(dict):
+    """A change set: the vars set (``dict[str, str]``, as before) plus
+    :attr:`removed`, the vars a layer unset.
+
+    A plain ``dict`` subclass, so a caller that treats the result as the vars
+    to set keeps working; one that also honours removals reads ``removed``
+    (empty unless an ``env.py`` printed ``null`` for a key or a plain env file
+    ran ``unset``). A key is never in both."""
+
+    def __init__(self, *args, removed: "Iterable[str]" = (), **kwargs):
+        super().__init__(*args, **kwargs)
+        #: Names to unset.
+        self.removed: "set[str]" = set(removed)
+
+    def __repr__(self) -> str:
+        return "EnvChanges(%s, removed=%r)" % (dict.__repr__(self), sorted(self.removed))
 
 
 # OS-bootstrap vars a spawned interpreter needs to even start (Windows
@@ -471,7 +497,7 @@ def get_env_from_py(
     level: str = "",
     global_scope: bool = False,
     logger=None,
-) -> "dict[str, str]":
+) -> EnvChanges:
     """Execute an ``env.py`` and read back its JSON object(s) of env changes.
 
     The script runs as ``<python> env.py --level <level> [--global]``:
@@ -494,6 +520,10 @@ def get_env_from_py(
     key that cannot be an environment variable (empty, or containing ``=`` or
     NUL) and a value containing NUL are dropped with a warning naming the key:
     applied, they would crash the next spawn instead.
+
+    A value must be a JSON string; ``null`` unsets the variable (it lands in
+    the result's :attr:`EnvChanges.removed`); any other type is skipped with
+    a warning naming the key, never the value.
     """
     args = [interpreter(base_env), str(env_py), "--level", level, "--agent", level]
     if global_scope:
@@ -505,28 +535,39 @@ def get_env_from_py(
     except (OSError, ValueError) as e:  # interpreter missing / unusable env
         if logger:
             logger.warning("env.py could not run: %s (%s)", env_py, type(e).__name__)
-        return {}
+        return EnvChanges()
     if proc.returncode != 0:
         if logger:
             logger.warning("env.py failed (exit %s): %s", proc.returncode, env_py)
-        return {}
+        return EnvChanges()
     try:
         parsed = _parse_env_json(proc.stdout.decode("utf-8", "surrogateescape"))
     except (json.JSONDecodeError, ValueError) as e:
         if logger:
             logger.warning("env.py output not JSON: %s (%s)", env_py, e)
-        return {}
-    out: "dict[str, str]" = {}
+        return EnvChanges()
+    out = EnvChanges()
     for key, value in parsed.items():
         if not _is_valid_env_key(key):
             if logger:
                 logger.warning("env.py %s: skipped a key that is not a valid variable name", env_py)
             continue
-        value = str(value)
+        if value is None:
+            out.pop(key, None)
+            out.removed.add(key)
+            continue
+        if not isinstance(value, str):
+            if logger:
+                logger.warning(
+                    "env.py %s: skipped %s (value is a JSON %s, not a string)",
+                    env_py, key, type(value).__name__,
+                )
+            continue
         if "\0" in value:
             if logger:
                 logger.warning("env.py %s: skipped %s (value contains NUL)", env_py, key)
             continue
+        out.removed.discard(key)
         out[key] = value
     return out
 
@@ -651,7 +692,7 @@ def find_bash(logger=None) -> "Optional[str]":
 
 def get_env_from_file(
     env_file: Path, base_env: "dict[str, str]", logger=None
-) -> "dict[str, str]":
+) -> EnvChanges:
     """Source a plain env file in bash and return the vars it changed.
 
     Runs :data:`_SOURCE_SCRIPT`: an ``env -0`` snapshot, ``set -a; source
@@ -661,12 +702,13 @@ def get_env_from_file(
     under MSYS2 / Cygwin. If no bash is found (:func:`find_bash`), or the
     source FAILS (a missing file, a directory, a syntax error, an ``exit`` in
     the file), the file contributes nothing -- logged by name, never fatal.
+    A variable the file ``unset`` is in the result's ``removed``.
     """
     spawn = _spawn_env(base_env)
 
     bash = find_bash(logger)
     if bash is None:
-        return {}
+        return EnvChanges()
     try:
         proc = subprocess.run(
             # The path is bash's `$1`, never spliced into the script: a
@@ -681,14 +723,14 @@ def get_env_from_file(
     except OSError as e:
         if logger:
             logger.warning("cannot source env file (no bash?): %s (%s)", env_file, e)
-        return {}
+        return EnvChanges()
     records = proc.stdout.split(b"\0")
     # A file that calls `exit` itself ends the shell before the second
     # snapshot: that is a failure too, not an empty change set.
     if proc.returncode != 0 or _SNAP_AFTER not in records:
         if logger:
             logger.warning("env file source failed: %s", env_file)
-        return {}
+        return EnvChanges()
     cut = records.index(_SNAP_AFTER)
     tail = records[cut + 1:]
     native_at = tail.index(_SNAP_NATIVE) if _SNAP_NATIVE in tail else len(tail)
@@ -696,7 +738,7 @@ def get_env_from_file(
     after = _parse_env_entries(tail[:native_at])
     native = _parse_env_entries(tail[native_at + 1:])
 
-    changes: "dict[str, str]" = {}
+    changes = EnvChanges(removed=(k for k in before if k not in after))
     for key, value in after.items():
         if key in before and before[key] == value:
             continue
@@ -866,13 +908,14 @@ def get_environment(
     base_env: "Optional[dict[str, str]]" = None,
     explicit: "Optional[str]" = None,
     logger=None,
-) -> "dict[str, str]":
+) -> EnvChanges:
     """Assemble the env CHANGES (vars this adds/overrides vs ``base_env``) for a
     :class:`Scope`.
 
     Follows contract B: identity seeded, PATH bins first, the two tiers
     chained (later overrides earlier), then proxy normalization. Returns only
-    what changed.
+    what changed: the vars set, and in ``removed`` the ``base_env`` vars a
+    layer unset (and no later layer set again).
     """
     from dotagents._agents import stamp_identity
 
@@ -883,11 +926,18 @@ def get_environment(
     global_scope = scope.global_scope
 
     osenv = dict(base_env if base_env is not None else os.environ)
-    env: "dict[str, str]" = {}
+    base_keys = frozenset(osenv)
+    env = EnvChanges()
 
     def _apply(changes: "dict[str, str]") -> None:
-        env.update(changes)
-        osenv.update(changes)
+        for key, value in changes.items():
+            env[key] = osenv[key] = value
+            env.removed.discard(key)
+        for key in getattr(changes, "removed", ()):
+            env.pop(key, None)
+            osenv.pop(key, None)
+            if key in base_keys:
+                env.removed.add(key)
 
     # --- Identity seed --- before the file chain so files can override.
     _apply(stamp_identity(osenv, explicit=explicit, root=project_root))
@@ -974,11 +1024,12 @@ def get_diff(
     base_env: "Optional[dict[str, str]]" = None,
     explicit: "Optional[str]" = None,
     logger=None,
-) -> "dict[str, str]":
+) -> EnvChanges:
     """Only the assembled vars that differ from ``base_env`` (current env).
 
     ``get_environment`` already returns changes vs ``base_env``, so the diff is
-    the subset whose value actually differs from the base.
+    the subset whose value actually differs from the base, plus the base vars
+    a layer unset (``removed``).
     """
     base = dict(base_env if base_env is not None else os.environ)
     full = get_environment(
@@ -987,4 +1038,7 @@ def get_diff(
         explicit=explicit,
         logger=logger,
     )
-    return {k: v for k, v in full.items() if k not in base or base[k] != v}
+    return EnvChanges(
+        {k: v for k, v in full.items() if k not in base or base[k] != v},
+        removed=(k for k in full.removed if k in base),
+    )

@@ -243,6 +243,120 @@ def test_a_file_that_exits_early_is_a_failed_source(tmp_path, caplog):
     assert any("source failed" in r.getMessage() for r in caplog.records)
 
 
+# --------------------------------------------------------------------------
+# env-14: env.py values are strings (null = unset); plain files can unset.
+# --------------------------------------------------------------------------
+
+def test_env_py_values_must_be_strings_and_null_unsets(roots, caplog):
+    """`{k: str(v)}` turned null into 'None', false into 'False' and an array
+    into its Python repr, and nothing could unset a variable."""
+    import logging
+
+    agents_dir, project_root = roots
+    (agents_dir / "env.py").write_text(
+        "import json\nprint(json.dumps({'CLEAR_ME': None, 'FLAG': False,"
+        " 'ARR': ['a', 'b'], 'NUM': 1, 'S': 'ok'}))\n",
+        encoding="utf-8",
+    )
+    base = {"PATH": "/usr/bin", "CLEAR_ME": "old"}
+    with caplog.at_level(logging.WARNING, logger="t"):
+        env = _run(agents_dir, project_root, base, logger=logging.getLogger("t"))
+    assert env["S"] == "ok"
+    for bad in ("FLAG", "ARR", "NUM", "CLEAR_ME"):
+        assert bad not in env
+    assert env.removed == {"CLEAR_ME"}
+    warned = " ".join(r.getMessage() for r in caplog.records)
+    assert "FLAG" in warned and "ARR" in warned and "NUM" in warned
+
+
+def test_a_later_layer_can_set_what_an_earlier_one_unset(roots):
+    agents_dir, project_root = roots
+    (agents_dir / "env.py").write_text(
+        "import json\nprint(json.dumps({'X': None, 'Y': None}))\n", encoding="utf-8"
+    )
+    (project_root / ".agents" / "env.py").write_text(
+        "import json, os\nprint(json.dumps({'X': 'back', 'SAW_Y': str('Y' in os.environ)}))\n",
+        encoding="utf-8",
+    )
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin", "X": "1", "Y": "1"})
+    assert env["X"] == "back"
+    assert env["SAW_Y"] == "False"  # the unset reached the next layer's env
+    assert env.removed == {"Y"}
+
+
+def test_unsetting_a_var_the_base_never_had_is_no_change(roots):
+    agents_dir, project_root = roots
+    (agents_dir / "env.py").write_text(
+        "import json\nprint(json.dumps({'NEVER_SET': None}))\n", encoding="utf-8"
+    )
+    diff = _env.get_diff(_scope(agents_dir, project_root), base_env={"PATH": "/usr/bin"})
+    assert "NEVER_SET" not in diff and not diff.removed
+
+
+@needs_bash
+def test_plain_env_file_unset_is_reported(tmp_path):
+    """`_changed_env` reported only added or changed keys, so `unset FOO` in a
+    plain env file was dropped silently."""
+    env_file = tmp_path / "env"
+    env_file.write_text("unset KEEP_ME\nexport ADDED=1\n", encoding="utf-8")
+    base = dict(os.environ, KEEP_ME="x")
+    changes = _env.get_env_from_file(env_file, base_env=base)
+    assert dict(changes) == {"ADDED": "1"}
+    assert changes.removed == {"KEEP_ME"}
+
+
+def test_removals_render_per_format():
+    from dotagents.cli.env import _format_env
+
+    env = _env.EnvChanges({"A": "1"}, removed={"B"})
+    assert _format_env(env, "export") == "export A='1'\nunset B"
+    assert _format_env(env, "fish") == "set -gx A '1'\nset -e B"
+    assert _format_env(env, "powershell") == "${env:A} = '1'\n${env:B} = $null"
+    assert _format_env(env, "cmd") == 'set "A=1"\nset "B="'
+    assert json.loads(_format_env(env, "json")) == {"A": "1", "B": None}
+    assert "B" not in _format_env(env, "dotenv")
+    assert "B" not in _format_env(env, "ini")
+    yaml = pytest.importorskip("yaml")
+    assert yaml.safe_load(_format_env(env, "yaml")) == {"A": "1", "B": None}
+
+
+@needs_bash
+def test_export_unset_really_unsets_in_bash(tmp_path):
+    import subprocess
+    from dotagents.cli.env import _format_env
+
+    script = tmp_path / "env.sh"
+    script.write_text(
+        _format_env(_env.EnvChanges({"A": "1"}, removed={"B"}), "export") + "\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [_BASH, "-c", '. "$1"; printf "%s|%s" "$A" "${B-unset}"', "bash", str(script)],
+        capture_output=True, env=dict(os.environ, B="was-set"),
+    )
+    assert proc.stdout.decode() == "1|unset"
+
+
+def test_env_cli_emits_the_unset(roots, monkeypatch, capsys):
+    from dotagents.cli.env import Env
+
+    agents_dir, project_root = roots
+    (agents_dir / "env.py").write_text(
+        "import json\nprint(json.dumps({'GO_AWAY': None}))\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("AGENTS_HOME", str(agents_dir))
+    monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(project_root))
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.setenv("GO_AWAY", "1")
+    for diff in (True, False):
+        cmd = Env()
+        cmd.format = "json"
+        cmd.diff = diff
+        assert cmd() == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["GO_AWAY"] is None
+
+
 def test_find_bash_warns_once_when_there_is_none(monkeypatch, caplog):
     import logging
 
