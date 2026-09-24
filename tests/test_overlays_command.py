@@ -513,12 +513,16 @@ def test_cmd_add_dry_run_writes_nothing(tmp_path):
 
     src = make_source(tmp_path)
     scope = make_scope(tmp_path)
-    _run(
+    agents_md = scope.agents_root / "AGENTS.md"
+    before = agents_md.read_bytes()
+    rc = _run(
         OverlayAdd, name=["py-demo"], repo=[str(src)], global_scope=True,
         agents_dir=scope.agents_root, copy=True, dry_run=True,
     )
+    assert rc == 0
     assert not (scope.overlay_root / "py-demo").exists()
-    assert not (scope.shared_skills_dir / "py-lint").exists() if scope.shared_skills_dir.exists() else True
+    assert not (scope.shared_skills_dir / "py-lint").exists()
+    assert agents_md.read_bytes() == before, "a dry run must not recompose the block"
 
 
 def test_cmd_sync_glob_filter(tmp_path):
@@ -528,10 +532,15 @@ def test_cmd_sync_glob_filter(tmp_path):
     scope = make_scope(tmp_path)
     _run(OverlayAdd, name=["py-demo", "plain"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
-    # A glob that matches only py-demo; a run that touches only it must succeed.
+    # A new file upstream in BOTH overlays; a glob matching only py-demo must
+    # bring it to py-demo alone.
+    for name in ("py-demo", "plain"):
+        (src / name / "NEW.md").write_text("new\n", encoding="utf-8")
     rc = _run(OverlaySync, pattern="py*", repo=[str(src)], global_scope=True,
               agents_dir=scope.agents_root, copy=True, dry_run=False)
     assert rc == 0
+    assert (scope.overlay_root / "py-demo" / "NEW.md").is_file()
+    assert not (scope.overlay_root / "plain" / "NEW.md").exists()
 
 
 # --------------------------------------------------------------------------- #
@@ -789,19 +798,17 @@ def test_existing_bundled_overlay_manifests_still_parse(tmp_path):
     """Every shipped overlay.toml parses unchanged and reports default priority
     (none declares `priority` today) -- the field is optional and backward-compatible.
 
-    The example overlays moved to the `overlays` branch (D77), so a plain main
-    checkout has none to parse here; skip when the dir is absent. This still guards
-    the manifests on the overlays branch (or any checkout that has an overlays/ dir),
-    while the tmp-fixture tests above cover read_manifest's parsing on main."""
-    repo_overlays = Path(__file__).resolve().parents[1] / "overlays"
-    if not repo_overlays.is_dir():
-        pytest.skip("no bundled overlays/ (they live on the `overlays` branch, D77)")
-    # Either layout: the branch checked out AT `overlays/` (CI: `overlays-src/`,
-    # manifests at `overlays/<name>/`), or a clone of the branch placed under it
-    # (a dev box: `overlays/overlays/<name>/`).
-    manifests = sorted(repo_overlays.glob("*/overlay.toml")) or sorted(
-        repo_overlays.glob("overlays/*/overlay.toml")
-    )
+    The example overlays live on the `repo` branch (D77), under
+    `overlays/<name>/`. CI checks that branch out at `overlays-src/`, a dev box
+    at `repo/` (a gitignored worktree); an older layout put it at `overlays/`.
+    The first of those present is parsed; a checkout with none of them skips,
+    and the tmp-fixture tests above cover read_manifest's parsing there."""
+    checkout = Path(__file__).resolve().parents[1]
+    candidates = [checkout / d for d in ("overlays-src/overlays", "repo/overlays", "overlays/overlays", "overlays")]
+    repo_overlays = next((d for d in candidates if list(d.glob("*/overlay.toml"))), None)
+    if repo_overlays is None:
+        pytest.skip("no checkout of the example overlays (overlays-src/, repo/ or overlays/)")
+    manifests = sorted(repo_overlays.glob("*/overlay.toml"))
     assert manifests, "expected bundled overlays to exist"
     for manifest in manifests:
         parsed = Overlay(manifest.parent).read_manifest()
