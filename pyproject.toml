@@ -1,12 +1,11 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 # Distribution name is `dotagents-cli`; the import package stays `dotagents` (see
 # tool.hatch...packages) and the console script stays `dotagents` (project.scripts),
 # so `pip install dotagents-cli` gives you `import dotagents` and a `dotagents`
-# command. The bare `dotagents` name is unclaimed on PyPI -- worth registering as a
-# redirect/placeholder before someone else does, but the CLI ships under -cli.
+# command.
 [project]
 name = "dotagents-cli"
 version = "0.5.1"
@@ -14,20 +13,22 @@ authors = [{ name = "Jose A." }]
 description = "The dotagents CLI: install and manage a portable ~/.agents config for AI coding agents"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 dependencies = [
     "duho>=0.5.0,<0.6",
@@ -39,7 +40,7 @@ uri = ["pathlib_next[uri]"]
 http = ["pathlib_next[http]"]
 sftp = ["pathlib_next[sftp]"]
 s3 = ["pathlib_next[s3]"]
-dev = ["build", "hatchling", "pytest", "pathlib_next[http]"]
+dev = ["build", "hatchling>=1.27", "pytest", "pyyaml", "pathlib_next[http]"]
 docs = [
     "mkdocs>=1.5",
     "mkdocs-material>=9.5",
@@ -53,6 +54,7 @@ dotagents = "dotagents.cli:main"
 Homepage = "https://github.com/jose-pr/dotagents/"
 Repository = "https://github.com/jose-pr/dotagents"
 Documentation = "https://jose-pr.github.io/dotagents/"
+Issues = "https://github.com/jose-pr/dotagents/issues"
 
 # Private files never ship, even when present in the tree: `*.local.*` is the
 # unshared per-machine override convention and `CLAUDE*` is agent config. Hatchling

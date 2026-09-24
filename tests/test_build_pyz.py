@@ -1,7 +1,7 @@
 """Unit coverage for `build-pyz` and for what the built artifacts carry.
 
-The version-stamping regex and a real staging of the package into a zipapp
-(with pip's vendoring step stubbed out, so no network).
+The version-stamping regex, the dependency pins, and a real staging of the
+package into a zipapp (with pip's vendoring step stubbed out, so no network).
 The wheel/sdist case builds for real with ``python -m build --no-isolation``
 and skips when `build`/`hatchling` are not installed (the `dev` extra has both).
 
@@ -79,6 +79,20 @@ def test_reads_the_real_repo_pyproject_toml():
     assert __version__ == match.group(1)
 
 
+def test_vendored_pins_are_the_declared_floors():
+    """The .pyz vendors the FLOOR of each range pyproject.toml declares.
+
+    The two copies are maintained by hand; a floor raised without moving the
+    pin ships a zipapp bundling a version `pip install dotagents-cli` refuses.
+    """
+    text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    floors = dict(re.findall(r'"(duho|pathlib_next)>=([^,"]+)', text))
+    assert floors == {
+        "duho": BuildPyz.duho_version,
+        "pathlib_next": BuildPyz.pathlib_next_version,
+    }
+
+
 def _copy_tree(dest: Path) -> Path:
     """A copy of the buildable project (no VCS, no .gitignore) with private
     files planted at the root and inside the package."""
@@ -100,6 +114,7 @@ def _assert_clean(names: "list[str]", prefix: str) -> None:
     leaked = [n for n in names if re.search(r"\.local\.|(^|/)CLAUDE", n)]
     assert not leaked, "private files shipped: %s" % leaked
     assert prefix + "dotagents/AGENTS.md" in names
+    assert prefix + "dotagents/py.typed" in names
     assert "claude_probe.py" in basenames
 
 
@@ -148,3 +163,7 @@ def test_wheel_and_sdist_leave_private_files_out(tmp_path):
     with tarfile.open(sdist) as tar:
         members = [m.name.split("/", 1)[1] for m in tar.getmembers() if "/" in m.name]
     _assert_clean(members, "src/")
+    metadata = zipfile.ZipFile(wheel).read(
+        next(n for n in zipfile.ZipFile(wheel).namelist() if n.endswith(".dist-info/METADATA"))
+    ).decode("utf-8")
+    assert "License-Expression: MIT" in metadata

@@ -76,6 +76,7 @@ class BuildPyz(LoggingArgs, Cmd):
 
     pathlib_next_version: str = "0.9.0"
     "Pinned pathlib_next version to vendor."
+    ("--pathlib-next-version",)
 
     extras: str = ""
     (
@@ -83,7 +84,6 @@ class BuildPyz(LoggingArgs, Cmd):
         "so the .pyz speaks those schemes for overlay sources; none by default."
     )
     ("--extras",)
-    ("--pathlib-next-version",)
 
     def __call__(self) -> int:
         import zipapp
