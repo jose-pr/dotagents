@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]  # PEP 639 license fields need 1.27
 build-backend = "hatchling.build"
 
 [project]
@@ -37,11 +37,14 @@ Homepage = "https://github.com/<gh_org>/<project_name>/"
 Documentation = "https://<gh_org>.github.io/<project_name>/"
 Issues = "https://github.com/<gh_org>/<project_name>/issues"
 
+# Personal overrides (`*.local.*`) and agent config (`CLAUDE*`) never ship, even
+# from a tree without its .gitignore (a copy, an sdist rebuild).
 [tool.hatch.build.targets.sdist]
-exclude = ["/.*", "/benchmarks"]
+exclude = ["/.*", "/benchmarks", "*.local.*", "CLAUDE*"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/<package_name>"]
+exclude = ["*.local.*", "CLAUDE*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
