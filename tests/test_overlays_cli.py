@@ -302,6 +302,7 @@ def test_list_shows_both_scopes_unless_global(tmp_path, monkeypatch, capsys):
 
 
 def test_system_store_is_walked_first_and_shadowed_by_user(tmp_path, monkeypatch):
+    from dotagents import _scope
     from dotagents._scope import Scope
 
     system = tmp_path / "etc-agents"
@@ -310,11 +311,61 @@ def test_system_store_is_walked_first_and_shadowed_by_user(tmp_path, monkeypatch
               "store/overlays/common/bin"):
         (tmp_path / d).mkdir(parents=True)
     monkeypatch.setenv("AGENTS_SYSTEM_ROOT", str(system))
+    # A tmp dir is user-writable; pretend it passed the administrators-only check.
+    monkeypatch.setattr(_scope, "_system_root_cache", {})
+    monkeypatch.setattr(_scope, "_system_root_is_safe", lambda p: (True, ""))
     scope = Scope.of(agents_dir=store)
     assert scope.stores == [system, store]
     assert [(o.name, o.store) for o in scope.overlays] == [("sys-only", system), ("common", store)]
     levels = [lvl for lvl, _p, _r in scope.paths({"default": "bin"}, include_missing=True)]
     assert levels == ["sys-only", "system", "common", "user"]
+
+
+@pytest.fixture
+def _system(monkeypatch):
+    from dotagents import _scope
+
+    monkeypatch.setattr(_scope, "_system_root_cache", {})
+    monkeypatch.delenv("AGENTS_SYSTEM_ROOT", raising=False)
+    return _scope
+
+
+def test_windows_has_no_default_system_store(_system, monkeypatch):
+    # `/etc/agents` on Windows is drive-relative (`\etc\agents`) and any local
+    # account can create it; its env.py and cmds ran in every user's session.
+    monkeypatch.setattr(_system, "_is_windows", lambda: True)
+    assert _system.system_root_default() is None
+
+
+def test_system_store_must_be_absolute_present_and_admin_only(_system, monkeypatch, tmp_path, caplog):
+    monkeypatch.setenv("AGENTS_SYSTEM_ROOT", "relative/agents")
+    assert _system.system_root_default() is None
+    assert "not an absolute path" in caplog.text
+
+    monkeypatch.setenv("AGENTS_SYSTEM_ROOT", str(tmp_path / "absent"))
+    assert _system.system_root_default() is None, "a missing root contributes nothing, not even bin/"
+
+    monkeypatch.setenv("AGENTS_SYSTEM_ROOT", str(tmp_path))
+    monkeypatch.setattr(_system, "_system_root_is_safe", lambda p: (False, "a user can write it"))
+    assert _system.system_root_default() is None
+    assert "a user can write it" in caplog.text
+
+
+def test_a_user_writable_dir_is_not_a_safe_system_store(tmp_path):
+    # The real check, on whichever OS runs the suite: a tmp dir belongs to the
+    # current (non-root, or non-admin-only) user.
+    from dotagents._scope import _system_root_is_safe
+
+    ok, reason = _system_root_is_safe(tmp_path)
+    assert not ok and reason
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL check")
+def test_an_admin_only_windows_dir_is_a_safe_system_store():
+    from dotagents._scope import _system_root_is_safe
+
+    ok, reason = _system_root_is_safe(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
+    assert ok, reason
 
 
 def test_umbrella_without_subcommand_exits_2():

@@ -145,8 +145,9 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   own `PWD`/`OLDPWD`/`SHLVL`/`MSYSTEM*` are never reported as a file's changes.
 - **`Scope.paths(*names, include_missing=False)`** — the Contract-A precedence
   walk / filename resolution, store by
-  store over `Scope.stores` — system (`Scope.system_root`, `/etc/agents` or
-  `$AGENTS_SYSTEM_ROOT`), user, project — each store's overlays first, then the
+  store over `Scope.stores` — system (`Scope.system_root`, `/etc/agents` on POSIX or
+  `$AGENTS_SYSTEM_ROOT`; `None` — skipped — unless it exists and only
+  administrators can write it; no default on Windows), user, project — each store's overlays first, then the
   store itself; then project-root. The project store and project-root exist
   only in a project scope (`overlays add` installs into the project store by
   default; it is walked like any other). Each
@@ -323,8 +324,12 @@ Config / path / sync vars (`AGENTS_*`, non-secret — read, and some emitted):
 
 - `AGENTS_HOME` — the configurable user-scope store path (default `~/.agents`). Also
   **emitted** by `dotagents env` (D79) and set for overlay setup scripts / sync hooks.
-- `AGENTS_SYSTEM_ROOT` — the machine-wide store (default `/etc/agents`), walked
-  first for overlays/bin/lib/env/cmds/AGENTS.md; nothing installs into it.
+- `AGENTS_SYSTEM_ROOT` — the machine-wide store (default `/etc/agents` on
+  POSIX, none on Windows), walked first for overlays/bin/lib/env/cmds/AGENTS.md;
+  nothing installs into it. It must be an absolute path to an existing dir that
+  only administrators can write (POSIX: root-owned, not group/world-writable;
+  Windows: no allow-write ACE outside Administrators/SYSTEM/TrustedInstaller),
+  else it is skipped with a warning (`_scope.system_root_default()`).
 - `AGENTS_STORE_DIR` — per-project store location (absolute paths allowed).
 - `AGENTS_OVERLAYS_REPO` — the default overlay repo for `overlays` (always a
   collection: a directory of overlays or a registry file, at a local path, an

@@ -17,8 +17,8 @@ only wires args) to match ``_overlays.py`` / ``_skills.py``:
   first offering a name wins. The command classes only use the returned
   object's ``available`` / ``overlay_dir`` / ``root`` -- see ``dotagents._sources``.
 
-The ``system`` store (``Scope.system_root``: ``/etc/agents``, or
-``$AGENTS_SYSTEM_ROOT``) is walked by the Contract-A resolver (``Scope.paths``)
+The ``system`` store (``Scope.system_root``: ``/etc/agents`` on POSIX, or
+``$AGENTS_SYSTEM_ROOT``; only when administrators alone can write it) is walked by the Contract-A resolver (``Scope.paths``)
 for overlays/env/context/bin/cmds like any store, first in precedence, but
 nothing installs into it -- there is no ``--system`` scope for ``init`` /
 ``overlays``.
@@ -72,10 +72,14 @@ class Scope:
     ):
         self.level = level
         self.agents_root = Path(agents_root)
-        #: The machine-wide store (``/etc/agents``, or ``$AGENTS_SYSTEM_ROOT``):
-        #: walked for overlays/bin/lib/env/cmds/AGENTS.md like any store, first
-        #: in precedence; nothing installs into it (no ``--system`` scope).
-        self.system_root = Path(system_root) if system_root else system_root_default()
+        #: The machine-wide store (``/etc/agents`` on POSIX, or
+        #: ``$AGENTS_SYSTEM_ROOT``; ``None`` when there is none, see
+        #: :func:`system_root_default`): walked for overlays/bin/lib/env/cmds/
+        #: AGENTS.md like any store, first in precedence; nothing installs into
+        #: it (no ``--system`` scope).
+        self.system_root: "Optional[Path]" = (
+            Path(system_root) if system_root else system_root_default()
+        )
         if level == "user":
             self.user_root = self.agents_root
             self.project_root: "Optional[Path]" = None
@@ -109,7 +113,7 @@ class Scope:
         return self.level == "user"
 
     @property
-    def system_store(self) -> Path:
+    def system_store(self) -> "Optional[Path]":
         """Alias of :attr:`system_root`, for symmetry with :attr:`project_store`."""
         return self.system_root
 
@@ -120,9 +124,10 @@ class Scope:
 
     @property
     def stores(self) -> "list[Path]":
-        """The stores in play, in precedence order: the system store, the user
-        store, then (in a project scope) the project's."""
-        stores = [self.system_root, self.user_root]
+        """The stores in play, in precedence order: the system store (when
+        there is one), the user store, then (in a project scope) the project's."""
+        stores = [self.system_root] if self.system_root is not None else []
+        stores.append(self.user_root)
         if not self.global_scope:
             stores.append(self.agents_root)
         return stores
@@ -131,7 +136,7 @@ class Scope:
         """The contract-A level name of one of :attr:`stores`: ``system``,
         ``user`` or ``project``."""
         store = Path(store)
-        if store == self.system_root:
+        if self.system_root is not None and store == self.system_root:
             return "system"
         if store == self.user_root:
             return "user"
@@ -262,14 +267,107 @@ def resolve_scope(
 
 
 #: The machine-wide store's location; read, never printed. Defaults to
-#: ``/etc/agents`` (a Windows path when set on Windows).
+#: ``/etc/agents`` on POSIX; Windows has no default (D93).
 SYSTEM_ROOT_ENV = "AGENTS_SYSTEM_ROOT"
 
+_system_root_cache: "dict[str, Optional[Path]]" = {}
 
-def system_root_default() -> Path:
-    """``$AGENTS_SYSTEM_ROOT`` if set, else ``/etc/agents``."""
-    value = os.environ.get(SYSTEM_ROOT_ENV)
-    return Path(value).expanduser() if value else Path("/etc/agents")
+#: Windows SIDs allowed to hold write access on a system store: Administrators,
+#: SYSTEM, TrustedInstaller. Any other allow-write ACE (Users, Authenticated
+#: Users, Everyone, a single user's SID) makes the store untrusted.
+_WINDOWS_TRUSTED_SIDS = (
+    "S-1-5-32-544",
+    "S-1-5-18",
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+)
+
+_WINDOWS_ACL_CHECK = r"""
+$ErrorActionPreference = 'Stop'
+$ok = @(%(sids)s)
+$w = [System.Security.AccessControl.FileSystemRights]'WriteData,AppendData,WriteExtendedAttributes,WriteAttributes,Delete,DeleteSubdirectoriesAndFiles,ChangePermissions,TakeOwnership'
+$rules = (Get-Acl -LiteralPath '%(path)s').GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+foreach ($r in $rules) {
+  if ($r.AccessControlType -ne 'Allow') { continue }
+  if ($r.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
+  if (($r.FileSystemRights -band $w) -and ($ok -notcontains $r.IdentityReference.Value)) {
+    Write-Output $r.IdentityReference.Value; exit 1
+  }
+}
+exit 0
+"""
+
+
+def _is_windows() -> bool:
+    """Seam: tests patch this, never ``os.name``."""
+    return os.name == "nt"
+
+
+def _system_root_is_safe(path: Path) -> "tuple[bool, str]":
+    """Whether only administrators can write ``path`` -- the bar for a store
+    whose ``env.py`` and ``cmds/`` run in every user's session. POSIX: owned by
+    root and not group/world-writable. Windows: no allow-write ACE for any SID
+    but Administrators, SYSTEM or TrustedInstaller. Returns ``(ok, reason)``."""
+    if not _is_windows():
+        try:
+            st = os.stat(str(path))
+        except OSError as exc:
+            return False, "cannot stat it (%s)" % exc
+        if st.st_uid != 0:
+            return False, "it is not owned by root"
+        if st.st_mode & 0o022:
+            return False, "it is group- or world-writable"
+        return True, ""
+    import subprocess
+
+    script = _WINDOWS_ACL_CHECK % {
+        "sids": ", ".join("'%s'" % sid for sid in _WINDOWS_TRUSTED_SIDS),
+        "path": str(path).replace("'", "''"),
+    }
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, "its ACL could not be read (%s)" % exc
+    if res.returncode == 0:
+        return True, ""
+    who = res.stdout.strip() or res.stderr.strip()[:200]
+    return False, "a non-administrator can write it (%s)" % (who or "unreadable ACL")
+
+
+def system_root_default() -> "Optional[Path]":
+    """The machine-wide store, or ``None`` when there is none to walk.
+
+    ``$AGENTS_SYSTEM_ROOT`` when set (it must be an absolute path), else
+    ``/etc/agents`` on POSIX and nothing on Windows -- there ``/etc/agents`` is
+    drive-relative (``\\etc\\agents``), and any local account can create it
+    (D93). A root that does not exist is ``None`` too, so nothing of it (a
+    ``bin/`` on PATH included) is walked. A root that a non-administrator can
+    write is skipped with a warning: its ``env.py`` and ``cmds/`` would run in
+    every user's session. Resolved once per process and value."""
+    value = os.environ.get(SYSTEM_ROOT_ENV) or ""
+    if value in _system_root_cache:
+        return _system_root_cache[value]
+    import logging
+
+    log = logging.getLogger("dotagents")
+    root: "Optional[Path]" = None
+    if value:
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            log.warning("ignoring $%s=%r: not an absolute path", SYSTEM_ROOT_ENV, value)
+            candidate = None
+    else:
+        candidate = None if _is_windows() else Path("/etc/agents")
+    if candidate is not None and candidate.is_dir():
+        ok, reason = _system_root_is_safe(candidate)
+        if ok:
+            root = candidate
+        else:
+            log.warning("ignoring the system store %s: %s", candidate, reason)
+    _system_root_cache[value] = root
+    return root
 
 
 #: The configurable user-scope store (D58). Every reader of the user store
