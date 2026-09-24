@@ -241,6 +241,18 @@ def remove_block(
         write_text_lf(target, head + tail)
     return "removed"
 
+def _import_target(entry: Path, ref: str) -> "Path | None":
+    """Where an `@ref` in ``entry`` points (relative to ``entry``'s dir, `~`
+    expanded), resolved; None when it cannot be resolved."""
+    try:
+        path = Path(ref).expanduser()
+        if not path.is_absolute():
+            path = Path(entry).parent / path
+        return path.resolve()
+    except (OSError, ValueError):
+        return None
+
+
 def merge_include_line(
     target: Path,
     include_line: str,
@@ -264,6 +276,12 @@ def merge_include_line(
         existing = target.read_text(encoding="utf-8-sig")
         if any(ln.strip() == line for ln in existing.splitlines()):
             return "skipped (present)"
+        # Any spelling of the same file (`@~/.agents/AGENTS.md`, an absolute
+        # path) already includes it; a second include would load it twice.
+        wanted = _import_target(target, line[1:] if line.startswith("@") else line)
+        for ref in re.findall(r"(?<!\S)@(\S+)", existing):
+            if wanted is not None and _import_target(target, ref) == wanted:
+                return "skipped (present)"
     block_text = "%s\n%s\n%s\n" % (BEGIN_MARKER, line, END_MARKER)
     return merge_block(
         target, block_text, force=force, dry_run=dry_run, backup_root=backup_root,

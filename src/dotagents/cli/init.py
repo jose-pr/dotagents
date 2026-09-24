@@ -65,12 +65,14 @@ class Init(DotAgentsArgs):
 
     def __call__(self) -> int:
         project = False
+        scope_level, project_root = None, None
         if self.dest is not None:
             dest = Path(self.dest).expanduser().resolve()
         else:
             scope = self.resolve_scope()
             dest = Path(scope.agents_root).expanduser().resolve()
             project = not scope.global_scope
+            scope_level, project_root = scope.level, scope.project_root
             self._logger_.info("scope: %s (%s)", scope.level, dest)
 
         # An explicit --from is recorded in the store's config, so a later plain
@@ -90,6 +92,8 @@ class Init(DotAgentsArgs):
             wire_hooks=not self.no_hooks,
             powershell_env_hook=self.powershell_env_hook,
             project=project,
+            scope_level=scope_level,
+            project_root=project_root,
         )
 
         if self.from_ is not None and not self.dry_run:

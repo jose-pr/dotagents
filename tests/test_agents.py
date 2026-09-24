@@ -117,7 +117,8 @@ def test_pi_user_store_gets_a_pointer_in_its_config_dir(monkeypatch, tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     _agents.PiAgent().write_base_config(store, src, base, force=False, dry_run=False, logger=None)
-    assert "# BASE" in (store / "AGENTS.md").read_text(encoding="utf-8")
+    # The store's AGENTS.md is `init`'s to write, once; pi adds only its pointer.
+    assert not (store / "AGENTS.md").exists()
     entry = (tmp_path / "pi" / "AGENTS.md").read_text(encoding="utf-8")
     assert (store / "AGENTS.md").resolve().as_posix() in entry
     assert "# BASE" not in entry, "a pointer, never a copy of the block"
@@ -126,7 +127,6 @@ def test_pi_user_store_gets_a_pointer_in_its_config_dir(monkeypatch, tmp_path):
     project_store = tmp_path / "proj" / ".agents"
     project_store.mkdir(parents=True)
     _agents.PiAgent().write_base_config(project_store, src, base, force=False, dry_run=False, logger=None)
-    assert (project_store / "AGENTS.md").is_file()
     assert (tmp_path / "pi" / "AGENTS.md").read_text(encoding="utf-8") == entry
 
 

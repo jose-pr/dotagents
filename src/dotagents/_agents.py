@@ -22,13 +22,64 @@ def _is_user_store(dest: "str | os.PathLike[str]") -> bool:
         return False
 
 
-#: A Claude Code `@path` include line: the path is the rest of the line.
-_INCLUDE_LINE_RE = re.compile(r"^\s*@(\S+)\s*$")
+#: A Claude Code `@path` import: `@` at the start of a line or after
+#: whitespace, anywhere on the line (list items and prose included), outside
+#: code spans and fenced blocks. Not an email address (no space before `@`).
+_IMPORT_RE = re.compile(r"(?<!\S)@(\S+)")
+_FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+_CODE_SPAN_RE = re.compile(r"`+[^`]*`+")
+#: Claude Code follows imports at most this many hops deep.
+_MAX_IMPORT_DEPTH = 4
 
 
-def _claude_includes(entry_file: Path, seen: "set[Path]") -> None:
-    """Add ``entry_file`` and every file it ``@``-includes (recursively,
-    relative to the including file, ``~`` expanded) to ``seen``."""
+def _claude_imports(text: str) -> "list[str]":
+    """The `@path` imports in ``text`` the way Claude reads them: fenced
+    blocks and backtick code spans are skipped."""
+    out: "list[str]" = []
+    fence = None
+    for line in text.splitlines():
+        m = _FENCE_RE.match(line)
+        if m:
+            marker = m.group(1)
+            if fence is None:
+                fence = marker[0]
+            elif marker[0] == fence:
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        out.extend(_IMPORT_RE.findall(_CODE_SPAN_RE.sub(" ", line)))
+    return out
+
+
+def _git_tracked_or_unignored(path: Path) -> bool:
+    """True when ``path`` sits in a git work tree and git does NOT ignore it --
+    a file there is (or will be) committed. False outside a repository."""
+    import subprocess
+
+    parent = Path(path).parent
+    while not parent.exists() and parent != parent.parent:
+        parent = parent.parent
+    try:
+        inside = subprocess.run(
+            ["git", "-C", str(parent), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, text=True,
+        )
+        if inside.returncode != 0 or inside.stdout.strip() != "true":
+            return False
+        ignored = subprocess.run(
+            ["git", "-C", str(parent), "check-ignore", "-q", "--", str(path)],
+            capture_output=True, text=True,
+        )
+    except OSError:
+        return False
+    return ignored.returncode == 1
+
+
+def _claude_includes(entry_file: Path, seen: "set[Path]", depth: int = 0) -> None:
+    """Add ``entry_file`` and every file it ``@``-imports (relative to the
+    importing file, ``~`` expanded, at most :data:`_MAX_IMPORT_DEPTH` hops) to
+    ``seen``."""
     try:
         resolved = entry_file.expanduser().resolve()
     except OSError:
@@ -36,18 +87,17 @@ def _claude_includes(entry_file: Path, seen: "set[Path]") -> None:
     if resolved in seen or not resolved.is_file():
         return
     seen.add(resolved)
-    try:
-        lines = resolved.read_text(encoding="utf-8").splitlines()
-    except OSError:
+    if depth >= _MAX_IMPORT_DEPTH:
         return
-    for line in lines:
-        m = _INCLUDE_LINE_RE.match(line)
-        if not m:
-            continue
-        ref = Path(m.group(1)).expanduser()
+    try:
+        text = resolved.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return
+    for ref_text in _claude_imports(text):
+        ref = Path(ref_text).expanduser()
         if not ref.is_absolute():
             ref = resolved.parent / ref
-        _claude_includes(ref, seen)
+        _claude_includes(ref, seen, depth + 1)
 
 
 class Agent:
@@ -64,6 +114,24 @@ class Agent:
     context_files: list[str] = []
     harness_loads: list[str] = []
     detect_env_vars: list[str] = []
+
+    #: Set by `init` (`_apply_base`): the scope it writes for, "user" or
+    #: "project", and the project root. None when unknown (an adapter called
+    #: directly, `init --dest`): the store is then compared with the user
+    #: store's resolution. Adapters decide user-vs-project from this, never by
+    #: re-deriving it from `$AGENTS_HOME`.
+    scope_level: "Optional[str]" = None
+    project_root: "Optional[Path]" = None
+
+    def _user_scope(self, dest: Path) -> bool:
+        if self.scope_level is not None:
+            return self.scope_level == "user"
+        return _is_user_store(dest)
+
+    def _project_dir(self, dest: Path) -> Path:
+        if self.project_root is not None:
+            return Path(self.project_root).expanduser().resolve()
+        return Path(dest).expanduser().resolve().parent
 
     # --- identity mapping ----------------------------------------------
     harness_id: str = ""
@@ -89,7 +157,9 @@ class Agent:
     def write_base_config(
         self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger
     ) -> None:
-        """Write the base configuration files for this agent (used by init)."""
+        """This harness's last mile to the store's AGENTS.md, which `init`
+        writes itself: an include in the harness's own entry file, a pointer,
+        or nothing when the harness reads the context another way."""
         pass
 
     #: The harness's own instruction file, relative to the PROJECT ROOT, that
@@ -186,7 +256,7 @@ class ClaudeAgent(Agent):
     _walk_stop: "Optional[Path]" = None
     #: Claude Code's entry files, relative to the project root (`~/`-prefixed =
     #: the user-level one). `@path` lines in any of them are includes.
-    ENTRY_FILES = ("~/.claude/CLAUDE.md", "CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md")
+    ENTRY_FILES = ("CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md")
     context_target = ".claude/CLAUDE.md"
     # Documented markers (code.claude.com/docs/en/env-vars): CLAUDECODE=1 plus the
     # CLAUDE_CODE_* family (CLAUDE_CODE_ENTRYPOINT, ...).
@@ -204,13 +274,29 @@ class ClaudeAgent(Agent):
         # (code.claude.com/docs/en/cli-reference, system prompt flags).
         return ["--append-system-prompt-file", str(context_file)]
 
+    @staticmethod
+    def _user_config_dir() -> Path:
+        """Claude Code's user config dir: ``$CLAUDE_CONFIG_DIR`` when set, else
+        ``~/.claude`` -- settings, user memory and skills all live there."""
+        return Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")).expanduser()
+
     def loaded_paths(self, project_root: Path) -> "list[Path]":
         seen: "set[Path]" = set()
-        for entry in self.ENTRY_FILES:
-            if entry.startswith("~/"):
-                _claude_includes(Path(entry), seen)
-            else:
-                _claude_includes(Path(project_root) / entry, seen)
+        _claude_includes(self._user_config_dir() / "CLAUDE.md", seen)
+        # The project root's entry files and every ancestor's: Claude walks up.
+        try:
+            chain = [Path(project_root).resolve(), *Path(project_root).resolve().parents]
+        except OSError:
+            chain = [Path(project_root)]
+        if self._walk_stop is not None:
+            stop = Path(self._walk_stop).resolve()
+            chain = [d for d in chain if d == stop or stop in d.parents]
+        user_dir = self._user_config_dir().resolve()
+        for d in chain:
+            for entry in self.ENTRY_FILES:
+                if (d / entry).resolve() == user_dir / "CLAUDE.md":
+                    continue
+                _claude_includes(d / entry, seen)
         seen.update(self._fallback_agents_md(Path(project_root)))
         return super().loaded_paths(project_root) + sorted(seen)
 
@@ -242,11 +328,11 @@ class ClaudeAgent(Agent):
         return out
 
     def _config_root(self, dest: Path) -> Path:
-        """`~/.claude` for the user store, `<project>/.claude` otherwise
-        (`dest` is `<scope>/.agents`, so its parent is the project root)."""
-        if _is_user_store(dest):
-            return Path.home() / ".claude"
-        return Path(dest).expanduser().resolve().parent / ".claude"
+        """Claude's user config dir (`$CLAUDE_CONFIG_DIR`, else `~/.claude`)
+        for the user scope, `<project>/.claude` for a project."""
+        if self._user_scope(dest):
+            return self._user_config_dir()
+        return self._project_dir(dest) / ".claude"
 
     def _include_line(self, dest: Path, entry_file: Path) -> str:
         """The `@path` line that makes `entry_file` load `<dest>/AGENTS.md`:
@@ -262,16 +348,7 @@ class ClaudeAgent(Agent):
         return "@" + target.as_posix()
 
     def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
-        from dotagents._merge import merge_block, merge_include_line, timestamped_backup_root
-
-        backup_root = timestamped_backup_root(dest) if force else None
-
-        branch = merge_block(
-            dest / "AGENTS.md",
-            base_agents_text,
-            force=force, dry_run=dry_run, backup_root=backup_root,
-        )
-        if logger: logger.info("%s: AGENTS.md", branch)
+        from dotagents._merge import merge_include_line
 
         # The last mile: Claude Code reads `~/.claude/CLAUDE.md` (user scope) or
         # `<project>/.claude/CLAUDE.md` (project scope), never a `<store>/CLAUDE.md`.
@@ -283,6 +360,11 @@ class ClaudeAgent(Agent):
             entry, self._include_line(dest, entry), dry_run=dry_run,
         )
         if logger: logger.info("%s: %s (include)", branch, entry)
+        if not self._user_scope(dest) and logger and _git_tracked_or_unignored(entry):
+            logger.warning(
+                "%s is not gitignored: the include points at .agents/, which is never "
+                "committed -- keep the file out of commits (or add it to .gitignore)", entry,
+            )
 
     # --- hooks ---------------------------------------------------------
     #
@@ -420,7 +502,7 @@ class ClaudeAgent(Agent):
         # its parent is the project root in project scope; the user store is
         # whatever `resolve_user_store` says (`$AGENTS_HOME`), not literally
         # `~/.agents`.
-        is_user_scope = _is_user_store(dest)
+        is_user_scope = self._user_scope(dest)
         if config_root:
             root = Path(config_root)
             is_user_scope = False
@@ -582,15 +664,23 @@ class GeminiAgent(Agent):
     model_source_vars = ["GEMINI_MODEL"]
 
     def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
-        from dotagents._merge import merge_block, timestamped_backup_root
-        backup_root = timestamped_backup_root(dest) if force else None
-        branch = merge_block(
-            dest / "GEMINI.md",
-            base_agents_text,
-            force=force, dry_run=dry_run, backup_root=backup_root,
-        )
-        if logger: logger.info("%s: GEMINI.md", branch)
+        """An `@<store>/AGENTS.md` import in Gemini's own entry file:
+        `~/.gemini/GEMINI.md` for the user scope, `<project>/GEMINI.md` for a
+        project (Gemini CLI resolves `@path` imports in GEMINI.md)."""
+        from dotagents._merge import merge_include_line
 
+        if self._user_scope(dest):
+            entry = Path.home() / ".gemini" / "GEMINI.md"
+        else:
+            entry = self._project_dir(dest) / "GEMINI.md"
+        target = (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
+        branch = merge_include_line(entry, "@" + target, dry_run=dry_run)
+        if logger: logger.info("%s: %s (include)", branch, entry)
+        if not self._user_scope(dest) and logger and _git_tracked_or_unignored(entry):
+            logger.warning(
+                "%s is not gitignored: its include is a machine-local path -- keep "
+                "it out of commits", entry,
+            )
 
 class AntigravityAgent(Agent):
     name = "antigravity"
@@ -614,16 +704,6 @@ class AntigravityAgent(Agent):
     # No documented model-source env var either; left empty rather than
     # guessed (GEMINI_MODEL is GeminiAgent's, a different product's var).
     model_source_vars = []
-
-    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
-        from dotagents._merge import merge_block, timestamped_backup_root
-        backup_root = timestamped_backup_root(dest) if force else None
-        branch = merge_block(
-            dest / "AGENTS.md",
-            base_agents_text,
-            force=force, dry_run=dry_run, backup_root=backup_root,
-        )
-        if logger: logger.info("%s: AGENTS.md (Antigravity)", branch)
 
     # --- hooks ---------------------------------------------------------
     #
@@ -655,15 +735,24 @@ class AntigravityAgent(Agent):
         """Deploys the context-injection script and wires it as a
         `PreInvocation` handler in `<config_root|~/.gemini/config>/hooks.json`.
 
-        Global scope only (`~/.gemini/config/hooks.json`), like the plugin
-        directory it mirrors (`~/.gemini/config/plugins/`): PreInvocation's
-        matcher is documented as ignored, so there is no per-project scoping.
+        The global file (`~/.gemini/config/hooks.json`) is written for the
+        user scope only: a project-scope `init` must not turn dotagents on in
+        every workspace. Run as the absolute interpreter that ran `init` -- a
+        bare `python` is missing on a POSIX box that ships only `python3`.
         """
         import shutil
+        import sys
 
         from dotagents import _hooks
         from dotagents.cli._common import BASE_ROOT
 
+        if config_root is None and not self._user_scope(dest):
+            if logger:
+                logger.info(
+                    "skipped Antigravity hooks: its hooks.json is global; run `init -g "
+                    "--agents antigravity` to wire it"
+                )
+            return
         root = Path(config_root) if config_root else (Path.home() / ".gemini" / "config")
 
         src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / self.PREINVOCATION_HOOK_SCRIPT
@@ -691,7 +780,7 @@ class AntigravityAgent(Agent):
             entry = {}
 
         script_path = dest_script.resolve()
-        command = 'python "%s"' % script_path.as_posix()
+        command = '"%s" "%s"' % (Path(sys.executable).as_posix(), script_path.as_posix())
         preinvocation, pi_changed = _hooks.merge_hook(
             entry.get("PreInvocation"),
             command,
@@ -737,16 +826,6 @@ class CodexAgent(Agent):
         if any(var in environ for var in self.detect_env_vars):
             return True
         return any(k.startswith("CODEX_SANDBOX") for k in environ)
-
-    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
-        from dotagents._merge import merge_block, timestamped_backup_root
-        backup_root = timestamped_backup_root(dest) if force else None
-        branch = merge_block(
-            dest / "AGENTS.md",
-            base_agents_text,
-            force=force, dry_run=dry_run, backup_root=backup_root,
-        )
-        if logger: logger.info("%s: AGENTS.md (Codex)", branch)
 
     # --- hooks ---------------------------------------------------------
     #
@@ -823,6 +902,13 @@ class CodexAgent(Agent):
         deploy the PreToolUse env-loader script alongside it."""
         from dotagents import _hooks
 
+        if config_root is None and not self._user_scope(dest):
+            if logger:
+                logger.info(
+                    "skipped Codex hooks: its config is global; run `init -g --agents "
+                    "codex` to wire it"
+                )
+            return
         root = self._config_root(config_root)
 
         self.remove_env_block(dry_run=dry_run, logger=logger, config_root=root)
@@ -912,9 +998,13 @@ class CodexAgent(Agent):
 
 class CursorAgent(Agent):
     name = "cursor"
-    context_files = [".cursorrules", ".cursor/rules/"]
-    harness_loads = [".cursorrules", ".cursor/rules/"]
-    context_target = ".cursorrules"
+    # cursor.com/docs/context/rules: project rules are `.cursor/rules/*.mdc`
+    # (frontmatter `alwaysApply: true` loads one in every session), and Cursor
+    # reads the project's AGENTS.md itself. `.cursorrules` is legacy: kept as a
+    # detect() signal only.
+    context_files = [".cursorrules", ".cursor/rules"]
+    harness_loads = ["AGENTS.md", ".cursor/rules/dotagents.mdc"]
+    context_target = ".cursor/rules/dotagents.mdc"
     # Documented marker: CURSOR_AGENT=1 (cursor.com/docs/cli). It is not always
     # propagated to spawned bash (forum.cursor.com/t/.../132427), so config-file
     # detect() remains the fallback.
@@ -924,21 +1014,29 @@ class CursorAgent(Agent):
     vendor = "cursor"
     model_source_vars = ["CURSOR_DEFAULT_MODEL"]
 
-    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
-        from dotagents._merge import merge_block, timestamped_backup_root
-        backup_root = timestamped_backup_root(dest) if force else None
-        branch = merge_block(
-            dest / ".cursorrules",
-            base_agents_text,
-            force=force, dry_run=dry_run, backup_root=backup_root,
-        )
-        if logger: logger.info("%s: .cursorrules", branch)
+    def write_context(self, project_root: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
+        """The managed block in `.cursor/rules/dotagents.mdc`, created with the
+        `alwaysApply: true` frontmatter a rule needs to load every session."""
+        from dotagents._fs import write_text_lf
 
+        target = Path(project_root) / self.context_target
+        if not target.exists() and not dry_run:
+            write_text_lf(
+                target,
+                "---\ndescription: dotagents assembled context\nalwaysApply: true\n---\n",
+            )
+        super().write_context(project_root, effective_context, force=force, dry_run=dry_run, logger=logger)
+
+    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
+        if logger:
+            logger.info("cursor: reads the context via `context --write-agent` or `launch`")
 
 class CopilotAgent(Agent):
     name = "copilot"
     context_files = [".github/copilot-instructions.md"]
-    harness_loads = [".github/copilot-instructions.md"]
+    # Copilot reads the nearest AGENTS.md as well as its instructions file
+    # (docs.github.com, repository custom instructions).
+    harness_loads = ["AGENTS.md", ".github/copilot-instructions.md"]
     context_target = ".github/copilot-instructions.md"
     # Copilot ships no runtime marker var (request open: microsoft/vscode#311734).
     # COPILOT_MODEL / COPILOT_HOME are config, not "am I running" markers, so
@@ -950,16 +1048,8 @@ class CopilotAgent(Agent):
     model_source_vars = ["COPILOT_MODEL"]
 
     def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
-        from dotagents._merge import merge_block, timestamped_backup_root
-        backup_root = timestamped_backup_root(dest) if force else None
-        target = dest / ".github" / "copilot-instructions.md"
-        branch = merge_block(
-            target,
-            base_agents_text,
-            force=force, dry_run=dry_run, backup_root=backup_root,
-        )
-        if logger: logger.info("%s: %s", branch, target.relative_to(dest))
-
+        if logger:
+            logger.info("copilot: reads the context via `context --write-agent` or `launch`")
 
 class PiAgent(Agent):
     """pi (pi.dev; npm ``@earendil-works/pi-coding-agent``; the ``pi`` command).
@@ -1009,33 +1099,34 @@ class PiAgent(Agent):
         return out
 
     def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
-        from dotagents._merge import BEGIN_MARKER, END_MARKER, merge_block, timestamped_backup_root
-        backup_root = timestamped_backup_root(dest) if force else None
-        branch = merge_block(
-            dest / "AGENTS.md",
-            base_agents_text,
-            force=force, dry_run=dry_run, backup_root=backup_root,
-        )
-        if logger: logger.info("%s: AGENTS.md (pi)", branch)
+        from dotagents._merge import BEGIN_MARKER, END_MARKER, merge_block
+
         # The last mile for the user store: pi reads `<config dir>/AGENTS.md`
         # in every session and has no include syntax, so that file gets a
         # managed block POINTING at the store's AGENTS.md -- not a copy of it,
         # which would reach a launched session twice (once from pi's own file,
-        # once as the context `launch` appends). A project store needs nothing:
-        # pi walks the cwd's parents and finds the project's own AGENTS.md.
-        if _is_user_store(dest):
-            store_agents = (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
-            entry = self._config_dir() / "AGENTS.md"
-            pointer = (
-                "%s\n# dotagents\n\n"
-                "Read `%s` before anything else: it is the global agent configuration "
-                "`dotagents init` manages (the always-on rules and the routing to "
-                "on-demand files).\n%s\n" % (BEGIN_MARKER, store_agents, END_MARKER)
-            )
-            # pi's own file is the user's: block-merged even under `--force`,
-            # like Claude's include, so their text around the block survives.
-            branch = merge_block(entry, pointer, dry_run=dry_run)
-            if logger: logger.info("%s: %s (pointer to the store)", branch, entry)
+        # once as the context `launch` appends). pi reads a project's ROOT
+        # AGENTS.md, not `<project>/.agents/AGENTS.md`, so a project store's
+        # block reaches it through `launch pi` or `context --write-agent`.
+        if not self._user_scope(dest):
+            if logger:
+                logger.info(
+                    "pi: reads <project>/AGENTS.md, not the project store's; use `dotagents "
+                    "launch pi` or `context --write-agent --agents pi`"
+                )
+            return
+        store_agents = (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
+        entry = self._config_dir() / "AGENTS.md"
+        pointer = (
+            "%s\n# dotagents\n\n"
+            "Read `%s` before anything else: it is the global agent configuration "
+            "`dotagents init` manages (the always-on rules and the routing to "
+            "on-demand files).\n%s\n" % (BEGIN_MARKER, store_agents, END_MARKER)
+        )
+        # pi's own file is the user's: block-merged even under `--force`,
+        # like Claude's include, so their text around the block survives.
+        branch = merge_block(entry, pointer, dry_run=dry_run)
+        if logger: logger.info("%s: %s (pointer to the store)", branch, entry)
 
     @staticmethod
     def _is_windows() -> bool:
@@ -1081,6 +1172,27 @@ def _harness_alias(value: str) -> "Optional[str]":
     return None
 
 
+def detect_runtime_agent(
+    environ: dict[str, str], explicit: Optional[str] = None
+) -> "Optional[Agent]":
+    """The agent actually driving this process, from runtime signals only:
+    explicit name > ``$AGENTS_HARNESS`` > env-var markers. ``None`` in a plain
+    shell -- config files in the tree say which tools a repo is set up for, not
+    that one of them is running."""
+    if explicit and explicit in _REGISTRY:
+        return _REGISTRY[explicit]()
+    stamped = environ.get("AGENTS_HARNESS")
+    if stamped:
+        alias = _harness_alias(stamped)
+        if alias:
+            return _REGISTRY[alias]()
+    for cls in _REGISTRY.values():
+        agent = cls()
+        if agent.detect_env(environ):
+            return agent
+    return None
+
+
 def resolve_active_agent(
     environ: dict[str, str],
     explicit: Optional[str] = None,
@@ -1092,21 +1204,13 @@ def resolve_active_agent(
     harness_id) > env-var detection (detect_env) > config-file detection
     (detect(root)) > default (claude).
 
-    ``root`` is where config-file detect() looks (default: cwd).
+    ``root`` is where config-file detect() looks (default: cwd). The TARGET
+    picker for ``context`` / ``launch``; identity uses
+    :func:`detect_runtime_agent` alone.
     """
-    if explicit and explicit in _REGISTRY:
-        return _REGISTRY[explicit]()
-
-    stamped = environ.get("AGENTS_HARNESS")
-    if stamped:
-        alias = _harness_alias(stamped)
-        if alias:
-            return _REGISTRY[alias]()
-
-    for name, cls in _REGISTRY.items():
-        agent = cls()
-        if agent.detect_env(environ):
-            return agent
+    runtime = detect_runtime_agent(environ, explicit=explicit)
+    if runtime is not None:
+        return runtime
 
     # Config-file fallback: which agent's config is present in the tree?
     detect_root = root if root is not None else Path.cwd()
@@ -1141,8 +1245,16 @@ def stamp_identity(
     ``AGENT=claude-code`` into every command a Claude session runs), not a pin.
 
     ``AGENTS_AGENT`` (a named persona) is not emitted; nothing may branch on it.
+
+    Runtime signals only (:func:`detect_runtime_agent`): in a plain shell --
+    no explicit name, no ``$AGENTS_HARNESS``, no harness marker -- nothing is
+    emitted. Config-file detection stamped ``AGENT=codex`` into any shell that
+    sourced ``env`` in a repo with an AGENTS.md, telling other tools an agent
+    was driving it. ``root`` is accepted for compatibility and unused.
     """
-    active = resolve_active_agent(environ, explicit=explicit, root=root)
+    active = detect_runtime_agent(environ, explicit=explicit)
+    if active is None:
+        return {}
     # Only a KNOWN explicit name overrides: an unknown one falls through to
     # detection above, and the detected identity must not clobber a pin.
     override = explicit is not None and explicit in _REGISTRY

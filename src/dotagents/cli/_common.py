@@ -370,6 +370,8 @@ def _apply_base(
     wire_hooks: bool = False,
     powershell_env_hook: bool = False,
     project: bool = False,
+    scope_level: "str | None" = None,
+    project_root: "Path | None" = None,
 ) -> None:
     """Lay down the base: managed-block merge AGENTS.md (rendered for this
     store) and, for Claude, the `@` include in its own config dir. `init`'s
@@ -393,12 +395,13 @@ def _apply_base(
 
     active_agents = []
     if agents:
-        for name in agents:
-            agent = _agents.get_agent(name)
-            if agent:
-                active_agents.append(agent)
-            else:
-                logger.warning(f"Unknown agent: {name}")
+        unknown = [name for name in agents if _agents.get_agent(name) is None]
+        if unknown:
+            raise SystemExit(
+                "error: unknown agent(s) %s (known: %s)"
+                % (", ".join(unknown), ", ".join(a.name for a in _agents.get_all_agents()))
+            )
+        active_agents = [_agents.get_agent(name) for name in agents]
     else:
         # Default: all detected + claude
         all_agents = _agents.get_all_agents()
@@ -406,7 +409,21 @@ def _apply_base(
         if not any(a.name == "claude" for a in active_agents):
             active_agents.append(_agents.ClaudeAgent())
 
+    # The store's AGENTS.md is written HERE, once, whatever agents are
+    # selected: `context` and `overlays` depend on it. Adapters only add their
+    # harness's last mile to it (an include, a pointer).
+    from dotagents._merge import merge_block, timestamped_backup_root
+
+    branch = merge_block(
+        Path(dest) / "AGENTS.md", base_agents, force=force, dry_run=dry_run,
+        backup_root=timestamped_backup_root(Path(dest)) if force else None,
+    )
+    logger.info("%s: AGENTS.md", branch)
+
     for agent in active_agents:
+        if scope_level is not None:
+            agent.scope_level = scope_level
+            agent.project_root = project_root
         agent.write_base_config(
             dest, src, base_agents, force=force, dry_run=dry_run, logger=logger
         )

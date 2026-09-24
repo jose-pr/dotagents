@@ -55,7 +55,6 @@ def test_user_scope_init_writes_the_claude_include(home, tmp_path):
     entry = home / ".claude" / "CLAUDE.md"
     assert entry.is_file()
     assert "@../.agents/AGENTS.md" in entry.read_text(encoding="utf-8")
-    assert (store / "AGENTS.md").is_file()
 
 
 def test_user_scope_include_is_skipped_when_hand_written(home, tmp_path):
@@ -169,7 +168,7 @@ def test_write_context_merges_a_block_into_the_project_file(tmp_path):
 @pytest.mark.parametrize("agent_cls,rel", [
     (_agents.ClaudeAgent, ".claude/CLAUDE.md"),
     (_agents.GeminiAgent, "GEMINI.md"),
-    (_agents.CursorAgent, ".cursorrules"),
+    (_agents.CursorAgent, ".cursor/rules/dotagents.mdc"),
     (_agents.CopilotAgent, ".github/copilot-instructions.md"),
     (_agents.AntigravityAgent, ".agents/rules/dotagents.md"),
     (_agents.PiAgent, ".pi/APPEND_SYSTEM.md"),
