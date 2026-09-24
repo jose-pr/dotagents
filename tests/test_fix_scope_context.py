@@ -269,6 +269,33 @@ def test_skills_listing_names_each_skill_md(ctx):
 
 
 # --------------------------------------------------------------------------
+# scope-context-09: context CLI agent handling and output
+# --------------------------------------------------------------------------
+
+def test_an_output_file_takes_one_agent(ctx, tmp_path):
+    store, project, ov = ctx
+    write_text_lf(store / "AGENTS.md", "rules\n")
+    with pytest.raises(SystemExit, match="one agent"):
+        _cli(agents=["gemini,codex"], out=str(tmp_path / "out.md"))()
+    # JSON holds an array, so it still takes several.
+    assert _cli(agents=["gemini,codex"], out=str(tmp_path / "o.json"), format="json")() == 0
+    assert len(json.loads((tmp_path / "o.json").read_text(encoding="utf-8"))) == 2
+
+
+def test_no_known_agent_exits_2_and_harness_ids_resolve(ctx, capsys):
+    store, project, ov = ctx
+    write_text_lf(store / "AGENTS.md", "rules\n")
+    assert _cli(agents=["nosuch"])() == 2
+    assert _cli(agents=["gemini-cli"], format="json")() == 0
+    assert json.loads(capsys.readouterr().out)["agent"] == "gemini"
+
+
+def test_an_empty_assembly_gets_no_reminder_wrapper(ctx, capsys):
+    assert _cli(format="system-reminder")() == 0
+    assert "system-reminder" not in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
 # scope-context-10: overlay sources sort by Overlay.sort_key, before stores
 # --------------------------------------------------------------------------
 

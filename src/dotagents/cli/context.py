@@ -45,12 +45,15 @@ class Context(DotAgentsArgs):
     ("--agents-dir",)
 
     agents: "list[str]" = []
-    "List of agents to generate context for (e.g. claude,gemini). Default: active agent."
+    "Agents to generate context for, by name or harness id (e.g. claude,gemini-cli). Default: active agent."
     ("--agents",)
 
     out: str = "-"
-    "Output path (positional). Default '-' = stdout; a path writes that file; use "
-    "--write-agent to write each agent's native config file instead."
+    (
+        "Output path (positional). Default '-' = stdout; a path writes that file "
+        "(one agent, or several with --format json); use --write-agent to write "
+        "each agent's native config file instead."
+    )
     ("out",)
 
     write_agent: bool = False
@@ -107,17 +110,31 @@ class Context(DotAgentsArgs):
         if agent_names:
             active_agents = []
             for name in agent_names:
-                a = _agents.get_agent(name)
+                # A registry name or a harness id (`claude-code`), like $AGENTS_HARNESS.
+                a = _agents.get_agent(_agents._harness_alias(name) or name)
                 if a:
                     active_agents.append(a)
                 else:
                     self._logger_.warning("Unknown agent: %s", name)
+            if not active_agents:
+                self._logger_.error(
+                    "no known agent in --agents (known: %s)",
+                    ", ".join(a.name for a in _agents.get_all_agents()),
+                )
+                return 2
         else:
             # Default target = the active agent (env-var detection / $AGENTS_HARNESS
             # stamp / config-file detect), not "all detected".
             active_agents = [
                 _agents.resolve_active_agent(os.environ, root=project_root)
             ]
+
+        if self.format != "json" and self.out != "-" and len(active_agents) > 1:
+            # One file, one agent: a loop writing it per agent kept the last.
+            raise SystemExit(
+                "error: an output path takes one agent (got %d); omit it to print "
+                "each agent's context, or use --format json" % len(active_agents)
+            )
 
         # --- JSON: emit structured data (object for one agent, array for many);
         #     never writes native config files. ---
@@ -147,7 +164,7 @@ class Context(DotAgentsArgs):
                 agent, scope, inline=self.inline, expand_vars=not self.write_agent
             )
 
-            if self.format == "system-reminder":
+            if self.format == "system-reminder" and text:
                 text = (
                     "<!-- system-reminder: begin -->\n"
                     + text
