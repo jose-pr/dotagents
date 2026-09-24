@@ -159,6 +159,56 @@ def _describe(exc: BaseException) -> str:
     return "%s: %s" % (type(exc).__name__, exc)
 
 
+def _check_buildable(command) -> None:
+    """Build ``command``'s subparser the way `duho.app` will, into a throwaway
+    parser, and let whatever that raises propagate.
+
+    `duho.app` builds every subparser up front with nothing around it, so a
+    module that imports cleanly but whose parser cannot be built (an annotation
+    `get_type_hints` cannot resolve, PEP 604 `X | None` on Python 3.9, two
+    fields claiming the same flag, a flag the umbrella already owns) would
+    otherwise fail every invocation. The parents are the umbrella's options,
+    as in `duho.app`, so a clash with them surfaces here too."""
+    import argparse
+
+    base = Dotagents._parser_(add_help=False)
+    subparsers = argparse.ArgumentParser(add_help=False).add_subparsers()
+    if isinstance(command, type):
+        command._parser_(subparsers, parents=[base])
+        return
+    try:
+        from duho.runtime import _register_module_command
+    except ImportError:  # pragma: no cover -- a later duho without this helper
+        return
+    _register_module_command(subparsers, command, base, None, Dotagents)
+
+
+def _source_of(command) -> str:
+    """The file a discovered command came from, for a log line."""
+    module = getattr(command, "module", None) or sys.modules.get(
+        getattr(command, "__module__", ""), None
+    )
+    return str(getattr(module, "__file__", None) or command)
+
+
+def _buildable(commands, file=None) -> "list":
+    """``commands`` minus the ones whose parser cannot be built, each skipped
+    with a warning that names its file (see `_check_buildable`)."""
+    out = []
+    for command in commands:
+        try:
+            _check_buildable(command)
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 -- see _check_buildable
+            name = getattr(command, "_parsername_", None) or getattr(command, "__name__", "?")
+            _LOGGER.warning(
+                "skipping command %r from %s: %s",
+                name, file or _source_of(command), _describe(exc),
+            )
+            continue
+        out.append(command)
+    return out
+
+
 def _discover_modules(directory: Path) -> "list":
     """duho's per-directory discovery, made resilient per MODULE.
 
@@ -169,23 +219,32 @@ def _discover_modules(directory: Path) -> "list":
     mirrored here with a catch-all per file -- the bad module is named, with
     its exception, and skipped; the rest of the directory still loads.
     SystemExit is included because a module that `sys.exit()`s at import is
-    not an Exception. Falls back to duho's own per-directory unit if a duho
-    release moves these helpers."""
+    not an Exception. A command that imports but cannot build its parser is
+    skipped the same way (`_buildable`). Falls back to duho's own
+    per-directory unit, with a warning, if a duho release moves these
+    helpers."""
     try:
         from duho.discovery import _commands_in_module, _import_from_path, _unique_module_name
     except ImportError:  # pragma: no cover -- a later duho without these internals
         from duho.discovery import discover_commands
 
-        return discover_commands(directory)
+        _LOGGER.warning(
+            "duho's discovery internals moved; a broken module in %s now skips "
+            "the whole directory, not just itself",
+            directory,
+        )
+        return _buildable(discover_commands(directory))
     commands = []
     for file in sorted(directory.glob("*.py")):
         if file.name.startswith("_"):
             continue
         try:
             module = _import_from_path(_unique_module_name("duho._discovered." + file.stem), file)
-            commands.extend(_commands_in_module(module, stem=file.stem))
+            found = _commands_in_module(module, stem=file.stem)
         except (Exception, SystemExit) as exc:  # noqa: BLE001 -- see docstring
             _LOGGER.warning("skipping command module %s: %s", file, _describe(exc))
+            continue
+        commands.extend(_buildable(found, file))
     return commands
 
 
