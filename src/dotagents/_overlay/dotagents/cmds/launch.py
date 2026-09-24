@@ -241,9 +241,14 @@ class Launch(DotAgentsArgs):
                         "into %s (the managed block it loads itself)",
                         agent.name, agent.context_target,
                     )
+                    # The project file may be committed: keep `$<NAME>_OVERLAY_ROOT`
+                    # as written rather than baking in this machine's paths.
                     agent.write_context(
-                        Path(project_root), text, force=False, dry_run=self.dry_run,
-                        logger=self._logger_,
+                        Path(project_root),
+                        _context.assemble_context(
+                            agent, scope, inline=self.inline, expand_vars=False
+                        ),
+                        force=False, dry_run=self.dry_run, logger=self._logger_,
                     )
                 else:
                     self._logger_.warning(

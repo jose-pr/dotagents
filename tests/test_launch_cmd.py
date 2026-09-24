@@ -83,10 +83,14 @@ def _capture_spawn(monkeypatch, launch_mod, rc=0):
     return calls
 
 
-def _context_is(monkeypatch, text):
+def _context_is(monkeypatch, text, unexpanded=None):
+    """`unexpanded`: what `expand_vars=False` returns (default: the same text)."""
     from dotagents import _context
 
-    monkeypatch.setattr(_context, "assemble_context", lambda agent, scope, inline=False: text)
+    def assemble(agent, scope, inline=False, expand_vars=True):
+        return text if expand_vars or unexpanded is None else unexpanded
+
+    monkeypatch.setattr(_context, "assemble_context", assemble)
 
 
 def _run(launch_mod, passthrough=(), **kwargs):
@@ -166,6 +170,21 @@ def test_a_harness_without_an_append_flag_gets_its_own_file_written(
     assert "dotagents:context" in text and CONTEXT.strip() in text
     assert env["AGENTS_HARNESS"] == "gemini-cli"
     assert Path(env["AGENTS_CONTEXT_FILE"]).read_text(encoding="utf-8") == CONTEXT
+
+
+def test_the_merged_instruction_file_keeps_overlay_root_variables(launch_mod, monkeypatch, tmp_path):
+    """scope-06: the file handed over is transient and gets expanded paths; the
+    project instruction file may be committed, so it keeps `$<NAME>_OVERLAY_ROOT`."""
+    program = _program(tmp_path)
+    _context_is(monkeypatch, "see /home/me/.agents/overlays/x/kb.md\n",
+                unexpanded="see $X_OVERLAY_ROOT/kb.md\n")
+    calls = _capture_spawn(monkeypatch, launch_mod)
+    assert _run(launch_mod, agent="gemini", command=str(program)) == 0
+    merged = (tmp_path / "project" / "GEMINI.md").read_text(encoding="utf-8")
+    assert "$X_OVERLAY_ROOT/kb.md" in merged and "/home/me" not in merged
+    (_argv, env), = calls
+    handed = Path(env["AGENTS_CONTEXT_FILE"]).read_text(encoding="utf-8")
+    assert "/home/me/.agents/overlays/x/kb.md" in handed
 
 
 def test_pi_gets_the_context_inline_on_posix_and_via_its_append_file_on_windows(
