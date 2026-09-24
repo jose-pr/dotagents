@@ -442,7 +442,6 @@ def get_env_from_file(
     visible; a bare ``;`` list would run ``env -0`` regardless and report rc 0),
     the file contributes nothing -- logged by name, never fatal.
     """
-    quoted = json.dumps(str(env_file))
     spawn = _spawn_env(base_env)
 
     # Resolve `bash` against the REAL environment's PATH, not `spawn`'s: that is
@@ -454,7 +453,11 @@ def get_env_from_file(
     bash = shutil.which("bash", path=os.environ.get("PATH")) or "bash"
     try:
         proc = subprocess.run(
-            [bash, "-c", "set -a; source %s >/dev/null 2>&1 || exit 1; env -0" % quoted],
+            # The path is bash's `$1`, never spliced into the script: a
+            # JSON-quoted path lost non-ASCII characters (`\u00e9`) and
+            # expanded `$` / backticks inside the double quotes.
+            [bash, "-c", 'set -a; source "$1" >/dev/null 2>&1 || exit 1; env -0',
+             "bash", str(env_file)],
             capture_output=True,
             text=False,
             check=False,
