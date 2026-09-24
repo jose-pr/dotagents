@@ -114,6 +114,14 @@ def test_extras_help_says_sftp_cannot_be_vendored():
 # --------------------------------------------------------------------------
 
 
+def test_pyz_members_are_deflated(built):
+    archive, _ = built
+    files = [i for i in archive.infolist() if not i.is_dir()]
+    assert files
+    stored = [i.filename for i in files if i.compress_type != zipfile.ZIP_DEFLATED]
+    assert not stored, stored
+
+
 def test_generated_files_are_lf(built):
     archive, _ = built
     for name in ("__main__.py", "dotagents/_bundle.json"):

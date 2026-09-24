@@ -190,7 +190,9 @@ class BuildPyz(LoggingArgs, Cmd):
 
             out_path = Path(self.out)
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            zipapp.create_archive(str(stage), target=str(out_path), interpreter=self.python)
+            zipapp.create_archive(
+                str(stage), target=str(out_path), interpreter=self.python, compressed=True
+            )
             self._logger_.info("built %s", out_path)
 
         return 0
