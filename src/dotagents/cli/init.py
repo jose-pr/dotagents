@@ -64,11 +64,13 @@ class Init(DotAgentsArgs):
     ("--powershell-env-hook",)
 
     def __call__(self) -> int:
+        project = False
         if self.dest is not None:
             dest = Path(self.dest).expanduser().resolve()
         else:
             scope = self.resolve_scope()
             dest = Path(scope.agents_root).expanduser().resolve()
+            project = not scope.global_scope
             self._logger_.info("scope: %s (%s)", scope.level, dest)
 
         # An explicit --from is recorded in the store's config, so a later plain
@@ -87,6 +89,7 @@ class Init(DotAgentsArgs):
             agents=agent_names if agent_names else None,
             wire_hooks=not self.no_hooks,
             powershell_env_hook=self.powershell_env_hook,
+            project=project,
         )
 
         if self.from_ is not None and not self.dry_run:

@@ -643,10 +643,12 @@ def recompose_overlay_block(
     from dotagents.cli import _compose_block
 
     if not agents_md.is_file():
-        logger.warning(
-            "no installed AGENTS.md at %s; overlay rules/routing not merged", agents_md
-        )
-        return False
+        # No `init` here yet (an `overlays add` into a fresh project): create
+        # the block rather than drop the overlays' rules and routing.
+        if not dry_run:
+            write_text_lf(agents_md, _compose_block(_extract_block(base_block), list(overlays), logger) + "\n")
+        logger.info("created %s with the managed block", agents_md)
+        return True
     existing = agents_md.read_text(encoding="utf-8")
     span = find_block(existing)
     if span is None:

@@ -47,6 +47,7 @@ DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 # validating that content is the overlays branch's concern, not main's.
 SCAN = [
     "src/dotagents/_overlay/dotagents/templates/AGENTS.md",
+    "src/dotagents/_overlay/dotagents/templates/PROJECT.md",
 ]
 REFS = []
 # The personal leak scanner is no longer a required tool of main: it is a personal

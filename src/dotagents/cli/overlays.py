@@ -225,7 +225,7 @@ class OverlayAdd(DotAgentsArgs):
         overlay_dirs = _installed_overlay_dirs(
             scope, source, adding=order, dry_run=self.dry_run
         )
-        base_block = base_agents_text(store_base(scope.agents_root, self._logger_), scope.agents_root)
+        base_block = base_agents_text(store_base(scope.agents_root, self._logger_), scope.agents_root, project=not scope.global_scope)
         if _overlays.recompose_overlay_block(
             agents_md, base_block, overlay_dirs, self.dry_run, self._logger_
         ):
@@ -292,7 +292,7 @@ class OverlayRemove(DotAgentsArgs):
                 for overlay in _overlays.Overlay.discover(scope.overlay_root)
                 if overlay.name not in removed_names
             ]
-            base_block = base_agents_text(store_base(scope.agents_root, self._logger_), scope.agents_root)
+            base_block = base_agents_text(store_base(scope.agents_root, self._logger_), scope.agents_root, project=not scope.global_scope)
             if _overlays.recompose_overlay_block(
                 scope.agents_root / "AGENTS.md", base_block, remaining,
                 self.dry_run, self._logger_,
@@ -565,7 +565,7 @@ class OverlaySync(DotAgentsArgs):
         # order (D68) -- not just the pattern-matched subset synced above, so
         # priority ordering holds across the full installed set.
         overlay_dirs = _installed_overlay_dirs(scope, source, dry_run=self.dry_run)
-        base_block = base_agents_text(store_base(scope.agents_root, self._logger_), scope.agents_root)
+        base_block = base_agents_text(store_base(scope.agents_root, self._logger_), scope.agents_root, project=not scope.global_scope)
         if _overlays.recompose_overlay_block(
             agents_md, base_block, overlay_dirs, self.dry_run, self._logger_
         ):

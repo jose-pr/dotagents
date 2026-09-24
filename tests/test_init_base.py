@@ -32,8 +32,10 @@ def _log():
 def test_base_overlay_is_the_template_the_bundled_cmds_and_the_hooks():
     shipped = sorted(p.relative_to(BASE_ROOT).as_posix() for p in BASE_ROOT.rglob("*")
                      if p.is_file() and "__pycache__" not in p.parts)
-    # The block template is the only markdown: no design log, no store docs.
-    assert [p for p in shipped if p.endswith(".md")] == ["dotagents/templates/AGENTS.md"]
+    # The block templates (user store, project store) are the only markdown:
+    # no design log, no store docs.
+    assert [p for p in shipped if p.endswith(".md")] == [
+        "dotagents/templates/AGENTS.md", "dotagents/templates/PROJECT.md"]
     others = [p for p in shipped if not p.endswith(".md")]
     assert others and all(
         p.startswith(("dotagents/cmds/", "dotagents/hooks/")) and p.endswith(".py")
@@ -189,3 +191,26 @@ def test_recompose_keeps_the_rendered_path(tmp_path):
     text = (store / "AGENTS.md").read_text(encoding="utf-8")
     assert "annotate that you read `%s`" % (store.resolve() / "AGENTS.md").as_posix() in text
     assert "{{" not in text and "TINY_OVERLAY_ROOT" in text
+
+
+def test_project_scope_gets_the_minimal_project_block(tmp_path):
+    """A project init copied the whole global block (Permissions, Read-local,
+    Global-config misses) into the project store; every session read both, so
+    the always-on rules were loaded twice."""
+    project = tmp_path / "proj" / ".agents"
+    _apply_base(BASE_ROOT, project, force=False, dry_run=False, logger=_log(),
+                agents=["codex"], project=True)
+    text = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert "# Project agent directives" in text
+    assert "**Permissions**" not in text and "Global-config misses" not in text
+    assert "annotate that you read `%s`" % (project.resolve() / "AGENTS.md").as_posix() in text
+
+
+def test_overlays_add_creates_the_block_when_agents_md_is_missing(tmp_path):
+    # An `overlays add` into a store without AGENTS.md installed the files and
+    # merged the routing nowhere.
+    store = tmp_path / "user"
+    store.mkdir()
+    _add_tiny(store, tmp_path)
+    text = (store / "AGENTS.md").read_text(encoding="utf-8")
+    assert "<!-- dotagents:begin -->" in text and "TINY_OVERLAY_ROOT" in text

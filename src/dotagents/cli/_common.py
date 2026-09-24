@@ -225,19 +225,28 @@ def store_base(dest: "str | os.PathLike[str]", logger=None) -> Path:
 
 #: Where the base AGENTS.md block template lives inside a base overlay dir.
 BASE_AGENTS_TEMPLATE = "dotagents/templates/AGENTS.md"
+#: The block template for a PROJECT store: only what the project's overlays
+#: add. The user store's block already carries the always-on rules, and every
+#: session reads both, so a project copy of them was loaded twice.
+BASE_PROJECT_TEMPLATE = "dotagents/templates/PROJECT.md"
 #: Rendered by `base_agents_text` as the actual path of the store's AGENTS.md.
 AGENTS_MD_PLACEHOLDER = "{{AGENTS_MD}}"
 
 
-def base_agents_text(src: "str | os.PathLike[str]", dest: "str | os.PathLike[str]") -> str:
+def base_agents_text(
+    src: "str | os.PathLike[str]", dest: "str | os.PathLike[str]", *, project: bool = False
+) -> str:
     """The base AGENTS.md block for the store at ``dest``: the template
-    (``<src>/dotagents/templates/AGENTS.md``, falling back to ``<src>/AGENTS.md``
-    for a ``--from`` base that keeps it at its root) with ``{{AGENTS_MD}}``
-    rendered as the ACTUAL path of the file being written, so the block's
-    "annotate that you read `…`" line names this store's file."""
+    (``<src>/dotagents/templates/AGENTS.md``, or ``PROJECT.md`` for a project
+    store when the base has one; falling back to ``<src>/AGENTS.md`` for a
+    ``--from`` base that keeps it at its root) with ``{{AGENTS_MD}}`` rendered
+    as the ACTUAL path of the file being written, so the block's "annotate that
+    you read `…`" line names this store's file."""
     src_path = Path(src)
     template = src_path / BASE_AGENTS_TEMPLATE
-    if not template.is_file():
+    if project and (src_path / BASE_PROJECT_TEMPLATE).is_file():
+        template = src_path / BASE_PROJECT_TEMPLATE
+    elif not template.is_file():
         template = src_path / "AGENTS.md"
     text = template.read_text(encoding="utf-8")
     agents_md = (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
@@ -360,6 +369,7 @@ def _apply_base(
     agents: "list[str] | None" = None,
     wire_hooks: bool = False,
     powershell_env_hook: bool = False,
+    project: bool = False,
 ) -> None:
     """Lay down the base: managed-block merge AGENTS.md (rendered for this
     store) and, for Claude, the `@` include in its own config dir. `init`'s
@@ -377,7 +387,8 @@ def _apply_base(
     # `overlays add/remove/sync` do (`recompose_overlay_block`): a re-run of
     # `init` refreshes the block without stripping their rules and routing.
     base_agents = _compose_block(
-        base_agents_text(src, dest), Overlay.discover(Path(dest) / "overlays"), logger
+        base_agents_text(src, dest, project=project),
+        Overlay.discover(Path(dest) / "overlays"), logger,
     )
 
     active_agents = []
