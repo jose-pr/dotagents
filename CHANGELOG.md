@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   still resolve. A project's `.agents/` itself stays trusted, like a
   harness's own `.claude/settings.json`; the install guide now describes what
   runs from where.
+- On Windows, the Claude Code PowerShell-tool env loader is opt-in: `init
+  --powershell-env-hook`. It returns `permissionDecision: "allow"`, the only
+  documented way to rewrite a command without prompting on every call, so it
+  auto-approves every PowerShell tool call; `init -g` wired it silently. A
+  plain `init` removes one an earlier release wired.
 - The system store is walked only when it exists and only administrators can
   write it: on POSIX `/etc/agents` (or `$AGENTS_SYSTEM_ROOT`) must be
   root-owned and not group- or world-writable; on Windows there is no default

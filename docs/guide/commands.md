@@ -61,6 +61,14 @@ agent's config dir. Pass `--no-hooks` to skip both.
 | `SessionStart` | appends `dotagents env --diff --format export` to `$CLAUDE_ENV_FILE`, then runs `dotagents context` | Claude sources `$CLAUDE_ENV_FILE` before each Bash command, so the env layers reach every command in the session; and it injects the hook's **stdout into the session context**, which is how the assembled context reaches the model. |
 | `CwdChanged` | `[ -f AGENTS.md ] && cat AGENTS.md \|\| true` | Surfaces a directory's `AGENTS.md` when the agent changes into it. |
 
+On Windows, Claude Code's PowerShell tool never reads `$CLAUDE_ENV_FILE`, so its
+commands do not see the env layers. `init --powershell-env-hook` adds a `PreToolUse`
+hook that prepends the `dotagents env` change set to each PowerShell call. **It
+auto-approves every PowerShell tool call**: rewriting a command without a prompt on
+each one requires `permissionDecision: "allow"`, which skips the approval prompt
+(your deny and ask rules still apply). It is off by default, and a plain `init`
+removes one an earlier release wired.
+
 The env half **appends** (`>>`) and is guarded by `[ -n "$CLAUDE_ENV_FILE" ]`, both
 per the [hooks docs](https://code.claude.com/docs/en/hooks#persist-environment-variables):
 other hooks write to the same file, so `>` would discard their variables, and an

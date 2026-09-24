@@ -285,7 +285,10 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `$CLAUDE_ENV_FILE` when the new cwd carries a `.agents/` (the SessionStart pin
   is only-if-unset, so without this a `cd` into another project would keep the
   first project's root for the rest of the session).
-- **Windows only**: `ClaudeAgent._wire_powershell_pretooluse` additionally wires
+- **Windows only, opt-in** (`init --powershell-env-hook` →
+  `ClaudeAgent.powershell_env_hook`; it AUTO-APPROVES every PowerShell tool
+  call, and without the flag `init` removes the entry):
+  `ClaudeAgent._wire_powershell_pretooluse` additionally wires
   a no-matcher `PreToolUse` hook (fires on every tool call), `shell:
   "powershell"`, running `PRETOOLUSE_POWERSHELL_COMMAND` INLINE — deliberately
   not a `.ps1` file, since a script file is subject to PowerShell's execution
