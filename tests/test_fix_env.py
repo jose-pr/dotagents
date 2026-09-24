@@ -490,6 +490,81 @@ def test_env_cli_agents_dir_wins_over_the_inherited_store(tmp_path, monkeypatch,
     assert out["AGENTS_HOME"] == str(tmp_path / "storeB")
 
 
+# --------------------------------------------------------------------------
+# env-07: the export format is POSIX sh, not bash.
+# --------------------------------------------------------------------------
+
+def _posix_shells():
+    shells = []
+    if _BASH:
+        shells.append(("bash", [_BASH]))
+        shells.append(("bash --posix", [_BASH, "--posix"]))
+    if os.name != "nt":
+        for name in ("dash", "sh", "ksh"):
+            found = shutil.which(name)
+            if found:
+                shells.append((name, [found]))
+    return shells
+
+
+_TRICKY = {
+    "INJ": "\x01'; echo INJ\"\"ECTED; #",
+    "NL": "line1\nline2\n",
+    "CR": "a\rb\r",
+    "TAB": "a\tb'c",
+    "BS": "back\\slash\\'",
+}
+
+
+def _parse_posix_sh_word(word):
+    """Decode a shell word built ONLY from what pre-2024 POSIX sh has: '...'
+    segments, a backslash-escaped quote, and the constant CR splice. Raises on
+    anything else -- in particular `$'...'` (a bash/ksh extension until POSIX
+    2024; dash before 0.5.13 has none of it)."""
+    import re
+
+    token = re.compile(r"'([^']*)'|\\(')|\"\$\(printf '\\r'\)\"")
+    out, pos = [], 0
+    while pos < len(word):
+        m = token.match(word, pos)
+        if not m:
+            raise ValueError("not POSIX single-quoting at %d: %r" % (pos, word[pos:pos + 12]))
+        out.append(m.group(1) if m.group(1) is not None else (m.group(2) or "\r"))
+        pos = m.end()
+    return "".join(out)
+
+
+def test_export_quoting_is_plain_posix_for_every_value():
+    from dotagents.cli.env import _format_env
+
+    for key, value in _TRICKY.items():
+        line = _format_env({key: value}, "export")
+        prefix = "export %s=" % key
+        assert line.startswith(prefix)
+        assert _parse_posix_sh_word(line[len(prefix):]) == value
+
+
+@pytest.mark.parametrize("label,argv", _posix_shells() or [pytest.param("none", None, marks=pytest.mark.skip("no POSIX shell"))])
+def test_export_values_roundtrip_through_every_posix_sh(tmp_path, label, argv):
+    """A value with a control character switched to bash's `$'...'` form, with
+    `'` written as `\\'`; dash has no `$'...'`, so there `\\'` ended the quote
+    and `export K=$'\\x01\\'; id; #'` RAN `id`."""
+    import subprocess
+    from dotagents.cli.env import _format_env
+
+    script = tmp_path / "env.sh"
+    script.write_bytes((_format_env(_TRICKY, "export") + "\n").encode("utf-8"))
+    probe = "import json, os; print(json.dumps({k: os.environ.get(k) for k in %r}))" % sorted(_TRICKY)
+    proc = subprocess.run(
+        argv + ["-c", '. "$1" && exec "$2" -c "$3"', "sh", str(script), sys.executable, probe],
+        capture_output=True,
+    )
+    assert b"INJECTED" not in proc.stdout, label
+    assert proc.returncode == 0, (label, proc.stderr)
+    got = json.loads(proc.stdout.decode("utf-8").strip().splitlines()[-1])
+    assert got == _TRICKY, label
+
+
 def test_find_bash_warns_once_when_there_is_none(monkeypatch, caplog):
     import logging
 

@@ -199,7 +199,7 @@ def _format_env(
     Shell-sourceable / assignment forms, one var per line:
 
     * ``export`` (aliases ``posix``/``sh``/``bash``) -- ``export KEY='value'``,
-      single-quoted (``'`` -> ``'\\''``, control chars via ``$'...'``) so nothing
+      POSIX single-quoted (``'`` -> ``'\\''``, control chars literal) so nothing
       in a value is expanded or executed when sourced; the POSIX default a
       SessionStart hook sources.
     * ``dotenv`` (alias ``env``) -- bare ``KEY=value`` (no ``export``), value
@@ -324,24 +324,19 @@ def _sh_quote(v: str) -> str:
     Single quotes, with an embedded ``'`` written as ``'\\''``: nothing inside
     single quotes is ever expanded, so a value containing ``$(...)``, backticks
     or ``$HOME`` is set verbatim instead of being EXECUTED when the SessionStart
-    hook's output is sourced from ``$CLAUDE_ENV_FILE``. A value with a newline
-    or another control character uses bash's ``$'...'`` form instead, since a
-    single-quoted string cannot carry an escape for them. Non-ASCII passes
-    through as-is -- the file is written and sourced as UTF-8.
+    hook's output is sourced from ``$CLAUDE_ENV_FILE``. Always this form, for
+    every value: a newline or another control character is kept literally
+    inside the quotes, which POSIX sh (dash included) reads back exactly --
+    the ``$'...'`` form used before is a bash/ksh extension that dash parses
+    as ``$`` followed by an ordinary quoted string, where ``\\'`` ENDS the
+    quote. The one exception is CR: Git for Windows' bash drops a literal CR
+    from the script text it reads, so a CR is spliced in as
+    ``'"$(printf '\\r')"'`` -- a POSIX builtin running a constant, never
+    anything from the value. Non-ASCII passes through as-is -- the file is
+    written and sourced as UTF-8.
     """
-    if any(ord(c) < 0x20 or c == "\x7f" for c in v):
-        out = []
-        for c in v:
-            if c == "\\":
-                out.append("\\\\")
-            elif c == "'":
-                out.append("\\'")
-            elif ord(c) < 0x20 or c == "\x7f":
-                out.append("\\x%02x" % ord(c))
-            else:
-                out.append(c)
-        return "$'%s'" % "".join(out)
-    return "'%s'" % v.replace("'", "'\\''")
+    body = v.replace("'", "'\\''").replace("\r", "'\"$(printf '\\r')\"'")
+    return "'%s'" % body
 
 
 def _cmd_value(v: str) -> str:

@@ -54,11 +54,12 @@ def test_export_never_expands_shell_syntax():
     assert out == "export K='a$(echo X)b `echo Y` $HOME \\ '\\''q'\\'''"
 
 
-def test_export_control_chars_use_ansi_c_quoting():
-    """A newline cannot live in a single-quoted value; bash's $'...' form can
-    carry it (the old JSON form emitted a literal backslash-n)."""
-    assert _format_env({"NL": "a\nb"}, "export") == "export NL=$'a\\x0ab'"
-    assert _format_env({"T": "a\tb'c"}, "export") == "export T=$'a\\x09b\\'c'"
+def test_export_control_chars_stay_literal_in_posix_single_quotes():
+    """A newline or tab is carried literally inside single quotes, which every
+    POSIX sh reads back exactly. The `$'...'` form used before is not POSIX:
+    dash reads `\\'` there as the END of the quote."""
+    assert _format_env({"NL": "a\nb"}, "export") == "export NL='a\nb'"
+    assert _format_env({"T": "a\tb'c"}, "export") == "export T='a\tb'\\''c'"
 
 
 def test_export_non_ascii_passes_through():
