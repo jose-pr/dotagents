@@ -6,9 +6,11 @@ the operating system's own trust store:
 
     $SSL_CERT_FILE  ->  ssl.get_default_verify_paths()  ->  well-known OS paths
 
-Put ``overlays/net/lib`` on ``PYTHONPATH`` ahead of any real ``certifi`` (the net
-overlay's ``setup`` does this) so a bundled ``requests`` verifies TLS against the
-OS trust store with zero shipped certificates. Pure stdlib; Python 3.9+.
+Put ``overlays/net/lib`` on ``PYTHONPATH`` ahead of any real ``certifi``
+(``dotagents env`` publishes it in ``AGENTS_PYTHONPATH``; opt in with
+``PYTHONPATH="$AGENTS_PYTHONPATH"``) so a bundled ``requests`` verifies TLS
+against the OS trust store with zero shipped certificates. Pure stdlib;
+Python 3.9+.
 """
 import os
 import ssl

@@ -1,10 +1,13 @@
 # NET — dependency-free HTTP tooling
 
 Installed by `dotagents overlays add net`. `dotagents env` wires it in on its
-own — every installed overlay's `bin/` goes on `PATH`, its `lib/` on
-`PYTHONPATH`, and `NET_OVERLAY_ROOT` points at the installed overlay dir — so
-after `add` these are live in an env-applied shell. Nothing else to set up:
-the overlay ships no setup script and no env file.
+own — every installed overlay's `bin/` goes on `PATH`, its `lib/` into
+`AGENTS_PYTHONPATH`, and `NET_OVERLAY_ROOT` points at the installed overlay dir —
+so after `add` the curl shim is live in an env-applied shell. The `lib/` modules
+are not on the session's `PYTHONPATH` (an overlay's module must never shadow an
+installed package by accident): a Python process that wants them opts in with
+`PYTHONPATH="$AGENTS_PYTHONPATH"` (POSIX: prepend it to any `PYTHONPATH` of your
+own). The overlay ships no setup script and no env file.
 
 ## curl shim — `$NET_OVERLAY_ROOT/bin/curl` (POSIX sh) / `bin/curl.cmd` (Windows)
 
@@ -72,13 +75,13 @@ build on `PATH` cannot break the shim.
 
 Not the real cert bundle: `certifi.where()` resolves a CA bundle from
 `$SSL_CERT_FILE` → `ssl.get_default_verify_paths()` → well-known OS paths. With
-`$NET_OVERLAY_ROOT/lib` on `PYTHONPATH` (`dotagents env` puts every installed overlay's
-`lib/` there), any library that `import certifi` verifies TLS through the OS
-trust store with no shipped certs.
+`$NET_OVERLAY_ROOT/lib` on `PYTHONPATH` ahead of any real `certifi` (opt in:
+`PYTHONPATH="$AGENTS_PYTHONPATH"`), any library that `import certifi` verifies TLS
+through the OS trust store with no shipped certs.
 
     python -m certifi        # prints the resolved OS CA bundle path
 
-## httplib — `$NET_OVERLAY_ROOT/lib/httplib` (on PYTHONPATH)
+## httplib — `$NET_OVERLAY_ROOT/lib/httplib` (in `AGENTS_PYTHONPATH`)
 
 A small session toolkit. `proxy`/`jar` are pure stdlib; `session`/`fetch` import
 `requests` (+`urllib3`) **lazily** — that is the overlay's one *optional*
@@ -157,7 +160,7 @@ the origin's, never the proxy's or a prefix gateway's rewrite:
   token jar — and return `None` to let the request go, or a response of its own
   to answer instead. Requests the hook makes through the session do not run
   hooks again. `<module:callable>` is importable from `PYTHONPATH` (an overlay's
-  `lib/` is, after `dotagents env`) or a `<file>.py:callable`.
+  `lib/` is once you put `$AGENTS_PYTHONPATH` there) or a `<file>.py:callable`.
 - **curl shim**: the wrapper is a shell-quoted command line — a program and its
   own arguments — that the shim's whole argv is appended to:
   `NET_HOOKS_X_CURL='cmd fetch --'` runs `cmd fetch -- "$@"`. Quote what
