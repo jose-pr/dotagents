@@ -42,7 +42,9 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   remove / index / path; its subcommands are classes NESTED in the `Findings`
   umbrella so discovery does not register them as top-level commands) and
   `launch.py` (`dotagents launch <agent> -- <args>`: exports the `env`
-  assembly into the process and the child, writes the `context` to a file
+  assembly into the process and the child, writes the `context` to
+  `<user store>/.cache/launch/<agent>-<sha256[:12] of the project root, or
+  "-g">.md` (overwritten per launch; the dir carries a `*` `.gitignore`)
   exported as `AGENTS_CONTEXT_FILE`, hands it over via
   `Agent.launch_context_args` — Claude's `--append-system-prompt-file`; `None`
   means no append flag and the context is merged into `Agent.context_target`
@@ -63,7 +65,11 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   line is honoured for the walk. A source that fails to import for ANY reason
   (a `SyntaxError`, an exception at import time) is skipped with a warning
   naming it — discovery runs before every invocation, hooks included, so one
-  broken personal module must never take `env`/`context` down. An umbrella
+  broken personal module must never take `env`/`context` down. A command
+  that imports but whose parser cannot be built (an unresolvable annotation,
+  `X | None` on 3.9, a flag clashing with the umbrella's) is skipped the same
+  way, per command. The zipapp source-repointing list (`cli._COMMAND_MODULES`)
+  is derived from the built-ins' MROs, not hand-kept. An umbrella
   invoked with no subcommand prints its help and exits 2.
 
 ## Helper modules (public surface)

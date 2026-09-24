@@ -42,7 +42,7 @@ them. Everything else is repo infrastructure.
 | `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`/`about`, plus the bundled `findings`/`launch`) — that is the whole shipped surface; commands beyond it come from overlays or your own `dotagents/cmds/` modules |
 | `src/dotagents/_overlay/` | The **base overlay**: the `AGENTS.md` block template `init` renders into the store (no `dotagents/` dir, no design log), the two bundled commands (`findings`, `launch`), and the hook scripts `init` deploys into an agent's config dir. Neutral — imposes no flows |
 | `tools/` | Repo tooling, not shipped: `audit.py` (CI structure check) and `cloud-setup.sh`. Personal scanning tools are not here either — keep them as command modules in your own private `.agents/dotagents/cmds/` |
-| `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
+| `install.py` | Thin shim over `dotagents.cli.main()` for a source checkout; installs the checkout's dependencies into the virtual environment running it (`--bootstrap` to allow another interpreter) |
 
 The **example overlays** — the `flows` workflow set, per-language `kb/` + templates,
 `references`, `release`, `private-sync`, `net`, `recovery`, `tools` — live on a separate
@@ -148,8 +148,8 @@ When both are present, `setup.py` wins. Presence of a script is the opt-in; skip
   outward or irreversible action the *script* must confirm first — the runner invokes a
   script you chose to install; it does not second-guess it.
 
-**Downloadable `dotagents.pyz`** — a self-contained zipapp with `duho`/
-`pathlib_next` and the required `tools/` bundled in, so it needs no `pip install`:
+**Downloadable `dotagents.pyz`** — a self-contained zipapp with `duho` and
+`pathlib_next` bundled in, so it needs no `pip install`:
 
 ```bash
 python -m dotagents build-pyz --out dist/dotagents.pyz   # build it (needs this repo checkout)
@@ -160,8 +160,9 @@ python dist/dotagents.pyz init --bin-dir ~/.local/bin    # lay down the base + a
 environment); `--agents a,b` replaces that set, so include `claude` to keep it.
 
 **Or let your agent do it:** point it at this repo and say —
-> Read README.md, run `python install.py init && python install.py overlays add engineering -g`,
-> and confirm `~/.agents/overlays/flows/flows/PLAN.md` exists.
+> Read README.md, install `dotagents-cli` (into a virtual environment, or with `pipx`), run
+> `dotagents init -g && dotagents overlays add engineering -g`, and confirm
+> `~/.agents/overlays/engineering/flows/PLAN.md` exists.
 
 ## Validate
 

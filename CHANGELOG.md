@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The package ships `py.typed` and declares `Typing :: Typed`; Python 3.14 is
+  a supported version, and the project metadata links the issue tracker.
+
 ### Removed
 
 - `init` writes no `dotagents/` directory into a store: the base config is the
@@ -25,6 +30,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The license metadata is the SPDX expression `MIT` (PEP 639). Building from
+  source needs hatchling 1.27 or later.
+- `install.py` installs its dependencies only into a virtual environment.
+  Elsewhere it lists the alternatives (a venv, `pip install dotagents-cli`,
+  the release `dotagents.pyz`) and installs only with `--bootstrap`, which it
+  still refuses for an externally managed (PEP 668) interpreter.
+- The root `build.py` helper is removed; use `python -m dotagents build-pyz`.
+  Its bare-word argument parsing misread flags, and at the repository root it
+  shadowed `python -m build`.
+- `tools/cloud-setup.sh` offers the store token only to the store's own
+  remote, on its own git calls, and no longer writes a global github.com
+  credential helper to `~/.gitconfig`.
+- `launch` writes the assembled context to one file per agent and project
+  under `<user store>/.cache/launch/`, overwritten by the next launch, instead
+  of a per-process temp directory that a killed session left behind.
+- `findings remove` deletes only active findings; a processed finding keeps
+  its resolution and must be reopened first.
 - The base rule for a config miss ends at the findings queue: triage closes a
   finding with `dotagents findings done -g <name> -r "<resolution>"`, and the
   resolution is the record. It no longer points at `dotagents/DECISIONS.md`.
@@ -67,6 +89,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A command module that imports but whose parser cannot be built (an
+  unresolvable annotation, `X | None` on Python 3.9, a duplicate flag, or a
+  flag the umbrella owns) no longer breaks every `dotagents` invocation; it is
+  skipped with a warning naming its file.
+- Inside the `.pyz`, a new built-in command can no longer lose its flags and
+  help to a hand-kept module list.
+- `findings` no longer fails on a note that is not UTF-8 (it is skipped and
+  left untouched), a UTF-8 BOM no longer hides a finding's frontmatter, and
+  `--body-file -` / `--resolution-file -` read stdin as UTF-8 instead of the
+  Windows ANSI code page. Paths print as UTF-8, so a non-Latin-1 path no
+  longer fails after the file was written.
+- `findings add` refuses the names `index` and `readme`, which overwrote the
+  finding with the index on a case-insensitive filesystem, and `done` and
+  `reopen` no longer overwrite an existing file at the destination.
+- `launch` exits 128+N for a harness killed by signal N, instead of 256-N.
+- On Windows, `launch` refuses arguments that cmd.exe would run or expand for
+  a `.cmd` or `.bat` harness (`& | < > ^ % ! "` or a newline) instead of
+  passing them on rewritten.
+- The `init`, `overlays` subcommand, `about` and `launch` summaries in
+  `--help` are whole sentences.
+- Private `*.local.*` and `CLAUDE*` files in a source tree no longer reach the
+  wheel, the sdist or a locally built `dotagents.pyz`.
+- `tools/cloud-setup.sh` no longer deletes an existing `~/.agents` that is not
+  a git checkout (it moves it aside and prints where), refuses to rewrite a
+  `~/.claude/settings.json` it cannot parse, shows pip's errors, and removes
+  its recovery hook once the store is cloned or pulled.
+- The docs site redeploys for each release and after a changelog-only change.
+- A release refuses to publish when its tag does not match the version it
+  built, and re-running a partially uploaded release no longer fails.
 - The Windows PowerShell handlers that `init` adds beside Claude Code's bash
   hooks decide whether to run the way Claude Code decides which shell to use.
   They checked for `bash` on PATH: a default Git install (only `Git\cmd` on
