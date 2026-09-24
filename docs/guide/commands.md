@@ -34,8 +34,9 @@ worth knowing:
   like any other, so tooling you keep private never has to live in this repo.
 
 Your own commands work the same way: drop a `*.py` defining a `duho` command class
-into `<scope>/dotagents/cmds/` (`init` creates that dir) and it becomes a subcommand,
-no registration needed.
+into `<scope>/dotagents/cmds/` (create the dir — `init` does not) and it becomes a
+subcommand, no registration needed; see
+[Authoring → Custom commands](authoring.md#custom-commands).
 
 ## init
 
@@ -264,7 +265,8 @@ dotagents findings path                     # where this scope's queue lives
   for every other scope-aware command (`$AGENTS_PROJECT_ROOT`, `$AGENTS_HOME`).
 - The base config's own rules use it: a global-config miss is
   `dotagents findings add -g ...`, triage reads `list -g` / `show -g` and closes
-  with `done -g` (see the installed `AGENTS.md` and `dotagents/DECISIONS.md`).
+  with `done -g` (see the installed `AGENTS.md`). The resolution is the record;
+  dotagents keeps no separate design log.
 - Layout is the queue discipline: active findings at the top level; `done`
   appends a `## Resolution` section and **moves** the file to `processed/`
   (never deletes). The resolution is required — a processed finding without one

@@ -17,13 +17,13 @@ carry the opinions.
   table. Task-specific detail lives in separate files an agent opens only when the
   task matches. You pay context for what you use, not for the whole config.
 - **A neutral base overlay + opt-in overlays.** `dotagents init` lays down a minimal,
-  opinion-free **base overlay** — just the `AGENTS.md` scaffolding and the design-log
-  convention. Everything opinionated (workflow sets, per-language knowledge bases, repo
-  templates, helper tools) lives in composable **overlays** you layer in explicitly with
-  `dotagents overlays add <name>`. The overlays in this repo are examples — payloads
-  riding on dotagents, swappable for your own; see [Overlays](guide/overlays.md) for
-  what each ships. Overlays are additive: they never overwrite a file you have already
-  customized.
+  opinion-free **base overlay** — just the `AGENTS.md` managed block, whose rules
+  include the findings queue for config misses. Everything opinionated (workflow
+  sets, per-language knowledge bases, repo templates, helper tools) lives in
+  composable **overlays** you layer in explicitly with `dotagents overlays add
+  <name>`. The overlays in this repo are examples — payloads riding on dotagents,
+  swappable for your own; see [Overlays](guide/overlays.md) for what each ships.
+  Overlays are additive: they never overwrite a file you have already customized.
 - **Two scopes.** Config installs into a **user** store (`~/.agents`, configurable)
   or a **project** store (`<project>/.agents`). Overlays, skills, commands, and env
   files all resolve across the same scope precedence.
@@ -35,8 +35,8 @@ carry the opinions.
 ## Quick start
 
 ```bash
-# Lay down the neutral base config into ~/.agents (block-merges AGENTS.md/CLAUDE.md):
-dotagents init
+# Lay down the neutral base config into ~/.agents (block-merges AGENTS.md):
+dotagents init -g
 
 # Layer in opinionated overlays by name, into the user scope:
 dotagents overlays add engineering python -g
@@ -45,8 +45,8 @@ dotagents overlays add engineering python -g
 dotagents overlays list -g
 ```
 
-Then wire your agent runner to it — for Claude Code, `~/.claude/CLAUDE.md` just needs
-`@AGENTS.md`, which is exactly what the installed `CLAUDE.md` already contains.
+`init` also wires your agent runner to it — for Claude Code, an include of the store's
+`AGENTS.md` in `~/.claude/CLAUDE.md` and the session hooks.
 
 Continue with the [Install](guide/install.md) guide, or jump to
 [Commands](guide/commands.md) for the full CLI surface.

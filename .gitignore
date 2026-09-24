@@ -1,7 +1,8 @@
 # Private agent config. No trailing slash: `dotagents link-project` makes .agents
 # a symlink, which git treats as a file, so a directory-only `.agents/` would not
-# match it. The design log lives INSIDE .agents/dotagents/ and is private like
-# every other project's (D61, reversing D56); CHANGELOG.md cites no D-numbers.
+# match it. This repo's decisions, findings and plans live INSIDE .agents/ and are
+# private like every other project's (D61, reversing D56); CHANGELOG.md cites no
+# D-numbers.
 .agents
 *.local.md
 CLAUDE.local.md

@@ -65,18 +65,47 @@ dotagents, so it works on every platform). See the contract in
 
 ## Custom commands
 
-An overlay (or a scope's command dir) can ship **command modules** that become new
-`dotagents` subcommands, discovered at run time. A command module defines a
-`duho` command class — a `class X(LoggingArgs, Cmd)` with a `__call__` entry point —
-and dotagents discovers it from:
+A **command module** is a `*.py` file defining a `duho` command class — a
+`class X(LoggingArgs, Cmd)` with a `__call__` entry point — and each one becomes a
+`dotagents <name>` subcommand, discovered at run time with no registration. An overlay
+ships its modules in its own `cmds/` dir. For your own, create `dotagents/cmds/` in a
+store: `~/.agents/dotagents/cmds/` for every session, `<project>/.agents/dotagents/cmds/`
+for one project. `init` does not create that directory; you create it when you add your
+first module.
 
-- the scope command dirs (user + project), always;
-- `$AGENTS_CMDS_PATH` entries (os.pathsep-split);
-- `--cmdspath` entries passed on the command line.
+```python
+# ~/.agents/dotagents/cmds/hello.py
+from duho import Cmd, LoggingArgs
 
-Later sources override an earlier same-named command, so a project command can shadow a
-user command of the same name. The bundled `link` / `sync` commands are exactly this
-mechanism (D76).
+
+class Hello(LoggingArgs, Cmd):
+    """Say hello."""
+
+    _parsername_ = "hello"
+
+    who: str = "world"
+    ("--who",)
+
+    def __call__(self) -> int:
+        print("hello, %s" % self.who)
+        return 0
+```
+
+Then `dotagents hello --who you`. Files whose name starts with `_` are skipped — use
+that prefix for shared helper modules. A command that works on a scope inherits
+`dotagents.cli.DotAgentsArgs` (the `-g` / `--agents-dir` pair and `resolve_scope()`)
+instead of redeclaring the flags.
+
+Sources layer so that a later one overrides a same-named command: the built-ins, then
+the bundled `findings` and `launch`, then store by store — system (`/etc/agents`), the
+user store, the project's `.agents/` — each store's overlays' `cmds/` before the
+store's own `dotagents/cmds/`, and last `$AGENTS_CMDS_PATH` entries (os.pathsep-split)
+and `--cmdspath` entries. So your user-store command overrides one shipped by an
+overlay installed in the user (or system) store, and a project's overlays and
+`.agents/dotagents/cmds/` override yours. A module that fails to
+import (a syntax error, an exception at import time) is skipped with a warning naming
+it; it never takes the other commands down with it. The private-sync overlay's
+`link-project` / `sync-project` are exactly this mechanism.
 
 ## Skills
 

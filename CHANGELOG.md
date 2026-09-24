@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+
+- `init` writes no `dotagents/` directory into a store: the base config is the
+  `AGENTS.md` managed block, plus the Claude include and the agents' hooks.
+  Gone are `dotagents/DECISIONS.md` (the per-install design log),
+  `dotagents/README.md`, `dotagents/AGENTS.md`, and the empty
+  `dotagents/cmds/` with its README. A scope's `dotagents/cmds/` is still where
+  your own command modules go; create it when you add your first one (the
+  docs' authoring guide shows how).
+
+### Changed
+
+- The base rule for a config miss ends at the findings queue: triage closes a
+  finding with `dotagents findings done -g <name> -r "<resolution>"`, and the
+  resolution is the record. It no longer points at `dotagents/DECISIONS.md`.
+  An existing store picks the new wording up when its block is next rebuilt:
+  `dotagents overlays sync` in a store with overlays installed, `dotagents
+  init` in one without.
+- Existing stores keep the files an earlier `init` wrote. Delete
+  `dotagents/DECISIONS.md`, `dotagents/README.md`, `dotagents/AGENTS.md` and
+  `dotagents/cmds/README.md` if you no longer want them, keeping any decisions
+  you recorded wherever you keep notes. If you still keep a findings queue at
+  `dotagents/findings/` (the queue moved to `findings/` in 0.4.0), move it;
+  until then every `findings` subcommand reads it with `--dir` (`dotagents
+  findings list --dir <store>/dotagents/findings`).
+
 ## [0.5.1] - 2026-09-12
 
 ### Added

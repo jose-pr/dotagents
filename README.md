@@ -19,7 +19,7 @@ session.
   `flows/` and `kb/` files that an agent reads only when the task matches. You pay for
   what you use.
 - **A neutral base + opt-in overlays.** `init` lays down a minimal, opinion-free
-  **base overlay** (just the `AGENTS.md` scaffolding + design-log convention).
+  **base overlay** (just the `AGENTS.md` managed block).
   Everything opinionated — workflows, language `kb/` files, repo templates, tools —
   lives in composable **overlays** you layer in explicitly
   (`dotagents overlays add <name>`), each contributing its own routing lines, rules,
@@ -39,8 +39,8 @@ them. Everything else is repo infrastructure.
 
 | Path | What |
 | --- | --- |
-| `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`) — that is the whole shipped surface; commands beyond it come from overlays or your own `cmds/` modules |
-| `src/dotagents/_overlay/` | The **base overlay** `init` writes: `AGENTS.md` scaffolding, `CLAUDE.md`, `dotagents/DECISIONS.md` (empty design-log index), and an empty `dotagents/cmds/` dir — your drop-in point for your own command modules. Neutral — imposes no flows, ships no command |
+| `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`/`about`, plus the bundled `findings`/`launch`) — that is the whole shipped surface; commands beyond it come from overlays or your own `dotagents/cmds/` modules |
+| `src/dotagents/_overlay/` | The **base overlay**: the `AGENTS.md` block template `init` renders into the store (no `dotagents/` dir, no design log), the two bundled commands (`findings`, `launch`), and the hook scripts `init` deploys into an agent's config dir. Neutral — imposes no flows |
 | `tools/` | Repo tooling, not shipped: `audit.py` (CI structure check) and `cloud-setup.sh`. Personal scanning tools are not here either — keep them as command modules in your own private `.agents/dotagents/cmds/` |
 | `install.py` | Thin shim over `dotagents.cli.main()`, kept at this filename for muscle memory |
 
@@ -53,9 +53,9 @@ resolves them from there (or from any `--repo`). See the
 
 Named-agent directives aren't a shipped overlay — a named agent (Claude, Antigravity,
 …) just reads its own `~/.agents/<agent>.md` on top of the shared `AGENTS.md`, which the
-base overlay's routing already states. This config's own design log lives **privately**
-under its untracked `.agents/dotagents/` (`DECISIONS.md` + one file per decision) — like
-every project, `.agents/` is never tracked or pushed.
+base overlay's routing already states. This repo's own working material (decisions,
+findings, plans) lives **privately** in its untracked `.agents/` — like every project,
+`.agents/` is never tracked or pushed.
 
 Each overlay's `<name>/overlay.toml` carries a `name`/`description`/`requires`/`routing`
 manifest read by the `dotagents overlays` subcommand, which manages overlays by name
@@ -71,21 +71,20 @@ Or skip `pip` entirely with the self-contained downloadable `.pyz` (see below).
 
 **`dotagents init`** lays down the neutral base config.
 
-`init` writes the `.agents/` scaffolding — the `AGENTS.md` managed block, the per-agent
-`<CLAUDE|ANTIGRAVITY|...>.md → @AGENTS.md` pattern, the design-log convention — and
-wires each supporting agent's hooks so `dotagents context` reaches it automatically at
-session start (`--no-hooks` opts out) — but
-imposes no opinions (those come from `overlays add`). Its `AGENTS.md`/`CLAUDE.md` are a
-marker-delimited managed block, so re-running `init` never clobbers what you've added
-around it. **Scope**: project by default (`<cwd>/.agents`), or the user store with
-`-g`/`--global` (`~/.agents`).
+`init` writes the store's `AGENTS.md` managed block, points Claude Code at it (an
+include in `~/.claude/CLAUDE.md` for the user store, `<project>/.claude/CLAUDE.md` for a
+project), and wires each supporting agent's hooks so `dotagents context` reaches it
+automatically at session start (`--no-hooks` opts out) — but imposes no opinions (those
+come from `overlays add`). The block is marker-delimited, so re-running `init` never
+clobbers what you've added around it. **Scope**: project by default (`<cwd>/.agents`),
+or the user store with `-g`/`--global` (`~/.agents`).
 
 ```bash
 dotagents init                          # project: <cwd>/.agents
 dotagents init -g                       # user store: ~/.agents
 dotagents init --bin-dir ~/.local/bin   # also write a `dotagents` command on PATH
 dotagents init --dry-run                # show what would happen
-dotagents init --force                  # replace AGENTS.md/CLAUDE.md wholesale (backed up)
+dotagents init --force                  # replace AGENTS.md wholesale (backed up)
 ```
 
 `--from <path-or-uri>` selects the *base* source for a `pip install`-only environment
@@ -157,8 +156,8 @@ python -m dotagents build-pyz --out dist/dotagents.pyz   # build it (needs this 
 python dist/dotagents.pyz init --bin-dir ~/.local/bin    # lay down the base + a `dotagents` command, offline
 ```
 
-Then wire your runner to it — e.g. Claude Code: put `@AGENTS.md` in
-`~/.claude/CLAUDE.md`... which is exactly what the installed `CLAUDE.md` contains.
+`init` wires Claude Code plus any harness it is running inside (detected from its
+environment); `--agents a,b` replaces that set, so include `claude` to keep it.
 
 **Or let your agent do it:** point it at this repo and say —
 > Read README.md, run `python install.py init && python install.py overlays add engineering -g`,
@@ -174,16 +173,20 @@ python tools/audit.py --check-templates --root .  # + template checks (needs 3.1
 ## Customize
 
 Fork it — that's the point. Keep the base `AGENTS.md` small (the audit warns past
-~2.5KB); put opinionated content in overlays. Your `~/.agents/dotagents/DECISIONS.md`
-is *your* private, per-install design log (index + `decisions/` files) — installed
-empty, edited directly, never distributed. This repo follows the same rule: its own
-design log and all working material live in an **untracked** `.agents/dotagents/`, never
-committed — so what's public here is only the CLI, the base overlay, and the opt-in
-overlays. If you fork, keep the tracked surface free of personal paths and private
-project names. `dotagents audit` validates config *structure* only; personal-leak
-scanning (machine paths, private plan names, session trailers) is a separate,
-personal tool you run locally before a push — it lives in your private `.agents/`,
-not shipped in this repo.
+~2.5KB); put opinionated content in overlays. dotagents installs no design log: a
+config miss is a **finding** — `dotagents findings add -g` for the user store
+(`~/.agents/findings/`), no `-g` for a project (`<project>/.agents/findings/`) — and
+triage closes each with its resolution, which is the record. How you keep any
+decisions beyond that is up to you. A store's `dotagents/` directory exists only for
+your own command modules (`dotagents/cmds/`), which you create when you add your first
+one. This
+repo follows the same rule: its working material lives in an **untracked** `.agents/`,
+never committed — so what's public here is only the CLI, the base overlay, and the
+opt-in overlays. If you fork, keep the tracked surface free of personal paths and
+private project names. `tools/audit.py` validates this repo's *structure* only;
+personal-leak scanning (machine paths, private plan names, session trailers) is a
+separate, personal tool you run locally before a push — keep it as a command module in
+your private `.agents/dotagents/cmds/`, not in the repo.
 
 ## Documentation
 

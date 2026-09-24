@@ -1,7 +1,7 @@
 # Overlays
 
 The configuration is a **base overlay** plus opt-in **overlays**. The base is what
-`init` / `install` lay down — neutral scaffolding with no opinions. Everything
+`init` lays down — the `AGENTS.md` managed block, with no opinions. Everything
 opinionated ships as a named overlay you add explicitly.
 
 ## The overlay model
