@@ -386,12 +386,17 @@ API:
   (paths the harness loads itself: `~/` or `/` absolute, else under the project
   root), `context_target` (the file `write_context` merges into, relative to the
   project root; `""` = none), `launch_command` (the CLI program; `""` = none),
-  `scope_level` / `project_root` (set by `init`).
+  `include_entry` (`(user path under ~, project path)` of the entry file that gets
+  the store's include; `()` = none), `base_config_note` (what `init` logs for a
+  harness it links nothing into), `scope_level` / `project_root` (set by `init`).
   - `detect_env(environ) -> bool` — any `detect_env_vars` present.
   - `detect(root) -> bool` — any `context_files` exists under `root`.
   - `resolve_model(environ) -> Optional[str]` — first set `model_source_vars` value.
   - `write_base_config(dest, *, dry_run, logger) -> None` — the harness's link to
-    `<dest>/AGENTS.md` (the store file itself is written by `init`). Base: nothing.
+    `<dest>/AGENTS.md` (the store file itself is written by `init`): an
+    `@<dest>/AGENTS.md` line appended as a managed block to the `include_entry`
+    file (skipped when the line is already there; a warning when a project's file
+    is not gitignored), else a `base_config_note` log line.
   - `write_context(project_root, effective_context, *, dry_run, logger) -> None` —
     merge a `dotagents:context` block into `<project_root>/<context_target>`.
   - `loaded_paths(project_root) -> list[Path]` — resolved `harness_loads`.

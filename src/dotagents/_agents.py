@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotagents._fs import write_text_lf
+from dotagents._scope import _is_windows
 
 
 def _is_user_store(dest: "str | os.PathLike[str]") -> bool:
@@ -74,6 +75,28 @@ def _git_tracked_or_unignored(path: Path) -> bool:
     except OSError:
         return False
     return ignored.returncode == 1
+
+
+def _deploy_hook_script(root: Path, name: str, *, dry_run: bool, logger, harness: str) -> "Optional[bool]":
+    """Copy the packaged hook script ``name`` into ``<root>/hooks/``
+    (create-or-refresh: the scripts have no user-editable region). Returns
+    whether the deployed copy changed, or None -- with a warning -- when the
+    package does not carry the script."""
+    import shutil
+
+    from dotagents.cli._common import BASE_ROOT
+
+    src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / name
+    if not src_script.is_file():
+        if logger:
+            logger.warning("%s hook script missing from package: %s", harness, src_script)
+        return None
+    dest_script = root / "hooks" / name
+    changed = not dest_script.is_file() or dest_script.read_bytes() != src_script.read_bytes()
+    if changed and not dry_run:
+        dest_script.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src_script), str(dest_script))
+    return changed
 
 
 def _claude_includes(entry_file: Path, seen: "set[Path]", depth: int = 0) -> None:
@@ -154,11 +177,57 @@ class Agent:
                 return val
         return None
 
+    #: The harness's own entry file that `init` adds an ``@<store>/AGENTS.md``
+    #: include to, as ``(user scope, project scope)``: the first relative to
+    #: the home directory, the second to the project root. Empty = the
+    #: harness has no include syntax.
+    include_entry: "tuple[str, str]" = ()
+    #: What `init` says for a harness that gets nothing from it (it reads the
+    #: context through `context --write-agent` or `launch`). Empty = nothing.
+    base_config_note: str = ""
+    #: Why a project entry file carrying the include should stay uncommitted.
+    _INCLUDE_NOT_IGNORED = (
+        "%s is not gitignored: its include names this machine's .agents/, which is "
+        "never committed -- keep the file out of commits (or add it to .gitignore)"
+    )
+
+    def _include_file(self, dest: Path) -> "Optional[Path]":
+        """The entry file :meth:`write_base_config` includes the store from,
+        or None (:attr:`include_entry`)."""
+        if not self.include_entry:
+            return None
+        user, project = self.include_entry
+        if self._user_scope(dest):
+            return Path.home() / user
+        return self._project_dir(dest) / project
+
+    def _include_line(self, dest: Path, entry_file: Path) -> str:
+        """The ``@path`` line that makes ``entry_file`` load ``<dest>/AGENTS.md``."""
+        return "@" + (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
+
     def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
         """This harness's last mile to the store's AGENTS.md, which `init`
-        writes itself: an include in the harness's own entry file, a pointer,
-        or nothing when the harness reads the context another way."""
-        pass
+        writes itself: an ``@`` include in the harness's own entry file
+        (:attr:`include_entry`), appended as a managed block and skipped when
+        the line is already there by hand; else just
+        :attr:`base_config_note`."""
+        entry = self._include_file(dest)
+        if entry is None:
+            if logger and self.base_config_note:
+                logger.info("%s: %s", self.name, self.base_config_note)
+            return
+        from dotagents._merge import merge_include_line
+
+        branch = merge_include_line(entry, self._include_line(dest, entry), dry_run=dry_run)
+        if logger:
+            logger.info("%s: %s (include)", branch, entry)
+        if not self._user_scope(dest) and logger and _git_tracked_or_unignored(entry):
+            logger.warning(self._INCLUDE_NOT_IGNORED, entry)
+
+    #: The platform gate for Windows-only behaviour, as a seam: tests patch it
+    #: on the adapter class (`os.name` cannot be patched -- `pathlib.Path()`
+    #: dispatches on it).
+    _is_windows = staticmethod(_is_windows)
 
     #: The harness's own instruction file, relative to the PROJECT ROOT, that
     #: `write_context` merges the assembled context into (as a managed
@@ -360,24 +429,12 @@ class ClaudeAgent(Agent):
             return "@" + rel.as_posix()
         return "@" + target.as_posix()
 
-    def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
-        from dotagents._merge import merge_include_line
-
-        # The last mile: Claude Code reads `~/.claude/CLAUDE.md` (user scope) or
-        # `<project>/.claude/CLAUDE.md` (project scope), never a `<store>/CLAUDE.md`.
-        # Without this include the store's AGENTS.md reaches no session at all.
-        # A managed block, appended, and skipped when the include line is already
-        # there by hand.
-        entry = self._config_root(dest) / "CLAUDE.md"
-        branch = merge_include_line(
-            entry, self._include_line(dest, entry), dry_run=dry_run,
-        )
-        if logger: logger.info("%s: %s (include)", branch, entry)
-        if not self._user_scope(dest) and logger and _git_tracked_or_unignored(entry):
-            logger.warning(
-                "%s is not gitignored: the include points at .agents/, which is never "
-                "committed -- keep the file out of commits (or add it to .gitignore)", entry,
-            )
+    def _include_file(self, dest: Path) -> "Optional[Path]":
+        # The last mile: Claude Code reads `<config>/CLAUDE.md` (user scope,
+        # `$CLAUDE_CONFIG_DIR` honoured) or `<project>/.claude/CLAUDE.md`
+        # (project scope), never a `<store>/CLAUDE.md`. Without this include
+        # the store's AGENTS.md reaches no session at all.
+        return self._config_root(dest) / "CLAUDE.md"
 
     # --- skills --------------------------------------------------------
 
@@ -676,13 +733,6 @@ class ClaudeAgent(Agent):
         if logger:
             logger.info("wired %s hooks: %s", wired, settings_path)
 
-    @staticmethod
-    def _is_windows() -> bool:
-        """The platform gate for the PowerShell hook variants, as a seam: tests
-        patch THIS (`os.name` cannot be patched -- `pathlib.Path()` dispatches
-        on it -- and the real gate must stay `os.name`, not "pwsh present")."""
-        return os.name == "nt"
-
     #: Identity (statusMessage) of the PowerShell PreToolUse env-loader entry.
     PRETOOLUSE_STATUS = "Checking PowerShell env"
     #: Opt-in (`init --powershell-env-hook`): the loader returns
@@ -730,25 +780,8 @@ class GeminiAgent(Agent):
     launch_command = "gemini"
     vendor = "google"
     model_source_vars = ["GEMINI_MODEL"]
-
-    def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
-        """An `@<store>/AGENTS.md` import in Gemini's own entry file:
-        `~/.gemini/GEMINI.md` for the user scope, `<project>/GEMINI.md` for a
-        project (Gemini CLI resolves `@path` imports in GEMINI.md)."""
-        from dotagents._merge import merge_include_line
-
-        if self._user_scope(dest):
-            entry = Path.home() / ".gemini" / "GEMINI.md"
-        else:
-            entry = self._project_dir(dest) / "GEMINI.md"
-        target = (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
-        branch = merge_include_line(entry, "@" + target, dry_run=dry_run)
-        if logger: logger.info("%s: %s (include)", branch, entry)
-        if not self._user_scope(dest) and logger and _git_tracked_or_unignored(entry):
-            logger.warning(
-                "%s is not gitignored: its include is a machine-local path -- keep "
-                "it out of commits", entry,
-            )
+    # Gemini CLI resolves `@path` imports in GEMINI.md.
+    include_entry = (".gemini/GEMINI.md", "GEMINI.md")
 
 class AntigravityAgent(Agent):
     name = "antigravity"
@@ -808,11 +841,9 @@ class AntigravityAgent(Agent):
         every workspace. Run as the absolute interpreter that ran `init` -- a
         bare `python` is missing on a POSIX box that ships only `python3`.
         """
-        import shutil
         import sys
 
         from dotagents import _hooks
-        from dotagents.cli._common import BASE_ROOT
 
         if config_root is None and not self._user_scope(dest):
             if logger:
@@ -823,20 +854,13 @@ class AntigravityAgent(Agent):
             return
         root = Path(config_root) if config_root else (Path.home() / ".gemini" / "config")
 
-        src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / self.PREINVOCATION_HOOK_SCRIPT
-        if not src_script.is_file():
-            if logger:
-                logger.warning("Antigravity hook script missing from package: %s", src_script)
-            return
-
-        dest_dir = root / "hooks"
-        dest_script = dest_dir / self.PREINVOCATION_HOOK_SCRIPT
-        script_changed = not dest_script.is_file() or (
-            dest_script.read_bytes() != src_script.read_bytes()
+        script_changed = _deploy_hook_script(
+            root, self.PREINVOCATION_HOOK_SCRIPT, dry_run=dry_run, logger=logger,
+            harness="Antigravity",
         )
-        if script_changed and not dry_run:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(src_script), str(dest_script))
+        if script_changed is None:
+            return
+        dest_script = root / "hooks" / self.PREINVOCATION_HOOK_SCRIPT
 
         hooks_path = root / "hooks.json"
         data = _hooks.load_settings(hooks_path)
@@ -980,7 +1004,9 @@ class CodexAgent(Agent):
         self.remove_env_block(dry_run=dry_run, logger=logger, config_root=root)
         script_changed = False
         for name in (self.SESSION_START_HOOK_SCRIPT, self.PRETOOLUSE_HOOK_SCRIPT):
-            script_changed |= self._deploy_script(root, name, dry_run=dry_run, logger=logger)
+            script_changed |= bool(_deploy_hook_script(
+                root, name, dry_run=dry_run, logger=logger, harness="Codex",
+            ))
 
         hooks_path = root / "hooks.json"
         data = _hooks.load_settings(hooks_path)
@@ -1037,30 +1063,6 @@ class CodexAgent(Agent):
             '"%s" "%s"' % (python, script),
         )
 
-    def _deploy_script(self, root: Path, name: str, *, dry_run: bool, logger) -> bool:
-        """Copies a packaged hook script to `<codex-home>/hooks/`
-        (create-or-refresh: the scripts have no user-editable region). Returns
-        whether it changed."""
-        import shutil
-
-        from dotagents.cli._common import BASE_ROOT
-
-        src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / name
-        if not src_script.is_file():
-            if logger:
-                logger.warning("Codex hook script missing from package: %s", src_script)
-            return False
-
-        dest_dir = root / "hooks"
-        dest_script = dest_dir / name
-        changed = not dest_script.is_file() or (
-            dest_script.read_bytes() != src_script.read_bytes()
-        )
-        if changed and not dry_run:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(src_script), str(dest_script))
-        return changed
-
 
 class CursorAgent(Agent):
     name = "cursor"
@@ -1091,9 +1093,8 @@ class CursorAgent(Agent):
             )
         super().write_context(project_root, effective_context, dry_run=dry_run, logger=logger)
 
-    def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
-        if logger:
-            logger.info("cursor: reads the context via `context --write-agent` or `launch`")
+    base_config_note = "reads the context via `context --write-agent` or `launch`"
+
 
 class CopilotAgent(Agent):
     name = "copilot"
@@ -1111,9 +1112,8 @@ class CopilotAgent(Agent):
     vendor = "github"
     model_source_vars = ["COPILOT_MODEL"]
 
-    def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
-        if logger:
-            logger.info("copilot: reads the context via `context --write-agent` or `launch`")
+    base_config_note = "reads the context via `context --write-agent` or `launch`"
+
 
 class PiAgent(Agent):
     """pi (pi.dev; npm ``@earendil-works/pi-coding-agent``; the ``pi`` command).
@@ -1210,11 +1210,6 @@ class PiAgent(Agent):
                 "%s is not gitignored: its pointer names .agents/, which is never "
                 "committed -- keep the file out of commits (or add it to .gitignore)", entry,
             )
-
-    @staticmethod
-    def _is_windows() -> bool:
-        """Seam, as on :class:`ClaudeAgent`: tests patch this, not ``os.name``."""
-        return os.name == "nt"
 
     def launch_context_args(self, context_file: Path) -> "Optional[list[str]]":
         # `--append-system-prompt <text>` is the documented append; there is no
