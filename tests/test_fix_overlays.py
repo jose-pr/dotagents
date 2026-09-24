@@ -486,3 +486,52 @@ def test_a_non_utf8_rules_file_is_a_warning_not_a_wedge(world):
     assert _add(src, store, "bad") == 0
     assert _add(src, store, "good") == 0
     assert "GOOD-ROUTE" in (store / "AGENTS.md").read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
+# overlays-19 / -20: names that alias on Windows or on the root variable
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", ["python.", "net-", "my_", "con", "NUL", "com1", "lpt9", "aux.tools"])
+def test_names_that_alias_on_windows_are_invalid(name):
+    assert not Overlay.is_valid_name(name)
+
+
+def test_removing_a_trailing_dot_name_is_refused_not_aliased(world):
+    src, store = world
+    _overlay(src, "python", files=[("kb/P.md", "p\n")])
+    _add(src, store, "python")
+    with pytest.raises(SystemExit, match="not a valid overlay name"):
+        _run(OverlayRemove, name=["python."], global_scope=True, agents_dir=store, dry_run=False)
+    assert (store / "overlays" / "python").is_dir()
+
+
+def test_dots_normalize_so_v1_2_and_v1_dash_2_are_one_overlay():
+    assert Overlay.normalize_name("v1.2") == Overlay.normalize_name("v1-2") == "v1-2"
+
+
+def test_shadowing_compares_normalized_names(tmp_path):
+    user, project = tmp_path / "user", tmp_path / "proj"
+    (user / "overlays" / "my_overlay").mkdir(parents=True)
+    (project / "overlays" / "my-overlay").mkdir(parents=True)
+    assert [o.path for o in Overlay.installed(user, project)] == [project / "overlays" / "my-overlay"]
+
+
+def test_discover_warns_when_two_dirs_are_one_overlay(tmp_path, caplog):
+    root = tmp_path / "overlays"
+    (root / "v1.2").mkdir(parents=True)
+    (root / "v1-2").mkdir()
+    with caplog.at_level(logging.WARNING):
+        Overlay.discover(root)
+    assert any("are one overlay" in r.getMessage() for r in caplog.records)
+
+
+def test_a_dotted_install_from_an_older_rule_is_still_found(world):
+    src, store = world
+    _overlay(src, "foo.bar", files=[("kb/F.md", "f\n")])
+    legacy = store / "overlays" / "foo.bar"  # what `add foo.bar` made before dots normalized
+    shutil.copytree(str(src / "foo.bar"), str(legacy))
+    assert _add(src, store, "foo.bar") == 0
+    assert sorted(p.name for p in (store / "overlays").iterdir()) == ["foo.bar"], "re-add reuses it"
+    assert _run(OverlayRemove, name=["foo.bar"], global_scope=True, agents_dir=store, dry_run=False) == 0
+    assert not legacy.exists()

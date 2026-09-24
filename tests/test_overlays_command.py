@@ -59,8 +59,8 @@ def test_normalize_name():
     assert Overlay.normalize_name("My_Overlay") == "my-overlay"
     assert Overlay.normalize_name("my-overlay") == "my-overlay"
     assert Overlay.normalize_name("NET") == "net"
-    # Dots are part of the install path and are kept.
-    assert Overlay.normalize_name("v1.2") == "v1.2"
+    # A dot normalizes to `-` like `_`: `v1.2` and `v1-2` are one overlay.
+    assert Overlay.normalize_name("v1.2") == "v1-2"
 
 
 def test_root_var_derives_from_normalized_name():
@@ -89,7 +89,7 @@ def test_overlay_instance_surface(tmp_path):
     ov = Overlay(d)  # dir does not exist yet
     assert ov.path == d
     assert ov.name == "My_Ov.v2"
-    assert ov.normalized_name == "my-ov.v2"
+    assert ov.normalized_name == "my-ov-v2"
     assert ov.root_var == "MY_OV_V2_OVERLAY_ROOT"
     assert ov.is_valid
     assert ov.manifest_path == d / "overlay.toml"

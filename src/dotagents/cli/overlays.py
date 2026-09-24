@@ -50,6 +50,22 @@ def _validated_names(raw_names, what: str) -> "list[str]":
     return names
 
 
+def _installed_dir(scope, name: str) -> "Optional[Path]":
+    """The scope's own installed dir for the normalized ``name``: the literal
+    ``overlays/<name>/``, else one whose name normalizes to it (an install
+    made under an older name rule -- ``foo.bar`` before dots normalized to
+    ``-``, or a hand-placed ``My_Overlay``). ``None`` when not installed."""
+    from dotagents._overlays import Overlay
+
+    literal = scope.overlay_dir(name)
+    if literal.is_dir():
+        return literal
+    for overlay in Overlay.discover(scope.overlay_root):
+        if overlay.normalized_name == name:
+            return overlay.path
+    return None
+
+
 def _install_order(
     source, names, *, follow_requires: bool, logger, installed: "frozenset[str]" = frozenset(),
 ) -> "list[str]":
@@ -199,7 +215,7 @@ class OverlayAdd(DotAgentsArgs):
 
         for name in order:
             overlay_src = sources[name]
-            dest_dir = scope.overlay_dir(name)
+            dest_dir = _installed_dir(scope, name) or scope.overlay_dir(name)
             copied, skipped, lines = _overlays.Overlay(overlay_src).install_to(
                 dest_dir, self.dry_run
             )
@@ -281,9 +297,11 @@ class OverlayRemove(DotAgentsArgs):
 
         removed_names: "list[str]" = []
         for name in names:
-            overlay_dir = scope.overlay_dir(name)
-            if not overlay_dir.is_dir():
-                self._logger_.warning("overlay %r not installed at %s", name, overlay_dir)
+            overlay_dir = _installed_dir(scope, name)
+            if overlay_dir is None:
+                self._logger_.warning(
+                    "overlay %r not installed at %s", name, scope.overlay_dir(name)
+                )
                 continue
             if not self.dry_run:
                 removed = _skills.remove_overlay_skills(
@@ -302,7 +320,7 @@ class OverlayRemove(DotAgentsArgs):
             remaining = [
                 overlay.path
                 for overlay in _overlays.Overlay.discover(scope.overlay_root)
-                if overlay.name not in removed_names
+                if overlay.normalized_name not in removed_names
             ]
             base_block = base_agents_text(store_base(scope.agents_root, self._logger_), scope.agents_root, project=not scope.global_scope)
             if _overlays.recompose_overlay_block(
@@ -374,7 +392,7 @@ class OverlayList(DotAgentsArgs):
         except SourceError as exc:  # nothing configured at all
             self._logger_.warning("%s", exc)
             available = []
-        names = {o.name for o in active}
+        names = {o.normalized_name for o in active}
 
         # Listed most-specific first: the scope's own store, then the stores
         # beneath it (user, then system); a store with nothing is shown only
@@ -410,7 +428,9 @@ class OverlayList(DotAgentsArgs):
             if not names_ and not shadowed_:
                 lines.append("  (none)")
         lines.append("available (source):")
-        lines += ["  %s%s" % (n, " *" if n in names else "") for n in available] or ["  (none)"]
+        lines += [
+            "  %s%s" % (n, " *" if Overlay.normalize_name(n) in names else "") for n in available
+        ] or ["  (none)"]
         _write_stdout("\n".join(lines) + "\n")
         return 0
 
@@ -453,7 +473,7 @@ class OverlayShow(DotAgentsArgs):
         scope = self.resolve_scope()
         # The copy a session in this scope would use (the most specific store's),
         # else the source's.
-        active = [o for o in scope.overlays if o.name == name]
+        active = [o for o in scope.overlays if o.normalized_name == name]
         if active:
             path = active[0].path
             where = "installed (%s)" % scope.store_level(active[0].store)

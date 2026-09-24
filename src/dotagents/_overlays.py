@@ -323,14 +323,23 @@ class Overlay:
     """
 
     #: A directory under ``overlays/`` is an overlay IFF its name matches this: a
-    #: leading ASCII letter, then ASCII letters/digits/``_``/``.``/``-``. A dot is
-    #: allowed MID-name (``foo.bar``, ``v1.2``) but not as the first char, so
-    #: ``.git``/``.hidden`` are excluded; a leading underscore (``__pycache__``) and
-    #: a leading digit (``2fast``) are excluded too. One shared rule for
-    #: :meth:`discover` and ``overlays add`` (D84). Whether a path IS a directory
-    #: is checked separately with ``is_dir()``, which follows symlinks -- a
-    #: symlink-to-dir is a valid overlay.
-    NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    #: leading ASCII letter, then ASCII letters/digits/``_``/``.``/``-``, ending
+    #: in a letter or digit. A dot is allowed MID-name (``foo.bar``, ``v1.2``)
+    #: but not first, so ``.git``/``.hidden`` are excluded, nor last: Win32
+    #: strips a trailing dot, so ``python.`` would BE ``python`` on disk. A
+    #: leading underscore (``__pycache__``) and a leading digit (``2fast``) are
+    #: excluded too. One shared rule for :meth:`discover` and ``overlays add``
+    #: (D84). Whether a path IS a directory is checked separately with
+    #: ``is_dir()``, which follows symlinks -- a symlink-to-dir is a valid overlay.
+    NAME_RE = re.compile(r"^[A-Za-z](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$")
+
+    #: Windows device names: ``con`` / ``nul`` / ``com1`` (with any extension)
+    #: name the device, not a directory, on every Windows drive.
+    RESERVED_NAMES = frozenset(
+        ["con", "prn", "aux", "nul"]
+        + ["com%d" % i for i in range(1, 10)]
+        + ["lpt%d" % i for i in range(1, 10)]
+    )
 
     #: The optional manifest an overlay may carry at its root.
     MANIFEST_NAME = "overlay.toml"
@@ -379,23 +388,30 @@ class Overlay:
         (``user``, ``project``, ``system``, ``project-root``, ``default``,
         ``overlay`` -- :data:`dotagents._scope.LEVEL_NAMES`) are reserved: an
         overlay's dir name is its level label in the walk, and one of these
-        would collide with the per-level filename keys."""
+        would collide with the per-level filename keys. So are Windows device
+        names (:data:`RESERVED_NAMES`, with or without an extension)."""
         from dotagents._scope import LEVEL_NAMES
 
-        return bool(Overlay.NAME_RE.match(name)) and name.lower() not in LEVEL_NAMES
+        return (
+            bool(Overlay.NAME_RE.match(name))
+            and name.lower() not in LEVEL_NAMES
+            and name.split(".", 1)[0].lower() not in Overlay.RESERVED_NAMES
+        )
 
     @staticmethod
     def normalize_name(name: str) -> str:
-        """THE canonical overlay name: lowercase, ``_`` -> ``-``.
+        """THE canonical overlay name: lowercase, ``_`` and ``.`` -> ``-``.
 
         Every place that refers to an overlay by name goes through this one
         function, so ``My_Overlay`` and ``my-overlay`` are one overlay everywhere:
         ``overlays add`` installs to ``<scope>/overlays/<normalize_name(name)>/``
-        and resolves the source dir by the same name, and :meth:`root_var_for`
-        derives the ``<NAME>_OVERLAY_ROOT`` env var from it. Dots are kept
-        (``v1.2`` stays ``v1.2``): they are legal in an overlay dir name
-        (:meth:`is_valid_name`) and are part of the install path."""
-        return name.lower().replace("_", "-")
+        and resolves the source dir by the same name, shadowing across stores
+        compares it, and :meth:`root_var_for` derives the ``<NAME>_OVERLAY_ROOT``
+        env var from it. A dot is legal in a dir name (:meth:`is_valid_name`)
+        but no shell variable can carry it, so ``v1.2`` and ``v1-2`` would share
+        ``V1_2_OVERLAY_ROOT``; normalizing it to ``-`` makes them one overlay
+        rather than two that alias."""
+        return name.lower().replace("_", "-").replace(".", "-")
 
     @staticmethod
     def root_var_for(name: str) -> str:
@@ -457,11 +473,20 @@ class Overlay:
         root = Path(root)
         if not root.is_dir():
             return []
-        return [
+        found = [
             cls(p, store)
             for p in sorted(root.iterdir())
             if p.is_dir() and cls.is_valid_name(p.name)
         ]
+        seen: "dict[str, str]" = {}
+        for overlay in found:
+            other = seen.setdefault(overlay.normalized_name, overlay.name)
+            if other != overlay.name:
+                _warn_once(
+                    "overlays %s and %s in %s are one overlay (%s) and share %s; remove one",
+                    other, overlay.name, root, overlay.normalized_name, overlay.root_var,
+                )
+        return found
 
     @classmethod
     def installed(cls, *stores: "str | os.PathLike[str] | None") -> "list[Overlay]":
@@ -472,8 +497,9 @@ class Overlay:
 
         The overlays come back store by store, each store's sorted by name,
         with every result stamped with the :attr:`store` it came from.
-        **Shadowing:** an overlay whose name also appears in a LATER store is
-        dropped -- the later store's copy REPLACES it, so the project's bin/lib/
+        **Shadowing:** an overlay whose name (compared normalized, so
+        ``my_overlay`` and ``my-overlay`` are one) also appears in a LATER store
+        is dropped -- the later store's copy REPLACES it, so the project's bin/lib/
         env/cmds/CONTEXT.md/root var are the only ones that resolve, not both
         stacked. This is the one function behind the contract-A walk
         (``Scope.paths``), ``env``'s overlay roots, ``context``'s
@@ -486,8 +512,8 @@ class Overlay:
         ]
         result: "list[Overlay]" = []
         for i, found in enumerate(per_store):
-            later = {o.name for rest in per_store[i + 1 :] for o in rest}
-            result.extend(o for o in found if o.name not in later)
+            later = {o.normalized_name for rest in per_store[i + 1 :] for o in rest}
+            result.extend(o for o in found if o.normalized_name not in later)
         return result
 
     # -- manifest -------------------------------------------------------------

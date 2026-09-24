@@ -578,10 +578,11 @@ class RegistryRepo(object):
         if not target.is_dir():
             raise SourceError("error: registry %s: %r resolves to %s, not a directory" % (self.origin, key, spec.display()))
         if not (target / "overlay.toml").is_file():
-            # A directory of overlays named as an entry: the one called `name`.
-            for candidate in (target / name, target / Overlay.normalize_name(name)):
-                if candidate.is_dir():
-                    return candidate
+            # A directory of overlays named as an entry: the one called `name`
+            # (any spelling that normalizes to it, as a DirRepo would find it).
+            found = DirRepo(target)._lookup(name)
+            if found is not None:
+                return found
         return target
 
     def __repr__(self) -> str:
