@@ -357,6 +357,60 @@ def test_env_cli_emits_the_unset(roots, monkeypatch, capsys):
         assert out["GO_AWAY"] is None
 
 
+# --------------------------------------------------------------------------
+# env-08: overlay lib/ dirs never reach the session's PYTHONPATH.
+# --------------------------------------------------------------------------
+
+def test_an_overlay_lib_does_not_shadow_the_stdlib_session_wide(roots):
+    """Every existing lib/ was prepended to the session's PYTHONPATH, ahead of
+    site-packages and the stdlib for every Python the agent runs: an overlay
+    module shadowed any same-named one (the net overlay's certifi shim broke
+    every `requests` HTTPS call)."""
+    import subprocess
+
+    agents_dir, project_root = roots
+    lib = agents_dir / "overlays" / "shadow" / "lib"
+    lib.mkdir(parents=True)
+    (lib / "csv.py").write_text("SHADOW = True\n", encoding="utf-8")
+    base = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env = _run(agents_dir, project_root, base)
+    assert "PYTHONPATH" not in env
+    assert env["AGENTS_PYTHONPATH"] == str(lib)
+    session = dict(base)
+    session.update(env)
+    out = subprocess.run(
+        [sys.executable, "-c", "import csv; print(hasattr(csv, 'SHADOW'))"],
+        capture_output=True, text=True, env=session,
+    ).stdout.strip()
+    assert out == "False"
+
+
+def test_env_py_child_gets_the_libs_ahead_of_the_inherited_pythonpath(roots):
+    agents_dir, project_root = roots
+    (agents_dir / "lib").mkdir()
+    (project_root / ".agents" / "lib").mkdir()
+    (agents_dir / "env.py").write_text(
+        "import json, os\nprint(json.dumps({'SEEN': os.environ.get('PYTHONPATH', '')}))\n",
+        encoding="utf-8",
+    )
+    extra = str(Path(os.sep) / "site" / "extra")
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin", "PYTHONPATH": extra})
+    assert env["SEEN"].split(os.pathsep) == [
+        str(project_root / ".agents" / "lib"), str(agents_dir / "lib"), extra,
+    ]
+    assert "PYTHONPATH" not in env
+
+
+def test_agents_pythonpath_from_another_scope_is_replaced(roots):
+    agents_dir, project_root = roots
+    stale = {"PATH": "/usr/bin", "AGENTS_PYTHONPATH": str(Path(os.sep) / "elsewhere" / "lib")}
+    env = _run(agents_dir, project_root, stale)
+    assert env.removed == {"AGENTS_PYTHONPATH"}
+    (agents_dir / "lib").mkdir()
+    env = _run(agents_dir, project_root, stale)
+    assert env["AGENTS_PYTHONPATH"] == str(agents_dir / "lib")
+
+
 def test_find_bash_warns_once_when_there_is_none(monkeypatch, caplog):
     import logging
 

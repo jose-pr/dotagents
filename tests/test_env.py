@@ -225,31 +225,33 @@ def test_bin_paths_excludes_project_root(tree):
 
 
 # --------------------------------------------------------------------------
-# Libs onto PYTHONPATH: the PATH/bin mechanism, for each level's `lib` dir.
+# Libs: each level's existing `lib` dir, published as AGENTS_PYTHONPATH and put
+# on an env.py child's PYTHONPATH -- never on the session's PYTHONPATH.
 # Existing dirs only; project-root excluded; seeded before the env chain.
 # --------------------------------------------------------------------------
 
-def test_lib_dirs_prepended_to_pythonpath(tree):
+def test_lib_dirs_published_in_agents_pythonpath(tree):
     agents_dir, project_root = tree
     (agents_dir / "overlays" / "aa" / "lib").mkdir()
     (agents_dir / "lib").mkdir()
     (project_root / ".agents" / "lib").mkdir()
     base = {"PATH": "/usr/bin", "PYTHONPATH": "/site/extra"}
     env = _run(agents_dir, project_root, base)
-    parts = env["PYTHONPATH"].split(os.pathsep)
-    assert str(agents_dir / "overlays" / "aa" / "lib") in parts
-    assert str(agents_dir / "lib") in parts
-    assert str(project_root / ".agents" / "lib") in parts
-    # The inherited entry survives, AFTER the prepended libs.
-    assert parts[-1] == "/site/extra"
-    # Absent lib dirs (overlay bb has none) are NOT added -- existing only.
-    assert str(agents_dir / "overlays" / "bb" / "lib") not in parts
+    parts = env["AGENTS_PYTHONPATH"].split(os.pathsep)
+    # Highest precedence first: the project's lib, then the user store's.
+    assert parts == [
+        str(project_root / ".agents" / "lib"),
+        str(agents_dir / "lib"),
+        str(agents_dir / "overlays" / "aa" / "lib"),
+    ]
+    # The session's PYTHONPATH is not touched.
+    assert "PYTHONPATH" not in env
 
 
 def test_no_lib_dirs_leaves_pythonpath_alone(tree):
     agents_dir, project_root = tree
     env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
-    assert "PYTHONPATH" not in env
+    assert "PYTHONPATH" not in env and "AGENTS_PYTHONPATH" not in env
     env = _run(agents_dir, project_root, {"PATH": "/usr/bin", "PYTHONPATH": "/keep"})
     assert "PYTHONPATH" not in env  # unchanged -> not in the change set
 
@@ -259,12 +261,12 @@ def test_lib_paths_exclude_project_root(tree):
     (project_root / "lib").mkdir()  # a project-ROOT lib must NOT be picked up
     (agents_dir / "lib").mkdir()
     env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
-    assert str(project_root / "lib") not in env["PYTHONPATH"].split(os.pathsep)
+    assert str(project_root / "lib") not in env["AGENTS_PYTHONPATH"].split(os.pathsep)
 
 
 def test_env_py_can_import_from_overlay_lib(tree):
-    """The whole point: an env.py (and any subprocess) imports an overlay's
-    lib/ module by name, because PYTHONPATH is set BEFORE the chain runs."""
+    """The whole point: an env.py imports an overlay's lib/ module by name,
+    because its own PYTHONPATH carries the libs (set BEFORE the chain runs)."""
     agents_dir, project_root = tree
     lib = agents_dir / "overlays" / "aa" / "lib"
     lib.mkdir()

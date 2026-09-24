@@ -4,11 +4,16 @@ Contract B, the exact sequence :func:`get_environment` performs:
 
   1. **Bins onto PATH FIRST**, before any env eval. Each level's ``bin`` dir
      (contract-A precedence order, *except* project-root) is prepended to
-     ``PATH`` so env scripts can call overlay helpers by name. **Libs onto
-     PYTHONPATH the same way**: each level's ``lib`` dir that EXISTS is
-     prepended to ``PYTHONPATH`` (:func:`get_lib_paths`), so an ``env.py`` --
-     and every subprocess that inherits the env -- can ``import`` an overlay's
-     library (an overlay ships ``lib/<module>.py`` beside its ``cmds/``).
+     ``PATH`` so env scripts can call overlay helpers by name. **Libs are
+     published, not injected**: each level's ``lib`` dir that EXISTS
+     (:func:`get_lib_paths`) is listed, ``os.pathsep``-joined, in
+     ``AGENTS_PYTHONPATH``, and only an ``env.py`` child gets them prepended to
+     its own ``PYTHONPATH`` -- so an ``env.py`` can ``import`` an overlay's
+     library (an overlay ships ``lib/<module>.py`` beside its ``cmds/``). The
+     session's ``PYTHONPATH`` is left alone: there an overlay module would
+     come before site-packages and the stdlib in every Python the agent runs
+     and shadow any same-named one. A caller that wants the libs opts in
+     (``PYTHONPATH="$AGENTS_PYTHONPATH"``).
   2. **Two tiers, in order**: ALL ``pre.env.py`` / ``pre.env`` / ``pre.local.env``
      first, THEN ALL ``env.py`` / ``env`` / ``local.env`` -- the concatenation of
      two contract-A resolutions (:func:`resolve_env_files`). The project-root
@@ -530,6 +535,12 @@ def get_env_from_py(
         args.append("--global")
     spawn = _spawn_env(base_env)
     spawn["PYTHONIOENCODING"] = "utf-8"
+    # The overlay libs, for this child only (never the session's PYTHONPATH).
+    libs = [p for p in base_env.get("AGENTS_PYTHONPATH", "").split(os.pathsep) if p]
+    if libs:
+        updated = _prepended_path_var(spawn, "PYTHONPATH", list(reversed(libs)))
+        if updated is not None:
+            spawn["PYTHONPATH"] = updated
     try:
         proc = subprocess.run(args, capture_output=True, check=False, env=spawn)
     except (OSError, ValueError) as e:  # interpreter missing / unusable env
@@ -782,12 +793,14 @@ def get_overlay_roots(scope: Scope) -> "list[Path]":
 
 def get_lib_paths(scope: Scope) -> "list[Path]":
     """Each level's ``lib`` dir in contract-A precedence order, EXCEPT project-root
-    -- the ``PYTHONPATH`` counterpart of :func:`get_bin_paths`.
+    -- what :func:`get_environment` publishes as ``AGENTS_PYTHONPATH`` (in
+    reverse, highest precedence first) and puts on an ``env.py`` child's
+    ``PYTHONPATH``; never on the session's.
 
-    Only dirs that EXIST are returned (unlike ``bin``): ``PYTHONPATH`` is read by every Python the
-    session spawns, and a dozen absent entries on it are noise a reader has to
-    rule out. project-root's ``lib`` is excluded for the same reason as its
-    ``bin``: a project's own top-level ``lib`` is not an agent library.
+    Only dirs that EXIST are returned (unlike ``bin``): a dozen absent entries
+    on a search path are noise a reader has to rule out. project-root's
+    ``lib`` is excluded for the same reason as its ``bin``: a project's own
+    top-level ``lib`` is not an agent library.
     """
     resolved = scope.paths({"default": "lib", "project-root": ""}, include_missing=False)
     return [path for _level, path, _root in resolved if path.is_dir()]
@@ -984,14 +997,22 @@ def get_environment(
     if updated is not None:
         _apply({"PATH": updated})
 
-    # --- Libs onto PYTHONPATH, same shape, same moment --- so the env.py chain
-    # below (and every subprocess inheriting the env) can import an overlay's
-    # `lib/`. Existing dirs only (see `get_lib_paths`).
-    lib_paths = [str(p) for p in get_lib_paths(scope)]
+    # --- Libs: published as AGENTS_PYTHONPATH, same moment --- the env.py
+    # chain below gets them on its own PYTHONPATH (`get_env_from_py`); the
+    # session's PYTHONPATH is never touched, since an overlay module there
+    # shadows a same-named site-packages or stdlib module in every Python the
+    # agent runs. Highest precedence first (the project's lib before the
+    # user store's), existing dirs only (see `get_lib_paths`). The value is
+    # this walk's, so an inherited one from another scope is replaced.
+    lib_paths: "list[str]" = []
+    for p in reversed(get_lib_paths(scope)):
+        if str(p) not in lib_paths:
+            lib_paths.append(str(p))
     if lib_paths:
-        updated = _prepended_path_var(osenv, "PYTHONPATH", lib_paths)
-        if updated is not None:
-            _apply({"PYTHONPATH": updated})
+        if osenv.get("AGENTS_PYTHONPATH") != os.pathsep.join(lib_paths):
+            _apply({"AGENTS_PYTHONPATH": os.pathsep.join(lib_paths)})
+    elif "AGENTS_PYTHONPATH" in osenv:
+        _apply(EnvChanges(removed=["AGENTS_PYTHONPATH"]))
 
     # --- Contract B steps 2-5: the two tiers, chained, later-overrides-earlier. ---
     # One broken layer contributes nothing; it never takes the rest of the
