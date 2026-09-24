@@ -136,8 +136,11 @@ class Spec(object):
 
 
 def redact(text: str) -> str:
-    """``text`` with the userinfo of every ``scheme://user:pass@host`` removed."""
-    return re.sub(r"(://)[^/@\s]+@", r"\1", text)
+    """``text`` with the userinfo of every ``scheme://user:pass@host`` removed
+    (up to the LAST ``@`` of the authority, so a raw ``@`` in a password goes
+    too) and every URL query value masked (``?access_token=***``)."""
+    text = re.sub(r"(://)[^/\s?#]*@", r"\1", text)
+    return re.sub(r"([?&][^=&#\s]+=)[^&#\s]+", r"\1***", text)
 
 
 def _is_git_location(location: str) -> bool:
@@ -269,6 +272,7 @@ class SourceCache(object):
         key = "uri:" + str(local)
         if key in self._fresh:
             return local / remote.name if not is_dir else local
+        self._ensure_root()
         local.mkdir(parents=True, exist_ok=True)
         try:
             if is_dir:
@@ -284,9 +288,24 @@ class SourceCache(object):
             self.logger.info("fetched %s", shown)
         return result
 
+    def _ensure_root(self) -> None:
+        """Create the cache root with a ``.gitignore`` of ``*`` -- the cache
+        sits inside the user store, and a store kept in git (private-sync's
+        ``git add -A``) must never record a checkout (an embedded repo) or a
+        materialized tree."""
+        from dotagents._fs import write_text_lf
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        ignore = self.root / ".gitignore"
+        if not ignore.exists():
+            write_text_lf(ignore, "# dotagents source cache: never tracked\n*\n")
+
     @staticmethod
     def _slug(location: str, path: "Optional[str]") -> str:
-        stem = posixpath.basename((location.rstrip("/") + ("/" + path.strip("/") if path else "")))
+        # The readable part comes from the REDACTED location, so a URL with no
+        # path never puts its userinfo in a directory name; the hash keeps the
+        # full location apart.
+        stem = posixpath.basename((redact(location).rstrip("/") + ("/" + path.strip("/") if path else "")))
         slug = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-.") or "source"
         digest = hashlib.sha1(("%s#%s" % (location, path or "")).encode("utf-8")).hexdigest()[:12]
         return "%s-%s" % (slug, digest)
@@ -311,7 +330,7 @@ class SourceCache(object):
         return proc
 
     def repo_dir(self, location: str, ref: "Optional[str]" = None) -> Path:
-        stem = Path(location.rstrip("/").replace("\\", "/")).name
+        stem = Path(redact(location).rstrip("/").replace("\\", "/")).name
         if stem.endswith(".git"):
             stem = stem[:-4]
         slug = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-.") or "repo"
@@ -325,14 +344,21 @@ class SourceCache(object):
             raise ValueError("not a git spec: %r" % (spec,))
         dest = self.repo_dir(spec.location, spec.ref)
         key = str(dest)
+        credentialed = redact(spec.location) != spec.location
         if not (dest / ".git").exists():
-            self.root.mkdir(parents=True, exist_ok=True)
+            self._ensure_root()
             if self.logger:
                 self.logger.info("cloning %s", redact(spec.location))
             self._git(["clone", "--quiet", "--", spec.location, str(dest)], None)
+            if credentialed:
+                # Keep the credential out of the checkout's .git/config: fetch
+                # passes the full URL each time instead (see _fetch_args).
+                self._git(["remote", "set-url", "origin", redact(spec.location)], dest)
             self._fresh.add(key)
         elif key not in self._fresh:
-            proc = self._git(["fetch", "--quiet", "--tags", "--prune", "origin"], dest, check=False)
+            if credentialed:  # a checkout cloned before origin was redacted
+                self._git(["remote", "set-url", "origin", redact(spec.location)], dest, check=False)
+            proc = self._git(self._fetch_args(spec, ["--tags", "--prune"]), dest, check=False)
             if proc.returncode != 0 and self.logger:
                 self.logger.warning(
                     "fetch of %s failed (using the cached checkout as is): %s",
@@ -341,6 +367,18 @@ class SourceCache(object):
             self._fresh.add(key)
         self._checkout_ref(dest, spec)
         return dest
+
+    @staticmethod
+    def _fetch_args(spec: Spec, options: "list[str]", refspecs: "Optional[list[str]]" = None) -> "list[str]":
+        """``git fetch`` from origin -- or, when the location carries
+        credentials (origin holds the redacted URL), from the full location
+        into origin's remote-tracking refs."""
+        if redact(spec.location) == spec.location:
+            return ["fetch", "--quiet", *options, "origin", *(refspecs or [])]
+        return [
+            "fetch", "--quiet", *options, "--", spec.location,
+            *(refspecs or ["+refs/heads/*:refs/remotes/origin/*"]),
+        ]
 
     def _checkout_ref(self, dest: Path, spec: Spec) -> None:
         if spec.ref is None:
@@ -358,7 +396,7 @@ class SourceCache(object):
             # Not among the fetched refs: ask the remote for it by name. Covers
             # a commit the default refspec did not bring over (a server that
             # allows reachable SHAs in want) and a ref the clone did not track.
-            fetched = self._git(["fetch", "--quiet", "origin", spec.ref], dest, check=False)
+            fetched = self._git(self._fetch_args(spec, [], [spec.ref]), dest, check=False)
             if fetched.returncode == 0:
                 self._git(["checkout", "--quiet", "--detach", "FETCH_HEAD"], dest)
                 return

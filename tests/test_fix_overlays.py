@@ -331,3 +331,57 @@ def test_stdlib_http_registry_honours_the_path(monkeypatch, tmp_path):
     assert fetched == ["https://h/cfg/reg.json"]
     assert repo.base == _sources.Spec("url", "https://h/cfg/reg.json")
     assert repo.available() == ["a"]
+
+
+# --------------------------------------------------------------------------
+# overlays-09: redaction covers query tokens, cache names and .git/config
+# --------------------------------------------------------------------------
+
+def test_redact_masks_query_values_and_a_raw_at_in_the_password():
+    assert "abc123" not in _sources.redact("fetched https://h/r.json?access_token=abc123&x=1")
+    assert _sources.redact("https://u:p@ss@host/x.git") == "https://host/x.git"
+    assert _sources.redact("clone https://a:b@h/x.git failed") == "clone https://h/x.git failed"
+
+
+def test_cache_dir_names_never_carry_userinfo(tmp_path):
+    cache = _sources.SourceCache(tmp_path / "cache")
+    assert "s3cret" not in cache.repo_dir("https://alice:s3cret@host").name
+    assert "s3cret" not in cache._slug("https://alice:s3cret@host", None)
+    # ...while two credentials still get two cache dirs (the hash is of the full URL).
+    assert cache.repo_dir("https://a:1@host/x.git") != cache.repo_dir("https://a:2@host/x.git")
+
+
+def test_a_credentialed_clone_keeps_the_credential_out_of_git_config(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_git(self, args, cwd, *, check=True):
+        calls.append(list(args))
+        if args[0] == "clone":
+            (Path(args[-1]) / ".git").mkdir(parents=True)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(_sources.SourceCache, "_git", fake_git)
+    url = "https://alice:s3cret@example.invalid/org/x.git"
+    cache = _sources.SourceCache(tmp_path / "cache")
+    cache.checkout(_sources.parse_spec(url + "@main"))
+    assert ["remote", "set-url", "origin", "https://example.invalid/org/x.git"] in calls
+    # A later process fetches from the full URL into origin's tracking refs.
+    calls.clear()
+    _sources.SourceCache(tmp_path / "cache").checkout(_sources.parse_spec(url + "@main"))
+    fetch = [c for c in calls if c[0] == "fetch"][0]
+    assert url in fetch and "+refs/heads/*:refs/remotes/origin/*" in fetch
+    assert "origin" not in fetch[fetch.index("--"):]
+
+
+# --------------------------------------------------------------------------
+# overlays-15: the source cache is never tracked by a store kept in git
+# --------------------------------------------------------------------------
+
+def test_the_source_cache_root_ignores_everything_in_it(tmp_path):
+    bare = _bare_repo(tmp_path, "whole", {"overlay.toml": 'name = "whole"\n'})
+    cache_root = tmp_path / "store" / ".cache" / "overlays"
+    _sources.SourceCache(cache_root).checkout(_sources.parse_spec(str(bare) + "@main"))
+    ignore = cache_root / ".gitignore"
+    assert ignore.is_file()
+    assert "*" in ignore.read_text(encoding="utf-8").splitlines()
+    assert b"\r" not in ignore.read_bytes()
