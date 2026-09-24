@@ -217,3 +217,117 @@ def test_stdlib_fetch_failure_is_redacted(monkeypatch):
     with pytest.raises(_sources.SourceError) as info:
         _sources._read_url("https://alice:s3cretpw@example.invalid/reg.json")
     assert "s3cretpw" not in str(info.value)
+
+
+# --------------------------------------------------------------------------
+# helpers: a local bare git repository (no network)
+# --------------------------------------------------------------------------
+
+def _git(*args, cwd=None):
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
+    subprocess.run(["git", *args], cwd=str(cwd) if cwd else None, check=True,
+                   capture_output=True, text=True, env=env)
+
+
+def _bare_repo(tmp_path: Path, name: str, files: dict) -> Path:
+    """A bare repo ``<tmp>/<name>.git`` whose ``main`` holds ``files``."""
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    work = tmp_path / ("%s-work" % name)
+    work.mkdir()
+    _git("init", "-q", "-b", "main", cwd=work)
+    for rel, body in files.items():
+        (work / rel).parent.mkdir(parents=True, exist_ok=True)
+        (work / rel).write_text(body, encoding="utf-8")
+    _git("add", "-A", cwd=work)
+    _git("commit", "-q", "-m", "init", cwd=work)
+    bare = tmp_path / ("%s.git" % name)
+    _git("clone", "-q", "--bare", str(work), str(bare))
+    return bare
+
+
+# --------------------------------------------------------------------------
+# overlays-16: paths are not re-parsed; `@` belongs to a non-git location
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text, expected", [
+    ("/srv/overlays@v2", _sources.Spec("dir", "/srv/overlays@v2")),
+    ("sftp://user@host", _sources.Spec("url", "sftp://user@host")),
+    ("https://h/cfg@x/reg.json", _sources.Spec("url", "https://h/cfg@x/reg.json")),
+    # git keeps its ref
+    ("/srv/x.git@v2", _sources.Spec("git", "/srv/x.git", "v2")),
+    ("ssh://git@host/org/x@dev", _sources.Spec("git", "ssh://git@host/org/x", "dev")),
+])
+def test_only_a_git_location_has_a_ref(text, expected):
+    assert _sources.parse_spec(text) == expected
+
+
+def test_a_store_path_with_a_hash_still_finds_its_registry(tmp_path):
+    store = tmp_path / "proj#1" / "store"
+    store.mkdir(parents=True)
+    (store / "AGENTS.md").write_text(BASE_AGENTS, encoding="utf-8")
+    _overlay(store.parent / "ovs", "x", files=[("kb/X.md", "x\n")])
+    (store / "dotagents.json").write_text(json.dumps({"x": "../ovs/x"}), encoding="utf-8")
+    assert _add(None, store, "x") == 0
+    assert (store / "overlays" / "x" / "kb" / "X.md").is_file()
+
+
+# --------------------------------------------------------------------------
+# overlays-17: relative git entries and non-http URL registries
+# --------------------------------------------------------------------------
+
+def test_relative_git_entries_resolve_beside_the_registry():
+    rr = _sources.resolve_relative
+    parse = _sources.parse_spec
+    Spec = _sources.Spec
+    local = rr(parse("../shared.git@v2"), Spec("dir", os.path.join(os.sep, "srv", "reg")), origin="r", key="k")
+    assert local == Spec("git", os.path.normpath(os.path.join(os.sep, "srv", "shared.git")), "v2", None)
+    # Inside a git registry: like a relative submodule URL.
+    base = Spec("git", "https://h/org/a.git", "main", "overlays")
+    assert rr(parse("../b.git@v1#kb"), base, origin="r", key="k") == Spec("git", "https://h/org/b.git", "v1", "kb")
+    scp = Spec("git", "git@h:org/a.git", None, None)
+    assert rr(parse("../b.git"), scp, origin="r", key="k") == Spec("git", "git@h:org/b.git", None, None)
+    # Absolute and scp-like entries are left alone.
+    assert rr(parse("git@h:org/c.git"), base, origin="r", key="k") == parse("git@h:org/c.git")
+
+
+def test_relative_entries_of_non_http_url_registries_join_the_path():
+    rr = _sources.resolve_relative
+    parse = _sources.parse_spec
+    Spec = _sources.Spec
+    assert rr(parse("../one"), Spec("url", "s3://bucket/cfg/reg.json"), origin="r", key="k") == Spec(
+        "url", "s3://bucket/one")
+    assert rr(parse("./one"), Spec("url", "zip:file:///a.zip!/cfg/reg.json"), origin="r", key="k") == Spec(
+        "url", "zip:file:///a.zip!/cfg/one")
+    assert rr(parse("./x"), Spec("url", "https://h/cfg/r.json"), origin="r", key="k") == Spec(
+        "url", "https://h/cfg/x")
+
+
+def test_a_relative_git_entry_is_cloned_beside_the_registry_not_the_cwd(tmp_path, monkeypatch):
+    _bare_repo(tmp_path, "shared", {"overlay.toml": 'name = "shared"\n', "kb/S.md": "s\n"})
+    reg_dir = tmp_path / "reg"
+    reg_dir.mkdir()
+    (reg_dir / "reg.json").write_text(json.dumps({"shared": "../shared.git@main"}), encoding="utf-8")
+    elsewhere = tmp_path / "a" / "b" / "c"  # `../shared.git` from here is not there
+    elsewhere.mkdir(parents=True)
+    monkeypatch.chdir(elsewhere)
+    store = tmp_path / "store"
+    store.mkdir()
+    (store / "AGENTS.md").write_text(BASE_AGENTS, encoding="utf-8")
+    assert _add(reg_dir / "reg.json", store, "shared") == 0
+    assert (store / "overlays" / "shared" / "kb" / "S.md").is_file()
+
+
+# --------------------------------------------------------------------------
+# overlays-18: the stdlib http fetch honours #path
+# --------------------------------------------------------------------------
+
+def test_stdlib_http_registry_honours_the_path(monkeypatch, tmp_path):
+    fetched = []
+    monkeypatch.setattr(_sources, "uri_path_class", lambda: None)
+    monkeypatch.setattr(_sources, "_read_url", lambda url: fetched.append(url) or '{"a": "./a"}')
+    repo = _sources.load_repo("https://h/cfg#reg.json", _sources.SourceCache(tmp_path / "cache"))
+    assert fetched == ["https://h/cfg/reg.json"]
+    assert repo.base == _sources.Spec("url", "https://h/cfg/reg.json")
+    assert repo.available() == ["a"]

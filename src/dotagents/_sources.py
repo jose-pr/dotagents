@@ -140,6 +140,10 @@ def redact(text: str) -> str:
     return re.sub(r"(://)[^/@\s]+@", r"\1", text)
 
 
+def _is_git_location(location: str) -> bool:
+    return location.endswith(".git") or location.startswith(_GIT_PREFIXES)
+
+
 def parse_spec(text: str) -> Spec:
     """Parse ``<location>[@<ref>][#<path>]``. See the module docstring."""
     raw = text.strip()
@@ -154,9 +158,15 @@ def parse_spec(text: str) -> Spec:
     head, at, tail = location.rpartition("@")
     # `repo.git@ref` -- but never the `@` of `git@host:…` or `https://user@host/…`:
     # a ref has no path or host separators and does not follow a bare scheme.
-    if at and head and tail and not re.search(r"[/:\\]", tail) and not head.endswith(("://", ":")):
+    # Only a GIT location has a ref: for a directory or a non-git URL the `@`
+    # is part of the location (`/srv/overlays@v2`, `sftp://user@host`).
+    if (
+        at and head and tail and not re.search(r"[/:\\]", tail)
+        and not head.endswith(("://", ":"))
+        and (explicit_git or _is_git_location(head))
+    ):
         location, ref = head, tail
-    if explicit_git or location.endswith(".git") or location.startswith(_GIT_PREFIXES):
+    if explicit_git or _is_git_location(location):
         # Passed to git as arguments: a leading `-` would be read as an option
         # (`@--upload-pack=<cmd>` ran <cmd>).
         for part, what in ((location, "location"), (ref, "ref")):
@@ -540,14 +550,72 @@ class RegistryRepo(object):
         return "RegistryRepo(%s)" % self.origin
 
 
-def is_relative(spec: Spec) -> bool:
-    """A ``dir`` spec whose location is a relative path (not absolute, not
-    rooted, not ``~``-prefixed): meaningful only against the registry it came
-    from. Rooted (``/x``) is spelled out because on Windows (3.13+)
+def _is_relative_path(location: str) -> bool:
+    """A local path that is not absolute, rooted, drive-qualified or
+    ``~``-prefixed. Rooted (``/x``) is spelled out because on Windows (3.13+)
     ``os.path.isabs`` does not count a drive-less root as absolute."""
-    return spec.kind == "dir" and not (
-        os.path.isabs(spec.location) or spec.location.startswith(("~", "/", "\\"))
+    return not (
+        os.path.isabs(location)
+        or location.startswith(("~", "/", "\\"))
+        or re.match(r"^[A-Za-z]:", location)
     )
+
+
+def is_relative(spec: Spec) -> bool:
+    """A spec meaningful only against the registry it came from: a ``dir``
+    spec whose location is a relative path, or a ``git`` spec whose location
+    is one (``../shared.git`` -- not a URL, not scp-like ``host:path``)."""
+    if spec.kind == "dir":
+        return _is_relative_path(spec.location)
+    if spec.kind == "git":
+        location = spec.location
+        if "://" in location:
+            return False
+        colon, slash = location.find(":"), location.find("/")
+        if colon > 1 and (slash == -1 or colon < slash):
+            return False  # scp-like `[user@]host:path`
+        return _is_relative_path(location)
+    return False
+
+
+def _join_beside(base: str, rel: str) -> str:
+    """``rel`` resolved against the document at URL ``base`` -- "the URL
+    beside it". http(s)/ftp/file/sftp go through ``urljoin`` (RFC 3986); any
+    other scheme (``s3://``, ``github://``) joins the path with posixpath, and
+    an archive URL (``zip:<archive>!/<inner>``) joins inside the archive."""
+    rel = rel.replace("\\", "/")
+
+    def join_path(base_path: str) -> str:
+        joined = posixpath.normpath(posixpath.join(posixpath.dirname(base_path), rel))
+        return joined + "/" if rel.endswith("/") and not joined.endswith("/") else joined
+
+    if "!/" in base:
+        head, _sep, inner = base.rpartition("!/")
+        return head + "!/" + join_path("/" + inner).lstrip("/")
+    parts = urlsplit(base)
+    if parts.scheme in uses_relative and parts.netloc:
+        return urljoin(base, rel)
+    return urlunsplit((parts.scheme, parts.netloc, join_path(parts.path), "", ""))
+
+
+def _beside_repository(base: Spec, rel: str) -> str:
+    """A relative git location resolved the way a relative submodule URL is:
+    against the repository ``base`` names (``../b.git`` beside
+    ``https://h/org/a.git`` is ``https://h/org/b.git``), or against the
+    registry file's directory / URL for a ``dir`` / ``url`` base."""
+    rel = rel.replace("\\", "/")
+    if base.kind == "dir":
+        return os.path.normpath(os.path.join(base.location, rel))
+    if base.kind == "url":
+        return _join_beside(base.location, rel)
+    location = base.location
+    if "://" in location:
+        return _join_beside(location.rstrip("/") + "/", rel)
+    colon, slash = location.find(":"), location.find("/")
+    if colon > 1 and (slash == -1 or colon < slash):
+        host, _sep, path = location.partition(":")
+        return host + ":" + posixpath.normpath(posixpath.join(path, rel))
+    return os.path.normpath(os.path.join(location, rel))
 
 
 def resolve_relative(spec: Spec, base: "Optional[Spec]", *, origin: str, key: str) -> Spec:
@@ -560,6 +628,8 @@ def resolve_relative(spec: Spec, base: "Optional[Spec]", *, origin: str, key: st
     (the registry's URL: the entry is the URL beside it)."""
     if base is None or not is_relative(spec):
         return spec
+    if spec.kind == "git":
+        return Spec("git", _beside_repository(base, spec.location), spec.ref, spec.path)
     if base.kind == "dir":
         location = os.path.normpath(os.path.join(base.location, spec.location))
         return Spec("dir", location, None, spec.path)
@@ -576,12 +646,11 @@ def resolve_relative(spec: Spec, base: "Optional[Spec]", *, origin: str, key: st
                 % (origin, key, spec.location)
             )
         return Spec("git", base.location, base.ref, None if rel in ("", ".") else rel)
-    # A URL: RFC 3986 reference resolution against the registry's URL -- what
-    # a relative link in a document at that URL would mean.
+    # A URL: what a relative link in a document at that URL would mean.
     rel = spec.location.replace("\\", "/")
     if spec.path:
         rel = rel.rstrip("/") + "/" + spec.path
-    return Spec("url", urljoin(base.location, rel), None, None)
+    return Spec("url", _join_beside(base.location, rel), None, None)
 
 
 def locate(spec: Spec, cache: SourceCache) -> Path:
@@ -603,22 +672,25 @@ def locate(spec: Spec, cache: SourceCache) -> Path:
     return target
 
 
-def load_repo(spec_text: str, cache: SourceCache) -> Any:
+def load_repo(spec_text: "Union[str, Spec]", cache: SourceCache) -> Any:
     """A :class:`DirRepo` or :class:`RegistryRepo` for a spec: what the spec
     resolves to decides -- a directory is a directory of overlays, a file is a
-    registry, an ``http(s)://`` location is fetched as a registry."""
-    spec = parse_spec(spec_text)
+    registry, an ``http(s)://`` location is fetched as a registry. A
+    pre-parsed :class:`Spec` (a store's own registry path) is used as is, so a
+    ``#`` or ``@`` in a local path is never read as spec grammar."""
+    spec = parse_spec(spec_text) if isinstance(spec_text, str) else spec_text
     origin = spec.display()
     if spec.kind == "url" and url_scheme(spec.location) != "file" and uri_path_class() is None:
         # No uri extra: the standard library can still fetch an http(s)
         # registry file; anything else is out of reach.
-        from urllib.parse import urlsplit
-
         if url_scheme(spec.location) not in ("http", "https"):
             cache.materialize(spec)  # raises, naming the extra
-        suffix = Path(urlsplit(spec.location).path).suffix
-        entries = parse_document(_read_url(spec.location), suffix, origin)
-        return RegistryRepo(origin, entries, cache, base=Spec("url", spec.location))
+        url = spec.location
+        if spec.path:
+            url = url.rstrip("/") + "/" + spec.path.strip("/")
+        suffix = Path(urlsplit(url).path).suffix
+        entries = parse_document(_read_url(url), suffix, origin)
+        return RegistryRepo(origin, entries, cache, base=Spec("url", url))
     target = locate(spec, cache)
     if target.is_dir():
         return DirRepo(target, origin)
@@ -675,14 +747,16 @@ class CompositeSource(object):
     wins. This is what the overlay commands talk to (``available`` /
     ``overlay_dir`` / ``root``)."""
 
-    def __init__(self, specs: "list[str]", cache: SourceCache):
+    def __init__(self, specs: "list[Union[str, Spec]]", cache: SourceCache):
         self.specs = list(specs)
         self.cache = cache
         self._loaded: "dict[int, Any]" = {}
 
     @property
     def root(self) -> str:
-        return " > ".join(redact(s) for s in self.specs)
+        return " > ".join(
+            s.display() if isinstance(s, Spec) else redact(s) for s in self.specs
+        )
 
     def _repo(self, index: int) -> Any:
         if index not in self._loaded:
@@ -744,10 +818,11 @@ def resolve(
     there is nothing at all, unless ``allow_empty``: then an empty source
     answers every name with :class:`OverlayNotFound`."""
     environ = os.environ if environ is None else environ
-    ordered = list(specs or []) + env_repos(environ)
-    ordered += [str(p) for p in registry_files(*stores)]
+    ordered: "list[Union[str, Spec]]" = list(specs or []) + env_repos(environ)
+    # Paths the process found, not specs the user wrote: never re-parsed.
+    ordered += [Spec("dir", str(p)) for p in registry_files(*stores)]
     if bundled is not None:
-        ordered.append(str(bundled))
+        ordered.append(Spec("dir", str(bundled)))
     if not ordered and not allow_empty:
         raise SourceError(NO_SOURCE_MESSAGE)
     return CompositeSource(ordered, SourceCache(cache_root, logger))
