@@ -16,6 +16,13 @@ same place, on the caller's URL, before the request: a hook may log in, set
 headers in the request's kwargs, or return a response of its own. A hook
 that makes requests through the session does not trigger hooks again.
 
+TLS verification uses the OS trust store directly: with ``verify=True`` the
+adapter hands urllib3 an ``ssl.create_default_context()`` (the certificate
+store on Windows, OpenSSL's system defaults elsewhere) and no CA file, so no
+``certifi`` bundle is involved. ``verify=<path>`` and ``REQUESTS_CA_BUNDLE`` /
+``CURL_CA_BUNDLE`` still name a bundle explicitly; ``verify=False`` is left to
+requests.
+
 ``requests`` + ``urllib3`` are this toolkit's **optional dependency** (the net
 overlay does NOT vendor them — see ``lib/VENDORED.md``). ``new_session`` imports
 them lazily and raises a clear, actionable error if they are absent; the curl
@@ -24,6 +31,8 @@ shim and the ``certifi`` shim work with zero dependencies regardless.
 from __future__ import annotations
 
 import re
+import ssl
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Optional, Union
 from urllib.parse import urlparse
@@ -56,6 +65,26 @@ def _import_requests():
             "or use the curl shim, which needs nothing. See kb/NET.md."
         ) from exc
     return requests, HTTPAdapter, Retry
+
+
+#: How long the OS trust-store context is reused (seconds) before it is
+#: rebuilt, so a certificate added to the system store is picked up.
+OS_CONTEXT_MAX_AGE = 60
+_os_context: "Optional[ssl.SSLContext]" = None
+_os_context_at = 0.0
+
+
+def os_ssl_context() -> "ssl.SSLContext":
+    """An ``SSLContext`` verifying against the OS trust store, shared for
+    :data:`OS_CONTEXT_MAX_AGE` seconds. Shared, because urllib3 keys its
+    connection pools by the context object: one per request would never reuse
+    a connection."""
+    global _os_context, _os_context_at
+    now = time.monotonic()
+    if _os_context is None or now - _os_context_at > OS_CONTEXT_MAX_AGE:
+        _os_context = ssl.create_default_context()
+        _os_context_at = now
+    return _os_context
 
 
 def _agent_proxy_adapter_class(HTTPAdapter):
@@ -99,6 +128,30 @@ def _agent_proxy_adapter_class(HTTPAdapter):
             self.endpoint = endpoint
             self.auth_header = auth_header or _proxy.DEFAULT_AUTH_HEADER
             self._gateway_base = _proxy.prefix_url("", proxy, endpoint) if endpoint is not None and proxy else None
+
+        def build_connection_pool_key_attributes(self, request, verify, cert=None):
+            """``verify=True`` over https: the OS trust-store context, in
+            place of requests' own (a ``certifi`` bundle in 2.32-2.33). Only
+            for ``verify=True`` -- urllib3 writes a pool's ``cert_reqs`` into
+            the context it is given, so a ``verify=False`` pool must never
+            share it."""
+            host_params, pool_kwargs = super().build_connection_pool_key_attributes(
+                request, verify, cert
+            )
+            if verify is True and host_params.get("scheme") == "https":
+                pool_kwargs["ssl_context"] = os_ssl_context()
+            return host_params, pool_kwargs
+
+        def cert_verify(self, conn, url: str, verify, cert) -> None:
+            """``verify=True`` keeps certificate checking on but names no CA
+            file: requests would set ``certifi.where()`` (and raise when it is
+            ``None``); with none, urllib3 verifies through the pool's OS
+            context, or loads the OS defaults itself on older requests."""
+            if verify is True and url.lower().startswith("https"):
+                super().cert_verify(conn, url, False, cert)  # client cert, no CA file
+                conn.cert_reqs = "CERT_REQUIRED"
+                return
+            super().cert_verify(conn, url, verify, cert)
 
         def proxy_headers(self, proxy: str) -> Dict[str, str]:
             headers = super().proxy_headers(proxy)
