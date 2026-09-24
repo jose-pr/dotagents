@@ -87,8 +87,8 @@ _scratch: "Path | None" = None
 
 def _scratch_dir() -> Path:
     """The ONE per-process temp directory for anything extracted out of a
-    zipapp (package data, the repointed module sources), created lazily and
-    removed at interpreter exit. A plain install never creates it."""
+    zipapp (package data, the repointed module sources) and for `launch`'s
+    context file, created lazily on first use and removed at interpreter exit."""
     global _scratch
     if _scratch is None:
         import atexit

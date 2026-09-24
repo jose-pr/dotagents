@@ -377,7 +377,7 @@ def _discover(argv=None) -> "list":
 
     1. the compiled built-in command classes (`_BUILTIN_COMMANDS`);
     2. the bundled command-module dir `<package>/_overlay/dotagents/cmds` --
-       always available, even before an install (ships `findings`);
+       always available, even before an install (ships `findings` and `launch`);
     3. the Contract-A `cmds` dirs (`_cmds_dirs`): each installed overlay's
        `<overlay-root>/cmds`, then system/user/project `<scope>/dotagents/cmds`,
        in Contract-A precedence (overlays < system < user < project). This is what
@@ -397,7 +397,7 @@ def _discover(argv=None) -> "list":
         name = getattr(command, "_parsername_", None) or command.__name__
         by_name[name] = command
 
-    # 2. bundled cmds dir (ships `findings`)
+    # 2. bundled cmds dir (ships `findings` and `launch`)
     bundled = _bundled_cmds_dir()
     if bundled is not None:
         _discover_dir(bundled, by_name)
