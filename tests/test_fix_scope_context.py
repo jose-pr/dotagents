@@ -161,6 +161,46 @@ def _cli(**fields):
 
 
 # --------------------------------------------------------------------------
+# scope-context-07 / -08: skills precedence, frontmatter, and path
+# --------------------------------------------------------------------------
+
+def _skill(root, dirname, body):
+    write_text_lf(root / "skills" / dirname / "SKILL.md", body)
+    return root / "skills" / dirname / "SKILL.md"
+
+
+def _skill_names(scope):
+    return {s[0]: s[1] for s in _context._collect_skills(scope)}
+
+
+def test_a_project_skill_shadows_the_users(ctx):
+    store, project, ov = ctx
+    _skill(store, "dup", "---\nname: dup\ndescription: USER COPY\n---\n")
+    _skill(project / ".agents", "dup-dir", "---\nname: dup\ndescription: PROJECT COPY\n---\n")
+    scope = Scope.of(agents_dir=store, project_root=project)
+    assert _skill_names(scope) == {"dup": "PROJECT COPY"}
+
+
+def test_skill_frontmatter_folds_block_scalars_and_ignores_the_body(ctx):
+    store, project, ov = ctx
+    _skill(store, "folded", "---\nname: folded\ndescription: >\n  line one\n  line two\n---\nname: body\n")
+    _skill(store, "quoted", "---\nname: \"quoted\"\ndescription: 'a: b'\n---\n")
+    _skill(store, "nofront", "# no frontmatter\nname: nofront\ndescription: x\n")
+    scope = Scope.of(agents_dir=store, project_root=project, global_scope=True)
+    assert _skill_names(scope) == {"folded": "line one line two", "quoted": "a: b"}
+
+
+def test_skills_listing_names_each_skill_md(ctx):
+    store, project, ov = ctx
+    write_text_lf(store / "AGENTS.md", "rules\n")
+    md = _skill(store, "some-dir", "---\nname: tool\ndescription: does it\n---\n")
+    scope = Scope.of(agents_dir=store, project_root=project, global_scope=True)
+    assert "- **tool** (`%s`): does it" % md in _gemini(scope)
+    data = _context.assemble_context_data(_agents.GeminiAgent(), scope)
+    assert data["skills"] == [{"name": "tool", "description": "does it", "path": str(md)}]
+
+
+# --------------------------------------------------------------------------
 # scope-context-10: overlay sources sort by Overlay.sort_key, before stores
 # --------------------------------------------------------------------------
 

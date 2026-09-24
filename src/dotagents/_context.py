@@ -128,49 +128,85 @@ def _inline_referenced_files(
     return text
 
 
-def _collect_skills(scope: _scope.Scope) -> "list[tuple[str, str]]":
-    """Discover available skills as (name, description) pairs.
+#: A YAML block-scalar indicator: `>`, `|`, optionally with chomping/indent.
+_BLOCK_SCALAR = re.compile(r'^[>|][+-]?[0-9]?[+-]?$')
+
+
+def _frontmatter(text: str) -> "dict[str, str]":
+    """The top-level string keys of a leading ``---`` frontmatter block.
+
+    Only the block at the very top counts (a ``name:`` line in the body is not
+    metadata). A ``>`` / ``|`` block scalar and a plain value continued on
+    indented lines are joined into one line -- the listing has one line per
+    skill -- and matching surrounding quotes are dropped."""
+    lines = text.lstrip("﻿").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    out: "dict[str, str]" = {}
+    key: "Optional[str]" = None
+    parts: "list[str]" = []
+
+    def _flush() -> None:
+        if key is None:
+            return
+        value = " ".join(parts).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        out[key] = value
+
+    for line in lines[1:]:
+        if line.strip() in ("---", "..."):
+            break
+        m = re.match(r'^([A-Za-z_][\w-]*):(?:\s+(.*))?$', line)
+        if m and not line[:1].isspace():
+            _flush()
+            key = m.group(1)
+            value = (m.group(2) or "").strip()
+            parts = [] if not value or _BLOCK_SCALAR.match(value) else [value]
+        elif key is not None and line.strip() and line[:1].isspace():
+            parts.append(line.strip())
+    else:
+        return {}  # never closed: not a frontmatter block
+    _flush()
+    return out
+
+
+def _collect_skills(scope: _scope.Scope) -> "list[tuple[str, str, Path]]":
+    """Discover available skills as ``(name, description, SKILL.md path)``.
 
     Skills are OPT-IN: the generator lists them so the user can choose to invoke
     one, but never inlines a skill body (that would defeat the user's
-    'skills I decide to use' model). Deterministic order: the scope's stores
-    (the user store, then the project's ``.agents``), then every installed
-    overlay (:attr:`Scope.overlays` -- ``.git`` / ``__pycache__`` never count)."""
-    roots = list(scope.stores) + _overlay_roots(scope)
-
-    skills: "list[tuple[str, str]]" = []
-    seen: "set[str]" = set()
-    for root in roots:
-        skills_dir = root / "skills"
+    'skills I decide to use' model). The ``skills/`` dirs are walked in
+    contract-A order (:meth:`Scope.paths`: each store's overlays, then the
+    store; system, user, project), and a LATER same-named skill wins -- a
+    project skill over the user's, like :meth:`Overlay.installed`. Listed in
+    first-seen order."""
+    found: "dict[str, tuple[str, str, Path]]" = {}
+    for _level, skills_dir, _root in scope.paths({"default": "skills", "project-root": ""}):
         if not skills_dir.is_dir():
             continue
         for skill_dir in sorted(skills_dir.iterdir()):
-            if not skill_dir.is_dir():
-                continue
             skill_md = skill_dir / "SKILL.md"
-            if not skill_md.is_file():
-                continue
             try:
-                content = skill_md.read_text(encoding="utf-8")
-                name_match = re.search(r'(?m)^name:\s*(.+)$', content)
-                desc_match = re.search(r'(?m)^description:\s*(.+)$', content)
-                if name_match and desc_match:
-                    name = name_match.group(1).strip()
-                    if name in seen:
-                        continue
-                    seen.add(name)
-                    skills.append((name, desc_match.group(1).strip()))
-            except OSError:
-                pass
-    return skills
+                if not skill_md.is_file():
+                    continue
+                meta = _frontmatter(skill_md.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
+            name, desc = meta.get("name"), meta.get("description")
+            if name and desc:
+                found[name] = (name, desc, skill_md)
+    return list(found.values())
 
 
 def _get_skills_listing(scope: _scope.Scope) -> str:
-    """Formatted opt-in skills listing (markdown), or '' if none."""
+    """Formatted opt-in skills listing (markdown), or '' if none. Each entry
+    names its ``SKILL.md``: a harness that does not scan the skills dirs itself
+    has no other way to find it, and the directory need not match the name."""
     skills = _collect_skills(scope)
     if not skills:
         return ""
-    lines = ["- **%s**: %s" % (n, d) for n, d in skills]
+    lines = ["- **%s** (`%s`): %s" % (n, p, d) for n, d, p in skills]
     return "\n\n## Available Skills (Opt-in)\n" + "\n".join(lines) + "\n"
 
 
@@ -291,7 +327,7 @@ def assemble_context_data(
           "harness": <harness_id>,
           "sources": [<absolute source path>, ...],  # after harness subtraction
           "context": <assembled markdown text, minus the skills listing>,
-          "skills": [{"name": ..., "description": ...}, ...],  # opt-in listing
+          "skills": [{"name": ..., "description": ..., "path": <SKILL.md>}, ...],
         }
     ``context`` is the same assembled(+inlined, with ``inline=True``) text the
     markdown format emits, but WITHOUT the skills listing appended -- skills are
@@ -299,7 +335,9 @@ def assemble_context_data(
     keep the opt-in distinction."""
     text, source_paths = _assemble(agent, scope, inline)
 
-    skills = [{"name": n, "description": d} for n, d in _collect_skills(scope)]
+    skills = [
+        {"name": n, "description": d, "path": str(p)} for n, d, p in _collect_skills(scope)
+    ]
 
     return {
         "agent": agent.name,

@@ -303,7 +303,10 @@ def test_json_payload_shape(layout):
     assert data["harness"] == "gemini-cli"
     assert isinstance(data["sources"], list) and data["sources"]
     assert "PYTHON-KB-BODY" in data["context"]           # inlining in the text field
-    assert {"name": "myskill", "description": "does a thing"} in data["skills"]
+    assert {
+        "name": "myskill", "description": "does a thing",
+        "path": str(agents_dir / "skills" / "myskill" / "SKILL.md"),
+    } in data["skills"]
     assert "SKILL-BODY-SECRET" not in data["context"]    # skills stay out of context
 
 
