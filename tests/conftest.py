@@ -88,6 +88,7 @@ def _isolate(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(_scope, "_system_root_cache", {})
     monkeypatch.setenv("PYTHONPATH", str(SRC))
     monkeypatch.setattr(_agents.ClaudeAgent, "_walk_stop", tmp_path_factory.getbasetemp())
+    monkeypatch.setattr(_scope, "_walk_stop", tmp_path_factory.getbasetemp())
     monkeypatch.chdir(cwd)
     saved_logging = _logging_state()
     yield home

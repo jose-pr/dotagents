@@ -469,16 +469,31 @@ def project_root_default() -> Path:
     return Path.cwd()
 
 
+#: Where :func:`_project_containing` stops walking up (inclusive); tests set
+#: it so a temp dir under the real home never reaches that home's ``.agents``.
+_walk_stop: "Optional[Path]" = None
+
+
 def _project_containing(start: Path) -> Path:
     """The nearest directory at or above ``start`` that is a project root -- one
-    holding a ``.git`` or a ``.agents`` of its own (the user or system store's
-    parent does not count: its ``.agents`` is a store every session shares) --
-    else ``start`` itself."""
+    holding a ``.git`` or a ``.agents`` of its own -- else ``start`` itself.
+
+    The home directory and everything above it never count (``~/.agents`` is a
+    user store even when ``$AGENTS_HOME`` names another), and neither does the
+    parent of the user or system store: its ``.agents`` is a store every
+    session shares."""
     shared = [resolve_user_store()]
     system = system_root_default()
     if system is not None:
         shared.append(system)
-    for candidate in (start, *start.parents):
+    home = Path.home()
+    chain = [start, *start.parents]
+    if _walk_stop is not None:
+        stop = Path(_walk_stop)
+        chain = [d for d in chain if _is_within(d, stop)]
+    for candidate in chain:
+        if _is_within(home, candidate):  # home itself, or above it
+            break
         if (candidate / ".git").exists():
             return candidate
         dot_agents = candidate / ".agents"
