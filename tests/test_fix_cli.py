@@ -436,3 +436,20 @@ def test_a_signal_killed_harness_exits_128_plus_n(launch_mod, monkeypatch):
 
     monkeypatch.setattr(launch_mod.subprocess, "Popen", lambda argv, env: Proc())
     assert launch_mod._spawn(["x"], {}) == 130
+
+
+def test_the_context_file_is_stable_and_outside_temp(launch_mod, monkeypatch, tmp_path):
+    program = _program(tmp_path)
+    _context_is(monkeypatch, "# rules\n")
+    calls = _capture_spawn(monkeypatch, launch_mod)
+
+    _run(launch_mod.Launch, passthrough=[], agent="claude", command=str(program))
+    _run(launch_mod.Launch, passthrough=[], agent="claude", command=str(program))
+
+    first, second = (Path(argv[2]) for argv in calls)
+    assert first == second, "each launch overwrites the same file"
+    cache = tmp_path / "store" / ".cache" / "launch"
+    assert first.parent == cache
+    assert not str(first).startswith(tempfile.gettempdir() + os.sep + "dotagents-")
+    assert first.read_text(encoding="utf-8") == "# rules\n"
+    assert (cache / ".gitignore").read_text(encoding="utf-8") == "*\n"

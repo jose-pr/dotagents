@@ -15,9 +15,10 @@ running session, done up front here):
    everything it spawns see it. ``-g`` skips the project tiers (the same
    narrowed meaning as ``env`` / ``context``), never "another store".
 2. **Context.** ``dotagents context`` for that agent (what the harness does
-   not already load by itself). It is written to a file, exported as
-   ``AGENTS_CONTEXT_FILE``, and handed to the harness the way that harness
-   accepts appended system-prompt text (Claude Code:
+   not already load by itself). It is written to a file (one per agent and
+   project under ``<user store>/.cache/launch/``, overwritten by the next
+   launch), exported as ``AGENTS_CONTEXT_FILE``, and handed to the harness
+   the way that harness accepts appended system-prompt text (Claude Code:
    ``--append-system-prompt-file``; pi: ``--append-system-prompt`` on POSIX).
    A harness with no append flag gets it
    the static way instead: merged as the managed ``dotagents:context`` block
@@ -194,7 +195,10 @@ class Launch(DotAgentsArgs):
         if not self.no_context:
             text = _context.assemble_context(agent, scope, inline=self.inline)
             if text:
-                context_file = _scratch_dir() / ("launch-%s-context.md" % agent.name)
+                if self.dry_run:  # removed at exit: a dry run leaves nothing behind
+                    context_file = _scratch_dir() / ("launch-%s-context.md" % agent.name)
+                else:
+                    context_file = self._context_file(scope, agent.name, project_root)
                 write_text_lf(context_file, text)
                 env[CONTEXT_FILE_ENV] = str(context_file)
                 args = agent.launch_context_args(context_file)
@@ -229,6 +233,26 @@ class Launch(DotAgentsArgs):
             return 0
         self._logger_.debug("%s", _describe(argv))
         return _spawn(argv, env)
+
+    @staticmethod
+    def _context_file(scope, agent_name: str, project_root) -> Path:
+        """Where a launch writes its context: one stable file per agent and
+        project (one for ``-g``) under ``<user store>/.cache/launch/``, overwritten
+        by the next launch. Not the per-process temp dir: that is removed at
+        exit, and a session ended by SIGTERM / SIGHUP or a closed console
+        never runs its exit handlers, which left one directory per session in
+        TEMP. Keyed by project so two concurrent launches in different
+        projects do not hand each other their context."""
+        import hashlib
+
+        key = "-g" if scope.global_scope else str(Path(project_root).resolve())
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+        cache = Path(scope.user_root) / ".cache" / "launch"
+        cache.mkdir(parents=True, exist_ok=True)
+        ignore = cache / ".gitignore"
+        if not ignore.exists():  # a store kept in git: never commit these
+            ignore.write_bytes(b"*\n")
+        return cache / ("%s-%s.md" % (agent_name, digest))
 
     def _may_write(self, agent, project_root) -> bool:
         """Whether the context may be merged into ``agent.context_target``.
