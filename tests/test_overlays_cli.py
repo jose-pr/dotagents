@@ -1,8 +1,8 @@
 """`dotagents overlays` command behaviour fixed in the 2026-09-09 review:
 name normalization on add/remove, remove's un-merge, skills published from the
 INSTALLED copy, `sync --copy` / `--overwrite`, dry-run setup reporting, up-front
-validation, `requires`, `show`, the manifest reader's comment handling, and
-the umbrella's no-subcommand exit -- plus the failure modes found since:
+validation, `requires`, `show` and the manifest reader's comment handling --
+plus the failure modes found since:
 confinement of `requires`/`rules`, broken repos and registries, removing a
 linked overlay, and what `sync` takes from where. Those still open in the
 product are strict xfails naming the review issue.
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from dotagents import _overlays, _scope, cli
+from dotagents import _overlays, _scope
 from dotagents.cli import OverlayAdd, OverlayRemove, OverlayShow, OverlaySync
 
 BASE_AGENTS = (
@@ -401,11 +401,6 @@ def test_the_acl_check_survives_a_powershell_7_parent(monkeypatch):
     monkeypatch.setenv("PSModulePath", os.pathsep.join(p for p in (str(modules), inherited) if p))
     ok, reason = _system_root_is_safe(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
     assert ok, reason
-
-
-def test_umbrella_without_subcommand_exits_2():
-    assert cli.Overlays()() == 2
-    assert cli.Dotagents()() == 2
 
 
 # --------------------------------------------------------------------------

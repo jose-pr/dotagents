@@ -44,7 +44,7 @@ def test_claude_writes_where_claude_config_dir_points(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
     agent = _agents.ClaudeAgent()
     agent.scope_level = "user"
-    agent.write_base_config(tmp_path / "store", tmp_path, BASE, force=False, dry_run=False, logger=None)
+    agent.write_base_config(tmp_path / "store", dry_run=False, logger=None)
     assert (cfg / "CLAUDE.md").is_file()
     assert (cfg / "CLAUDE.md").resolve() in agent.loaded_paths(tmp_path / "proj")
 
@@ -55,7 +55,7 @@ def test_the_told_scope_wins_over_agents_home(tmp_path):
     agent = _agents.ClaudeAgent()
     agent.scope_level = "user"
     store = tmp_path / "custom" / "store"
-    agent.write_base_config(store, tmp_path, BASE, force=False, dry_run=False, logger=None)
+    agent.write_base_config(store, dry_run=False, logger=None)
     assert (Path.home() / ".claude" / "CLAUDE.md").is_file()
     assert not (store.parent / ".claude").exists()
 
@@ -90,7 +90,7 @@ def test_an_unknown_agent_name_is_a_usage_error(tmp_path):
 
 def test_cursor_context_goes_to_an_always_applied_rule(tmp_path):
     project = tmp_path / "proj"
-    _agents.CursorAgent().write_context(project, "CTX", force=False, dry_run=False, logger=None)
+    _agents.CursorAgent().write_context(project, "CTX", dry_run=False, logger=None)
     text = (project / ".cursor" / "rules" / "dotagents.mdc").read_text(encoding="utf-8")
     assert text.startswith("---\n") and "alwaysApply: true" in text and "CTX" in text
     assert "AGENTS.md" in _agents.CursorAgent.harness_loads
@@ -138,7 +138,7 @@ def test_project_include_in_a_tracked_claude_file_warns(tmp_path, caplog):
     agent = _agents.ClaudeAgent()
     agent.scope_level, agent.project_root = "project", project
     with caplog.at_level(logging.WARNING):
-        agent.write_base_config(project / ".agents", tmp_path, BASE, force=False, dry_run=False, logger=_log())
+        agent.write_base_config(project / ".agents", dry_run=False, logger=_log())
     assert "not gitignored" in caplog.text
 
 

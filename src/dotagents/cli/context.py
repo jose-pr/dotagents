@@ -175,7 +175,7 @@ class Context(DotAgentsArgs):
             if self.write_agent:
                 # The PROJECT root, never the store: the target is the harness's
                 # own instruction file, merged as a managed block.
-                agent.write_context(project_root, text, force=False, dry_run=False, logger=self._logger_)
+                agent.write_context(project_root, text, dry_run=False, logger=self._logger_)
             elif self.out == "-":
                 # Just the context on stdout. A per-agent delimiter is emitted ONLY when
                 # more than one agent is generated, so a single-agent run (the default)

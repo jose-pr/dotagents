@@ -154,9 +154,7 @@ class Agent:
                 return val
         return None
 
-    def write_base_config(
-        self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger
-    ) -> None:
+    def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
         """This harness's last mile to the store's AGENTS.md, which `init`
         writes itself: an include in the harness's own entry file, a pointer,
         or nothing when the harness reads the context another way."""
@@ -167,7 +165,7 @@ class Agent:
     #: `dotagents:context` block, never a raw overwrite). Empty = no such file.
     context_target: str = ""
 
-    def write_context(self, project_root: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
+    def write_context(self, project_root: Path, effective_context: str, *, dry_run: bool, logger) -> None:
         """Merge the assembled context into this harness's own instruction file
         under ``project_root`` (:attr:`context_target`), as a managed block.
 
@@ -362,7 +360,7 @@ class ClaudeAgent(Agent):
             return "@" + rel.as_posix()
         return "@" + target.as_posix()
 
-    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
+    def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
         from dotagents._merge import merge_include_line
 
         # The last mile: Claude Code reads `~/.claude/CLAUDE.md` (user scope) or
@@ -733,7 +731,7 @@ class GeminiAgent(Agent):
     vendor = "google"
     model_source_vars = ["GEMINI_MODEL"]
 
-    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
+    def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
         """An `@<store>/AGENTS.md` import in Gemini's own entry file:
         `~/.gemini/GEMINI.md` for the user scope, `<project>/GEMINI.md` for a
         project (Gemini CLI resolves `@path` imports in GEMINI.md)."""
@@ -940,8 +938,6 @@ class CodexAgent(Agent):
     ENV_BLOCK_END = "# dotagents:end"
 
     def _config_root(self, config_root: "Optional[Path]" = None) -> Path:
-        import os
-
         if config_root:
             return Path(config_root)
         # CODEX_HOME is Codex's own documented state-dir override.
@@ -1084,20 +1080,18 @@ class CursorAgent(Agent):
     vendor = "cursor"
     model_source_vars = ["CURSOR_DEFAULT_MODEL"]
 
-    def write_context(self, project_root: Path, effective_context: str, *, force: bool, dry_run: bool, logger) -> None:
+    def write_context(self, project_root: Path, effective_context: str, *, dry_run: bool, logger) -> None:
         """The managed block in `.cursor/rules/dotagents.mdc`, created with the
         `alwaysApply: true` frontmatter a rule needs to load every session."""
-        from dotagents._fs import write_text_lf
-
         target = Path(project_root) / self.context_target
         if not target.exists() and not dry_run:
             write_text_lf(
                 target,
                 "---\ndescription: dotagents assembled context\nalwaysApply: true\n---\n",
             )
-        super().write_context(project_root, effective_context, force=force, dry_run=dry_run, logger=logger)
+        super().write_context(project_root, effective_context, dry_run=dry_run, logger=logger)
 
-    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
+    def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
         if logger:
             logger.info("cursor: reads the context via `context --write-agent` or `launch`")
 
@@ -1117,7 +1111,7 @@ class CopilotAgent(Agent):
     vendor = "github"
     model_source_vars = ["COPILOT_MODEL"]
 
-    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
+    def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
         if logger:
             logger.info("copilot: reads the context via `context --write-agent` or `launch`")
 
@@ -1171,7 +1165,7 @@ class PiAgent(Agent):
                 pass
         return out
 
-    def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
+    def write_base_config(self, dest: Path, *, dry_run: bool, logger) -> None:
         from dotagents._merge import BEGIN_MARKER, END_MARKER, merge_block
 
         # The last mile: pi has no include syntax, so a managed block POINTING

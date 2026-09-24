@@ -47,7 +47,7 @@ def _log():
 def test_user_scope_init_writes_the_claude_include(home, tmp_path):
     store = home / ".agents"
     _agents.ClaudeAgent().write_base_config(
-        store, tmp_path, BASE, force=False, dry_run=False, logger=_log()
+        store, dry_run=False, logger=_log()
     )
     entry = home / ".claude" / "CLAUDE.md"
     assert entry.is_file()
@@ -61,7 +61,7 @@ def test_user_scope_include_is_skipped_when_hand_written(home, tmp_path):
     write_text_lf(entry, "@../.agents/AGENTS.md\n\n# my own rules\n")
     before = entry.read_text(encoding="utf-8")
     _agents.ClaudeAgent().write_base_config(
-        store, tmp_path, BASE, force=False, dry_run=False, logger=_log()
+        store, dry_run=False, logger=_log()
     )
     assert entry.read_text(encoding="utf-8") == before
 
@@ -71,7 +71,7 @@ def test_project_scope_init_writes_the_project_include(home, tmp_path):
     dest = project / ".agents"
     dest.mkdir(parents=True)
     _agents.ClaudeAgent().write_base_config(
-        dest, tmp_path, BASE, force=False, dry_run=False, logger=_log()
+        dest, dry_run=False, logger=_log()
     )
     entry = project / ".claude" / "CLAUDE.md"
     assert entry.is_file()
@@ -86,7 +86,7 @@ def test_custom_store_is_still_the_user_scope(home, tmp_path, monkeypatch):
     store.mkdir(parents=True)
     monkeypatch.setenv("AGENTS_HOME", str(store))
     agent = _agents.ClaudeAgent()
-    agent.write_base_config(store, tmp_path, BASE, force=False, dry_run=False, logger=_log())
+    agent.write_base_config(store, dry_run=False, logger=_log())
     entry = home / ".claude" / "CLAUDE.md"
     assert entry.is_file()
     assert "@" + (store / "AGENTS.md").as_posix() in entry.read_text(encoding="utf-8")
@@ -97,7 +97,7 @@ def test_custom_store_is_still_the_user_scope(home, tmp_path, monkeypatch):
 
 def test_dry_run_writes_no_include(home, tmp_path):
     _agents.ClaudeAgent().write_base_config(
-        home / ".agents", tmp_path, BASE, force=False, dry_run=True, logger=_log()
+        home / ".agents", dry_run=True, logger=_log()
     )
     assert not (home / ".claude").exists()
 
@@ -153,8 +153,8 @@ def test_write_context_merges_a_block_into_the_project_file(tmp_path):
     project = tmp_path / "proj"
     write_text_lf(project / "AGENTS.md", "# The project's own AGENTS.md\n")
     codex = _agents.CodexAgent()
-    codex.write_context(project, "CTX ONE", force=False, dry_run=False, logger=_log())
-    codex.write_context(project, "CTX TWO", force=False, dry_run=False, logger=_log())
+    codex.write_context(project, "CTX ONE", dry_run=False, logger=_log())
+    codex.write_context(project, "CTX TWO", dry_run=False, logger=_log())
     text = (project / "AGENTS.md").read_text(encoding="utf-8")
     assert text.startswith("# The project's own AGENTS.md")   # user content kept, first
     assert "CTX TWO" in text and "CTX ONE" not in text         # refreshed, not appended
@@ -173,7 +173,7 @@ def test_write_context_merges_a_block_into_the_project_file(tmp_path):
 def test_write_context_targets_per_harness(tmp_path, agent_cls, rel):
     project = tmp_path / "proj"
     project.mkdir()
-    agent_cls().write_context(project, "CTX", force=False, dry_run=False, logger=_log())
+    agent_cls().write_context(project, "CTX", dry_run=False, logger=_log())
     assert (project / rel).is_file()
     assert "CTX" in (project / rel).read_text(encoding="utf-8")
 

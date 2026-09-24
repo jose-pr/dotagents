@@ -18,17 +18,14 @@ Command modules are discovered from the bundled cmds dir, from each installed
 overlay's `<overlay-root>/cmds/`, and from each scope's `dotagents/cmds` (one
 `Scope.paths` Contract-A walk, `_cmds_dirs`).
 
-`_compose_block` and `_package_data_dir` are re-exported at package level because
-other package modules import them as `dotagents.cli._compose_block` /
-`dotagents.cli._package_data_dir` (see `_overlays.py`, `_scope.py`). `DotAgentsArgs`
-is re-exported for overlay-shipped command modules, which always run inside a real
+`DotAgentsArgs` and `_write_stdout` are re-exported for command modules (the
+bundled ones and overlay-shipped ones), which always run inside a real
 `dotagents` process and should `from dotagents.cli import DotAgentsArgs`.
 """
 
 import logging
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import duho
@@ -36,18 +33,13 @@ from duho import Cli, LoggingArgs
 
 from dotagents import __version__
 
-# Re-export shared helpers so `dotagents.cli.<name>` keeps resolving for both the
-# command modules and external importers (`dotagents._overlays`, `dotagents._scope`).
+# Names imported through the package: `DotAgentsArgs` and `_write_stdout` by
+# command modules (the bundled ones and overlay-shipped ones), `_compose_block`
+# by `dotagents._overlays`; the rest are used below.
 from dotagents.cli._common import (  # noqa: F401
-    AGENTS_DIR_ENV,
-    BASE_ROOT,
     DotAgentsArgs,
-    _apply_base,
     _compose_block,
-    _installed_overlay_dirs,
-    _no_subcommand,
     _package_data_dir,
-    _resolve_from,
     _scratch_dir,
     _write_stdout,
     resolve_user_store,
@@ -107,12 +99,6 @@ class Dotagents(LoggingArgs, Cli):
     cmdspath: "list[str]" = []
     "Extra directory to discover command modules from (repeatable)."
     ("--cmdspath",)
-
-    def __call__(self) -> int:
-        return _no_subcommand(
-            self,
-            "pick a subcommand, e.g. `init`, `overlays`, `context`, `env`, `build-pyz`",
-        )
 
 
 def _command_modules(commands) -> "tuple[str, ...]":

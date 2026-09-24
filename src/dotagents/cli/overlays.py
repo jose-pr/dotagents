@@ -20,7 +20,6 @@ from duho import Cli, LoggingArgs
 from dotagents.cli._common import (
     base_agents_text,
     DotAgentsArgs,
-    _no_subcommand,
     _write_stdout,
     store_base,
 )
@@ -939,6 +938,3 @@ class Overlays(LoggingArgs, Cli):
 
     _parsername_ = "overlays"
     _subcommands_ = [OverlayAdd, OverlayRemove, OverlayList, OverlaySync, OverlayShow]
-
-    def __call__(self) -> int:
-        return _no_subcommand(self, "pick an overlays subcommand: add, remove, list, sync, show")

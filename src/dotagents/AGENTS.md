@@ -25,7 +25,8 @@ Terms used throughout:
 `dotagents <command> [options]` (also `python -m dotagents`, or a built `.pyz`).
 `dotagents --help` / `<command> --help` list every flag. Umbrella options:
 `--cmdspath DIR` (repeatable), `--loglevel`, `-v` / `-q`. An umbrella run with no
-subcommand prints its help and exits 2.
+subcommand (`dotagents`, `dotagents overlays`, `dotagents findings`) prints its usage
+and an error naming the missing command, and exits 2.
 
 | Command | Contract |
 | --- | --- |
@@ -64,8 +65,7 @@ are skipped.
   `python -m dotagents`, `install.py`).
 - `class Dotagents(LoggingArgs, Cli)` — the umbrella; field `cmdspath: list[str]`.
 - `CMDS_PATH_ENV = "AGENTS_CMDS_PATH"`.
-- Re-exported for command modules: `DotAgentsArgs`, `resolve_user_store`,
-  `AGENTS_DIR_ENV`, `BASE_ROOT` (see below).
+- Re-exported for command modules: `DotAgentsArgs`, `_write_stdout` (see below).
 
 ## `dotagents.cli._common`
 
@@ -75,6 +75,8 @@ are skipped.
   project_root=None) -> Scope` (via `_scope.resolve_scope`). Subclass it alone
   (`class X(DotAgentsArgs)`), define `_parsername_` and `__call__(self) -> int`. A
   subclass may redeclare a field with the same type and default to change its help.
+- `_write_stdout(text) -> None` — write to stdout as UTF-8 whatever the console's
+  encoding (a bare `print` fails on a non-Latin-1 character under cp1252).
 - `BASE_ROOT: Path` — the bundled base overlay dir (`_overlay/`).
 - `STORE_CONFIG = "dotagents/config.toml"`;
   `read_store_config(dest) -> dict[str, str]` (`{}` when absent or invalid);
@@ -388,11 +390,10 @@ API:
   - `detect_env(environ) -> bool` — any `detect_env_vars` present.
   - `detect(root) -> bool` — any `context_files` exists under `root`.
   - `resolve_model(environ) -> Optional[str]` — first set `model_source_vars` value.
-  - `write_base_config(dest, src, base_agents_text, *, force, dry_run, logger) ->
-    None` — the harness's link to `<dest>/AGENTS.md` (the store file itself is
-    written by `init`). Base: nothing.
-  - `write_context(project_root, effective_context, *, force, dry_run, logger) ->
-    None` — merge a `dotagents:context` block into `<project_root>/<context_target>`.
+  - `write_base_config(dest, *, dry_run, logger) -> None` — the harness's link to
+    `<dest>/AGENTS.md` (the store file itself is written by `init`). Base: nothing.
+  - `write_context(project_root, effective_context, *, dry_run, logger) -> None` —
+    merge a `dotagents:context` block into `<project_root>/<context_target>`.
   - `loaded_paths(project_root) -> list[Path]` — resolved `harness_loads`.
   - `wire_hooks(dest, *, dry_run, logger, config_root=None) -> None` — merge the
     harness's hooks; `config_root` redirects its config dir. Base: nothing.

@@ -291,7 +291,7 @@ class Launch(DotAgentsArgs):
                         _context.assemble_context(
                             agent, scope, inline=self.inline, expand_vars=False
                         ),
-                        force=False, dry_run=self.dry_run, logger=self._logger_,
+                        dry_run=self.dry_run, logger=self._logger_,
                     )
                 else:
                     self._logger_.warning(

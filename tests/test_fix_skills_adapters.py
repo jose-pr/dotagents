@@ -191,7 +191,7 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
     agent = ClaudeAgent()
     agent.scope_level = "user"
-    agent.write_base_config(store, tmp_path, BASE_AGENTS, force=False, dry_run=False, logger=None)
+    agent.write_base_config(store, dry_run=False, logger=None)
     src = tmp_path / "src"
     src.mkdir()
     return src, store, claude
@@ -256,7 +256,7 @@ def test_project_scope_links_into_the_project_claude_dir(tmp_path, monkeypatch):
     monkeypatch.chdir(project)
     agent = ClaudeAgent()
     agent.scope_level, agent.project_root = "project", project
-    agent.write_base_config(store, tmp_path, BASE_AGENTS, force=False, dry_run=False, logger=None)
+    agent.write_base_config(store, dry_run=False, logger=None)
     src = tmp_path / "src"
     _overlay(src, "withskill", skill="hello")
     _run(OverlayAdd, name=["withskill"], no_setup=True, no_requires=False,
@@ -310,12 +310,12 @@ def _pi_project(tmp_path):
 def test_pi_gets_a_pointer_to_the_project_store(tmp_path, monkeypatch):
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "pi"))
     agent, project, store = _pi_project(tmp_path)
-    agent.write_base_config(store, tmp_path, BASE_AGENTS, force=False, dry_run=False, logger=_log())
+    agent.write_base_config(store, dry_run=False, logger=_log())
     text = (project / ".pi" / "APPEND_SYSTEM.md").read_text(encoding="utf-8")
     assert "`.agents/AGENTS.md`" in text, "relative to the project root: no machine path"
     assert "Base rule" not in text, "a pointer, never a copy"
     assert not (tmp_path / "pi").exists(), "the user's pi config is not touched"
-    agent.write_base_config(store, tmp_path, BASE_AGENTS, force=True, dry_run=False, logger=_log())
+    agent.write_base_config(store, dry_run=False, logger=_log())
     assert (project / ".pi" / "APPEND_SYSTEM.md").read_text(encoding="utf-8") == text, "idempotent"
 
 
@@ -325,9 +325,9 @@ def test_pi_pointer_leaves_a_context_block_alone(tmp_path):
     from dotagents import _merge
 
     agent, project, store = _pi_project(tmp_path)
-    agent.write_context(project, BASE_AGENTS, force=False, dry_run=False, logger=_log())
+    agent.write_context(project, BASE_AGENTS, dry_run=False, logger=_log())
     before = (project / ".pi" / "APPEND_SYSTEM.md").read_text(encoding="utf-8")
-    agent.write_base_config(store, tmp_path, BASE_AGENTS, force=False, dry_run=False, logger=_log())
+    agent.write_base_config(store, dry_run=False, logger=_log())
     after = (project / ".pi" / "APPEND_SYSTEM.md").read_text(encoding="utf-8")
     span = _merge.find_block(after, _merge.CONTEXT_BEGIN_MARKER, _merge.CONTEXT_END_MARKER)
     assert after[span[0]:span[1]] in before, "the context block is intact"

@@ -200,7 +200,6 @@ def uri_path_class() -> "Any":
 
 def _local_from_file_url(url: str) -> Path:
     """The local path a ``file://`` URL names."""
-    from urllib.parse import urlsplit
     from urllib.request import url2pathname
 
     parts = urlsplit(url)

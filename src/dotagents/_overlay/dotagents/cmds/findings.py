@@ -62,7 +62,7 @@ from typing import Optional
 
 from duho import Cli, LoggingArgs
 
-from dotagents.cli import DotAgentsArgs, _no_subcommand, _write_stdout
+from dotagents.cli import DotAgentsArgs, _write_stdout
 
 FINDINGS_DIRNAME = "findings"
 PROCESSED_DIRNAME = "processed"
@@ -628,8 +628,3 @@ class Findings(LoggingArgs, Cli):
             return 0
 
     _subcommands_ = [Add, List, Show, Done, Reopen, Remove, Index, PathCmd]
-
-    def __call__(self) -> int:
-        return _no_subcommand(
-            self, "pick a findings subcommand: add, list, show, done, reopen, remove, index, path"
-        )

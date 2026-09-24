@@ -318,53 +318,6 @@ OVERLAY_ROOT_NOTE = (
 )
 
 
-def _no_subcommand(cmd, hint: str) -> int:
-    """What an umbrella (`dotagents`, `overlays`, `findings`) does when invoked
-    with no subcommand: print its help and exit 2, the argparse convention --
-    not an info log and exit 0, which read as success to a script."""
-    parser = getattr(type(cmd), "_duho_last_parser_", None)
-    if parser is not None and hasattr(parser, "print_help"):
-        parser.print_help()
-    else:
-        # `_logger_` needs a `_parsername_`, which the top-level umbrella has none of.
-        import logging
-
-        logging.getLogger(getattr(cmd, "_parsername_", None) or "dotagents").info(hint)
-    return 2
-
-
-def _installed_overlay_dirs(scope, source, *, adding=None, dry_run=False) -> "list[Path]":
-    """The overlay dirs to recompose the managed block over.
-
-    Every overlay installed in `scope` contributes to the block, so the recompose is
-    a pure function of *which* overlays are present -- not of add-invocation order.
-    Each installed overlay ships its own `overlay.toml` + rules files (see
-    `install_overlay_dir`), so the installed dir is self-describing and used directly.
-
-    `adding` is the names being added/synced this call; on a `--dry-run` `add` they
-    are not yet on disk in the scope, so their **source** dir stands in so the dry-run
-    preview reflects what a real run would produce. A real (non-dry-run) run reads them
-    from the scope like any other installed overlay. Order here is irrelevant --
-    `_compose_block` sorts by `(priority, name)`.
-    """
-    from dotagents._overlays import Overlay
-
-    adding = list(adding or [])
-    installed = {overlay.name for overlay in Overlay.discover(scope.overlay_root)}
-    names = sorted(installed | set(adding))
-    dirs: "list[Path]" = []
-    for name in names:
-        if dry_run and name in adding and name not in installed:
-            # Not on disk yet (dry-run add): describe it from the source instead.
-            try:
-                dirs.append(source.overlay_dir(name))
-            except SystemExit:
-                pass
-        else:
-            dirs.append(scope.overlay_dir(name))
-    return dirs
-
-
 def _apply_base(
     src: Path, dest: Path, force: bool, dry_run: bool, logger,
     agents: "list[str] | None" = None,
@@ -440,9 +393,7 @@ def _apply_base(
     logger.info("%s: AGENTS.md", branch)
 
     for agent in active_agents:
-        agent.write_base_config(
-            dest, src, base_agents, force=force, dry_run=dry_run, logger=logger
-        )
+        agent.write_base_config(dest, dry_run=dry_run, logger=logger)
         if wire_hooks:
             agent.wire_hooks(dest, dry_run=dry_run, logger=logger)
 
