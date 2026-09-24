@@ -565,6 +565,34 @@ def test_export_values_roundtrip_through_every_posix_sh(tmp_path, label, argv):
     assert got == _TRICKY, label
 
 
+# --------------------------------------------------------------------------
+# env-11: PATH conversion only on a Windows host.
+# --------------------------------------------------------------------------
+
+def test_no_path_conversion_off_windows(monkeypatch):
+    """Under pwsh on Linux/WSL, `_to_windows_path_list` dropped every Linux
+    entry: `/home/u/.agents/bin:/usr/bin:/mnt/c/Windows/system32` rendered as
+    `'C:\\Windows\\system32'`."""
+    from dotagents.cli import env as cli_env
+
+    monkeypatch.setattr(cli_env, "_host_is_windows", lambda: False, raising=False)
+    linux = "/home/u/.agents/bin:/usr/bin:/mnt/c/Windows/system32"
+    assert cli_env._format_env({"PATH": linux}, "powershell") == "${env:PATH} = '%s'" % linux
+    assert cli_env._format_env({"PATH": linux}, "cmd") == 'set "PATH=%s"' % linux
+    # Nor the other way: a `;` or `\` in a Linux value is just a character.
+    odd = r"/opt/a\b;c"
+    assert cli_env._format_env({"MYPATH": odd}, "export") == "export MYPATH='%s'" % odd
+
+
+def test_path_conversion_still_happens_on_windows(monkeypatch):
+    from dotagents.cli import env as cli_env
+
+    monkeypatch.setattr(cli_env, "_host_is_windows", lambda: True, raising=False)
+    out = cli_env._format_env({"PATH": "/usr/bin:/mnt/c/Windows/system32"}, "powershell")
+    assert out == "${env:PATH} = 'C:\\Windows\\system32'"
+    assert cli_env._format_env({"PATH": r"C:\a;D:\b"}, "export") == "export PATH='/c/a:/d/b'"
+
+
 def test_find_bash_warns_once_when_there_is_none(monkeypatch, caplog):
     import logging
 

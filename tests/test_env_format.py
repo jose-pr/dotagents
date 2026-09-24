@@ -22,6 +22,14 @@ from dotagents.cli.env import _format_env
 BASH = _env.find_bash()
 
 
+@pytest.fixture(autouse=True)
+def _windows_host(monkeypatch):
+    """The PATH-conversion tests here model a WINDOWS host (the only one that
+    converts); pin it so they run the same on every OS. The host gate itself
+    is tested in test_fix_env.py."""
+    monkeypatch.setattr("dotagents.cli.env._host_is_windows", lambda: True)
+
+
 # A sample env covering the tricky cases: a plain value, a value with a space, a
 # value with a quote char, a value with a single quote, and an empty value.
 SAMPLE = {

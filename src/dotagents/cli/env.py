@@ -49,6 +49,14 @@ def _looks_like_path_list(key: str, value: str) -> bool:
     return "\\" in value or ";" in value
 
 
+def _host_is_windows() -> bool:
+    """True on a native Windows host -- the only one whose PATH is in Windows
+    form and so the only one where the formats convert PATH-shaped values."""
+    import os
+
+    return os.name == "nt"
+
+
 _DRIVE_LETTER_RE = re.compile(r"^([A-Za-z]):/")
 
 
@@ -235,12 +243,16 @@ def _format_env(
     gone = sorted(k for k in set(removed) if k not in env)
 
     # `get_environment` assembles PATH in the HOST OS's convention (`;` and `\`
-    # on Windows), which is what a native subprocess needs. POSIX shell formats
-    # need `:` and `/` regardless of host: a `;`-joined, backslash-laden PATH
-    # sourced into bash (the SessionStart hook writes this into
+    # on Windows), which is what a native subprocess needs. On a WINDOWS host
+    # the POSIX shell formats need `:` and `/`: a `;`-joined, backslash-laden
+    # PATH sourced into Git Bash (the SessionStart hook writes this into
     # $CLAUDE_ENV_FILE) breaks every bare-name command lookup for that shell.
-    # Convert PATH-shaped values only, for POSIX target formats only.
-    if fmt in ("export", "dotenv", "fish"):
+    # Convert PATH-shaped values only, for POSIX target formats only. On any
+    # other host PATH is already POSIX and no conversion applies in either
+    # direction: pwsh on Linux or WSL wants the Linux PATH as it is (converting
+    # it dropped every Linux entry).
+    windows_host = _host_is_windows()
+    if fmt in ("export", "dotenv", "fish") and windows_host:
         # PATHEXT is Windows-only with no POSIX meaning; dropped.
         #
         # Windows-native var names with parentheses (`ProgramFiles(x86)`,
@@ -252,7 +264,9 @@ def _format_env(
             for k, v in env.items()
             if k != "PATHEXT" and _POSIX_IDENTIFIER_RE.match(k)
         }
-    elif fmt in ("powershell", "cmd"):
+    elif fmt in ("export", "dotenv", "fish"):
+        env = {k: v for k, v in env.items() if _POSIX_IDENTIFIER_RE.match(k)}
+    elif fmt in ("powershell", "cmd") and windows_host:
         # The mirror case: the caller's inherited `PATH` may hold WSL/MSYS-mount
         # entries (`/mnt/c/...`), which PowerShell would take as one opaque
         # string (see `_to_windows_path`). Convert only PATH-shaped values that
