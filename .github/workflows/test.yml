@@ -69,7 +69,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.9", "3.14"] # the floor and the newest supported
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-python@v5
@@ -88,11 +88,11 @@ jobs:
       matrix:
         python-version: ["3.9", "3.14"] # the default mode must run on the 3.9 floor
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
       - name: Fetch the example overlays (`repo` branch)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.overlays_ref || 'repo' }}
           path: overlays-src
@@ -116,11 +116,11 @@ jobs:
     name: Example overlays' own tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
       - name: Fetch the example overlays (`repo` branch)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.overlays_ref || 'repo' }}
           path: overlays-src
@@ -141,7 +141,7 @@ jobs:
     name: Install into scratch HOME
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-python@v5
@@ -149,7 +149,7 @@ jobs:
           python-version: "3.12"
       - name: Fetch the example overlays (`repo` branch)
         # The steps below resolve overlays via --repo overlays-src/overlays.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.overlays_ref || 'repo' }}
           path: overlays-src
@@ -298,11 +298,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
       - name: Fetch the example overlays (`repo` branch)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.overlays_ref || 'repo' }}
           path: overlays-src
