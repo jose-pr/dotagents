@@ -645,6 +645,7 @@ class Overlay:
     def run_setup(
         self, *, agents_dir: Path, dry_run: bool, logger,
         scope_root: "Optional[Path]" = None, scope_level: "Optional[str]" = None,
+        base_env: "Optional[dict[str, str]]" = None,
     ) -> "Optional[int]":
         """Run the overlay's idempotent ``setup`` script if it ships one.
 
@@ -658,7 +659,10 @@ class Overlay:
         invokes it:
 
         * **cwd** = the installed overlay dir, so the script sees its own files.
-        * **env** carries ``AGENTS_HOME`` = ``agents_dir``, the USER store
+        * **env** is ``base_env`` (default ``os.environ``; ``overlays`` passes the
+          assembled ``dotagents env``, so the script imports any overlay's
+          ``lib`` and calls any overlay's ``bin`` by name), plus
+          ``AGENTS_HOME`` = ``agents_dir``, the USER store
           -- what the variable means everywhere else, so a ``dotagents``
           call the script makes resolves the same stores -- plus
           ``AGENTS_SCOPE_ROOT`` = the store the overlay is installed into
@@ -679,7 +683,7 @@ class Overlay:
             logger.info("[dry-run] would run %s in %s", script.name, self.path)
             return 0
 
-        env = dict(os.environ)
+        env = dict(os.environ if base_env is None else base_env)
         env["AGENTS_HOME"] = str(agents_dir)
         env["AGENTS_SCOPE_ROOT"] = str(scope_root if scope_root is not None else agents_dir)
         if scope_level:

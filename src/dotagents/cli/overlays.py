@@ -161,9 +161,10 @@ def _remove_tree(path: Path) -> None:
 def _run_setup(scope, dest_dir: Path, name: str, *, no_setup, dry_run, logger, source_dir=None) -> int:
     """Run an installed overlay's `setup` script, honoring `--no-setup`.
 
-    The script sees ``AGENTS_HOME`` = the USER store (what the variable means
-    everywhere else) and ``AGENTS_SCOPE_ROOT`` / ``AGENTS_SCOPE`` = the store
-    it is installed into. On a `--dry-run` the installed dir may not exist
+    The script sees the scope's assembled env (:func:`_session_env`: overlay
+    libs on ``PYTHONPATH``, bins on ``PATH``), ``AGENTS_HOME`` = the USER store
+    (what the variable means everywhere else) and ``AGENTS_SCOPE_ROOT`` /
+    ``AGENTS_SCOPE`` = the store it is installed into. On a `--dry-run` the installed dir may not exist
     yet, so the SOURCE overlay (`source_dir`) is what gets inspected. Returns
     the exit code, 0 when skipped or absent."""
     from dotagents._overlays import Overlay
@@ -178,8 +179,23 @@ def _run_setup(scope, dest_dir: Path, name: str, *, no_setup, dry_run, logger, s
     rc = overlay.run_setup(
         agents_dir=scope.user_root, scope_root=scope.agents_root, scope_level=scope.level,
         dry_run=dry_run, logger=logger,
+        base_env=None if dry_run else _session_env(scope, logger),
     )
     return rc or 0
+
+
+def _session_env(scope, logger) -> "dict[str, str]":
+    """``os.environ`` with the scope's assembled ``dotagents env`` applied -- what
+    a session in that scope sees, so a setup script run from a plain shell
+    still finds every overlay's ``lib`` on ``PYTHONPATH`` and ``bin`` on ``PATH``."""
+    from dotagents import _env
+
+    env = dict(os.environ)
+    changes = _env.get_environment(scope, base_env=env, logger=logger)
+    env.update(changes)
+    for name in changes.removed:
+        env.pop(name, None)
+    return env
 
 
 def _backup_root(scope, name: str) -> Path:

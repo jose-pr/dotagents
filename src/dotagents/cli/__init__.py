@@ -311,6 +311,35 @@ def _agents_dir_from_argv(argv) -> "str | None":
     return None
 
 
+def _discovery_scope(argv=None):
+    """The scope command discovery walks: the user store an `--agents-dir` in
+    `argv` names (see `_agents_dir_from_argv`), and the pinned project root."""
+    from dotagents import _scope
+
+    return _scope.Scope.of(
+        agents_dir=resolve_user_store(_agents_dir_from_argv(argv)),
+        project_root=_scope.project_root_default(),
+    )
+
+
+def _add_overlay_libs(argv=None) -> "list[str]":
+    """Put every existing overlay/store ``lib`` dir on ``sys.path`` before the
+    command modules import, so a command can import any overlay's library even
+    when ``dotagents`` runs from a plain shell (a session already has them on
+    ``PYTHONPATH``). APPENDED, in contract-A precedence: in this process a lib
+    never shadows an installed package, dotagents' own dependencies included.
+    Returns the dirs added."""
+    from dotagents import _env
+
+    added = []
+    for lib in reversed(_env.get_lib_paths(_discovery_scope(argv))):
+        entry = str(lib)
+        if entry not in sys.path:
+            sys.path.append(entry)
+            added.append(entry)
+    return added
+
+
 def _cmds_dirs(argv=None) -> "list[Path]":
     """Every `cmds` dir to discover command modules from, in Contract-A order.
 
@@ -336,12 +365,7 @@ def _cmds_dirs(argv=None) -> "list[Path]":
     the cwd), with no `<project>/dotagents/cmds` tier outside `.agents`.
     `include_missing=True`: every level's cmds dir is offered and the caller's
     `_discover_dir` skips the ones that don't exist."""
-    from dotagents import _scope
-
-    scope = _scope.Scope.of(
-        agents_dir=resolve_user_store(_agents_dir_from_argv(argv)),
-        project_root=_scope.project_root_default(),
-    )
+    scope = _discovery_scope(argv)
     # No project-root tier: a checkout's own `dotagents/cmds/` is not a store,
     # and importing it would run a cloned repo's code on every invocation.
     resolved = scope.paths(
@@ -385,7 +409,9 @@ def _discover(argv=None) -> "list":
         _discover_dir(bundled, by_name)
 
     # 3. Contract-A cmds dirs: overlay cmds + scope (user/project) cmds, in
-    #    precedence order (overlays first, project last -> project wins).
+    #    precedence order (overlays first, project last -> project wins). The
+    #    overlay libs go on sys.path first, so a command imports them.
+    _add_overlay_libs(argv)
     for cmds_dir in _cmds_dirs(argv):
         _discover_dir(cmds_dir, by_name)
 
