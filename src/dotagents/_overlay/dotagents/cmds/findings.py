@@ -62,6 +62,7 @@ from typing import Optional
 
 from duho import Cli, LoggingArgs
 
+from dotagents._fs import write_text_lf
 from dotagents.cli import DotAgentsArgs, _write_stdout
 
 FINDINGS_DIRNAME = "findings"
@@ -97,13 +98,6 @@ def _read(path: Path) -> str:
     """UTF-8, with a leading BOM dropped (PowerShell 5's `-Encoding UTF8`
     writes one, and it would hide the frontmatter)."""
     return path.read_text(encoding="utf-8-sig")
-
-
-def _write(path: Path, text: str) -> None:
-    """LF-only, whatever the platform (files are LF-only, every repo)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(text)
 
 
 def _read_stdin() -> str:
@@ -193,7 +187,7 @@ class Finding:
         return "\n".join(lines) + "\n\n" + (body + "\n" if body else "")
 
     def save(self) -> None:
-        _write(self.path, self.render())
+        write_text_lf(self.path, self.render())
 
     # -- accessors -----------------------------------------------------------
 
@@ -412,7 +406,8 @@ class FindingsStore:
         return "\n".join(lines) + "\n"
 
     def write_index(self) -> Path:
-        _write(self.index_path, self.render_index())
+        # Atomic: an agent may be reading the index while a change rewrites it.
+        write_text_lf(self.index_path, self.render_index(), atomic=True)
         return self.index_path
 
 
