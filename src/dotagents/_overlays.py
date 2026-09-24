@@ -48,10 +48,11 @@ DEFAULT_PRIORITY = 500
 # --------------------------------------------------------------------------- #
 # Manifest text parsing (pure functions over TOML source; no overlay needed).
 #
-# `tomllib` (3.11+) or `tomli` reads the manifest whenever one is importable;
-# the small hand reader below is the fallback for a 3.9/3.10 interpreter with
-# neither, and covers what a manifest uses: top-level strings, arrays of
-# strings and an integer, with TOML's escapes.
+# `tomllib` (3.11+) or `tomli` reads the manifest. `tomli` is a declared
+# dependency below 3.11 and is vendored in the .pyz, so the small hand reader
+# below only runs in an install that skipped its dependencies; it covers what
+# a manifest uses: top-level strings, arrays of strings and an integer, with
+# TOML's escapes.
 # --------------------------------------------------------------------------- #
 
 

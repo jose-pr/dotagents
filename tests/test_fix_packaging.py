@@ -103,6 +103,11 @@ def test_pip_resolves_pure_python_wheels_for_the_python_floor(built):
     assert argv[argv.index("--python-version") + 1] == floor
 
 
+def test_tomli_is_vendored_at_its_pin(built):
+    _, argv = built
+    assert "tomli==%s" % BuildPyz.tomli_version in argv
+
+
 def test_extras_help_says_sftp_cannot_be_vendored():
     source = (SRC / "dotagents" / "cli" / "build_pyz.py").read_text(encoding="utf-8")
     help_text = source[source.index("extras: str"):source.index('("--extras",)')]
@@ -152,3 +157,17 @@ def test_build_pyz_no_longer_stamps_a_version():
     source = (SRC / "dotagents" / "cli" / "build_pyz.py").read_text(encoding="utf-8")
     assert "_PYPROJECT_VERSION_RE" not in source
     assert "__version__ =" not in source
+
+
+# --------------------------------------------------------------------------
+# TOML / YAML readers' dependencies
+# --------------------------------------------------------------------------
+
+
+def test_tomli_is_a_dependency_below_python_311():
+    deps = _pyproject()["project"]["dependencies"]
+    tomli = [d for d in deps if re.match(r"tomli\b", d)]
+    assert len(tomli) == 1, deps
+    spec, _, marker = tomli[0].partition(";")
+    assert re.fullmatch(r"tomli>=[\d.]+", spec.strip())
+    assert marker.strip() == 'python_version < "3.11"'

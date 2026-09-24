@@ -55,7 +55,7 @@ def _dist_info_name_version(dist_info: Path) -> "dict[str, str]":
 
 
 class BuildPyz(LoggingArgs, Cmd):
-    """Vendor duho/pathlib_next via pip --target and package a self-contained dotagents.pyz."""
+    """Vendor the runtime dependencies and package a self-contained dotagents.pyz."""
 
     _parsername_ = "build-pyz"
 
@@ -67,7 +67,7 @@ class BuildPyz(LoggingArgs, Cmd):
     "Shebang line to embed in the pyz."
     ("--python",)
 
-    # These two are a SECOND copy of the dependency versions declared in
+    # These pins are a SECOND copy of the dependency versions declared in
     # `pyproject.toml`'s `[project] dependencies`, and the two must move
     # together: the zipapp bundles what the package claims to support, so a
     # stale pin here ships an artifact `pip install dotagents-cli` would refuse.
@@ -80,6 +80,12 @@ class BuildPyz(LoggingArgs, Cmd):
     pathlib_next_version: str = "0.9.0"
     "Pinned pathlib_next version to vendor."
     ("--pathlib-next-version",)
+
+    # Declared only for Python < 3.11, but always vendored: the .pyz runs on
+    # whatever interpreter launches it, and on 3.11+ `tomllib` wins anyway.
+    tomli_version: str = "1.1.0"
+    "Pinned tomli version to vendor (the TOML reader below Python 3.11)."
+    ("--tomli-version",)
 
     extras: str = ""
     (
@@ -115,10 +121,11 @@ class BuildPyz(LoggingArgs, Cmd):
             extras = ",".join(e.strip() for e in self.extras.split(",") if e.strip())
             extras_spec = "[%s]" % extras if extras else ""
             self._logger_.info(
-                "vendoring duho==%s pathlib_next%s==%s via pip --target",
+                "vendoring duho==%s pathlib_next%s==%s tomli==%s via pip --target",
                 self.duho_version,
                 extras_spec,
                 self.pathlib_next_version,
+                self.tomli_version,
             )
             rc = subprocess.call(
                 [
@@ -139,6 +146,7 @@ class BuildPyz(LoggingArgs, Cmd):
                     _VENDOR_PYTHON,
                     "duho==%s" % self.duho_version,
                     "pathlib_next%s==%s" % (extras_spec, self.pathlib_next_version),
+                    "tomli==%s" % self.tomli_version,
                 ]
             )
             if rc != 0:
