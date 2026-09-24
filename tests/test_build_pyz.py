@@ -58,9 +58,12 @@ def test_matches_real_pyproject_version_line():
     assert match.group(1) == "0.3.2"
 
 
-def test_ignores_a_version_looking_value_elsewhere():
-    # Only the top-level `version = "..."` under [project] should match, not
-    # some other quoted string that happens to contain the word "version".
+def test_ignores_the_word_version_inside_another_value():
+    # A quoted value that merely contains the word "version" is not a match:
+    # the pattern wants a line that STARTS with `version =`. It is not
+    # table-aware -- the first such line in the file wins, whatever table it
+    # sits in -- which holds for this repo's pyproject, where `[project]`'s
+    # comes first.
     text = 'description = "the version field below is what matters"\nversion = "1.2.3"\n'
     match = _PYPROJECT_VERSION_RE.search(text)
     assert match is not None
