@@ -55,8 +55,6 @@ _MALFORMED = {
 }
 
 
-@_open("env-04", "only OSError and JSON errors are caught; these crash the whole assembly")
-# The undecodable case dies in subprocess's reader thread today.
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 @pytest.mark.parametrize("shape", sorted(_MALFORMED))
 def test_a_malformed_env_py_does_not_abort_the_assembly(roots, shape):

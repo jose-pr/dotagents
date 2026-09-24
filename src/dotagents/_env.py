@@ -527,8 +527,9 @@ def get_env_from_py(
     The child runs with ``PYTHONIOENCODING=utf-8`` and its stdout is decoded as
     UTF-8 with ``surrogateescape``, so no byte it prints can fail the read. A
     key that cannot be an environment variable (empty, or containing ``=`` or
-    NUL) and a value containing NUL are dropped with a warning naming the key:
-    applied, they would crash the next spawn instead.
+    NUL, or bytes that are not UTF-8) and a value containing NUL or bytes that
+    are not UTF-8 are dropped with a warning naming the key (escaped): applied,
+    they would crash the next spawn instead.
 
     A value must be a JSON string; ``null`` unsets the variable (it lands in
     the result's :attr:`EnvChanges.removed`); any other type is skipped with
@@ -563,7 +564,7 @@ def get_env_from_py(
         return EnvChanges()
     out = EnvChanges()
     for key, value in parsed.items():
-        if not _is_valid_env_key(key):
+        if not _is_valid_env_key(key) or not _is_utf8(key):
             if logger:
                 logger.warning("env.py %s: skipped a key that is not a valid variable name", env_py)
             continue
@@ -582,9 +583,23 @@ def get_env_from_py(
             if logger:
                 logger.warning("env.py %s: skipped %s (value contains NUL)", env_py, key)
             continue
+        if not _is_utf8(value):
+            if logger:
+                logger.warning("env.py %s: skipped %s (value is not UTF-8)", env_py, key)
+            continue
         out.removed.discard(key)
         out[key] = value
     return out
+
+
+def _is_utf8(text: str) -> bool:
+    """False for a str holding ``surrogateescape``-decoded bytes that were not
+    UTF-8: such a str cannot be encoded back for a child's environment."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _is_valid_env_key(key: object) -> bool:

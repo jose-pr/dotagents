@@ -100,11 +100,6 @@ def test_failed_source_contributes_nothing(roots, caplog, bash_on_path):
     assert any("source failed" in r.getMessage() for r in caplog.records)
 
 
-@pytest.mark.xfail(
-    os.name == "nt", strict=True,
-    reason="open (review 2026-09-23 env-01): MSYS bash rewrites HOME/TEMP/PATH/... "
-           "on start, and the rewritten values come back as the file's changes",
-)
 def test_bash_own_vars_are_not_reported(tmp_path, bash_on_path):
     """Git Bash from a minimal env adds PWD (as `/c/...`), SHLVL, MSYSTEM, and
     MSYS rewrites path-like values on the way through; emitted into a
