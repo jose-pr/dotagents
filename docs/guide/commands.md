@@ -177,6 +177,9 @@ dotagents overlays show python             # describe one: manifest, requires, s
   replacing a skill already in the shared `skills/` dir (and links them into
   Claude's skills dir when `init` wired Claude for the store). A fresh install whose setup
   script fails is rolled back.
+- `add`, `remove` and `show` without an overlay name are usage errors (exit 2), and
+  a `--dry-run` says what it would write (`would recompose ...`) instead of reporting
+  it as done.
 - **`sync`** refreshes each installed overlay from the repo it was installed from
   (recorded in `<overlay>/.dotagents-install.json`); `--repo` replaces that recorded
   source for the run. New files land and `overlay.toml` is refreshed; a file that

@@ -217,6 +217,13 @@ def _recompose(scope, logger, *, dry_run: bool, extra: "Optional[list[Path]]" = 
                     "would recompose" if dry_run else "recomposed")
 
 
+def _usage_error(message: str) -> int:
+    """A command-line mistake: the message on stderr and exit code 2, as
+    argparse reports its own."""
+    sys.stderr.write("error: %s\n" % message)
+    return 2
+
+
 def _log_install(logger, verb: str, name: str, result, dry_run: bool) -> None:
     """One summary line per overlay, and a warning naming every file left
     alone although it differs from the source."""
@@ -405,8 +412,7 @@ class OverlayAdd(_RepoArgs):
         from dotagents import _scope
 
         if not self.name:
-            self._logger_.warning("no overlay name given; nothing to add")
-            return 0
+            return _usage_error("overlays add needs at least one overlay name")
         names = _validated_names(self.name, "add")
 
         scope = self.resolve_scope()
@@ -479,8 +485,7 @@ class OverlayRemove(DotAgentsArgs):
         from dotagents import _overlays, _skills
 
         if not self.name:
-            self._logger_.warning("no overlay name given; nothing to remove")
-            return 0
+            return _usage_error("overlays remove needs at least one overlay name")
         names = _validated_names(self.name, "remove")
         scope = self.resolve_scope()
         self._logger_.info("scope: %s (%s)", scope.level, scope.agents_root)
@@ -680,9 +685,9 @@ class OverlayShow(_RepoArgs):
         from dotagents import _overlays, _scope
         from dotagents._sources import record_display
 
-        (name,) = _validated_names([self.name], "show") if self.name else (None,)
-        if not name:
-            raise SystemExit("error: overlays show needs an overlay name")
+        if not self.name:
+            return _usage_error("overlays show needs an overlay name")
+        (name,) = _validated_names([self.name], "show")
         scope = self.resolve_scope()
         # The copy a session in this scope would use (the most specific store's),
         # else the source's.

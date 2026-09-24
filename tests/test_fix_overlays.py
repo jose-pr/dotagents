@@ -822,3 +822,20 @@ def test_a_dry_run_into_a_store_without_agents_md_says_it_would_create_it(world,
     assert any(m.startswith("would create") and "AGENTS.md" in m for m in messages), messages
     assert not any(m.startswith("created") for m in messages), messages
     assert not (store / "AGENTS.md").exists()
+
+
+@pytest.mark.parametrize("command", ["add", "remove", "show"])
+def test_a_missing_overlay_name_is_a_usage_error(world, command, capsys):
+    from dotagents import cli
+
+    src, store = world
+    argv = ["overlays", command, "-g", "--agents-dir", str(store)]
+    if command != "remove":
+        argv += ["--repo", str(src)]
+    try:
+        rc = cli.main(argv)
+    except SystemExit as exc:
+        rc = exc.code
+    assert rc == 2
+    assert "overlay name" in capsys.readouterr().err
+    assert not (store / "overlays").exists()
