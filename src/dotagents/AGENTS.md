@@ -304,18 +304,20 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   environment through `Invoke-Expression`. Every literal `\` in the
   command constant must be a raw string — a bare `\b` in a normal Python string
   literal silently becomes a backspace character, corrupting the emitted path.
-- **`CodexAgent._deploy_pretooluse_script`** covers the same env gap for Codex,
-  which has NO env-persistence mechanism at any hook event (not Bash-only like
-  Claude — none). Ships `pretooluse_codex_env.py` (`_overlay/dotagents/hooks/`),
-  deployed to `<codex-home>/hooks/` (create-or-refresh), wired as `PreToolUse`
-  with `matcher: "Bash"` — Codex's one shell tool, so (unlike Claude's
-  no-matcher hook) filtering happens at the settings level, no runtime
-  `tool_name` check needed in the script. A FILE, not inlined like Claude's:
-  Codex's docs show every hook example as `python3 <path>`, and a `.py` file
-  has no execution-policy/signing concern (PowerShell-specific). Sets
-  `commandWindows` to `python "<path>"` (not `python3`): on Windows `python3`
-  can resolve to the Microsoft Store app-execution-alias stub and fail
-  outright (exit 49).
+- **Codex's two hooks are scripts** deployed to `<codex-home>/hooks/`
+  (create-or-refresh, `CodexAgent._deploy_script`) and run as
+  `"<sys.executable>" "<script>"` in both `command` and `commandWindows`
+  (`CodexAgent.hook_commands`) — no shell syntax, no bare `python`/`python3`.
+  `sessionstart_codex_context.py` finds `dotagents` (project `.agents/bin`,
+  store `bin`, PATH) and prints `context --agents codex`; a shell line there
+  ran as cmd.exe's PATH builtin on native Windows. `pretooluse_codex_env.py`,
+  wired as `PreToolUse` with `matcher: "Bash"`, covers the env gap (Codex has
+  NO env-persistence mechanism at any hook event) by prepending a POSIX env
+  loader through `updatedInput` + `permissionDecision: "allow"` (Codex applies
+  `updatedInput` only with `allow`; approval is its separate PermissionRequest
+  event). On a Windows shell it passes commands through unchanged (Codex runs
+  PowerShell there, which cannot parse the prefix); `DOTAGENTS_HOOK_SHELL=
+  posix|windows` overrides the platform check.
 
 ## Environment variables
 

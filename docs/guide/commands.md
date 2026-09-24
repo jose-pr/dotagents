@@ -82,9 +82,11 @@ overlay skills change.
 
 Codex ships a [hooks framework](https://learn.chatgpt.com/docs/hooks) whose JSON is
 structurally identical to Claude's, so the same merge applies. `init` writes a
-`SessionStart` hook running `dotagents context --agents codex` into `~/.codex/hooks.json` (or
-`$CODEX_HOME/hooks.json`) — Codex adds a SessionStart hook's plain stdout as extra
-developer context.
+`SessionStart` hook into `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`) that runs
+`dotagents context --agents codex` — Codex adds a SessionStart hook's plain stdout as
+extra developer context. Both Codex hooks are small Python scripts in
+`<codex-home>/hooks/`, run by the interpreter `init` ran with, so they work under any
+shell, including native Windows.
 
 We target `hooks.json` rather than `config.toml` so your main config is never rewritten
 for hooks — if you keep inline `[hooks]` in `config.toml`, Codex warns about the split,
@@ -94,7 +96,8 @@ so use `--no-hooks` and add the hook there yourself.
 and does not read `.env` files, so `init` also wires a `PreToolUse` hook (matched on
 Codex's `Bash` tool) that prepends the `dotagents env` change set to each command
 through `updatedInput`. The env is live: change your env layers and the next command
-sees it.
+sees it. On native Windows Codex runs commands through PowerShell, so the hook leaves
+them unchanged there: Windows Codex sessions get the context but not the env.
 
 Earlier releases wrote a static `[shell_environment_policy]` snapshot into your
 `config.toml` on `init --agents codex`. It pinned one project's paths into the

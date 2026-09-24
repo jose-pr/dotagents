@@ -38,7 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `dotagents/findings/` (the queue moved to `findings/` in 0.4.0), move it;
   until then every `findings` subcommand reads it with `--dir` (`dotagents
   findings list --dir <store>/dotagents/findings`).
-
 - A project's root no longer contributes env files: a checkout's top-level
   `local.env` / `pre.local.env` were bash-sourced at every session start, so a
   repository that committed one ran its commands in your session. Move your
@@ -92,8 +91,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   session's `PATH` by `dotagents env`, where it resolved against whatever
   directory a later command ran in. Re-run `dotagents init` to update the hooks.
 - Codex's SessionStart hook runs `dotagents context --agents codex`; without the
-  flag it assembled Claude's context and gave Codex nothing. Re-run `dotagents
-  init --agents codex` to update the hook.
+  flag it assembled Claude's context and gave Codex nothing. It is now a small
+  Python script, like the PreToolUse one: on native Windows the shell line ran
+  as cmd.exe's `PATH` builtin and did nothing. Both Codex hooks run under the
+  interpreter `init` ran with, not a bare `python3` / `python`.
+- Codex's PreToolUse env loader no longer breaks every shell command on native
+  Windows: Codex runs PowerShell there, which cannot parse its POSIX prefix, so
+  the hook now passes commands through unchanged (Windows Codex sessions get the
+  context, not the live env). Re-run `dotagents init --agents codex` to update
+  the hooks.
 - `tools/cloud-setup.sh` installs `dotagents-cli` by default; the `dotagents`
   name it used is not this project on PyPI.
 - `overlays add` / `sync` never delete a skill you placed or edited in the
