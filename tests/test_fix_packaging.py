@@ -171,3 +171,17 @@ def test_tomli_is_a_dependency_below_python_311():
     spec, _, marker = tomli[0].partition(";")
     assert re.fullmatch(r"tomli>=[\d.]+", spec.strip())
     assert marker.strip() == 'python_version < "3.11"'
+
+
+def test_yaml_extra_declares_pyyaml():
+    extras = _pyproject()["project"]["optional-dependencies"]
+    assert extras["yaml"] == ["pyyaml"]
+    assert any(d.lower().startswith("pyyaml") for d in extras["dev"])
+
+
+def test_yaml_registry_without_pyyaml_names_the_extra(monkeypatch):
+    monkeypatch.setitem(sys.modules, "yaml", None)  # `import yaml` -> ImportError
+    with pytest.raises(SourceError) as exc:
+        parse_document("a: /srv/a\n", ".yaml", "reg.yaml")
+    assert "dotagents-cli[yaml]" in str(exc.value)
+    assert "reg.yaml" in str(exc.value)

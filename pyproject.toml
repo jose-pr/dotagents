@@ -46,6 +46,8 @@ uri = ["pathlib_next[uri]"]
 http = ["pathlib_next[http]"]
 sftp = ["pathlib_next[sftp]"]
 s3 = ["pathlib_next[s3]"]
+# YAML overlay-repo registries (dotagents.yaml / *.yml).
+yaml = ["pyyaml"]
 dev = ["build", "hatchling>=1.27", "pytest", "pyyaml", "pathlib_next[http]"]
 docs = [
     "mkdocs>=1.5",

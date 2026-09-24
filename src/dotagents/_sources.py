@@ -430,7 +430,10 @@ def parse_document(text: str, suffix: str, origin: str) -> "dict[str, str]":
         try:
             import yaml  # type: ignore[import-untyped]
         except ImportError:
-            raise SourceError("error: registry %s is YAML, which needs `pip install pyyaml`" % origin)
+            raise SourceError(
+                "error: registry %s is YAML, which needs PyYAML "
+                "(`pip install 'dotagents-cli[yaml]'`)" % origin
+            )
         loads, what, errors = yaml.safe_load, "YAML", (ValueError, yaml.YAMLError)
     else:
         raise SourceError(
