@@ -16,7 +16,7 @@ A hook does what it wants with the session (log in, set a header in
 let the request proceed; anything else it returns is used AS the response
 (a cached or synthetic one). ``kwargs`` is the request's keyword arguments,
 mutable in place. ``<module:callable>`` is importable from ``PYTHONPATH``
-(an overlay's ``lib/`` is once ``$AGENTS_PYTHONPATH`` is put there) or a
+(every overlay's ``lib/`` is, in a ``dotagents env`` session) or a
 ``<path>.py:callable`` file.
 
 The curl wrapper is a shell-quoted command line -- a program and its own
