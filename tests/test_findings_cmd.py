@@ -287,3 +287,73 @@ def test_subcommands_are_nested_not_module_level(findings_mod):
     assert module_level == ["Findings"]
     names = [c._parsername_ for c in findings_mod.Findings._subcommands_]
     assert names == ["add", "list", "show", "done", "reopen", "remove", "index", "path"]
+
+
+# --------------------------------------------------------------------------- #
+# Encodings and reserved names (review 2026-09-23). Cases the module still
+# gets wrong are strict xfails naming the issue: a fix flips them to XPASS
+# failures until the marker goes.
+# --------------------------------------------------------------------------- #
+
+def _open(issue, why):
+    return pytest.mark.xfail(strict=True, reason="open (review 2026-09-23 %s): %s" % (issue, why))
+
+
+@_open("cli-04", "stdin is decoded with the locale code page, not as UTF-8")
+def test_cmd_body_from_stdin_is_read_as_utf8_bytes(findings_mod, tmp_path, monkeypatch, capsys):
+    """What a pipe really delivers: bytes, behind a text layer that decodes
+    with the console code page (cp1252 on a default Windows shell)."""
+    import io
+
+    F = findings_mod.Findings
+    d = tmp_path / "q"
+    text = "arrow → and café\n"
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(text.encode("utf-8")), encoding="cp1252"))
+    _run(F.Add, description="Piped", name="piped", body_file=Path("-"), dir=d)
+    capsys.readouterr()
+    assert text.strip() in (d / "piped.md").read_text(encoding="utf-8")
+
+
+@_open("cli-03", "files are read as strict UTF-8; one non-UTF-8 note breaks every subcommand")
+def test_a_non_utf8_note_does_not_break_the_queue(findings_mod, tmp_path):
+    root = tmp_path / "findings"
+    root.mkdir()
+    (root / "handnote.md").write_bytes(b"caf\xe9 note\n")
+    store = findings_mod.FindingsStore(root)
+    store.add("Second finding", name="second")
+    assert "second" in [f.name for f in store.active()]
+
+
+@_open("cli-03", "a UTF-8 BOM hides the frontmatter")
+def test_a_bom_note_keeps_its_frontmatter(findings_mod, tmp_path):
+    root = tmp_path / "findings"
+    root.mkdir()
+    (root / "bom.md").write_bytes(
+        b"\xef\xbb\xbf---\nname: bom\ndescription: written by PowerShell 5\n---\nbody\n"
+    )
+    store = findings_mod.FindingsStore(root)
+    assert [(f.name, f.description) for f in store.active()] == [("bom", "written by PowerShell 5")]
+
+
+def _case_insensitive_tmp():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "probe").write_text("", encoding="utf-8")
+        return (Path(d) / "PROBE").exists()
+
+
+@pytest.mark.xfail(
+    _case_insensitive_tmp(), strict=True,
+    reason="open (review 2026-09-23 cli-05): INDEX.md is excluded case-sensitively",
+)
+def test_a_finding_named_like_the_index_survives_it(findings_mod, tmp_path):
+    """`add Index` wrote `index.md`, which `write_index()` then overwrote on a
+    case-insensitive filesystem (NTFS, APFS) -- the finding's body lost, rc 0.
+    A case-sensitive filesystem keeps both files, so it passes there."""
+    root = tmp_path / "findings"
+    store = findings_mod.FindingsStore(root)
+    store.add("Index", name="index", body="important details that must survive")
+    store.write_index()
+    assert [f.name for f in store.active()] == ["index"]
+    assert "important details that must survive" in store.get("index").path.read_text(encoding="utf-8")
