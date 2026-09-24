@@ -8,30 +8,18 @@ Git tests build real repositories in tmp_path with the `git` on PATH; they skip
 when there is none. No network.
 """
 import json
-import logging
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from dotagents import _scope, _sources  # noqa: E402
-from dotagents._sources import CompositeSource, DirRepo, SourceCache, RegistryRepo, Spec, parse_spec  # noqa: E402
+from dotagents import _scope, _sources
+from dotagents._sources import CompositeSource, DirRepo, SourceCache, RegistryRepo, Spec, parse_spec
 
 GIT = shutil.which("git")
 needs_git = pytest.mark.skipif(GIT is None, reason="needs git on PATH")
-
-
-@pytest.fixture(autouse=True)
-def _no_ambient_repos(monkeypatch):
-    for k in list(os.environ):
-        if k.startswith(_sources.REPO_ENV_PREFIX):
-            monkeypatch.delenv(k)
-    monkeypatch.delenv(_sources.REPO_ENV_DEFAULT, raising=False)
 
 
 # --------------------------------------------------------------------------
@@ -83,33 +71,54 @@ def _write(path: Path, text: str):
     path.write_text(text, encoding="utf-8")
 
 
-@pytest.fixture()
-def repo(tmp_path):
-    """A git repo where the ROOT is one overlay (`whole`) and `overlays/inner`
-    is another; `main` and a `v1` tag differ from a `dev` branch."""
+@pytest.fixture(scope="module")
+def _repo_template(tmp_path_factory):
+    """Built once per module (about a dozen git calls): a git repo where the
+    ROOT is one overlay (`whole`) and `overlays/inner` is another; `main` and a
+    `v1` tag differ from a `dev` branch, plus a bare clone of it.
+
+    Module scope runs before the per-test isolation in conftest, so HOME is
+    pointed at a tmp dir here too: no global git config (signing, hooks,
+    templates) of the developer's may shape the fixture."""
     if GIT is None:
         pytest.skip("needs git on PATH")
-    work = tmp_path / "work"
-    work.mkdir()
-    _git("init", "-q", "-b", "main", cwd=work)
-    _git("config", "user.email", "t@example.invalid", cwd=work)
-    _git("config", "user.name", "t", cwd=work)
-    _write(work / "overlay.toml", 'name = "whole"\nrequires = []\nrouting = []\n')
-    _write(work / "kb" / "WHOLE.md", "main\n")
-    _write(work / "overlays" / "inner" / "overlay.toml", 'name = "inner"\nrequires = []\nrouting = []\n')
-    _write(work / "overlays" / "inner" / "kb" / "INNER.md", "main\n")
-    _git("add", "-A", cwd=work)
-    _git("commit", "-q", "-m", "main", cwd=work)
-    _git("tag", "v1", cwd=work)
-    main_sha = subprocess.run([GIT, "rev-parse", "HEAD"], cwd=str(work), capture_output=True, text=True, check=True).stdout.strip()
-    _git("checkout", "-q", "-b", "dev", cwd=work)
-    _write(work / "kb" / "WHOLE.md", "dev\n")
-    _write(work / "overlays" / "inner" / "kb" / "INNER.md", "dev\n")
-    _git("commit", "-q", "-am", "dev", cwd=work)
-    _git("checkout", "-q", "main", cwd=work)
-    bare = tmp_path / "remote.git"
-    _git("clone", "-q", "--bare", str(work), str(bare), cwd=tmp_path)
-    return {"url": str(bare), "work": work, "main": main_sha, "bare": bare}
+    base = tmp_path_factory.mktemp("git-template")
+    with pytest.MonkeyPatch.context() as mp:
+        (base / "home").mkdir()
+        mp.setenv("HOME", str(base / "home"))
+        mp.setenv("USERPROFILE", str(base / "home"))
+        work = base / "work"
+        work.mkdir()
+        _git("init", "-q", "-b", "main", cwd=work)
+        _git("config", "user.email", "t@example.invalid", cwd=work)
+        _git("config", "user.name", "t", cwd=work)
+        _write(work / "overlay.toml", 'name = "whole"\nrequires = []\nrouting = []\n')
+        _write(work / "kb" / "WHOLE.md", "main\n")
+        _write(work / "overlays" / "inner" / "overlay.toml", 'name = "inner"\nrequires = []\nrouting = []\n')
+        _write(work / "overlays" / "inner" / "kb" / "INNER.md", "main\n")
+        _git("add", "-A", cwd=work)
+        _git("commit", "-q", "-m", "main", cwd=work)
+        _git("tag", "v1", cwd=work)
+        main_sha = subprocess.run([GIT, "rev-parse", "HEAD"], cwd=str(work), capture_output=True, text=True, check=True).stdout.strip()
+        _git("checkout", "-q", "-b", "dev", cwd=work)
+        _write(work / "kb" / "WHOLE.md", "dev\n")
+        _write(work / "overlays" / "inner" / "kb" / "INNER.md", "dev\n")
+        _git("commit", "-q", "-am", "dev", cwd=work)
+        _git("checkout", "-q", "main", cwd=work)
+        bare = base / "remote.git"
+        _git("clone", "-q", "--bare", str(work), str(bare), cwd=base)
+    return {"work": work, "main": main_sha, "bare": bare}
+
+
+@pytest.fixture()
+def repo(_repo_template, tmp_path):
+    """A private copy of the template per test: several tests commit to the
+    work tree and push to the bare repo. The work tree has no remote (pushes
+    name the bare repo's path), so the copy needs no URL fix-up."""
+    work, bare = tmp_path / "work", tmp_path / "remote.git"
+    shutil.copytree(str(_repo_template["work"]), str(work))
+    shutil.copytree(str(_repo_template["bare"]), str(bare))
+    return {"url": str(bare), "work": work, "main": _repo_template["main"], "bare": bare}
 
 
 @needs_git
