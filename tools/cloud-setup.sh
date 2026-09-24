@@ -21,7 +21,11 @@
 # dotagents commands), (5) links the current project's .agents into the repo,
 # (6) wires the private-sync hooks into ~/.claude/settings.json so per-session
 # pull/sync-back actually runs.
-# Safe to run at every container start; never fails hard.
+# Safe to run at every container start; never fails hard. It never deletes a
+# store: a pre-existing ~/.agents that is not a git checkout is moved aside
+# (to ~/.agents.pre-clone.<time>) before the first clone. The token is offered
+# only to AGENTS_REMOTE, only by this script's own git calls; ~/.gitconfig is
+# never changed.
 #
 # Self-heal: the container-start clone often loses a race with egress/proxy
 # readiness. Two defenses so a single early failure can't permanently disable the
@@ -41,38 +45,44 @@
 #   AGENTS_HOME              where the repo lives (default: $HOME/.agents)
 #   DOTAGENTS_AGENTS_TOKEN   fine-grained PAT, Contents: read/write, scoped to it (SECRET)
 #   DOTAGENTS_CLI_INSTALL    pip spec for the CLI if not already installed
-#                            (default: "dotagents"; e.g. a git URL if unpublished)
+#                            (default: "dotagents-cli"; e.g. a git URL for an
+#                            unreleased build)
 #   CLAUDE_PROJECT_DIR       project to link (default: current directory)
 #   AGENTS_OVERLAYS_REPO     an overlay repo (a directory of overlays, a registry
 #                            file, or a git <repo>[@ref][#path]); set it to skip
-#                            the overlays-branch fetch in step 4 entirely
+#                            the `repo` branch fetch in step 4 entirely
 #   DOTAGENTS_OVERLAYS_REMOTE / DOTAGENTS_OVERLAYS_REF
 #                            where to fetch the private-sync overlay from
-#                            (default: this repo, branch `overlays`)
+#                            (default: this repo, branch `repo`)
 
 AGENTS_DIR="${AGENTS_HOME:-$HOME/.agents}"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+AGENTS_REMOTE="${AGENTS_REMOTE:-}"
+# One interpreter for every Python step below.
+_DG_PY=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
 
 # Banner so the environment's setup-script log unambiguously shows this ran (a
 # blank log means the setup-script field never invoked it -- a config issue, not
 # a script one).
 echo "dotagents cloud-setup: starting (repo -> $AGENTS_DIR, project -> $PROJECT_DIR)"
 
-# Some setup-script contexts start before HOME exists; git config --global
-# (used below) can't write ~/.gitconfig without it.
+# Some setup-script contexts start before HOME exists; the store, the recovery
+# copy and ~/.claude/settings.json all live under it.
 [ -n "${HOME:-}" ] && [ ! -d "$HOME" ] && mkdir -p "$HOME" 2>/dev/null
 
-# --- 1. Token auth + github.com -> proxy rewrite bypass (applied per git call
-#        below via dg_git, never exported into the session environment). --------
+# --- 1. Token auth + github.com -> proxy rewrite bypass. Applied per git call
+#        below via dg_git: never written to ~/.gitconfig, never exported into the
+#        session environment, and scoped to AGENTS_REMOTE, so no other github.com
+#        repository is ever offered this PAT. ------------------------------------
 _DG_CFG=""
-if [ -n "${DOTAGENTS_AGENTS_TOKEN:-}" ]; then
-    _helper='!f() { printf "username=x-access-token\npassword=%s\n" "$DOTAGENTS_AGENTS_TOKEN"; }; f'
+_DG_HELPER=""
+if [ -n "${DOTAGENTS_AGENTS_TOKEN:-}" ] && [ -n "$AGENTS_REMOTE" ]; then
+    _DG_HELPER='!f() { printf "username=x-access-token\npassword=%s\n" "$DOTAGENTS_AGENTS_TOKEN"; }; f'
     _rewrite=$(git config --get-regexp '^url\..*\.insteadof$' 2>/dev/null \
         | awk 'tolower($2) ~ /^https:\/\/github\.com/ {print; exit}')
     if [ -n "$_rewrite" ]; then
         _DG_CFG=$(mktemp)
-        git config --file "$_DG_CFG" credential."https://github.com".helper "$_helper"
-        git config --file "$_DG_CFG" credential."https://github.com".useHttpPath false
+        git config --file "$_DG_CFG" credential."$AGENTS_REMOTE".helper "$_DG_HELPER"
         git config --file "$_DG_CFG" init.defaultBranch main
         _n=$(git config user.name 2>/dev/null || true);  [ -n "$_n" ] || _n="dotagents"
         _e=$(git config user.email 2>/dev/null || true); [ -n "$_e" ] || _e="dotagents@localhost"
@@ -83,16 +93,19 @@ if [ -n "${DOTAGENTS_AGENTS_TOKEN:-}" ]; then
             [ -n "$_ca" ] && [ -f "$_ca" ] && { git config --file "$_DG_CFG" http.sslCAInfo "$_ca"; break; }
         done
         echo "dotagents: bypassing github.com->proxy rewrite for token auth"
-    else
-        git config --global credential."https://github.com".helper "$_helper"
-        git config --global credential."https://github.com".useHttpPath false
     fi
 fi
 
-# git with the isolated config when a bypass was built; else plain git.
+# git with the isolated config when a bypass was built; else git with the token
+# helper passed on the command line for AGENTS_REMOTE only. The empty value
+# first clears any helper configured elsewhere for that URL, so the store's PAT
+# is the credential git presents for it.
 dg_git() {
     if [ -n "$_DG_CFG" ]; then
         GIT_CONFIG_GLOBAL="$_DG_CFG" GIT_CONFIG_SYSTEM=/dev/null git "$@"
+    elif [ -n "$_DG_HELPER" ]; then
+        git -c "credential.$AGENTS_REMOTE.helper=" \
+            -c "credential.$AGENTS_REMOTE.helper=$_DG_HELPER" "$@"
     else
         git "$@"
     fi
@@ -110,20 +123,27 @@ _DG_RECOVERY_CMD='sh "$HOME/.dotagents/cloud-setup.sh"'
 # Edit ~/.claude/settings.json: optionally merge a private-sync snippet, and add or
 # remove the recovery SessionStart hook. Idempotent; preserves unrelated settings.
 #   _dg_settings <recovery: present|absent> [snippet_path]
+# A settings.json that does not parse is left untouched (the helper fails);
+# writes go through a temp file and os.replace, into a symlink's target.
 _dg_settings() {
     _dg_state="$1"; _dg_snip="${2:-}"
-    _dg_py=$(command -v python || command -v python3)
-    [ -n "$_dg_py" ] || return 1
-    DG_RECOVERY_CMD="$_DG_RECOVERY_CMD" "$_dg_py" - \
+    [ -n "$_DG_PY" ] || return 1
+    DG_RECOVERY_CMD="$_DG_RECOVERY_CMD" "$_DG_PY" - \
         "$HOME/.claude/settings.json" "$_dg_state" "$_dg_snip" <<'PYEOF'
-import json, os, sys
+import json, os, sys, tempfile
 dst_path, state, snip_path = sys.argv[1], sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 else "")
 recovery_cmd = os.environ.get("DG_RECOVERY_CMD", "")
 try:
-    with open(dst_path) as f:
+    with open(dst_path, encoding="utf-8-sig") as f:
         settings = json.load(f)
-except (FileNotFoundError, ValueError):
+except FileNotFoundError:
     settings = {}
+except ValueError as exc:
+    sys.stderr.write("dotagents: %s is not valid JSON (%s); left untouched\n" % (dst_path, exc))
+    sys.exit(1)
+if not isinstance(settings, dict) or not isinstance(settings.get("hooks", {}), dict):
+    sys.stderr.write("dotagents: %s has an unexpected shape; left untouched\n" % dst_path)
+    sys.exit(1)
 hooks = settings.setdefault("hooks", {})
 changed = False
 
@@ -154,10 +174,21 @@ elif state == "absent" and has_recovery:
     changed = True
 
 if changed:
-    os.makedirs(os.path.dirname(dst_path) or ".", exist_ok=True)
-    with open(dst_path, "w") as f:
-        json.dump(settings, f, indent=2)
-        f.write("\n")
+    target = os.path.realpath(dst_path)
+    folder = os.path.dirname(target) or "."
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".settings.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(settings, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     print("dotagents: updated %s" % dst_path)
 PYEOF
 }
@@ -177,12 +208,34 @@ _dg_install_recovery_hook() {
         && echo "dotagents: wired a SessionStart recovery hook; retrying the clone next session"
 }
 
+# The store is in place: a recovery hook left by an earlier failed run has done
+# its job.
+_dg_drop_recovery_hook() {
+    [ -n "${HOME:-}" ] || return 0
+    _dg_settings absent \
+        || echo "dotagents: could not remove the recovery hook from ~/.claude/settings.json"
+}
+
 # --- 2. Clone (with retry/backoff) or pull the private repo. ------------------
-AGENTS_REMOTE="${AGENTS_REMOTE:-}"
 if [ -d "$AGENTS_DIR/.git" ]; then
-    dg_git -C "$AGENTS_DIR" pull --rebase --autostash --quiet \
-        || echo "dotagents: pull failed, using local copy"
-elif [ -n "${AGENTS_REMOTE:-}" ]; then
+    if dg_git -C "$AGENTS_DIR" pull --rebase --autostash --quiet; then
+        _dg_drop_recovery_hook
+    else
+        echo "dotagents: pull failed, using local copy"
+    fi
+elif [ -n "$AGENTS_REMOTE" ]; then
+    # Never clone over or delete a store that is not a git checkout: move a
+    # non-empty one aside first. git removes a target it created itself when a
+    # clone fails, so nothing needs cleaning up between attempts.
+    if [ -e "$AGENTS_DIR" ] && [ -n "$(ls -A "$AGENTS_DIR" 2>/dev/null)" ]; then
+        _dg_aside="$AGENTS_DIR.pre-clone.$(date +%s)"
+        if mv "$AGENTS_DIR" "$_dg_aside"; then
+            echo "dotagents: $AGENTS_DIR is not a git checkout; moved it to $_dg_aside"
+        else
+            echo "dotagents: $AGENTS_DIR is not a git checkout and could not be moved aside; not cloning over it"
+            exit 0
+        fi
+    fi
     echo "dotagents: cloning private agents repo into $AGENTS_DIR"
     _dg_tries=0
     until dg_git clone --quiet "$AGENTS_REMOTE" "$AGENTS_DIR"; do
@@ -192,33 +245,46 @@ elif [ -n "${AGENTS_REMOTE:-}" ]; then
             _dg_install_recovery_hook
             exit 0
         fi
-        # A failed clone can leave a partial target that would block a retry.
-        [ -d "$AGENTS_DIR" ] && [ ! -d "$AGENTS_DIR/.git" ] && rm -rf "$AGENTS_DIR"
         _dg_wait=$((_dg_tries * _dg_tries))
         echo "dotagents: clone attempt $_dg_tries failed, retrying in ${_dg_wait}s"
         sleep "$_dg_wait"
     done
+    _dg_drop_recovery_hook
 else
     # No remote at setup time. On a hosted runner this is usually not "never
     # configured" but the secret not being injected into the setup-script phase
     # (it is present in-session) -- so treat it like an exhausted clone: wire the
     # recovery hook and retry next session, when the secret is available. A run
     # that genuinely has no remote just re-skips next session (~100ms, idempotent);
-    # the first session that sees it clones and drops the hook in step 5.
+    # the first session that sees it clones and drops the hook.
     echo "dotagents: AGENTS_REMOTE unset at setup time (secret not injected into the setup phase?)"
     _dg_install_recovery_hook
     exit 0
 fi
 
 # --- 3. Ensure the dotagents CLI is available. --------------------------------
-if ! command -v dotagents >/dev/null 2>&1 && ! python -m dotagents --version >/dev/null 2>&1; then
+# pip's own error output stays visible: a PEP 668 refusal or a bad spec must
+# show in the setup log.
+if ! command -v dotagents >/dev/null 2>&1 \
+    && ! { [ -n "$_DG_PY" ] && "$_DG_PY" -m dotagents --version >/dev/null 2>&1; }; then
     _spec="${DOTAGENTS_CLI_INSTALL:-dotagents-cli}"
-    echo "dotagents: installing the CLI ($_spec)"
-    pip install --quiet "$_spec" 2>/dev/null \
-        || python -m pip install --quiet "$_spec" 2>/dev/null \
-        || echo "dotagents: could not install the CLI; set DOTAGENTS_CLI_INSTALL or install it manually"
+    if [ -z "$_DG_PY" ]; then
+        echo "dotagents: no python3 or python on PATH; cannot install the CLI ($_spec)"
+    else
+        echo "dotagents: installing the CLI ($_spec) with $_DG_PY"
+        "$_DG_PY" -m pip install --quiet "$_spec" \
+            || echo "dotagents: could not install the CLI (see pip's error above); set DOTAGENTS_CLI_INSTALL or install it manually"
+    fi
 fi
-dg_cli() { if command -v dotagents >/dev/null 2>&1; then dotagents "$@"; else python -m dotagents "$@"; fi; }
+dg_cli() {
+    if command -v dotagents >/dev/null 2>&1; then
+        dotagents "$@"
+    elif [ -n "$_DG_PY" ]; then
+        "$_DG_PY" -m dotagents "$@"
+    else
+        return 127
+    fi
+}
 
 # --- 4. Install the private-sync overlay (it SUPPLIES link-project). ----------
 # Ordering matters: `link-project` is not a dotagents command -- the private-sync
@@ -227,7 +293,7 @@ dg_cli() { if command -v dotagents >/dev/null 2>&1; then dotagents "$@"; else py
 # Skipped when already installed (and when the store already provides the command,
 # e.g. a user's own cmds module), so the common path costs nothing.
 #
-# The example overlays live on the dotagents repo's `overlays` BRANCH, not in
+# The example overlays live on the dotagents repo's `repo` BRANCH, not in
 # main's tree -- so fetch that branch shallowly into a temp dir and point --repo
 # at its overlays/ dir. AGENTS_OVERLAYS_REPO (or a pre-populated
 # <store>/overlays/private-sync) short-circuits the fetch entirely, for an
@@ -260,8 +326,7 @@ else
 fi
 
 # --- 5. Link the current project's .agents into the repo. ---------------------
-# `link-project` (renamed from the old bare `link`) comes from the overlay added
-# in step 4. Fail with a CLEAR message if it is missing rather than letting the
+# `link-project` comes from the overlay added in step 4. Fail with a CLEAR message if it is missing rather than letting the
 # CLI's "unknown subcommand" error scroll past -- the cause is always step 4.
 if [ -d "$PROJECT_DIR" ]; then
     if _dg_have_link_project; then
@@ -278,12 +343,9 @@ fi
 # do nothing until registered in the USER-level settings file. A fresh container
 # has no ~/.claude/settings.json, and nothing else creates one -- without this
 # step the clone above would go stale and session changes would never push back.
-# Reaching this point means the clone succeeded, so we also drop any recovery hook
-# a prior failed run left behind. Idempotent; unrelated settings are preserved.
-# The snippet ships inside the installed private-sync overlay; a store laid out
-# before overlays installed as directories may still carry it at hooks/.
+# Idempotent; unrelated settings are preserved. The snippet ships inside the
+# private-sync overlay, which step 4 installs.
 _snippet="$AGENTS_DIR/overlays/private-sync/hooks/settings.snippet.json"
-[ -f "$_snippet" ] || _snippet="$AGENTS_DIR/hooks/settings.snippet.json"
 if [ -f "$_snippet" ]; then
     _dg_settings absent "$_snippet" \
         || echo "dotagents: hook wiring failed; register $_snippet manually"
