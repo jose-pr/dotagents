@@ -332,25 +332,13 @@ def test_a_bom_note_keeps_its_frontmatter(findings_mod, tmp_path):
     assert [(f.name, f.description) for f in store.active()] == [("bom", "written by PowerShell 5")]
 
 
-def _case_insensitive_tmp():
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as d:
-        (Path(d) / "probe").write_text("", encoding="utf-8")
-        return (Path(d) / "PROBE").exists()
-
-
-@pytest.mark.xfail(
-    _case_insensitive_tmp(), strict=True,
-    reason="open (review 2026-09-23 cli-05): INDEX.md is excluded case-sensitively",
-)
-def test_a_finding_named_like_the_index_survives_it(findings_mod, tmp_path):
+def test_a_finding_named_like_the_index_is_refused(findings_mod, tmp_path):
     """`add Index` wrote `index.md`, which `write_index()` then overwrote on a
     case-insensitive filesystem (NTFS, APFS) -- the finding's body lost, rc 0.
-    A case-sensitive filesystem keeps both files, so it passes there."""
+    The name is refused now, on every filesystem, before anything is written."""
     root = tmp_path / "findings"
     store = findings_mod.FindingsStore(root)
-    store.add("Index", name="index", body="important details that must survive")
-    store.write_index()
-    assert [f.name for f in store.active()] == ["index"]
-    assert "important details that must survive" in store.get("index").path.read_text(encoding="utf-8")
+    for title in ("Index", "README"):
+        with pytest.raises(SystemExit, match="reserved"):
+            store.add(title, body="important details")
+    assert not root.exists() or not [p for p in root.iterdir() if p.suffix == ".md"]
