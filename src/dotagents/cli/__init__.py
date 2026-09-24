@@ -285,18 +285,48 @@ def _discover_dir(source, by_name: dict) -> None:
             by_name[name] = command  # later source wins
 
 
+#: Commands whose `--agents-dir` names the USER store with or without `-g`;
+#: elsewhere it names the project store unless `-g` is given.
+_USER_STORE_COMMANDS = frozenset({"env", "context", "launch"})
+#: Umbrella options that take a value, skipped when looking for the command.
+_UMBRELLA_VALUE_FLAGS = frozenset({"--loglevel", "--cmdspath", "--agents-dir"})
+
+
 def _agents_dir_from_argv(argv) -> "str | None":
-    """The value of an `--agents-dir X` / `--agents-dir=X` anywhere in `argv`,
+    """The user store an `--agents-dir X` / `--agents-dir=X` in `argv` names,
     so command discovery walks the store the command itself is about to use.
     The flag belongs to the subcommands, not the umbrella, and `_discover`
-    runs before the subcommand parser exists -- so it is read by hand."""
+    runs before the subcommand parser exists -- so it is read by hand.
+
+    Only dotagents' own arguments count: scanning stops at `--`, after which
+    everything belongs to a harness (`launch claude -- --agents-dir x`). And
+    the value is the user store only under `-g` / `--global` or for `env`,
+    `context` and `launch`; for `init`, `overlays` and `findings` without
+    `-g` it is the PROJECT store, so it leaves the user tier as it is."""
     if argv is None:
         argv = sys.argv[1:]
+    argv = list(argv)
+    if "--" in argv:
+        argv = argv[:argv.index("--")]
+    value = command = None
+    global_scope = skip = False
     for i, arg in enumerate(argv):
-        if arg == "--agents-dir" and i + 1 < len(argv):
-            return argv[i + 1]
-        if arg.startswith("--agents-dir="):
-            return arg.split("=", 1)[1]
+        if skip:
+            skip = False
+            continue
+        if arg in ("-g", "--global"):
+            global_scope = True
+        elif arg == "--agents-dir":
+            value = argv[i + 1] if i + 1 < len(argv) else None
+            skip = True
+        elif arg.startswith("--agents-dir="):
+            value = arg.split("=", 1)[1]
+        elif arg in _UMBRELLA_VALUE_FLAGS:
+            skip = True
+        elif command is None and not arg.startswith("-"):
+            command = arg
+    if value is not None and (global_scope or command in _USER_STORE_COMMANDS):
+        return value
     return None
 
 
