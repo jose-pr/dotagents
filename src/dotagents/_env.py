@@ -40,16 +40,21 @@ The identity/proxy model is wired into the output around the file chain:
     only-if-unset: the two scope roots ``AGENTS_HOME`` / ``AGENTS_PROJECT_ROOT``,
     the interpreter ``AGENTS_PYTHON`` (``sys.executable`` -- the Python the CLI
     is running under, a default any shim or helper can trust), and one
-    ``<NAME>_OVERLAY_ROOT`` per installed overlay
-    (:func:`get_overlay_roots`, named by :attr:`_overlays.Overlay.root_var` --
+    ``<NAME>_OVERLAY_ROOT`` per installed overlay (:attr:`Scope.overlays`,
+    the same set :func:`get_overlay_roots` lists, named by
+    :attr:`_overlays.Overlay.root_var` --
     the same name ``dotagents context`` expands as a placeholder), so an env
     file can reference an overlay's install dir by name.
   * **Proxy** is normalized AFTER the file chain: ``AGENTS_PROXY`` is seeded if
     unset (from ``AGENTS_WEBFETCH_PROXY_URL`` else the global
     HTTPS/HTTP/ALL_PROXY, either case); any proxy var that *already exists* is
-    mirrored into BOTH cases (never creating one that was not set;
-    ``http_proxy`` stays lowercase-populated per httpoxy). ``AGENTS_PROXY`` is
-    NOT fanned out into the global ``HTTP_PROXY``.
+    mirrored into BOTH cases (never creating one that was not set).
+    ``AGENTS_PROXY`` is NOT fanned out into the global ``HTTP_PROXY``.
+    Mirroring ``HTTP_PROXY`` into ``http_proxy`` is the opposite of the
+    httpoxy mitigation, which is for a CGI handler to IGNORE the upper-case
+    name (a ``Proxy:`` request header arrives as ``HTTP_PROXY``). An agent
+    session is not a CGI handler, so there the upper-case var is the user's
+    own setting; the chain is not meant to run inside one.
 
 Trust model (D93): ``env.py`` runs arbitrary code, from every store the walk
 visits -- the system store (only when administrators alone can write it), the
@@ -65,6 +70,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -255,9 +261,7 @@ def _posix_parent_comm(ppid: int) -> str:
         pass
     # 2. POSIX `ps -o comm=` (macOS / OpenBSD / any POSIX)
     try:
-        import subprocess as _sp
-
-        out = _sp.run(
+        out = subprocess.run(
             ["ps", "-o", "comm=", "-p", str(ppid)],
             capture_output=True, text=True, check=False,
         ).stdout.strip()
@@ -362,9 +366,9 @@ def interpreter(osenv: "dict[str, str]") -> str:
 def get_env_from_py(
     env_py: Path,
     base_env: "dict[str, str]",
-    project_root: Path,
-    level: str,
-    global_scope: bool,
+    *,
+    level: str = "",
+    global_scope: bool = False,
     logger=None,
 ) -> "dict[str, str]":
     """Execute an ``env.py`` and read back its JSON object(s) of env changes.
@@ -448,8 +452,6 @@ def get_env_from_file(
     # `base_env`, the chain's ACCUMULATED PATH (contract B step 1 prepends overlay
     # bin dirs onto it), which need not contain bash's install location
     # (`/usr/local/bin` on macOS, Git's `bin` on Windows).
-    import shutil
-
     bash = shutil.which("bash", path=os.environ.get("PATH")) or "bash"
     try:
         proc = subprocess.run(
@@ -597,8 +599,9 @@ def apply_proxy_model(osenv: "dict[str, str]") -> "dict[str, str]":
       :data:`_PROXY_SEED_ORDER` var (webfetch var wins, then the global proxy in
       either case). An existing ``AGENTS_PROXY`` is respected.
     * Mirror every proxy var that ALREADY EXISTS into both cases -- fills only
-      the missing case, never introduces a proxy that was not set. ``http_proxy``
-      thus stays lowercase-populated when ``HTTP_PROXY`` is set (httpoxy).
+      the missing case, never introduces a proxy that was not set (so
+      ``http_proxy`` is populated from ``HTTP_PROXY``; see the module note on
+      httpoxy).
     * ``AGENTS_PROXY`` is NOT fanned into the global ``HTTP_PROXY``.
     """
     changes: "dict[str, str]" = {}
@@ -714,7 +717,7 @@ def get_environment(
     for level, path, _root in resolve_env_files(scope):
         if path.suffix == ".py":
             changes = get_env_from_py(
-                path, osenv, project_root, level, global_scope, logger=logger
+                path, osenv, level=level, global_scope=global_scope, logger=logger
             )
         else:
             changes = get_env_from_file(path, osenv, logger=logger)
