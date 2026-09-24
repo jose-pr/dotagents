@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from dotagents import cli
+from _helpers import run_cmd as _run
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -70,15 +71,6 @@ def _isolated(monkeypatch, tmp_path):
     yield tmp_path
     os.environ.clear()
     os.environ.update(saved)
-
-
-def _run(cmd_cls, passthrough=None, **kwargs):
-    cmd = cmd_cls()
-    if passthrough is not None:
-        cmd._passthrough_ = list(passthrough)
-    for k, v in kwargs.items():
-        setattr(cmd, k, v)
-    return cmd()
 
 
 def _names(commands):

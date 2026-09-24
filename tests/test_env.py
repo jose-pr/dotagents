@@ -34,7 +34,7 @@ import pytest
 
 from dotagents import _env
 from dotagents._scope import Scope
-
+from _helpers import py_emit as _py_emit
 
 
 # --------------------------------------------------------------------------
@@ -67,10 +67,6 @@ def test_paths_resolves_bare_overlay_dir(tmp_path):
 # os.environ (the child inherits the accumulated env) and prints a JSON object
 # of the changes it wants applied.
 # --------------------------------------------------------------------------
-
-def _py_emit(mapping):
-    """A .py file body that unconditionally emits `mapping` as JSON."""
-    return "import json, sys\nprint(json.dumps(%r))\n" % (mapping,)
 
 
 def _py_echo_seen(var, out_key):

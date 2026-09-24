@@ -19,19 +19,13 @@ import pytest
 
 from dotagents import _overlays, _scope
 from dotagents.cli import OverlayAdd, OverlayRemove, OverlayShow, OverlaySync
+from _helpers import run_cmd as _run
 
 BASE_AGENTS = (
     "<!-- dotagents:begin -->\n# Agent Directives\n\n## Always-on rules\n"
     "- **Base rule**: keep it.\n\n## Load on demand\nNothing ships here by default.\n"
     "<!-- dotagents:end -->\n"
 )
-
-
-def _run(cmd_cls, **kwargs):
-    cmd = cmd_cls()
-    for k, v in kwargs.items():
-        setattr(cmd, k, v)
-    return cmd()
 
 
 def _logger():

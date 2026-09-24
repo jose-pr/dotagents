@@ -18,6 +18,7 @@ import pytest
 
 from dotagents import _scope, _sources
 from dotagents._sources import CompositeSource, DirRepo, SourceCache, RegistryRepo, Spec, parse_spec
+from _helpers import run_cmd as _run
 
 GIT = shutil.which("git")
 needs_git = pytest.mark.skipif(GIT is None, reason="needs git on PATH")
@@ -416,12 +417,6 @@ def test_resolve_source_keeps_its_contract(tmp_path):
 # --------------------------------------------------------------------------
 # Through the CLI: add from a git registry entry, then sync follows the remote
 # --------------------------------------------------------------------------
-
-def _run(cmd_cls, **kwargs):
-    cmd = cmd_cls()
-    for k, v in kwargs.items():
-        setattr(cmd, k, v)
-    return cmd()
 
 
 @needs_git

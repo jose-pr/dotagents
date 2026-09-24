@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _helpers import run_cmd as _run
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,13 +33,6 @@ def findings_mod():
         yield mod
     finally:
         sys.modules.pop(spec.name, None)
-
-
-def _run(cmd_cls, **kwargs):
-    cmd = cmd_cls()
-    for k, v in kwargs.items():
-        setattr(cmd, k, v)
-    return cmd()
 
 
 # --------------------------------------------------------------------------- #

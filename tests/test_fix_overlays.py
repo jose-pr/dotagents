@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from dotagents import _overlays, _scope, _skills, _sources  # noqa: E402
 from dotagents.cli import OverlayAdd, OverlayList, OverlayRemove, OverlayShow, OverlaySync  # noqa: E402
+from _helpers import run_cmd as _run
 
 Overlay = _overlays.Overlay
 
@@ -40,13 +41,6 @@ def _isolated_env(tmp_path, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "home-store"))
     monkeypatch.setenv("AGENTS_SYSTEM_ROOT", str(tmp_path / "no-system-store"))
-
-
-def _run(cmd_cls, **kwargs):
-    cmd = cmd_cls()
-    for key, value in kwargs.items():
-        setattr(cmd, key, value)
-    return cmd()
 
 
 def _overlay(src: Path, name: str, *, requires=(), routing=(), rules=None, files=(), skill=None, setup=None):

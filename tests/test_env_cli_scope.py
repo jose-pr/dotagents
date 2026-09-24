@@ -27,11 +27,7 @@ import pytest
 from dotagents.cli._common import resolve_user_store
 from dotagents.cli.context import Context
 from dotagents.cli.env import Env
-
-
-def _py_emit(mapping):
-    """An `env.py` body that unconditionally emits `mapping` as JSON changes."""
-    return "import json\nprint(json.dumps(%r))\n" % (mapping,)
+from _helpers import py_emit as _py_emit
 
 
 @pytest.fixture

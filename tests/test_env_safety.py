@@ -12,11 +12,7 @@ import pytest
 from dotagents import _env
 from dotagents._scope import Scope
 from dotagents import _scope, _sources
-
-
-
-def _py_emit(mapping):
-    return "import json\nprint(json.dumps(%r))\n" % (mapping,)
+from _helpers import py_emit as _py_emit
 
 
 @pytest.fixture

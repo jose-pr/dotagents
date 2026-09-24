@@ -19,6 +19,7 @@ import pytest
 from dotagents import _agents, _skills
 from dotagents._fs import write_text_lf
 from dotagents.cli import OverlayAdd, OverlayRemove, OverlaySync
+from _helpers import run_cmd as _run
 
 ClaudeAgent = _agents.ClaudeAgent
 
@@ -163,12 +164,6 @@ def test_dry_run_links_nothing(tmp_path):
 # --------------------------------------------------------------------------
 # overlays-25: overlays add / sync / remove keep a wired Claude current
 # --------------------------------------------------------------------------
-
-def _run(cmd_cls, **kwargs):
-    cmd = cmd_cls()
-    for key, value in kwargs.items():
-        setattr(cmd, key, value)
-    return cmd()
 
 
 def _overlay(src: Path, name: str, skill=None) -> Path:
