@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 
 MODULE_PATH = ROOT / "src" / "dotagents" / "_overlay" / "dotagents" / "cmds" / "findings.py"
 
@@ -151,6 +150,15 @@ def test_store_add_rejects_duplicates_and_empty(findings_mod, tmp_path):
         store.add("   ")
     with pytest.raises(SystemExit, match="no usable file name"):
         store.add("???")
+
+
+def test_store_add_rejects_a_name_taken_by_frontmatter(findings_mod, tmp_path):
+    """A hand-written `foo.md` whose frontmatter says `name: bar` owns `bar`."""
+    root = tmp_path / "findings"
+    root.mkdir()
+    (root / "foo.md").write_text("---\nname: bar\ndescription: hand note\n---\nbody\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="already exists"):
+        findings_mod.FindingsStore(root).add("Something", name="bar")
 
 
 def test_store_lists_hand_written_notes_and_skips_index(findings_mod, tmp_path):

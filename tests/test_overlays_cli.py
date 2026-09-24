@@ -2,7 +2,10 @@
 name normalization on add/remove, remove's un-merge, skills published from the
 INSTALLED copy, `sync --copy` / `--overwrite`, dry-run setup reporting, up-front
 validation, `requires`, `show`, the manifest reader's comment handling, and
-the umbrella's no-subcommand exit.
+the umbrella's no-subcommand exit -- plus the failure modes found since:
+confinement of `requires`/`rules`, broken repos and registries, removing a
+linked overlay, and what `sync` takes from where. Those still open in the
+product are strict xfails naming the review issue.
 
 tmp dirs only, no network.
 """
@@ -10,16 +13,12 @@ tmp dirs only, no network.
 import json
 import logging
 import os
-import sys
 from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(SRC))
-
-from dotagents import _overlays, _scope, cli  # noqa: E402
-from dotagents.cli import OverlayAdd, OverlayRemove, OverlayShow, OverlaySync  # noqa: E402
+from dotagents import _overlays, _scope, cli
+from dotagents.cli import OverlayAdd, OverlayRemove, OverlayShow, OverlaySync
 
 BASE_AGENTS = (
     "<!-- dotagents:begin -->\n# Agent Directives\n\n## Always-on rules\n"
@@ -283,10 +282,10 @@ def test_list_shows_both_scopes_unless_global(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("AGENTS_HOME", str(store))
     monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(project))
     monkeypatch.chdir(project)  # a write-scope command honours the pin only from inside it
+    empty_repo = tmp_path / "empty-repo"  # a real, empty source: nothing available
+    empty_repo.mkdir()
 
-    monkeypatch.setenv("AGENTS_SYSTEM_ROOT", str(tmp_path / "no-system-store"))
-
-    _run(OverlayList, json=False, repo=[str(tmp_path / "nosrc")])
+    _run(OverlayList, json=False, repo=[str(empty_repo)])
     out = capsys.readouterr().out
     assert out.splitlines()[:6] == [
         "installed (project):",
@@ -296,7 +295,7 @@ def test_list_shows_both_scopes_unless_global(tmp_path, monkeypatch, capsys):
         "  only-user",
         "  common  (shadowed by a more specific store's)",
     ]
-    _run(OverlayList, json=True, global_scope=True, repo=[str(tmp_path / "nosrc")])
+    _run(OverlayList, json=True, global_scope=True, repo=[str(empty_repo)])
     data = json.loads(capsys.readouterr().out)
     assert data["scope"] == "user" and data["installed"] == ["common", "only-user"]
     assert [s["level"] for s in data["stores"]] == ["user"]
@@ -362,9 +361,48 @@ def test_a_user_writable_dir_is_not_a_safe_system_store(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACL check")
-def test_an_admin_only_windows_dir_is_a_safe_system_store():
+def test_an_admin_only_windows_dir_is_a_safe_system_store(monkeypatch):
+    # The ACL logic itself, from a neutral environment. What a PowerShell 7
+    # parent does to the check is the next test's subject, so the result here
+    # does not depend on which shell started pytest.
     from dotagents._scope import _system_root_is_safe
 
+    monkeypatch.delenv("PSModulePath", raising=False)
+    ok, reason = _system_root_is_safe(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
+    assert ok, reason
+
+
+def _pwsh7_modules():
+    import shutil
+    import subprocess
+
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        return None
+    try:
+        home = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", "$PSHOME"],
+                              capture_output=True, text=True, timeout=60).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    modules = Path(home) / "Modules" if home else None
+    return modules if modules is not None and modules.is_dir() else None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL check")
+@pytest.mark.xfail(
+    strict=True,
+    reason="open: _system_root_is_safe spawns Windows PowerShell with the PSModulePath a "
+           "PowerShell 7 parent exports, so Get-Acl fails to load and every system store "
+           "is rejected when dotagents runs from pwsh",
+)
+def test_the_acl_check_survives_a_powershell_7_parent(monkeypatch):
+    from dotagents._scope import _system_root_is_safe
+
+    modules = _pwsh7_modules()
+    if modules is None:
+        pytest.skip("needs PowerShell 7 (pwsh)")
+    inherited = os.environ.get("PSModulePath", "")
+    monkeypatch.setenv("PSModulePath", os.pathsep.join(p for p in (str(modules), inherited) if p))
     ok, reason = _system_root_is_safe(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
     assert ok, reason
 
@@ -434,19 +472,144 @@ def test_scratch_dir_is_one_dir_removed_at_exit():
     a = _scratch_dir()
     assert a == _scratch_dir() and a.is_dir()
     assert a.name.startswith("dotagents-")
+    # ...and gone once its process exits, contents and all. In a child, so
+    # this process's own dir survives for the tests after this one.
+    import subprocess
+    import sys
+
+    code = ("from dotagents.cli._common import _scratch_dir; d = _scratch_dir(); "
+            "(d / 'sub').mkdir(); (d / 'sub' / 'f').write_text('x'); print(d)")
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    child = Path(proc.stdout.strip())
+    assert child.name.startswith("dotagents-") and child != a
+    assert not child.exists()
 
 
-def test_findings_add_rejects_a_name_taken_by_frontmatter(tmp_path):
-    import importlib.util
+# --------------------------------------------------------------------------
+# failure modes: confinement, broken repos, bad registries, removal, sync
+# --------------------------------------------------------------------------
 
-    spec = importlib.util.spec_from_file_location(
-        "findings_mod", SRC / "dotagents" / "_overlay" / "dotagents" / "cmds" / "findings.py"
+def _open(issue, why):
+    """A regression test for a confirmed, still-open product bug: strict, so
+    the fix turns it into an XPASS failure and the marker has to go."""
+    return pytest.mark.xfail(strict=True, reason="open (review 2026-09-23 %s): %s" % (issue, why))
+
+
+@_open("overlays-05", "requires names are not validated")
+def test_requires_cannot_install_outside_the_overlays_dir(world, tmp_path):
+    src, scope_root = world
+    _overlay(tmp_path, "escape")  # beside the source, reachable as ../escape
+    _overlay(src, "top", requires=["../escape", "user"])
+    _add(src, scope_root, "top")
+    assert not (scope_root / "escape").exists(), "a requires entry installed outside overlays/"
+    assert sorted(p.name for p in (scope_root / "overlays").iterdir()) == ["top"]
+
+
+@_open("overlays-05", "rules paths are not confined to the overlay")
+def test_rules_cannot_merge_a_file_outside_the_overlay(world, tmp_path):
+    src, scope_root = world
+    secret = tmp_path / "secret.md"
+    secret.write_text("- **Secret**: must not be merged.\n", encoding="utf-8")
+    top = _overlay(src, "top")
+    manifest = top / "overlay.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        + "rules = [%s, %s]\n" % (json.dumps(str(secret)), json.dumps("../../../secret.md")),
+        encoding="utf-8",
     )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    root = tmp_path / "findings"
-    root.mkdir()
-    (root / "foo.md").write_text("---\nname: bar\ndescription: hand note\n---\nbody\n", encoding="utf-8")
-    store = mod.FindingsStore(root)
-    with pytest.raises(SystemExit, match="already exists"):
-        store.add("Something", name="bar")
+    _add(src, scope_root, "top")
+    assert "Secret" not in (scope_root / "AGENTS.md").read_text(encoding="utf-8")
+
+
+@_open("overlays-07", "a registry parse error escapes as a traceback")
+@pytest.mark.parametrize("name, text", [
+    ("dotagents.json", '{"a": "x",}'),
+    ("dotagents.toml", 'a = "x\n'),
+])
+def test_a_malformed_store_registry_is_a_clean_error(world, name, text):
+    """One trailing comma in the store's registry turned every overlays
+    command into a traceback."""
+    src, scope_root = world
+    (scope_root / name).write_text(text, encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        _run(OverlayShow, name="nope", repo=[], global_scope=True, agents_dir=scope_root, json=True)
+    assert name in str(exc.value)
+
+
+@_open("overlays-06", "repo failures are swallowed as not-found")
+def test_a_broken_repo_fails_the_add_instead_of_dropping_a_requirement(world, tmp_path):
+    """A requirement looked up in a repo that FAILS (here: missing) is an
+    error, not the documented warning for a requirement no repo offers."""
+    src, scope_root = world
+    _overlay(src, "top", requires=["dep"])
+    with pytest.raises(SystemExit):
+        _run(OverlayAdd, name=["top"], repo=[str(src), str(tmp_path / "missing-repo")],
+             global_scope=True, agents_dir=scope_root, copy=True, dry_run=False)
+
+
+@_open("overlays-06", "repo failures are swallowed as not-found")
+def test_sync_with_a_mistyped_repo_is_an_error(world, tmp_path):
+    src, scope_root = world
+    _overlay(src, "one")
+    _add(src, scope_root, "one")
+    with pytest.raises(SystemExit):
+        _run(OverlaySync, pattern=None, repo=[str(tmp_path / "typo")], global_scope=True,
+             agents_dir=scope_root, copy=True, overwrite=False, dry_run=False)
+
+
+def _link_dir(link, target):
+    try:
+        os.symlink(str(target), str(link), target_is_directory=True)
+        return
+    except (OSError, NotImplementedError):
+        if os.name != "nt":
+            raise
+    import _winapi  # a junction needs no privilege on Windows
+
+    _winapi.CreateJunction(str(target), str(link))
+
+
+def test_remove_unlinks_a_symlinked_overlay_and_keeps_its_target(world, tmp_path):
+    src, scope_root = world
+    target = _overlay(tmp_path / "dev", "myov", routing=["- MYOV-ROUTE -> x"])
+    (scope_root / "overlays").mkdir()
+    try:
+        _link_dir(scope_root / "overlays" / "myov", target)
+    except OSError:
+        pytest.skip("cannot create a directory link here")
+    assert _run(OverlayRemove, name=["myov"], global_scope=True, agents_dir=scope_root, dry_run=False) == 0
+    assert not os.path.lexists(str(scope_root / "overlays" / "myov"))
+    assert (target / "overlay.toml").is_file(), "the link's target is the user's, not ours to delete"
+
+
+@_open("overlays-03", "sync records no provenance")
+def test_sync_keeps_the_repo_an_overlay_was_added_from(world, tmp_path, monkeypatch):
+    """`add --repo private` then a plain `sync` with another repo configured:
+    the overlay must not take files from that other repo."""
+    src, scope_root = world
+    _overlay(src, "python", files=[("kb/PY.md", "private\n")])
+    _add(src, scope_root, "python")
+    public = tmp_path / "public"
+    _overlay(public, "python", files=[("kb/PY.md", "public\n"), ("bin/pytool", "echo public\n")])
+    monkeypatch.setenv("AGENTS_OVERLAYS_REPO", str(public))
+    _run(OverlaySync, pattern=None, repo=[], global_scope=True, agents_dir=scope_root,
+         copy=True, overwrite=True, dry_run=False)
+    installed = scope_root / "overlays" / "python"
+    assert (installed / "kb" / "PY.md").read_text(encoding="utf-8") == "private\n"
+    assert not (installed / "bin" / "pytool").exists()
+
+
+@_open("overlays-12", "sync never prunes files deleted upstream")
+def test_sync_overwrite_drops_a_file_removed_upstream(world):
+    """An `env.py` renamed upstream kept running from the store, because its
+    presence alone activates it."""
+    src, scope_root = world
+    _overlay(src, "demo", files=[("env.py", "print('{}')\n")])
+    _add(src, scope_root, "demo")
+    (src / "demo" / "env.py").rename(src / "demo" / "pre.env.py")
+    _run(OverlaySync, pattern=None, repo=[str(src)], global_scope=True, agents_dir=scope_root,
+         copy=True, overwrite=True, dry_run=False)
+    installed = scope_root / "overlays" / "demo"
+    assert (installed / "pre.env.py").is_file()
+    assert not (installed / "env.py").exists()
