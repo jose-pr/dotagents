@@ -215,7 +215,8 @@ call an overlay's helpers by name and `import` an overlay's `lib/` module.
 !!! warning
     `env` output is sensitive by design — it prints resolved values. Treat the
     output as secret. The command itself never logs `DOTAGENTS_*` / `AGENTS_*`
-    values (Leakage rule).
+    values (Leakage rule), and its full (non-`--diff`) output leaves inherited
+    `DOTAGENTS_*` values out.
 
 ## findings
 

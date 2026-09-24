@@ -107,6 +107,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `$AGENTS_CONTEXT_FILE` with a warning; `launch --write-agent` merges it anyway.
   The harness is resolved first, so a launch that fails with "not found" writes
   nothing. `context --write-agent` refuses `-g`.
+- The Claude `CwdChanged` hook quotes the directory it pins into
+  `$CLAUDE_ENV_FILE`: a `'` in a directory name broke every later Bash command
+  of the session, and a crafted name ran commands. Re-run `dotagents init`.
+- `env --format powershell` doubles every character PowerShell reads as a single
+  quote (`'` and U+2018–U+201B): a `’` in a value ended the string, and the rest
+  ran as code in the PowerShell loader. A variable whose name contains `}` or a
+  backtick, which `${env:…}` cannot hold, is left out.
+- Plain env files under a path with non-ASCII characters, `$` or backticks are
+  sourced; they were silently skipped (and `$` / backticks in the path expanded).
+- `env` without `--diff` no longer prints inherited `DOTAGENTS_*` values, the
+  tool's own secrets.
+- A git overlay spec whose ref or location starts with `-` is rejected: it was
+  passed to git as an option (`@--upload-pack=<command>` ran the command).
 - `tools/cloud-setup.sh` installs `dotagents-cli` by default; the `dotagents`
   name it used is not this project on PyPI.
 - `overlays add` / `sync` never delete a skill you placed or edited in the
