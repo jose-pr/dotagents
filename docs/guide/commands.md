@@ -150,7 +150,8 @@ dotagents context --write-agent --agents codex # merge a managed block into <pro
 
 - `[output]` — positional destination. Default `-` (stdout); a path writes that file.
 - `--write-agent` — merge the context into each agent's own instruction file under
-  the project root, as a managed `dotagents:context` block refreshed in place:
+  the project root (not with `-g`), as a managed `dotagents:context` block refreshed
+  in place:
   Claude `.claude/CLAUDE.md`, Codex `AGENTS.md`, Gemini `GEMINI.md`, Cursor
   `.cursorrules`, Copilot `.github/copilot-instructions.md`, pi
   `.pi/APPEND_SYSTEM.md` (the file pi appends to its system prompt), Antigravity
@@ -285,8 +286,13 @@ What happens, in order:
    Cursor, Copilot — their prompt-file options *replace* the built-in prompt, which
    is not the same thing) gets it the static way instead: merged as the managed
    `dotagents:context` block into its own instruction file in the project, exactly
-   what `context --write-agent` does. `--no-context` skips this; `--inline` also
-   inlines the on-demand files the sources reference.
+   what `context --write-agent` does — but only into a file git does not track, and
+   not under `-g`: those files are usually committed, and the context carries your
+   user store's private rules. Otherwise the context stays at `$AGENTS_CONTEXT_FILE`
+   only, with a warning; `--write-agent` merges it anyway. The harness is resolved
+   before anything is written, so a launch that fails with "not found" leaves the
+   project untouched. `--no-context` skips this; `--inline` also inlines the
+   on-demand files the sources reference.
 3. **The harness** — the agent's program (`claude`, `codex`, `gemini`,
    `cursor-agent`, `copilot`, `pi`), resolved on the PATH from step 1 so a harness an
    overlay's `bin/` provides is found, or `--command <program>` for one under

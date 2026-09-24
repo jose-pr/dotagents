@@ -100,6 +100,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the hook now passes commands through unchanged (Windows Codex sessions get the
   context, not the live env). Re-run `dotagents init --agents codex` to update
   the hooks.
+- `launch` no longer merges your context into a harness's instruction file that
+  git tracks, or under `-g`: for an agent with no append flag (Codex, Gemini,
+  Cursor, Copilot, pi on Windows) it wrote the user store's rules into a usually
+  committed `AGENTS.md` / `GEMINI.md` / `.cursorrules`. The context stays at
+  `$AGENTS_CONTEXT_FILE` with a warning; `launch --write-agent` merges it anyway.
+  The harness is resolved first, so a launch that fails with "not found" writes
+  nothing. `context --write-agent` refuses `-g`.
 - `tools/cloud-setup.sh` installs `dotagents-cli` by default; the `dotagents`
   name it used is not this project on PyPI.
 - `overlays add` / `sync` never delete a skill you placed or edited in the
