@@ -139,6 +139,43 @@ def test_force_keeps_the_original_when_two_adapters_write_it(tmp_path):
     assert [p.read_text(encoding="utf-8") for p in backups] == ["MY PRECIOUS HAND-WRITTEN AGENTS.md\n"]
 
 
+def _init(store, from_=None):
+    from dotagents.cli.init import Init
+
+    cmd = Init()
+    cmd.dest, cmd.from_, cmd.agents, cmd.no_hooks = store, from_, ["codex"], True
+    cmd.dry_run, cmd.force, cmd.bin_dir = False, False, None
+    assert cmd() == 0
+
+
+def test_from_base_is_recorded_and_every_writer_composes_over_it(tmp_path):
+    # The overlay commands used to recompose over the bundled base, silently
+    # replacing an `init --from` one; a plain re-init did the same.
+    from dotagents.cli._common import STORE_CONFIG, read_store_config
+
+    base = tmp_path / "mybase"
+    (base / "dotagents" / "templates").mkdir(parents=True)
+    (base / "dotagents" / "templates" / "AGENTS.md").write_text(
+        "<!-- dotagents:begin -->\n# CUSTOM BASE\nread `{{AGENTS_MD}}`\n\n"
+        "## Load on demand\nNothing ships here by default.\n<!-- dotagents:end -->\n",
+        encoding="utf-8",
+    )
+    store = tmp_path / "user"
+    _init(store, from_=str(base))
+    assert read_store_config(store) == {"base": str(base.resolve())}
+
+    _add_tiny(store, tmp_path)
+    text = (store / "AGENTS.md").read_text(encoding="utf-8")
+    assert "# CUSTOM BASE" in text and "TINY_OVERLAY_ROOT" in text
+
+    _init(store)  # no --from: the recorded base, not the bundled one
+    assert (store / "AGENTS.md").read_text(encoding="utf-8") == text
+
+    plain = tmp_path / "plain"
+    _init(plain)
+    assert not (plain / STORE_CONFIG).exists() and not (plain / "dotagents").exists()
+
+
 def test_dry_run_writes_nothing(tmp_path):
     store = tmp_path / "user"
     _apply_base(BASE_ROOT, store, force=False, dry_run=True, logger=_log(), agents=["codex"])

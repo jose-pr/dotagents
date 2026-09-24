@@ -4,7 +4,14 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from dotagents.cli._common import BASE_ROOT, DotAgentsArgs, _apply_base, _resolve_from
+from dotagents.cli._common import (
+    BASE_ROOT,
+    DotAgentsArgs,
+    _apply_base,
+    _resolve_from,
+    read_store_config,
+    write_store_config,
+)
 
 
 class Init(DotAgentsArgs):
@@ -25,7 +32,7 @@ class Init(DotAgentsArgs):
     ("--dest",)
 
     from_: Optional[str] = None
-    "Source directory/URI for the base overlay (default: bundled overlay)."
+    "Source directory/URI for the base overlay (default: the one recorded by an earlier --from, else bundled)."
     ("--from",)
 
     bin_dir: Optional[Path] = None
@@ -49,13 +56,18 @@ class Init(DotAgentsArgs):
     ("--no-hooks",)
 
     def __call__(self) -> int:
-        src = _resolve_from(self.from_, BASE_ROOT)
         if self.dest is not None:
             dest = Path(self.dest).expanduser().resolve()
         else:
             scope = self.resolve_scope()
             dest = Path(scope.agents_root).expanduser().resolve()
             self._logger_.info("scope: %s (%s)", scope.level, dest)
+
+        # An explicit --from is recorded in the store's config, so a later plain
+        # `init` and every `overlays add/remove/sync` compose over the same base.
+        config = read_store_config(dest)
+        base_arg = self.from_ if self.from_ is not None else config.get("base")
+        src = _resolve_from(base_arg, BASE_ROOT)
 
         agent_names = []
         if self.agents:
@@ -67,6 +79,13 @@ class Init(DotAgentsArgs):
             agents=agent_names if agent_names else None,
             wire_hooks=not self.no_hooks,
         )
+
+        if self.from_ is not None and not self.dry_run:
+            local = Path(self.from_).expanduser()
+            recorded = str(local.resolve()) if local.exists() else self.from_
+            if config.get("base") != recorded:
+                config["base"] = recorded
+                self._logger_.info("recorded base: %s", write_store_config(dest, config))
 
         if not self.dry_run:
             from dotagents._wrappers import check_path_warning, write_wrappers

@@ -155,6 +155,74 @@ BASE_ROOT = _package_data_dir("_overlay") or (
     Path(__file__).resolve().parent.parent / "_overlay"
 )
 
+#: The store's own config file, relative to the store. The only file besides
+#: `cmds/` that may live in `<store>/dotagents/` (D92/D93), and written only when
+#: there is something to record: today the base an `init --from` used.
+STORE_CONFIG = "dotagents/config.toml"
+
+
+def read_store_config(dest: "str | os.PathLike[str]") -> "dict[str, str]":
+    """The string keys of `<dest>/dotagents/config.toml` ({} when absent or
+    unreadable). A one-level `key = "value"` file: read with tomllib where the
+    stdlib has it, else line by line (the only form `write_store_config`
+    produces)."""
+    import json
+
+    path = Path(dest) / STORE_CONFIG
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return {}
+    try:
+        import tomllib  # 3.11+
+
+        data = tomllib.loads(text)
+        return {k: v for k, v in data.items() if isinstance(v, str)}
+    except ImportError:
+        pass
+    except ValueError:
+        return {}
+    out: "dict[str, str]" = {}
+    for line in text.splitlines():
+        m = re.match(r'^\s*([A-Za-z0-9_-]+)\s*=\s*("(?:[^"\\]|\\.)*")\s*(?:#.*)?$', line)
+        if m:
+            try:
+                out[m.group(1)] = json.loads(m.group(2))
+            except ValueError:
+                pass
+    return out
+
+
+def write_store_config(dest: "str | os.PathLike[str]", values: "dict[str, str]") -> Path:
+    """Write `values` as `<dest>/dotagents/config.toml` (TOML basic strings;
+    JSON string escapes are valid TOML ones)."""
+    import json
+
+    from dotagents._fs import write_text_lf
+
+    lines = ["# dotagents store config -- written by `dotagents init --from`."]
+    lines += ["%s = %s" % (k, json.dumps(v, ensure_ascii=False)) for k, v in sorted(values.items())]
+    path = Path(dest) / STORE_CONFIG
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_text_lf(path, "\n".join(lines) + "\n")
+    return path
+
+
+def store_base(dest: "str | os.PathLike[str]", logger=None) -> Path:
+    """The base overlay this store's block is composed from: the `base` an
+    `init --from` recorded in its config, else the bundled one. A recorded base
+    that no longer resolves falls back to the bundled one with a warning."""
+    recorded = read_store_config(dest).get("base")
+    if not recorded:
+        return BASE_ROOT
+    try:
+        return Path(_resolve_from(recorded, BASE_ROOT))
+    except SystemExit as exc:
+        if logger is not None:
+            logger.warning("recorded base %r unusable (%s); using the bundled one", recorded, exc)
+        return BASE_ROOT
+
+
 #: Where the base AGENTS.md block template lives inside a base overlay dir.
 BASE_AGENTS_TEMPLATE = "dotagents/templates/AGENTS.md"
 #: Rendered by `base_agents_text` as the actual path of the store's AGENTS.md.
