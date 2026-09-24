@@ -1,477 +1,606 @@
 # dotagents — package API header
 
-Public API of the installed `dotagents` package: the CLI umbrella plus the `_*.py`
-helper modules that back it. This file ships inside the package so a consuming agent
-can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
+The public API of the installed `dotagents` package (distribution `dotagents-cli`,
+Python ≥ 3.9): the `dotagents` command line, the `dotagents.cli` extension API, and
+the `_*.py` helper modules behind them. Read this instead of the source. Full docs:
+https://jose-pr.github.io/dotagents/
 
-## Entry points
+Terms used throughout:
 
-- `dotagents.cli.main(argv=None) -> int` — the `install.py` shim and
-  `python -m dotagents` entry point. Repoints zipapp sources, then dispatches through
-  `duho.app` with the discovered command set. Also the `dotagents` console script
-  (`[project.scripts]`).
-- `dotagents.cli.Dotagents(LoggingArgs, Cli)` — the umbrella CLI class.
-- `dotagents.cli.DotAgentsArgs` — mix-in base carrying the shared `-g/--global` +
-  `--agents-dir` pair and `resolve_scope()`; an overlay-shipped command module
-  should inherit it (as the FIRST base) rather than redeclare the flags.
-- `dotagents.cli.resolve_user_store(agents_dir=None) -> Path` — the USER store
-  root: `agents_dir` (`--agents-dir`) → `$AGENTS_HOME` → `~/.agents`. Use it (not `resolve_scope`) when the
-  store is always the user store and the project scope only adds/removes tiers,
-  as in `env` / `context`.
-- `dotagents.cli._common.store_base(dest, logger=None) -> Path` — the base overlay a
-  store's block is composed from: the `base` an `init --from` recorded in
-  `<store>/dotagents/config.toml` (`read_store_config` / `write_store_config`),
-  else the bundled `BASE_ROOT`. `init` and `overlays add/remove/sync` all use it.
-- Compiled command classes live in `dotagents.cli.<name>` (`init`, `overlays`
-  — `add` (installs and sets up each manifest's `requires` before the overlay
-  itself, `--no-requires` to skip; a requirement the scope's walk already has
-  is satisfied, not re-copied or re-set-up -- an explicit name always is;
-  every name validated and resolved against the source BEFORE anything is
-  touched; skills published from the INSTALLED copy), `remove` (recomposes the
-  managed block over what remains — the un-merge), `list`, `sync` (`--copy`
-  honoured, `--overwrite` replaces changed files), `show` (manifest, setup,
-  skills, files, `--json`) — `context`, `env`, `build_pyz` (a checkout only:
-  a clear error elsewhere), `about` (`dotagents-cli <version>` then one
-  `<distribution> <version>` per line: from a `.pyz` what `build-pyz` vendored,
-  recorded in `dotagents/_bundle.json` at build time since the zipapp carries
-  no dist-info; from a plain install the runtime packages present)); each is a `class X(LoggingArgs, Cmd)` — or
-  `class X(DotAgentsArgs)`, which is that pair transitively — with a
-  `__call__`. Plus TWO bundled command modules under
-  `_overlay/dotagents/cmds/`: `findings.py` (`dotagents findings`: a per-scope
-  findings queue at `<scope-root>/findings/` — add / list / show / done / reopen /
-  remove / index / path; its subcommands are classes NESTED in the `Findings`
-  umbrella so discovery does not register them as top-level commands) and
-  `launch.py` (`dotagents launch <agent> -- <args>`: exports the `env`
-  assembly into the process and the child, writes the `context` to
-  `<user store>/.cache/launch/<agent>-<sha256[:12] of the project root, or
-  "-g">.md` (overwritten per launch; the dir carries a `*` `.gitignore`)
-  exported as `AGENTS_CONTEXT_FILE`, hands it over via
-  `Agent.launch_context_args` — Claude's `--append-system-prompt-file`; `None`
-  means no append flag and the context is merged into `Agent.context_target`
-  as `context --write-agent` does — then runs `Agent.launch_command` resolved
-  on the exported PATH, or `--command`). `init` copies neither into the store —
-  the bundled dir is always a discovery source. `link-project` / `sync-project`
-  are shipped by the opt-in **private-sync** overlay from its own `cmds/` +
-  `lib/_link.py` (D85), not by the package. A personal command module
-  dropped into a scope's `dotagents/cmds/` (a dir its owner creates — `init`
-  writes no `dotagents/` dir) is discovered like any other, so private
-  tooling never has to live in the repo (D84). `audit` is repo CI tooling
-  (`tools/audit.py`), not a command.
-- Command discovery layers sources, later wins: built-ins < bundled `cmds` <
-  store overlay `cmds` (`<overlay-root>/cmds`) < system < user < project
-  overlay `cmds` < project < `$AGENTS_CMDS_PATH` < `--cmdspath`. The overlay +
-  scope tiers come from one Contract-A `Scope.paths` walk (`cli._cmds_dirs`),
-  the same resolver that backs `bin`/PATH; an `--agents-dir X` on the command
-  line is honoured for the walk. A source that fails to import for ANY reason
-  (a `SyntaxError`, an exception at import time) is skipped with a warning
-  naming it — discovery runs before every invocation, hooks included, so one
-  broken personal module must never take `env`/`context` down. A command
-  that imports but whose parser cannot be built (an unresolvable annotation,
-  `X | None` on 3.9, a flag clashing with the umbrella's) is skipped the same
-  way, per command. The zipapp source-repointing list (`cli._COMMAND_MODULES`)
-  is derived from the built-ins' MROs, not hand-kept. An umbrella
-  invoked with no subcommand prints its help and exits 2.
+- **store** — an `.agents`-shaped directory: the **user** store (`$AGENTS_HOME`, else
+  `~/.agents`), a **project** store (`<project>/.agents`), or the **system** store
+  (`$AGENTS_SYSTEM_ROOT`, else `/etc/agents` on POSIX; none on Windows; used only when
+  it exists and only administrators can write it).
+- **scope** — which store a command writes to (`user` with `-g`, else `project`) plus
+  the stores a session reads (a `Scope`).
+- **contract A** — the precedence walk: store by store (system, user, project), each
+  store's installed overlays first, then the store itself; then the project root.
+- **overlay** — a directory installed as `<store>/overlays/<name>/`; its root is
+  exported as `$<NAME>_OVERLAY_ROOT`.
 
-## Helper modules (public surface)
+`dotagents.__version__` is the package version.
 
-- `_agents` — `Agent` base type + per-agent adapters; `stamp_identity(...)` emits the
-  standardized `AGENTS_*` / `AGENT` identity vars.
-- `_overlays` — the **`Overlay`** type: one overlay = one directory, `Overlay(path)`.
-  Everything that depends on a single overlay is on it. Name rules are static so a
-  bare name works: `Overlay.is_valid_name(n)` / `.normalize_name(n)` (THE canonical
-  name, lowercase `_`→`-`, = the install dir `overlays/<n>/`) / `.root_var_for(n)`
-  (`<NAME>_OVERLAY_ROOT`). Instance: `.path` / `.name` / `.normalized_name` /
-  `.root_var` / `.is_valid` / `.manifest_path`, `.read_manifest()` (`name`,
-  `description`, `routing`, `rules`, `requires` — normalized names —,
-  `priority`; a small quote-aware TOML reader: trailing `#` comments, `'...'`
-  and `'''...'''` strings and an indented closing `]` all parse) / `.priority` /
-  `.sort_key` (`(priority, manifest name, dir name)`),
-  `.find_setup_script()` / `.run_setup(agents_dir=, dry_run=, logger=)`,
-  `.files()` (skips `Overlay.SKIP_PARTS` — `.git` and tool caches — and
-  `*.pyc`) / `.rule_blocks(rel_paths)` / `.apply_to(dest, dry_run)` /
-  `.install_to(dest_overlay_dir, dry_run, overwrite=False)` (self-describing:
-  ships the manifest; `overwrite` replaces files whose content differs) /
-  `.merge_rules_into(agents_md, dry_run, logger)`. `Overlay.discover(root)` is the
-  ONE discovery rule (valid-named dirs under ONE `overlays/` root — what
-  `overlays add/remove/sync` install into), and **`Overlay.installed(*stores)`**
-  folds it over `.agents` roots in precedence order (`Scope.stores`: system,
-  user, then the project's; `-g` has no project store; a `None` store is
-  skipped): every
-  result is stamped with its `.store`, and an overlay whose name appears in a
-  LATER store is dropped — **the project's copy shadows the store's**, so only
-  its bin/lib/env/cmds/CONTEXT.md/root var resolve. `Scope.paths`, `env`,
-  `context` and `overlays list`/`show` all go through `installed`.
-  `Overlay.sort_by_priority(items)` is the one merge order. It is `os.PathLike`,
-  so it goes anywhere a path does.
-  `recompose_overlay_block(...)` (over a *set* of overlays) is the only module
-  function. `DEFAULT_PRIORITY = 500`.
-- `_scope` — **`Scope`**, the one object every walk takes: `level` (`user` /
-  `project`), `agents_root` (the scope's own store, the install target),
-  `user_root` (the user store — every walk starts from it), `project_root`,
-  `system_root`, `stores` (in precedence order: system, user, project),
-  `overlays` (`Overlay.installed(*stores)`), `project_store`, `global_scope`,
-  `store_level(store)`, and `paths(*names, include_missing=False)` (the
-  contract-A walk, typed `list[tuple[str, Path, Optional[Path]]]`). `Scope.of(agents_dir=, project_root=, global_scope=)`
-  builds one from resolved parts (what `env` / `context` / `_cmds_dirs` do);
-  `resolve_scope(global_scope, agents_dir=None, project_root=None)` is the
-  install-command form, whose project root is `install_project_root()`: the
-  pin (`$AGENTS_PROJECT_ROOT`, then `$CLAUDE_PROJECT_DIR`) while the cwd is
-  inside it, else the nearest ancestor of the cwd with a `.git` or its own
-  `.agents` (not the user/system store's parent), else the cwd, with a
-  warning. A project whose `.agents` IS the user store (run from `~`)
-  collapses to the user scope, keeping the project root, and `Scope.stores`
-  lists a directory once; `resolve_user_store(agents_dir=None)` (the home of the
-  chain `dotagents.cli` re-exports) and `resolve_source(...)`. Scope = *where
-  installed overlays live*, source = *where an overlay comes from* (bundled by
-  default). `-g` resolves the store through `resolve_user_store`
-  (`--agents-dir` → `$AGENTS_HOME` → `~/.agents`), never the literal
-  home dir; `--agents-dir` overrides the store in EITHER scope. The library
-  functions take a `Scope` only.
-  Installed overlays are **discovered** by presence (`Overlay.discover(scope.overlay_root)`
-  for one scope, `Overlay.installed(...)` for what a session uses), not tracked in
-  a registry. Nothing overlay-only lives here (name rules and discovery are
-  `Overlay`'s).
-- `_context` — assemble the effective per-agent context:
-  `assemble_context(agent, scope, *, inline=False, expand_vars=True)` /
-  `assemble_context_data(agent, scope, *, inline=False, expand_vars=True)`.
-  Sources are the contract-A walk (overlay `CONTEXT.md`s first, sorted by
-  `Overlay.sort_key` — priority, then manifest name, then dir — and always
-  before the stores; then the store / project `AGENTS.md` + `AGENTS.local.md`), minus what
-  the harness loads itself (`Agent.loaded_paths(project_root)` — for Claude,
-  whatever its entry files actually `@`-include, recursively). `<PROJECT_ROOT>`
-  and one `<NAME_OVERLAY_ROOT>` per installed overlay (user store + project)
-  expand, and with `expand_vars` (every output but `--write-agent`'s file and
-  the file `launch` merges into a project) so do `$NAME_OVERLAY_ROOT` /
-  `${NAME_OVERLAY_ROOT}`. **Inlining the on-demand `.md` files a source mentions is opt-in**
-  (`inline=True` / `context --inline`): the base rules say to read them only
-  when a task needs them, so inlining every mention would bloat the session
-  payload; each reference resolves against its own source's directory, a
-  project's also against `<project>/.agents`, and a user/system source never
-  into the project. Skills are listed, never inlined: `- **name** (<SKILL.md
-  path>): desc` (JSON: `name`, `description`, `path`), collected in contract-A
-  order so a later (project) skill wins, reading only the leading frontmatter.
-- `_env` — chained env-file assembly + `env.py` execution (frozen contract B):
-  `get_environment(scope, *, base_env, explicit, logger)` / `get_diff(scope, ...)`
-  / `resolve_env_files(scope)` / `get_bin_paths(scope)` / `get_lib_paths(scope)`
-  / `get_overlay_roots(scope)` / `get_env_from_py` / `get_env_from_file`. Bins
-  onto PATH first (`get_bin_paths`, every level's `bin`
-  except project-root, missing dirs included — frozen), and each level's EXISTING
-  `lib` onto PYTHONPATH the same way (`get_lib_paths`; not part of contract B), so
-  an `env.py` and every subprocess can import an overlay's `lib/`; then two tiers
-  (`pre.env*` then `env*`), later-overrides-earlier. Identity seeded before the
-  chain; proxy vars applied after. The project-root level resolves nothing —
-  a checkout's own top-level `env.py` / `env` / `local.env` is never executed
-  or sourced (that would be code a cloned repo runs at session start; a user's
-  local overrides go in `<project>/.agents/local.env`); only regular files count (a venv
-  dir named `env` is not an env file); a plain file whose `source` fails
-  contributes nothing (`source F || exit 1`, so the failure is visible); bash's
-  own `PWD`/`OLDPWD`/`SHLVL`/`MSYSTEM*` are never reported as a file's changes.
-- **`Scope.paths(*names, include_missing=False)`** — the Contract-A precedence
-  walk / filename resolution, store by
-  store over `Scope.stores` — system (`Scope.system_root`, `/etc/agents` on POSIX or
-  `$AGENTS_SYSTEM_ROOT`; `None` — skipped — unless it exists and only
-  administrators can write it; no default on Windows), user, project — each store's overlays first, then the
-  store itself; then project-root. The project store and project-root exist
-  only in a project scope (`overlays add` installs into the project store by
-  default; it is walked like any other). Each
-  tuple is `(level, path, root)`; an overlay entry's `level` is the overlay's
-  dir name and `root` its dir (`root is None` for every other level — that is
-  the overlay test). `LEVEL_NAMES` are reserved as overlay names.
-- `_merge` — managed-block merge for `init`'s `AGENTS.md`, delimited by
-  `<!-- dotagents:begin -->` / `<!-- dotagents:end -->` marker LINES (a prose
-  mention of a marker is not a marker, and neither is one inside fenced code;
-  `find_block` returns the span). A begin with no end after it is refused; a
-  base without markers is a usage error; a target's UTF-8 BOM is read through
-  and not written back. `merge_block(..., force=True, backup_root=...)` backs a
-  replaced target up at its mirrored path under the root (`external/…` for a
-  file outside the store), never over an earlier backup, and returns
-  `"replaced (--force, backed up)"` / `"replaced (--force)"` / `"unchanged"`
-  accordingly; `timestamped_backup_root(dest)` is one root per store per process.
-  `begin_marker`/`end_marker` override the pair for other comment syntaxes
-  (`#` for TOML), and `append=True` puts a first-time block at the END of the
-  file — required for TOML, where a `[table]` header captures every key line
-  after it and a prepended block would swallow the user's top-level keys.
-  `merge_include_line(target, "@path")` is the harness-entry-file include
-  (skipped when the line is already present anywhere), `merge_context_block`
-  the `dotagents:context` block `context --write-agent` uses. All writes go
-  through `_fs.write_text_lf` (LF-only everywhere; `atomic=True` for JSON
-  settings).
-- `_agents.Agent` — per adapter: `harness_loads` (static: what the harness
-  reads by itself, relative = project root), `loaded_paths(project_root)`
-  (resolved; Claude adds its real `@` includes), `context_target` (the
-  harness's instruction file under the project root that `write_context`
-  merges a managed context block into — Claude `.claude/CLAUDE.md`, Codex
-  `AGENTS.md`, Gemini `GEMINI.md`, Cursor `.cursor/rules/dotagents.mdc`,
-  Copilot `.github/copilot-instructions.md`, pi `.pi/APPEND_SYSTEM.md`,
-  Antigravity `.agents/rules/dotagents.md`),
-  `write_base_config(dest, ...)` — the harness's LAST MILE only: `init`
-  (`_apply_base`) writes the store's `AGENTS.md` itself, once. Claude merges an
-  `@` include into `<$CLAUDE_CONFIG_DIR|~/.claude>/CLAUDE.md` (user) or
-  `<project>/.claude/CLAUDE.md`; Gemini an `@` import into `~/.gemini/GEMINI.md`
-  or `<project>/GEMINI.md`; pi a pointer in its config dir (user store only);
-  Codex, Antigravity, Cursor and Copilot write nothing here. `_apply_base` sets
-  `Agent.scope_level` ("user" / "project") and `Agent.project_root` from the
-  resolved scope, so adapters never re-derive the scope from `$AGENTS_HOME`;
-  Codex and Antigravity wire their global hooks for the user scope only. A
-  project include in a file git does not ignore gets a warning.
-  `detect_runtime_agent(environ, explicit=None)` (explicit > `$AGENTS_HARNESS` >
-  env markers, else None) feeds `stamp_identity`, which stamps nothing in a
-  plain shell; `resolve_active_agent` adds config-file detection and the Claude
-  default for picking a TARGET (`context`, `launch`). Claude's `loaded_paths`
-  follows `@` imports the way Claude does (anywhere on a line outside code
-  spans and fences, at most 4 hops, in the project root's and every ancestor's
-  CLAUDE files). The base overlay is
-  `_overlay/dotagents/` only, and none of it is copied into the store:
-  `templates/AGENTS.md` (the block TEMPLATE, rendered by
-  `cli._common.base_agents_text(src, dest)` — `{{AGENTS_MD}}` becomes the
-  actual path of the store's `AGENTS.md`, so "annotate that you read `…`"
-  names the real file; `init` and every recompose use it), `cmds/` (the
-  bundled command modules, discovered from the package; a same-named module in
-  a scope's `dotagents/cmds/` overrides one; `_`-prefixed files are helpers,
-  never commands) and `hooks/` (the scripts `wire_hooks` deploys into an
-  agent's own config dir — dependency-free, since they run under whatever
-  Python the harness finds, and silent on stdout unless the hook protocol
-  reads it). What `init` writes into a store is the rendered managed block
-  (`AGENTS.md`), the `bin/` wrappers (at the running `.pyz`, else `"<python>" -m dotagents` —
-  `_wrappers.write_module_wrappers`) and, with `--force`, the
-  `install_backup/<timestamp>/` copies — never a `dotagents/` dir or a design
-  log. The user scope is whatever `resolve_user_store()` returns, never the
-  literal `~/.agents`.
-- `_skills` — publish an overlay's `skills/<name>/` into a scope's shared skills dir
-  (symlink-preferred, copy fallback); unpublish removes only what the overlay
-  published — a copy counts as the overlay's only when its file set AND bytes
-  match the source, so a user-edited copy is kept — then sweeps broken
-  symlinks. Publishing never replaces a skill already at the target (kept,
-  warned). Each published COPY's tree digest is recorded in
-  `<skills>/.dotagents-published.json`; `resync_overlay_skills(...,
-  overwrite=False)` refreshes a copy only while it still matches that digest
-  (`sync --overwrite` replaces an edited one). Pure stdlib. `ClaudeAgent.wire_hooks` links the scope's skills
-  into `<config>/skills/<name>` PER SKILL (a same-named skill the user placed
-  there is a conflict and stays), never the whole directory.
-- `_hooks` — additive, idempotent merge of our hooks into an agent's `settings.json`.
-  `hooks.<Event>` is a **list of matcher-objects** each holding its own `hooks` list,
-  not a flat command list. Foreign hooks are preserved verbatim (a foreign hook
-  sharing a matcher-object with an older shape of ours keeps its object; ours
-  moves to its own), an entry that is exactly what we would write is left
-  alone and any other shape of ours (revised command, `shell`, `matcher`,
-  `commandWindows`, status) is refreshed in place, keeping any key the user
-  added to it (a `timeout`, say). Ours is recognised by its status message,
-  written namespaced (`"dotagents: Loading ..."`); the bare label an earlier
-  release wrote still matches, for both merge and `remove_hook`, on a command
-  that runs `dotagents`. Malformed
-  entries are kept as they are, never raising, and invalid JSON raises `SystemExit` instead of
-  silently overwriting the user's file. Writes are LF-only and atomic, with
-  non-ASCII kept as-is. `shell` (Claude: `"bash"`/`"powershell"`,
-  picks the interpreter for the hook's own command) and `command_windows`
-  (Codex: emitted as `commandWindows`, a separate Windows-only command OVERRIDE,
-  not an interpreter choice) are both supported. Pure stdlib. Consumed by
-  `ClaudeAgent.wire_hooks` (`~/.claude/settings.json`: env via `$CLAUDE_ENV_FILE`
-  + context via stdout, plus `CwdChanged`, plus a `PreToolUse` env-loader for the
-  PowerShell tool) and `CodexAgent.wire_hooks` (`<CODEX_HOME|~/.codex>/hooks.json`,
-  never `config.toml`: `SessionStart` context-only, plus a `PreToolUse` env-loader
-  matched on `matcher: "Bash"`). Codex's hook JSON is structurally identical to
-  Claude's, including the same `updatedInput.command` rewrite mechanism on
-  `PreToolUse` (learn.chatgpt.com/docs/hooks).
-  Gemini/Cursor/Copilot keep the base no-op — Gemini CLI documents no hook
-  mechanism. **Antigravity is a separate
-  product** from Gemini CLI (Antigravity CLI/IDE/SDK family, shares only the
-  `~/.gemini/` namespace for some files) and DOES wire a hook: see
-  `AntigravityAgent.wire_hooks` below. `PreToolUse` there is allow/deny/ask
-  only — no `updatedInput`, so no command-rewrite/env-loader path exists to hang
-  on it, unlike Claude/Codex. Revisit if either framework changes.
-- **`AntigravityAgent.wire_hooks`** (`<AGENTS_HOME_ANTIGRAVITY|~/.gemini/config>/hooks.json`,
-  keyed under a `"dotagents"` name per the docs' own example shape — a named-entry
-  object, not Claude/Codex's flat `hooks.<Event>`): wires a single `PreInvocation`
-  entry, context-only, no env mechanism. Antigravity's hooks
-  (antigravity.google/docs/hooks) have exactly five events — `PreToolUse`,
-  `PostToolUse`, `PreInvocation`, `PostInvocation`, `Stop` — no SessionStart
-  equivalent. `PreInvocation` fires every model turn (`invocationNum`, 0-indexed),
-  so the deployed script (`preinvocation_antigravity_context.py`,
-  `_overlay/dotagents/hooks/`) gates on `invocationNum == 0` to behave like a
-  one-shot SessionStart rather than resending context every turn. Output shape is
-  a bare `{"injectSteps": [{"ephemeralMessage": "..."}]}`, no `hookSpecificOutput`
-  wrapper; `ephemeralMessage` is the one of the
-  three step types meant for free text (`toolCall` executes a tool,
-  `userMessage` impersonates the user). Antigravity's docs define no detection
-  marker, so `detect_env_vars = []` — explicit `--agents antigravity`
-  only, as for Codex (writes touching an agent's
-  own live config are opt-in, never inferred).
-- **`SessionStart`/`CwdChanged` register TWO handlers each ON WINDOWS**,
-  bash-syntax (default shell) and a PowerShell-native equivalent (`shell:
-  "powershell"`); **POSIX hosts get the bash handler only**, and `init` there
-  REMOVES any PowerShell entries present (`_hooks.remove_hook`,
-  keyed by status message) — Claude Code on Linux runs such an entry through
-  bash, a syntax error every session. The gate
-  is `ClaudeAgent._is_windows()` (`os.name == "nt"`, a seam tests patch; never
-  "is pwsh installed"). hooks.md: `shell` "Defaults to bash, or to powershell
-  on Windows when Git Bash isn't installed" — bash
-  syntax fed to `powershell -Command` is a hard parse error,
-  not a soft failure, so every session there would silently get neither env
-  nor context. Every handler in a matched group fires unconditionally
-  (hooks.md), so on Windows both always run; the PowerShell variants therefore
-  **select themselves: they run only when Claude Code would find no Git
-  Bash** -- detected the way Claude detects it (`$CLAUDE_CODE_GIT_BASH_PATH`,
-  `Git\bin\bash.exe` under either Program Files, or `git` on PATH with
-  `..\..\bin\bash.exe` beside it), never `Get-Command bash`, which finds the
-  WSL launcher stub -- otherwise a box with both would inject the same context
-  twice per session. The PowerShell
-  `SessionStart` variant is context-only (`dotagents context`), not
-  env+context: `$CLAUDE_ENV_FILE`'s documented effect is "subsequent BASH
-  commands" regardless of which shell wrote it, so writing to it from a
-  PowerShell-shelled hook would feed nothing. Every hook command runs
-  `dotagents` BY PATH -- the project's `.agents/bin` wrapper, else the store's,
-  else `dotagents` on PATH -- never by splicing those bins onto PATH, which
-  `env --diff` would then report as a change and persist into the session. The
-  store is `$AGENTS_HOME`, else `~/.agents` (bash: `${AGENTS_HOME:-$HOME/.agents}`),
-  and the bash `CwdChanged` handler re-pins `AGENTS_PROJECT_ROOT` into
-  `$CLAUDE_ENV_FILE` when the new cwd carries a `.agents/` (the SessionStart pin
-  is only-if-unset, so without this a `cd` into another project would keep the
-  first project's root for the rest of the session).
-- **Windows only, opt-in** (`init --powershell-env-hook` →
-  `ClaudeAgent.powershell_env_hook`; it AUTO-APPROVES every PowerShell tool
-  call, and without the flag `init` removes the entry):
-  `ClaudeAgent._wire_powershell_pretooluse` additionally wires
-  a `PreToolUse` hook matched on `"PowerShell"`, `shell:
-  "powershell"`, running `PRETOOLUSE_POWERSHELL_COMMAND` INLINE — deliberately
-  not a `.ps1` file, since a script file is subject to PowerShell's execution
-  policy (RemoteSigned/AllSigned/Restricted) and dotagents has no code-signing
-  certificate; the inline form runs even
-  under `Restricted`, which blocks every `.ps1` file outright. It is needed
-  because `$CLAUDE_ENV_FILE` is Bash-tool-only (`$env:CLAUDE_ENV_FILE` is
-  empty inside a PowerShell tool call), so the
-  SessionStart env half never reaches the PowerShell tool. Uses `PreToolUse`'s
-  `updatedInput` to prepend a guarded env-loader (`AGENTS_RUNTIME_SET`)
-  to a `PowerShell` tool call's own
-  command — not by trying to persist state across hook invocations, which are
-  each their own fresh process and cannot. Each PowerShell TOOL call is a fresh
-  process too, so the guard never carries over and the loader runs on every
-  call: it therefore runs `env --diff` (the change set), not the whole
-  environment through `Invoke-Expression`. That pipe CAPTURES `env`'s output,
-  which PowerShell decodes with `[Console]::OutputEncoding` (the OEM code page),
-  so the loader switches it to UTF-8 around the call and restores it after.
-  Every literal `\` in the
-  command constant must be a raw string — a bare `\b` in a normal Python string
-  literal silently becomes a backspace character, corrupting the emitted path.
-- **Codex's two hooks are scripts** deployed to `<codex-home>/hooks/`
-  (create-or-refresh, `CodexAgent._deploy_script`) and run as
-  `"<sys.executable>" "<script>"` in both `command` and `commandWindows`
-  (`CodexAgent.hook_commands`) — no shell syntax, no bare `python`/`python3`.
-  `sessionstart_codex_context.py` finds `dotagents` (project `.agents/bin`,
-  store `bin`, PATH) and prints `context --agents codex`; a shell line there
-  ran as cmd.exe's PATH builtin on native Windows. `pretooluse_codex_env.py`,
-  wired as `PreToolUse` with `matcher: "Bash"`, covers the env gap (Codex has
-  NO env-persistence mechanism at any hook event) by prepending a POSIX env
-  loader through `updatedInput` + `permissionDecision: "allow"` (Codex applies
-  `updatedInput` only with `allow`; approval is its separate PermissionRequest
-  event). On a Windows shell it passes commands through unchanged (Codex runs
-  PowerShell there, which cannot parse the prefix); `DOTAGENTS_HOOK_SHELL=
-  posix|windows` overrides the platform check.
+## Command line
+
+`dotagents <command> [options]` (also `python -m dotagents`, or a built `.pyz`).
+`dotagents --help` / `<command> --help` list every flag. Umbrella options:
+`--cmdspath DIR` (repeatable), `--loglevel`, `-v` / `-q`. An umbrella run with no
+subcommand prints its help and exits 2.
+
+| Command | Contract |
+| --- | --- |
+| `init [-g] [--dest D] [--from SRC] [--bin-dir D] [--agents a,b] [--no-hooks] [--powershell-env-hook] [--force] [--dry-run]` | Merge the base block into `<store>/AGENTS.md`, write `<store>/bin/dotagents[.cmd]`, and per active agent (`--agents`, else detected + `claude`) write its include and hooks. `--force` replaces `AGENTS.md`'s content, backed up under `<store>/install_backup/<timestamp>/`. `--from` records its base in `<store>/dotagents/config.toml`. |
+| `overlays add NAME... [-g] [--repo SPEC]... [--copy] [--no-setup] [--no-requires] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/`, publish its skills, run its `setup.py`, recompose the managed block. Every name is resolved before anything is written; a fresh install whose setup fails is rolled back. |
+| `overlays remove NAME... [-g] [--force] [--dry-run]` | Delete the overlay dirs, unpublish the skills they published, recompose the block. Refuses an overlay another installed overlay requires unless `--force`. |
+| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--overwrite] [--prune] [--no-setup] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it). Files that differ from the source are kept unless `--overwrite`; files the source dropped are removed if unedited, else kept unless `--prune`; replaced/pruned files are backed up under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`. Exits 1 when an overlay's repo cannot be loaded or its setup fails. |
+| `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` flagged) and what the repos offer. |
+| `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; manifest, setup, skills, file count, recorded source. |
+| `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
+| `env [-g] [--format F] [--diff]` | Print the assembled environment (`--diff`: only what differs from the caller's) in format `F`: `auto` (default: the calling shell), `export`/`posix`/`sh`/`bash`, `dotenv`/`env`, `powershell`/`pwsh`/`ps`, `cmd`/`bat`/`batch`, `fish`, `json`, `ini`, `yaml`. |
+| `launch [AGENT] [-g] [--command PROG] [--no-context] [--inline] [--write-agent] [--dry-run] [-- ARGS...]` | Run the agent's CLI with the env applied and the context handed over; the exit code is the harness's (`128+N` on signal N). |
+| `findings add\|list\|show\|done\|reopen\|remove\|index\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding, `done` moves it to `processed/` with a required resolution, `INDEX.md` regenerated on every change. |
+| `about [--json]` | `dotagents-cli <version>`, then `<distribution> <version>` per bundled (`.pyz`) or installed package. |
+| `build-pyz [--out P] [--python SHEBANG] [--duho-version V] [--pathlib-next-version V] [--extras a,b]` | Build a zipapp from a source checkout; errors elsewhere. |
+
+Scope flags: `-g` / `--global` selects the user store; `--agents-dir D` overrides the
+store the command resolves to (the project store for `init` / `overlays` / `findings`
+without `-g`, the user store otherwise). For `env`, `context` and `launch`, `-g` means
+"skip the project tiers" and the store is always the user store.
+
+Project root: `init`, `overlays` and `findings` use `install_project_root()`; `env`,
+`context` and `launch` use `project_root_default()` (see `dotagents._scope`).
+
+Command discovery, later source wins on a name: built-ins < bundled `findings` /
+`launch` < per store in contract-A order (system, user, project), each store's
+overlays' `cmds/` then the store's `dotagents/cmds/` < `$AGENTS_CMDS_PATH` entries <
+`--cmdspath`. The project root's own `dotagents/cmds/` is never a source. A module
+whose import raises, or a command whose parser cannot be built, is skipped with a
+warning naming its file. Only module-level command classes register; `_*.py` files
+are skipped.
+
+## `dotagents.cli`
+
+- `main(argv=None) -> int` — the entry point (`dotagents` console script,
+  `python -m dotagents`, `install.py`).
+- `class Dotagents(LoggingArgs, Cli)` — the umbrella; field `cmdspath: list[str]`.
+- `CMDS_PATH_ENV = "AGENTS_CMDS_PATH"`.
+- Re-exported for command modules: `DotAgentsArgs`, `resolve_user_store`,
+  `AGENTS_DIR_ENV`, `BASE_ROOT` (see below).
+
+## `dotagents.cli._common`
+
+- `class DotAgentsArgs(LoggingArgs, Cmd)` — base for a scope-aware command: fields
+  `global_scope: bool = False` (`--global`, `-g`) and
+  `agents_dir: Optional[Path] = None` (`--agents-dir`); `resolve_scope(*,
+  project_root=None) -> Scope` (via `_scope.resolve_scope`). Subclass it alone
+  (`class X(DotAgentsArgs)`), define `_parsername_` and `__call__(self) -> int`. A
+  subclass may redeclare a field with the same type and default to change its help.
+- `BASE_ROOT: Path` — the bundled base overlay dir (`_overlay/`).
+- `STORE_CONFIG = "dotagents/config.toml"`;
+  `read_store_config(dest) -> dict[str, str]` (`{}` when absent or invalid);
+  `write_store_config(dest, values) -> Path`.
+- `store_base(dest, logger=None) -> Path` — the base recorded by `init --from`, else
+  `BASE_ROOT` (also when the recorded one no longer resolves, with a warning).
+- `BASE_AGENTS_TEMPLATE = "dotagents/templates/AGENTS.md"`,
+  `BASE_PROJECT_TEMPLATE = "dotagents/templates/PROJECT.md"`,
+  `AGENTS_MD_PLACEHOLDER = "{{AGENTS_MD}}"`.
+- `base_agents_text(src, dest, *, project=False) -> str` — the base block for the
+  store at `dest`: the project template for a project store when the base has one,
+  else the user template, else `<src>/AGENTS.md`; `{{AGENTS_MD}}` rendered as the
+  absolute POSIX path of `<dest>/AGENTS.md`.
+- `OVERLAY_ROOT_NOTE: str` — the line emitted above overlay routing lines that use
+  `$<NAME>_OVERLAY_ROOT`.
+
+## Commands — `dotagents.cli.init`, `dotagents.cli.overlays`, `dotagents.cli.context`, `dotagents.cli.env`, `dotagents.cli.about`, `dotagents.cli.build_pyz`
+
+One `duho` command class per command above; fields are the flags, `__call__()`
+returns the exit code.
+
+- `init.Init`; `overlays.Overlays` (umbrella) with `OverlayAdd`, `OverlayRemove`,
+  `OverlayList`, `OverlaySync`, `OverlayShow`; `context.Context` (`FORMATS =
+  ("markdown", "system-reminder", "json")`); `env.Env`; `build_pyz.BuildPyz`;
+  `about.About`.
+- `about`: `DISTRIBUTION = "dotagents-cli"`, `BUNDLE_FILE = "_bundle.json"` (written
+  by `build-pyz` into the package), `RUNTIME_PACKAGES = ("duho", "pathlib_next",
+  "uritools", "netimps", "requests")` (the only packages a plain install reports);
+  `bundle_manifest() -> Optional[dict]`, `installed_packages() -> dict[str, str]`,
+  `packages() -> tuple[dict[str, str], Optional[dict]]` (the bundle's packages, else
+  the installed ones; the CLI itself in neither).
+
+## `dotagents._scope`
+
+- `LEVEL_NAMES` — `default`, `overlay`, `system`, `user`, `project`, `project-root`;
+  reserved, never overlay names.
+- `class Scope(level, agents_root, *, user_root=None, project_root=None,
+  system_root=None)` — `level` `"user"` / `"project"`; `agents_root` the scope's own
+  store (the write target). A project scope defaults `user_root` to
+  `resolve_user_store()` and `project_root` to `agents_root.parent`; a project whose
+  `agents_root` is the user store becomes the user scope (keeping `project_root`).
+  `system_root` defaults to `system_root_default()`.
+  - `Scope.of(*, agents_dir, project_root=None, global_scope=False) -> Scope` — the
+    read walk's scope: user scope when `global_scope` or no `project_root`, else a
+    project scope at `<project_root>/.agents`.
+  - Properties: `global_scope` (user level), `system_store` (= `system_root`),
+    `project_store` (`None` in the user scope), `stores` (system, user, project —
+    existing roles only, a directory listed once), `overlays`
+    (`Overlay.installed(*stores)`), `overlay_root` (`<agents_root>/overlays`),
+    `shared_skills_dir` (`<agents_root>/skills`), `cmds_dir`
+    (`<agents_root>/dotagents/cmds`).
+  - `store_level(store) -> str` — `"system"` / `"user"` / `"project"`; `ValueError`
+    for another path.
+  - `overlay_dir(name) -> Path` — `<overlay_root>/<name>`.
+  - `paths(*names, include_missing=False) -> list[tuple[str, Path, Optional[Path]]]`
+    — the contract-A walk. Each name is a filename (resolved at every level) or a
+    dict `{"default": ..., "overlay": ..., "<level>": ...}` where an empty or missing
+    entry skips that level. Returns `(level, path, root)`: for an overlay `level` is
+    its dir name and `root` its dir; `root is None` for every other level. Existing
+    paths only unless `include_missing`.
+- `resolve_scope(global_scope=False, *, agents_dir=None, project_root=None) -> Scope`
+  — the write scope: `-g` → user scope at `resolve_user_store(agents_dir)`; else a
+  project scope at `agents_dir` (if given) or `<root>/.agents`, the root being
+  `project_root` or `install_project_root()`.
+- `SYSTEM_ROOT_ENV = "AGENTS_SYSTEM_ROOT"`; `system_root_default() -> Optional[Path]`
+  — the system store, or `None` (unset on Windows, not absolute, not a directory,
+  or writable by a non-administrator — the last two with a warning). Cached per
+  process and value.
+- `AGENTS_DIR_ENV = "AGENTS_HOME"`; `resolve_user_store(agents_dir=None) -> Path` —
+  `agents_dir` → `$AGENTS_HOME` → `~/.agents`.
+- `project_root_default() -> Path` — `$AGENTS_PROJECT_ROOT` → `$CLAUDE_PROJECT_DIR`
+  → the cwd.
+- `install_project_root() -> Path` — the pinned root (same two vars) while the cwd
+  is inside it; outside it, the nearest ancestor of the cwd with a `.git` or its own
+  `.agents` (never `~` or above, never a store's parent), else the cwd, with a
+  warning; no pin: the cwd.
+- `filter_names(names, pattern) -> list[str]` — `fnmatch` filter; `None` / `"*"`
+  keep all.
+- `OverlaySource(root)` — a `_sources.DirRepo` over `root`.
+- `resolve_source(repos=None, *, scope=None, logger=None, allow_empty=False) ->
+  CompositeSource` — `_sources.resolve` over `repos`, the env repos, then the
+  project store's and the user store's registries, caching under
+  `<user store>/.cache/overlays`. `SourceError` when nothing is configured, unless
+  `allow_empty`.
+
+## `dotagents._overlays`
+
+- `DEFAULT_PRIORITY = 500`.
+- `parse_manifest_text(text, origin="overlay.toml") -> Optional[dict]` — the TOML
+  document via `tomllib` / `tomli`, else a built-in reader (top-level strings,
+  string arrays including multi-line strings, an integer); `None` plus one warning
+  when it is not valid TOML.
+- `class InstallResult` — what `install_to` did: `written`, `unchanged`,
+  `kept` (differ from source), `removed` (dropped by the source), `orphans_kept`
+  (dropped but edited), `backed_up`, `lines`; property `skipped` (= unchanged +
+  kept). Unpacks as `(written, skipped, lines)`.
+- `class Overlay(path, store=None)` — one overlay directory; `os.PathLike`; equal
+  and hashed by `path`; nothing read at construction.
+  - Class data: `NAME_RE`, `RESERVED_NAMES` (Windows device names),
+    `MANIFEST_NAME = "overlay.toml"`, `SETUP_SCRIPT_NAMES = ("setup.py",)`,
+    `SKIP_PARTS` (`.git`, `__pycache__`, tool caches, `node_modules` — never
+    installed), `INSTALL_RECORD = ".dotagents-install.json"`, `DEFAULT_PRIORITY`.
+  - `Overlay.is_valid_name(name) -> bool` — `NAME_RE` (a letter, then letters,
+    digits, `_`, `.`, `-`, ending in a letter or digit), not a `LEVEL_NAMES` entry,
+    not a Windows device name (with or without an extension).
+  - `Overlay.normalize_name(name) -> str` — lowercase, `_` and `.` → `-`: the
+    canonical name, the install dir name, the name compared everywhere.
+  - `Overlay.root_var_for(name) -> str` — `normalize_name(name)` upper-cased, every
+    non-alphanumeric → `_`, plus `_OVERLAY_ROOT`.
+  - Properties: `name` (dir name), `normalized_name`, `root_var`, `is_valid`,
+    `manifest_path`, `priority` (manifest value, else `DEFAULT_PRIORITY`),
+    `sort_key` (`(priority, manifest name, dir name)`), `install_record_path`;
+    attribute `store` (the store it was discovered in, else `None`).
+  - `Overlay.discover(root, store=None) -> list[Overlay]` — valid-named dirs
+    directly under one `overlays/` root, sorted; warns when two normalize alike.
+  - `Overlay.installed(*stores) -> list[Overlay]` — `discover` over each
+    `<store>/overlays` in order (`None` skipped), each result stamped with its
+    store; an overlay whose normalized name appears in a later store is dropped
+    (the later copy shadows it).
+  - `Overlay.sort_by_priority(overlays) -> list[Overlay]` — sorted by `sort_key`.
+  - `read_manifest() -> dict` — keys `name`, `description`, `routing`, `rules`,
+    `requires` (valid names only, normalized, de-duplicated), `priority`; a missing
+    or invalid manifest gives empty contributions.
+  - `find_setup_script() -> Optional[Path]`.
+  - `run_setup(*, agents_dir, dry_run, logger, scope_root=None, scope_level=None) ->
+    Optional[int]` — runs `setup.py` under `sys.executable` with cwd = the overlay
+    dir and env `AGENTS_HOME=agents_dir`, `AGENTS_SCOPE_ROOT=scope_root or
+    agents_dir`, `AGENTS_SCOPE=scope_level` (when given), `AGENTS_OVERLAY_DIR`;
+    returns its exit code, `None` when there is no script, `0` on `dry_run`.
+  - `files() -> list[Path]` — every file to install: not the manifest, not the
+    install record, not under `SKIP_PARTS`, not `*.pyc`.
+  - `read_install_record() -> dict` — `{"source": dict | None, "files": {rel:
+    sha256}}` of an installed copy; `{}` when absent.
+  - `rule_blocks(rel_paths) -> tuple[list[str], list[str]]` — `(blocks, warnings)`:
+    each file's leading `- **` bullets up to its next `## ` heading; a path outside
+    the overlay, missing or unreadable is a warning.
+  - `install_to(dest_overlay_dir, dry_run, overwrite=False, *, prune=False,
+    backup_root=None, source=None) -> InstallResult` — copy `files()` in; a file
+    that differs is kept unless `overwrite`; `overlay.toml` always refreshed; a
+    recorded file the source dropped is removed when unedited, kept unless `prune`
+    when edited; replaced/pruned files copied under `backup_root` first; writes the
+    install record (`source`, or the previous one when `None`).
+  - `apply_to(dest, dry_run)` — create-if-absent copy of `files()` into `dest` at
+    their relative paths; returns `(written, skipped, lines)`. Not used by the
+    commands.
+  - `merge_rules_into(agents_md, dry_run, logger) -> bool` — fold this overlay's
+    routing and rules into an existing managed block in place. Not used by the
+    commands (they use `recompose_overlay_block`).
+- `recompose_overlay_block(agents_md, base_block, overlays, dry_run, logger) -> bool`
+  — rebuild the managed block from the pristine `base_block` over `overlays` in
+  `sort_key` order; creates the file when absent; content outside the markers kept;
+  returns whether it changed (`False` and a warning when the file has no block).
+
+## `dotagents._sources`
+
+Spec grammar: `[git+]<location>[@<ref>][#<path>]`. A location ending `.git`, starting
+`git@` / `ssh://` / `git://`, or prefixed `git+` is git (`@ref` only for git);
+another `scheme://` is a URL; anything else a local path. For a **repo** `#path` names
+a directory of overlays or a registry file (default: the root); for a **source**
+(registry value) it names the overlay's root dir (default: the repository root).
+
+- `class SourceError(SystemExit)`; `class OverlayNotFound(SourceError)` — raised only
+  when every repo loaded and none offers the name.
+- `REPO_ENV_DEFAULT = "AGENTS_OVERLAYS_REPO"`, `REPO_ENV_PREFIX =
+  "AGENTS_OVERLAYS_REPO_"`, `REGISTRY_FILE_STEM = "dotagents"`,
+  `REGISTRY_FILE_SUFFIXES = (".json", ".toml", ".yaml", ".yml")`,
+  `NO_SOURCE_MESSAGE`.
+- `class Spec(kind, location, ref=None, path=None)` — `kind` `"git"` / `"url"` /
+  `"dir"`; `display() -> str` (credentials removed).
+- `parse_spec(text) -> Spec` — `ValueError` when empty; `SourceError` when a git
+  location or ref starts with `-`.
+- `redact(text) -> str` — URL userinfo removed, query values masked.
+- `uri_path_class()` — `pathlib_next.uri.UriPath`, or `None` without the `uri` extra.
+- `url_scheme(location) -> str` — the lower-cased scheme.
+- `class SourceCache(root, logger=None)` — `repo_dir(location, ref=None) -> Path`
+  (`<root>/<slug>-<hash>`); `checkout(spec) -> Path` (clone or fetch, once per
+  process; a failed fetch of an existing checkout is a warning);
+  `materialize(spec) -> Path` (a `url` spec: `file://` in place, anything else
+  synced into `<root>/uri/` once per process; needs the `uri` extra). Creates a
+  `.gitignore` of `*` in `root`.
+- `parse_document(text, suffix, origin) -> dict[str, str]` — a registry's
+  name → spec map (the document or its `overlays` table); TOML needs Python 3.11+ or
+  `tomli`, YAML `pyyaml`.
+- `class DirRepo(root, origin=None)` — `available() -> list[str]`, `has(name) ->
+  bool`, `overlay_dir(name) -> Path` (literal, normalized, or any dir whose
+  normalized name matches; `OverlayNotFound` otherwise).
+- `class RegistryRepo(origin, entries, cache, base=None)` — `root` (= origin),
+  `key_for(name) -> Optional[str]`, `available()`, `has(name)`, `overlay_dir(name)`
+  (an entry that is a directory of overlays yields the one called `name`).
+- `is_relative(spec) -> bool`; `resolve_relative(spec, base, *, origin, key) -> Spec`
+  — a relative entry resolved beside the registry (same repo and ref inside git,
+  the URL beside it for a URL registry).
+- `locate(spec, cache) -> Path` — the local path a spec names; `SourceError` when
+  missing.
+- `load_repo(spec_text, cache)` — `DirRepo` for a directory, `RegistryRepo` for a
+  file (or an http(s) registry fetched with the standard library when the `uri`
+  extra is absent).
+- `source_record(spec) -> dict` — `{kind, location, ref, path, lossy}` for an
+  install record: a local location made absolute, credentials removed, `lossy`
+  when removal dropped something. `spec_from_record(record) -> Optional[Spec]`;
+  `record_display(record) -> str`.
+- `registry_files(*stores) -> list[Path]` — the first existing
+  `<store>/dotagents.<suffix>` per store.
+- `env_repos(environ=None) -> list[str]` — `$AGENTS_OVERLAYS_REPO_<KEY>` values by
+  sorted KEY, then `$AGENTS_OVERLAYS_REPO`.
+- `class CompositeSource(specs, cache)` — repos in order, loaded lazily: `root`
+  (display string), `repos()`, `available(on_error=None) -> list[str]` (with
+  `on_error(spec, exc)` a broken repo is reported, not raised), `overlay_dir(name)
+  -> Path`, `locate(name) -> tuple[Path, spec]` (first repo offering it), `only(spec)
+  -> CompositeSource` (same cache), `find_repo(record) -> Optional[spec]` (the spec
+  in the chain an install record describes).
+- `resolve(specs, *, cache_root, stores, environ=None, logger=None,
+  allow_empty=False) -> CompositeSource` — `specs`, then `env_repos`, then
+  `registry_files(*stores)`; `SourceError(NO_SOURCE_MESSAGE)` when empty unless
+  `allow_empty`.
+
+## `dotagents._env`
+
+Assembly order (`get_environment`): identity (`stamp_identity`), then the roots,
+then `PATH`, then `AGENTS_PYTHONPATH`, then the env files, then the proxy model.
+
+- Roots: `AGENTS_HOME` and `AGENTS_PROJECT_ROOT` name the stores walked, absolute —
+  an inherited value naming the same directory holds, another is replaced; in a
+  user-scope walk `AGENTS_PROJECT_ROOT` is set only when unset. Only when unset:
+  `AGENTS_PYTHON` (`sys.executable`) and one `<NAME>_OVERLAY_ROOT` per
+  `scope.overlays` (a value pinned to the user store's copy is re-pointed when a
+  project copy shadows it).
+- `PATH`: every level's `bin` (contract A, not project-root, missing dirs included)
+  prepended.
+- `AGENTS_PYTHONPATH`: every existing level's `lib`, highest precedence first,
+  `os.pathsep`-joined; removed when there are none. Never added to `PYTHONPATH`.
+- Env files: all `pre.env.py` / `pre.env` (+ the project store's `pre.local.env`),
+  then all `env.py` / `env` (+ `local.env`), contract-A order, regular files only,
+  each evaluated against everything before it. The project root contributes none.
+  A layer that raises is skipped with a warning.
+- Proxy: `AGENTS_PROXY` seeded when unset from `AGENTS_WEBFETCH_PROXY_URL`, then
+  `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` (either case); each set proxy variable
+  mirrored into its other case.
+
+API:
+
+- `class EnvChanges(dict)` — vars to set, plus `removed: set[str]` (vars to unset;
+  never also a key).
+- `get_environment(scope, *, base_env=None, explicit=None, logger=None) ->
+  EnvChanges` — the changes against `base_env` (default `os.environ`); `explicit`
+  names the agent for the identity, overriding inherited identity vars.
+- `get_diff(scope, *, base_env=None, explicit=None, logger=None) -> EnvChanges` —
+  only the values that differ from `base_env`, plus removals of vars it has.
+- `get_env_from_py(env_py, base_env, *, level="", global_scope=False, logger=None)
+  -> EnvChanges` — runs `<interpreter(base_env)> env.py --level <level> --agent
+  <level> [--global]` with `base_env` (plus OS bootstrap vars and
+  `PYTHONIOENCODING=utf-8`), `AGENTS_PYTHONPATH` prepended to its `PYTHONPATH`, in
+  the caller's cwd. Stdout: one JSON object, or one per line merged in order.
+  Values must be strings; `null` → `removed`; other types, invalid keys (empty,
+  `=`, NUL, non-UTF-8) and values with NUL or non-UTF-8 bytes are skipped with a
+  warning naming the key. Non-zero exit or unparseable output → empty, with a
+  warning; values are never logged.
+- `get_env_from_file(env_file, base_env, logger=None) -> EnvChanges` — sources the
+  file in bash (`set -a`, output discarded) and returns what changed, `unset`
+  included, from before/after snapshots taken in one bash process (MSYS2 `*PATH`
+  values converted back to Windows form). No bash, a failed `source` or an `exit`
+  in the file → empty, with a warning.
+- `find_bash(logger=None) -> Optional[str]` — the bash for plain env files, resolved
+  once per process: `bash` on `PATH` on POSIX; on Windows Git's bash (beside `git`
+  on `PATH`, then the standard install dirs, then `PATH`), accepted only if it is
+  MSYS2 / Cygwin (never the WSL launcher). Warns once when there is none.
+- `interpreter(osenv) -> str` — `osenv["AGENTS_PYTHON"]` when it names a file, else
+  `sys.executable`.
+- `get_bin_paths(scope) -> list[Path]`, `get_lib_paths(scope) -> list[Path]`
+  (existing dirs only), `get_overlay_roots(scope) -> list[Path]` (the dirs of
+  `scope.overlays`), `resolve_env_files(scope) -> list[tuple[str, Path,
+  Optional[Path]]]` (pre tier then main tier, as `Scope.paths` tuples).
+- `apply_proxy_model(osenv) -> dict[str, str]` — the proxy changes described above.
+- `FORMAT_ALIASES: dict[str, str]` (alias → canonical format), `KNOWN_FORMATS`
+  (every accepted `--format`, `auto` included), `detect_shell_format() -> str`
+  (from the parent-process chain; `"powershell"` on Windows / `"export"` elsewhere
+  when unknown; never raises).
+
+## `dotagents._context`
+
+- `assemble_context(agent, scope, *, inline=False, expand_vars=True) -> str` — the
+  context markdown, or `""` when nothing is left after subtracting
+  `agent.loaded_paths(project_root)`. Sources in order: overlay `CONTEXT.md`s by
+  `Overlay.sort_key`, then contract-A `AGENTS.md` (every store and the project root)
+  and `AGENTS.local.md` (project store and project root), each prefixed
+  `<!-- Source: <path> -->`. Then a skills listing (`- **name** (`<SKILL.md>`):
+  description`, from each skill's leading frontmatter; a project skill wins).
+  `<PROJECT_ROOT>` and `<NAME_OVERLAY_ROOT>` placeholders expand; with
+  `expand_vars` so do `$NAME_OVERLAY_ROOT` / `${NAME_OVERLAY_ROOT}`. `inline`
+  appends the on-demand `.md` files the sources reference, each resolved against
+  its own source's directory (a project's also against its `.agents`; a user or
+  system source never into the project).
+- `assemble_context_data(agent, scope, *, inline=False, expand_vars=True) -> dict`
+  — `{"agent", "harness", "sources", "context", "skills": [{"name",
+  "description", "path"}]}`; `context` without the skills listing.
+
+## `dotagents._agents`
+
+- `class Agent` — the adapter base. Class data: `name` (registry name),
+  `harness_id` (e.g. `claude-code`), `vendor`, `model_source_vars`,
+  `detect_env_vars`, `context_files` (config-file detection), `harness_loads`
+  (paths the harness loads itself: `~/` or `/` absolute, else under the project
+  root), `context_target` (the file `write_context` merges into, relative to the
+  project root; `""` = none), `launch_command` (the CLI program; `""` = none),
+  `scope_level` / `project_root` (set by `init`).
+  - `detect_env(environ) -> bool` — any `detect_env_vars` present.
+  - `detect(root) -> bool` — any `context_files` exists under `root`.
+  - `resolve_model(environ) -> Optional[str]` — first set `model_source_vars` value.
+  - `write_base_config(dest, src, base_agents_text, *, force, dry_run, logger) ->
+    None` — the harness's link to `<dest>/AGENTS.md` (the store file itself is
+    written by `init`). Base: nothing.
+  - `write_context(project_root, effective_context, *, force, dry_run, logger) ->
+    None` — merge a `dotagents:context` block into `<project_root>/<context_target>`.
+  - `loaded_paths(project_root) -> list[Path]` — resolved `harness_loads`.
+  - `wire_hooks(dest, *, dry_run, logger, config_root=None) -> None` — merge the
+    harness's hooks; `config_root` redirects its config dir. Base: nothing.
+  - `launch_context_args(context_file) -> Optional[list[str]]` — argv appending the
+    context to the system prompt, or `None` (then `launch` uses `write_context`).
+- Adapters (`name`: harness id, `context_target`, `launch_command`, markers):
+  - `ClaudeAgent` (`claude`: `claude-code`, `.claude/CLAUDE.md`, `claude`,
+    `CLAUDECODE` / `CLAUDE_CODE_ENTRYPOINT`) — include `@<store>/AGENTS.md` (relative
+    when the store is beside the config dir) in `<$CLAUDE_CONFIG_DIR|~/.claude>/CLAUDE.md`
+    (user) or `<project>/.claude/CLAUDE.md`; `loaded_paths` follows the entry files'
+    `@` imports (up to 4 hops; code spans and fences skipped) in the user file and in
+    the project root's and every ancestor's `CLAUDE.md` / `CLAUDE.local.md` /
+    `.claude/CLAUDE.md`, plus each `AGENTS.md` Claude reads as a fallback;
+    `wire_hooks` links each `<store>/skills/<name>` into `<config>/skills/<name>`
+    and merges `SessionStart` + `CwdChanged` (bash; plus `shell: "powershell"`
+    variants on Windows that run only without Git Bash, removed elsewhere) into
+    `settings.json` (user) or `<project>/.claude/settings.local.json`, and with
+    `powershell_env_hook = True` (Windows) a `PreToolUse` hook matched on
+    `PowerShell` (`PRETOOLUSE_STATUS`). Command constants: `SESSION_START_COMMAND`,
+    `CWD_CHANGED_COMMAND`, `SESSION_START_COMMAND_POWERSHELL`,
+    `CWD_CHANGED_COMMAND_POWERSHELL`, `PRETOOLUSE_POWERSHELL_COMMAND`;
+    `ENTRY_FILES`. `launch_context_args` → `--append-system-prompt-file <file>`.
+  - `CodexAgent` (`codex`: `codex`, `AGENTS.md`, `codex`, any `CODEX_SANDBOX*`) —
+    user scope only: deploys `SESSION_START_HOOK_SCRIPT` and
+    `PRETOOLUSE_HOOK_SCRIPT` into `<$CODEX_HOME|~/.codex>/hooks/`, merges
+    `SessionStart` and `PreToolUse` (matcher `Bash`) into `hooks.json`, and
+    `remove_env_block(*, dry_run, logger, config_root=None)` deletes the old
+    `ENV_BLOCK_BEGIN` / `ENV_BLOCK_END` block from `config.toml`.
+    `CodexAgent.hook_commands(root, script_name) -> tuple[str, str]` —
+    `(command, commandWindows)` running the script under `sys.executable`.
+  - `AntigravityAgent` (`antigravity`: `antigravity`, `.agents/rules/dotagents.md`,
+    no CLI, never detected) — user scope only: deploys
+    `PREINVOCATION_HOOK_SCRIPT` into `~/.gemini/config/hooks/` and merges a
+    `PreInvocation` hook under the `"dotagents"` key of `~/.gemini/config/hooks.json`.
+  - `GeminiAgent` (`gemini`: `gemini-cli`, `GEMINI.md`, `gemini`, `GEMINI_CLI`) —
+    `@<store>/AGENTS.md` import in `~/.gemini/GEMINI.md` (user) or
+    `<project>/GEMINI.md`; no hooks.
+  - `CursorAgent` (`cursor`: `cursor`, `.cursor/rules/dotagents.mdc` created with
+    `alwaysApply: true`, `cursor-agent`, `CURSOR_AGENT`), `CopilotAgent`
+    (`copilot`: `copilot`, `.github/copilot-instructions.md`, `copilot`, no marker)
+    — no include, no hooks.
+  - `PiAgent` (`pi`: `pi`, `.pi/APPEND_SYSTEM.md`, `pi`, `PI_CODING_AGENT`) — user
+    scope only: a managed block pointing at the store's `AGENTS.md` in
+    `<$PI_CODING_AGENT_DIR|~/.pi/agent>/AGENTS.md`; `launch_context_args` →
+    `--append-system-prompt <text>` on POSIX, `None` on Windows.
+- `get_agent(name) -> Optional[Agent]` — a fresh adapter by registry name.
+- `get_all_agents() -> list[Agent]` — one of each, registry order (claude, gemini,
+  antigravity, codex, cursor, copilot, pi).
+- `detect_runtime_agent(environ, explicit=None) -> Optional[Agent]` — `explicit`
+  (registry name) > `$AGENTS_HARNESS` (registry name or harness id) > markers;
+  `None` in a plain shell.
+- `resolve_active_agent(environ, explicit=None, root=None) -> Agent` —
+  `detect_runtime_agent`, else config-file `detect(root or cwd)`, else
+  `ClaudeAgent()`.
+- `stamp_identity(environ, explicit=None, root=None) -> dict[str, str]` —
+  `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENT` (= harness id) and `AGENTS_MODEL` when
+  derivable, for the runtime agent only (`{}` in a plain shell); never replaces a
+  value in `environ` unless `explicit` names a known agent. `root` is unused.
+
+## `dotagents._merge`
+
+Marker lines (a marker counts only on a line of its own, outside fenced code):
+
+- `BEGIN_MARKER = "<!-- dotagents:begin -->"`, `END_MARKER = "<!-- dotagents:end -->"`,
+  `CONTEXT_BEGIN_MARKER = "<!-- dotagents:context:begin -->"`,
+  `CONTEXT_END_MARKER = "<!-- dotagents:context:end -->"`.
+- `find_block(text, begin_marker=BEGIN_MARKER, end_marker=END_MARKER) ->
+  Optional[tuple[int, int]]` — the block's span, markers included.
+- `merge_block(target, block_source_text, *, force=False, dry_run=False,
+  backup_root=None, begin_marker=..., end_marker=..., append=False) -> str` — returns
+  `"created"`, `"block-inserted"` (prepended, or appended with `append`),
+  `"block-refreshed"`, `"skipped (present)"` (block already current), or with
+  `force` `"unchanged"`, `"replaced (--force, backed up)"` or
+  `"replaced (--force)"`. Content outside the markers is kept unless `force`
+  (whole file replaced; the original copied under `backup_root`, never over an
+  earlier backup, `external/…` for a file outside the store). A begin marker with
+  no end is refused (`SystemExit`). A UTF-8 BOM is read through and not written.
+- `remove_block(target, *, dry_run=False, begin_marker=..., end_marker=...) -> str`
+  — `"removed"` or `"absent"`.
+- `merge_include_line(target, include_line, *, force=False, dry_run=False,
+  backup_root=None) -> str` — an `@path` line in a managed block appended to a
+  harness entry file; `"skipped (present)"` when the line is already anywhere in it.
+- `merge_context_block(target, context_text, *, dry_run=False) -> str` — the
+  `dotagents:context` block, appended after existing content.
+- `timestamped_backup_root(dest) -> Path` — `<dest>/install_backup/<timestamp>`, one
+  per store per process.
+
+## `dotagents._hooks`
+
+Settings schema (Claude Code and Codex): `hooks.<Event>` is a list of matcher
+objects `{"matcher"?: str, "hooks": [{"type": "command", "command": str, ...}]}`.
+
+- `STATUS_PREFIX = "dotagents: "` — our hooks' `statusMessage` is
+  `STATUS_PREFIX + label`; that label is the hook's identity.
+- `build_hook_entry(command, *, matcher=None, status_message=None, shell=None,
+  command_windows=None) -> dict` — one matcher object; `None` keys omitted;
+  `command_windows` is written as `commandWindows`.
+- `merge_hook(existing, command, *, matcher=None, status_message=None, shell=None,
+  command_windows=None) -> tuple[list, bool]` — `(entries, changed)`. An identical
+  entry is kept; ours in another shape (same status label, or the bare label on a
+  command running dotagents) is refreshed in place, keeping keys the user added;
+  duplicates dropped; foreign and malformed entries kept verbatim; a foreign hook
+  sharing an entry with ours keeps the entry, ours moves out. Never raises.
+- `remove_hook(existing, status_message) -> tuple[list, bool]` — drop ours;
+  entries left empty are dropped.
+- `load_settings(path) -> dict` — `{}` when missing or empty; invalid JSON raises
+  `SystemExit`.
+- `write_settings(path, data, *, dry_run=False) -> None` — 2-space JSON, non-ASCII
+  kept, LF, atomic.
+
+## `dotagents._skills`
+
+- `PUBLISHED_RECORD = ".dotagents-published.json"` — in the shared skills dir: the
+  tree digest of each skill published as a copy.
+- `class SyncResult(success, mode, message="")` — truthy iff `success`; `mode`
+  `"symlink"` / `"copy"` / `"conflict"` / `"error"` / `"none"`.
+- `sync_path(source, target, *, prefer_symlink=True, force=False) -> SyncResult` —
+  symlink (else copy) `source` at `target`; an existing correct link or matching copy
+  succeeds unchanged; anything else there is a conflict unless `force`.
+- `unsync_path(target, source) -> SyncResult` — remove `target` only when it is a
+  link to `source` or a copy matching it.
+- `resync_path(source, target, *, prefer_symlink=True, published_digest=None,
+  overwrite=False) -> SyncResult` — refresh a copy only when it still matches
+  `published_digest`, or with `overwrite`.
+- `publish_overlay_skills(overlay_dir, shared_skills, *, copy=False, logger=None) ->
+  int` — each `<overlay_dir>/skills/<name>` into `shared_skills`; an occupied target
+  is kept with a warning. Returns the count published.
+- `resync_overlay_skills(overlay_dir, shared_skills, *, copy=False, overwrite=False,
+  logger=None) -> int` — publish new skills, refresh unedited copies.
+- `owned_overlay_skills(overlay_dir, shared_skills, *, logger=None) -> list[str]` —
+  the published names that are this overlay's (link to its skill, or matching copy).
+- `unpublish_skills(shared_skills, names, *, logger=None) -> int` — remove them, then
+  drop broken links and an emptied dir.
+- `remove_overlay_skills(overlay_dir, shared_skills, *, logger=None) -> int` —
+  `owned_overlay_skills` + `unpublish_skills`.
+- `clean_broken_syncs(shared_skills, logger=None) -> None` — drop dangling symlinks.
+
+## `dotagents._wrappers`
+
+- `POSIX_TEMPLATE`, `POSIX_TEMPLATE_REL` (pyz path relative to the wrapper),
+  `POSIX_TEMPLATE_MODULE` (`"<python>" -m dotagents`) — the `sh` wrapper bodies.
+- `write_wrappers(bin_dir, pyz_path, python=None, *, relative=False) -> list[Path]` —
+  `dotagents` (sh) and `dotagents.cmd`, both always, running the `.pyz`.
+- `write_module_wrappers(bin_dir, python=None) -> list[Path]` — both forms running
+  `"<python>" -m dotagents` (`python` defaults to `sys.executable`).
+- `wrapper_points_at_pyz(bin_dir) -> bool`.
+- `check_path_warning(bin_dir) -> Optional[str]` — a warning with the PATH line to
+  add, or `None` when `bin_dir` is on `PATH`.
+
+## `dotagents._fs`
+
+- `write_text_lf(path, text, *, atomic=False) -> Path` — UTF-8, LF line endings on
+  every platform, parent dirs created; `atomic` writes a sibling temp file and
+  `os.replace`s it. Every file dotagents writes goes through this.
+
+## Package data
+
+- `_overlay/dotagents/templates/AGENTS.md`, `PROJECT.md` — the user and project
+  block templates (`{{AGENTS_MD}}` placeholder).
+- `_overlay/dotagents/cmds/findings.py`, `launch.py` — the bundled command modules
+  (always a discovery source; never copied into a store). `launch` exports
+  `AGENTS_CONTEXT_FILE` and writes the context to
+  `<user store>/.cache/launch/<agent>-<sha256[:12] of the project root, or "-g">.md`.
+- `_overlay/dotagents/hooks/` — `sessionstart_codex_context.py`,
+  `pretooluse_codex_env.py`, `preinvocation_antigravity_context.py`: copied into the
+  harness's config dir by `wire_hooks`; standard library only.
 
 ## Environment variables
 
-The prefix split (D80): **`AGENTS_*`** names everything about the `.agents` / agent
-world (paths, scope, overlays, sync) — non-secret, safe to emit; **`DOTAGENTS_*`** is
-reserved for genuinely tool-internal config and secrets, so the "never print
-`DOTAGENTS_*` values" leak guard (D48) stays a simple blanket ban over exactly the
-sensitive set.
+Prefix rule: `AGENTS_*` are non-secret and may be printed; `DOTAGENTS_*` are
+tool-internal and never printed (`env` leaves inherited ones out of its full output).
 
-Config / path / sync vars (`AGENTS_*`, non-secret — read, and some emitted):
+Read:
 
-- `AGENTS_HOME` — the configurable user-scope store path (default `~/.agents`). Also
-  **emitted** by `dotagents env` (D79) and set for overlay setup scripts / sync hooks.
-- `AGENTS_SYSTEM_ROOT` — the machine-wide store (default `/etc/agents` on
-  POSIX, none on Windows), walked first for overlays/bin/lib/env/cmds/AGENTS.md;
-  nothing installs into it. It must be an absolute path to an existing dir that
-  only administrators can write (POSIX: root-owned, not group/world-writable;
-  Windows: no allow-write ACE outside Administrators/SYSTEM/TrustedInstaller),
-  else it is skipped with a warning (`_scope.system_root_default()`).
-- `AGENTS_STORE_DIR` — per-project store location (absolute paths allowed).
-- `AGENTS_OVERLAYS_REPO` — the default overlay repo for `overlays` (always a
-  collection: a directory of overlays or a registry file, at a local path, an
-  http(s) URL, or inside a git `<repo>[@ref][#path]`; a registry's values are
-  sources, one overlay each, a git path being the overlay's root, a relative
-  path being relative to the registry file -- same repo and ref for a
-  registry inside a checkout, `_sources.resolve_relative`), and
-  `AGENTS_OVERLAYS_REPO_<KEY>` — one repo per variable, ordered by KEY, consulted
-  before the default; both after `--repo` and before the stores'
-  `dotagents.{json,toml,yaml}` registries and the bundled `overlays/`.
-  `_sources` is the module; `resolve_source(repos, scope=)` the entry point.
-  A non-git `scheme://` location is a pathlib_next `UriPath` when the `uri`
-  extra is installed (`_sources.uri_path_class()`), materialized by
-  `SourceCache.materialize` into `<store>/.cache/overlays/uri/` (a directory
-  synced with `PathSyncer(remove_missing=True)`, a file copied, once per
-  process); `file://` is local; without the extra only an http(s) REGISTRY
-  works (stdlib fetch).
-- `AGENTS_CMDS_PATH` — extra command-module search paths (os.pathsep-split).
-- `AGENTS_OVERLAY_DIR` — set for an overlay's setup script (its own installed dir).
-- `AGENTS_REMOTE` / `AGENTS_SYNC_MESSAGE` — private-store sync (tokenless remote URL /
-  commit message).
+- `AGENTS_HOME` — the user store. `AGENTS_PROJECT_ROOT`, then `CLAUDE_PROJECT_DIR` —
+  the project root pin. `AGENTS_SYSTEM_ROOT` — the system store.
+- `AGENTS_OVERLAYS_REPO`, `AGENTS_OVERLAYS_REPO_<KEY>` — overlay repos (after
+  `--repo`). `AGENTS_CMDS_PATH` — extra command dirs.
+- `AGENTS_HARNESS` — the running harness (registry name or harness id), for
+  identity. `AGENTS_PYTHON` — the interpreter for `env.py`. `AGENTS_PYTHONPATH` —
+  put on each `env.py`'s `PYTHONPATH`.
+- Harness config dirs: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`.
+  Harness markers: `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `GEMINI_CLI`,
+  `CODEX_SANDBOX*`, `CURSOR_AGENT`, `PI_CODING_AGENT`. Model vars: `ANTHROPIC_MODEL`,
+  `GEMINI_MODEL`, `OPENAI_MODEL`, `CURSOR_DEFAULT_MODEL`, `COPILOT_MODEL`,
+  `PI_MODEL`.
+- Proxy: `AGENTS_PROXY`, `AGENTS_WEBFETCH_PROXY_URL`, `HTTP(S)_PROXY`, `ALL_PROXY`,
+  `NO_PROXY` (either case).
+- In the hooks: `CLAUDE_ENV_FILE`, `CLAUDE_CODE_GIT_BASH_PATH`, `AGENTS_RUNTIME_SET`
+  (the env loaders' once-per-process guard), `DOTAGENTS_HOOK_SHELL=posix|windows`
+  (overrides the Codex env hook's platform check).
 
-Readers take the `AGENTS_*` name only, and setters emit it only; there is no
-`DOTAGENTS_*` spelling of any of these.
+Emitted by `env` (and applied by `launch`): `AGENTS_HARNESS`, `AGENTS_VENDOR`,
+`AGENT`, `AGENTS_MODEL`, `AGENTS_HOME`, `AGENTS_PROJECT_ROOT`, `AGENTS_PYTHON`,
+`<NAME>_OVERLAY_ROOT`, `PATH`, `AGENTS_PYTHONPATH`, `AGENTS_PROXY` and the mirrored
+proxy vars, plus whatever the env files set. `AGENTS_AGENT` is never emitted.
+`launch` also exports `AGENTS_CONTEXT_FILE`.
 
-Tool-internal / secret vars (`DOTAGENTS_*` — read, **never printed**):
-
-- `DOTAGENTS_AGENTS_TOKEN` — **secret** (fine-grained PAT) for private-store auth.
-- `DOTAGENTS_CLI_INSTALL` — pip spec to install the CLI itself (tool-specific).
-- `DOTAGENTS_AUDIT_PATTERNS` — path to the machine-local audit-pattern file (tooling).
-
-Emitted by the identity/env layer (safe to branch on in env files):
-`AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENTS_MODEL`, `AGENT`, `AGENTS_PROXY`,
-`AGENTS_WEBFETCH_PROXY_URL`, plus the two
-scope roots — `AGENTS_HOME` (the user store, `agents_dir`/`~/.agents`) and
-`AGENTS_PROJECT_ROOT` (this project's root) — **`AGENTS_PYTHON`** (the
-interpreter `dotagents` itself runs under, `sys.executable`; the default a
-shim or helper script should run Python with, since a bare `python`/`python3`
-on PATH may be a stub, emulated, or missing; only-if-unset) and one **`<NAME>_OVERLAY_ROOT`**
-per installed overlay under `<store>/overlays/` (`_env.get_overlay_roots`, the
-same presence-by-directory rule as the contract-A walk). `NAME` is the overlay's
-directory name upper-cased with every non-alphanumeric character turned into `_`
-(`my-ov.v2` → `MY_OV_V2_OVERLAY_ROOT`). `Overlay.normalize_name(name)` is THE
-canonical overlay name (lowercase, `_`→`-`): it names the install dir
-`overlays/<normalize_name(name)>/` and the source lookup, and
-`Overlay.root_var_for(name)` (`Overlay(dir).root_var`) derives the env var from
-it (upper-case, `-`/`.`→`_`, suffix), so the var for `overlays/<n>/` is always
-`root_var_for(n)`. `context`'s `<NAME_OVERLAY_ROOT>` placeholder goes through the
-same property, so an env file and a context file name an overlay's install dir
-identically. All of these
-roots are seeded before the file chain and only if unset, so a harness/env can
-pin them. `PATH` is emitted with every level's `bin` prepended, and `PYTHONPATH`
-with every level's existing `lib` prepended (both except project-root; the
-formatter treats any `*PATH` var as a path list for Windows/POSIX conversion).
-Deliberately NOT emitted, despite looking like they
-would be: `AGENTS_AGENT` (a named persona — nothing derives one, so there is
-nothing to emit) and `AGENTS_CODE_SESSION_ID`. Do not branch on either.
-`resolve_scope` READS `AGENTS_PROJECT_ROOT` (then the
-agent-native `CLAUDE_PROJECT_DIR`) for the project scope's root while the cwd is
-inside it, and warns and uses the cwd's own project otherwise (see `_scope`).
-
-Every command READS both back, so the pin actually holds: `env` and `context`
-resolve their user store through `cli.resolve_user_store()` (`--agents-dir` →
-`$AGENTS_HOME` → `~/.agents`) and their project
-root through `_scope.project_root_default()` — neither is taken from the cwd or a
-hardcoded home. This matters for hook-invoked runs: a `SessionStart` hook runs
-`dotagents context` / `dotagents env` from wherever the session started, and only
-the pinned root makes that cwd-independent. `-g/--global` on these two means
-*skip the project tier*, not *use a different store*.
+Set for an overlay's `setup.py`: `AGENTS_HOME` (user store), `AGENTS_SCOPE_ROOT`,
+`AGENTS_SCOPE`, `AGENTS_OVERLAY_DIR`.
 
 ## Gotchas
 
-- **Python 3.9 floor.** Files using bare `X | Y` unions in runtime-evaluated positions
-  need `from __future__ import annotations`. `Path.write_text(..., newline=...)` is
-  3.10+, so wrapper-script writers use `open(path, "w", newline="")`.
-- **Zipapp source shim.** Inside a `.pyz`, `Path(__file__)` is not a real file, so
-  duho's AST flag/help introspection degrades (`--from` → `--from-`, positionals lost).
-  `cli.main()` calls `_repoint_zipapp_sources()` first, extracting the built-in command
-  modules to real temp files. Discovered `cmds` modules are extracted by
-  `_package_data_dir` before import, so they need no repoint.
-- **Package data in a `.pyz`.** `_package_data_dir(name)` resolves a package-data dir
-  by name — `_overlay` (the base overlay; `init` renders its template) and `_overlays_src` (bundled
-  example overlays, when a build includes them) — via `importlib.resources` (a
-  zip-backed `Traversable` is extracted once), never `Path(__file__).exists()`
-  (always False in a zipapp). Everything a `.pyz` run extracts — package data
-  and the repointed module sources — lives under ONE per-process scratch dir
-  (`_common._scratch_dir()`), removed at interpreter exit, so a `.pyz` run
-  leaves nothing behind in `%TEMP%`.
-- **`pathlib_next` needs `typing_extensions` on Python < 3.10** (an upstream gap); a
-  3.9 environment must `pip install typing_extensions`.
+- **Python 3.9 floor.** Runtime-evaluated annotations need `from __future__ import
+  annotations` for `X | Y`; `Path.write_text(newline=)` is 3.10+ (use
+  `_fs.write_text_lf`). On 3.9, `pathlib_next` needs `typing_extensions` installed.
+- **Inside a `.pyz`** `Path(__file__)` is not a real file: package data is reached
+  through `cli._common._package_data_dir(name)` (extracted once to a per-process
+  scratch dir removed at exit), and `cli.main()` repoints the built-in command
+  modules' sources so `duho` still reads their flags and help.
+- **Writes are LF-only.** Use `_fs.write_text_lf`, never `Path.write_text`.
+- **`env` output is sensitive**: it prints resolved values. Nothing in the package
+  logs a value, only names.
+- **Credentials in a repo URL** are removed from every log line, cache dir name and
+  install record; an overlay installed from such a URL syncs only while that repo is
+  configured again (or given as `--repo`).

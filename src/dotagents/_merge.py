@@ -165,7 +165,8 @@ def merge_block(
 ) -> str:
     """Merge `block_source_text` (a fully marker-wrapped skeleton file's
     contents) into `target`, returning the branch taken:
-    "created" / "block-inserted" / "block-refreshed" / "unchanged" /
+    "created" / "block-inserted" / "block-refreshed" / "skipped (present)"
+    (the block is already current) and, with `force`, "unchanged" /
     "replaced (--force, backed up)" / "replaced (--force)".
 
     Never overwrites content outside the markers unless `force` is True (then
