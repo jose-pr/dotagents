@@ -389,29 +389,53 @@ def get_env_from_py(
     own object. A non-zero exit or unparseable output contributes nothing and
     is logged by NAME only -- never abort assembly, and never echo the child's
     stdout (it may carry secret values).
+
+    The child runs with ``PYTHONIOENCODING=utf-8`` and its stdout is decoded as
+    UTF-8 with ``surrogateescape``, so no byte it prints can fail the read. A
+    key that cannot be an environment variable (empty, or containing ``=`` or
+    NUL) and a value containing NUL are dropped with a warning naming the key:
+    applied, they would crash the next spawn instead.
     """
     args = [interpreter(base_env), str(env_py), "--level", level, "--agent", level]
     if global_scope:
         args.append("--global")
+    spawn = _spawn_env(base_env)
+    spawn["PYTHONIOENCODING"] = "utf-8"
     try:
-        proc = subprocess.run(
-            args, capture_output=True, text=True, check=False, env=_spawn_env(base_env)
-        )
-    except OSError as e:  # pragma: no cover - interpreter missing
+        proc = subprocess.run(args, capture_output=True, check=False, env=spawn)
+    except (OSError, ValueError) as e:  # interpreter missing / unusable env
         if logger:
-            logger.warning("env.py could not run: %s (%s)", env_py, e)
+            logger.warning("env.py could not run: %s (%s)", env_py, type(e).__name__)
         return {}
     if proc.returncode != 0:
         if logger:
             logger.warning("env.py failed (exit %s): %s", proc.returncode, env_py)
         return {}
     try:
-        parsed = _parse_env_json(proc.stdout)
+        parsed = _parse_env_json(proc.stdout.decode("utf-8", "surrogateescape"))
     except (json.JSONDecodeError, ValueError) as e:
         if logger:
             logger.warning("env.py output not JSON: %s (%s)", env_py, e)
         return {}
-    return {k: str(v) for k, v in parsed.items() if isinstance(k, str)}
+    out: "dict[str, str]" = {}
+    for key, value in parsed.items():
+        if not _is_valid_env_key(key):
+            if logger:
+                logger.warning("env.py %s: skipped a key that is not a valid variable name", env_py)
+            continue
+        value = str(value)
+        if "\0" in value:
+            if logger:
+                logger.warning("env.py %s: skipped %s (value contains NUL)", env_py, key)
+            continue
+        out[key] = value
+    return out
+
+
+def _is_valid_env_key(key: object) -> bool:
+    """A name the OS accepts as an environment variable: a non-empty str with
+    no ``=`` and no NUL."""
+    return isinstance(key, str) and bool(key) and "=" not in key and "\0" not in key
 
 
 def _parse_env_json(stdout: str) -> "dict[str, object]":
@@ -722,13 +746,21 @@ def get_environment(
             _apply({"PYTHONPATH": updated})
 
     # --- Contract B steps 2-5: the two tiers, chained, later-overrides-earlier. ---
+    # One broken layer contributes nothing; it never takes the rest of the
+    # env with it (the hooks send stderr to /dev/null, so a crash here would
+    # silently empty every session). Logged by file name only.
     for level, path, _root in resolve_env_files(scope):
-        if path.suffix == ".py":
-            changes = get_env_from_py(
-                path, osenv, level=level, global_scope=global_scope, logger=logger
-            )
-        else:
-            changes = get_env_from_file(path, osenv, logger=logger)
+        try:
+            if path.suffix == ".py":
+                changes = get_env_from_py(
+                    path, osenv, level=level, global_scope=global_scope, logger=logger
+                )
+            else:
+                changes = get_env_from_file(path, osenv, logger=logger)
+        except Exception as e:  # noqa: BLE001 - see above
+            if logger:
+                logger.warning("env layer skipped: %s (%s)", path, type(e).__name__)
+            continue
         _apply(changes)
 
     # --- Proxy normalization --- after the chain so file-set proxies
