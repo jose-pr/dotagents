@@ -1,4 +1,4 @@
-"""Characterization tests for the context generator (plan 04).
+"""Characterization tests for the context generator.
 
 Covers: harness_loads subtraction (no double-send), on-demand inlining of both
 bare and backticked refs, skills listed-not-inlined, overlay priority ordering

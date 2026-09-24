@@ -1,6 +1,6 @@
 """Tests for the `dotagents overlays` command surface: discovery, add/remove,
-skills publish/unpublish, glob filtering, --copy fallback, source resolution, and
-the `install --overlays` deprecation shim.
+skills publish/unpublish, glob filtering, --copy fallback, source resolution,
+setup scripts, and the priority-ordered merge.
 
 Filesystem-only (tmp_path); no network. Symlink-preferred publish is exercised, but
 every assertion also accepts the copy fallback so the suite passes on a Windows box
@@ -544,7 +544,7 @@ def test_cmd_sync_glob_filter(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Overlay setup scripts (plan 06)
+# Overlay setup scripts
 # --------------------------------------------------------------------------- #
 
 def _add_setup_overlay(src: Path, name: str, body: str):
@@ -690,7 +690,7 @@ def test_setup_runs_on_sync(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Priority-ordered merge (plan 02 / D68)
+# Priority-ordered merge (D68)
 # --------------------------------------------------------------------------- #
 
 def _make_rules_overlay(src_root: Path, name: str, marker: str, priority=None):

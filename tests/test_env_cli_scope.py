@@ -173,7 +173,7 @@ def test_env_global_scope_skips_project_files_but_keeps_the_store(
     roots, monkeypatch, capsys
 ):
     """`-g` here means "skip the project tier", NOT "resolve a different store"
-    (plan design Q1) -- the store's own env.py must still be evaluated."""
+    -- the store's own env.py must still be evaluated."""
     store, project, _ = roots
     (store / "env.py").write_text(_py_emit({"FROM_STORE": "yes"}), encoding="utf-8")
     (project / ".agents" / "env.py").write_text(

@@ -1,4 +1,4 @@
-"""Characterization tests for `dotagents env` -- FROZEN CONTRACT B (plan 07).
+"""Characterization tests for `dotagents env` -- FROZEN CONTRACT B.
 
 These tests are the SPEC. They pin the observable env-assembly behavior ported
 from the precursor `environment.py:get_environment` and MUST stay green through
@@ -16,7 +16,7 @@ any refactor of `_env.py`'s shape:
   5. `.py` files are EXECUTED and emit JSON env changes; plain files sourced;
   6. `get_diff` returns only vars differing from the current `os.environ`.
 
-Plus the plan-08 identity/proxy model wired into the env output:
+Plus the identity/proxy model wired into the env output:
   - `stamp_identity` emits AGENTS_HARNESS/VENDOR/MODEL + AGENT per harness;
   - `AGENTS_PROXY` seeded if unset (AGENTS_WEBFETCH_PROXY_URL else global
     HTTPS/HTTP/ALL_PROXY); existing proxy vars normalized into BOTH cases
@@ -453,7 +453,7 @@ def test_get_diff_only_changed(tree):
 
 
 # --------------------------------------------------------------------------
-# Identity wiring (plan 08): stamp_identity emits AGENTS_*/AGENT.
+# Identity wiring: stamp_identity emits AGENTS_*/AGENT.
 # --------------------------------------------------------------------------
 
 def test_identity_stamped_claude(tree):
@@ -572,7 +572,7 @@ def test_env_files_win_over_identity(tree):
 
 
 # --------------------------------------------------------------------------
-# Proxy model (plan 08).
+# Proxy model.
 # --------------------------------------------------------------------------
 
 def test_proxy_seed_from_global_https(tree):

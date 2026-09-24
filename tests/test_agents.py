@@ -1,4 +1,4 @@
-"""Characterization tests for the agent registry (plans 00 + 08).
+"""Characterization tests for the agent registry.
 
 Covers: env-var detection per adapter, resolve_active_agent precedence
 (explicit > $AGENTS_HARNESS > detect_env > config-file detect() > claude
@@ -174,7 +174,7 @@ def test_unknown_agents_harness_falls_through_to_default():
 
 
 # --------------------------------------------------------------------------
-# stamp_identity (plan 08)
+# stamp_identity
 # --------------------------------------------------------------------------
 
 def test_stamp_claude_full():
