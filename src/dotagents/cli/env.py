@@ -261,7 +261,8 @@ def _format_env(
     * ``cmd`` (aliases ``bat``/``batch``) -- ``set "KEY=value"``, ``%`` doubled.
       cmd has NO way to escape a literal ``"`` inside a value (emitted as ``""``
       best-effort) or to carry a newline (emitted as a space) -- documented
-      limitations.
+      limitations. Consume it as a batch file (``> f.cmd && call f.cmd``),
+      the only way the ``%%`` collapses back; see :func:`_cmd_value`.
     * ``fish`` -- ``set -gx KEY value``, single-quoted, ``\\`` and ``'``
       backslash-escaped.
 
@@ -409,7 +410,18 @@ def _cmd_value(v: str) -> str:
     """cmd.exe ``set "K=v"`` value. ``%`` is doubled so a ``%4`` or ``%PATH%``
     inside a value survives batch-file expansion; a newline cannot be carried
     by ``set`` at all, so it becomes a space (documented limitation, like the
-    ``"`` -> ``""`` best-effort below)."""
+    ``"`` -> ``""`` best-effort below).
+
+    The doubling is undone only when the output runs AS A BATCH FILE, so that
+    is the one supported way to consume it::
+
+        dotagents env --format cmd > "%TEMP%\\agents-env.cmd" && call "%TEMP%\\agents-env.cmd"
+
+    Pasted at an interactive prompt or read through ``for /f``, a ``%%``
+    stays doubled. And under ``setlocal EnableDelayedExpansion`` a ``!name!``
+    inside a value is expanded when the line runs -- there is no escape for
+    it that also works with delayed expansion off, so run the file with it
+    off (the default)."""
     return (
         v.replace("%", "%%")
         .replace('"', '""')
@@ -496,6 +508,10 @@ class Env(DotAgentsArgs):
     ``posix``/``sh``/``bash``), ``dotenv`` (``env``), ``powershell``
     (``pwsh``/``ps``), ``cmd`` (``bat``/``batch``), ``fish``, plus the data
     forms ``json``/``ini``/``yaml``. An explicit ``--format`` always wins.
+    ``cmd`` output is meant to run as a batch file: redirect it to a ``.cmd``
+    file and ``call`` that file, with delayed expansion off. Only then do its
+    doubled percent signs collapse back, and a ``!name!`` in a value is not
+    expanded.
 
     Roots (both configurable, never hardcoded -- D58/D79/D80): the user store is
     ``--agents-dir`` -> ``$AGENTS_HOME`` ->
