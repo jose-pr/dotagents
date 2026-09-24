@@ -503,7 +503,7 @@ class ClaudeAgent(Agent):
             changed |= c
             hooks[event] = entries
 
-        if windows:
+        if windows and self.powershell_env_hook:
             changed |= self._wire_powershell_pretooluse(hooks)
         else:
             pretooluse, c = _hooks.remove_hook(hooks.get("PreToolUse"), self.PRETOOLUSE_STATUS)
@@ -538,6 +538,12 @@ class ClaudeAgent(Agent):
 
     #: Identity (statusMessage) of the PowerShell PreToolUse env-loader entry.
     PRETOOLUSE_STATUS = "Checking PowerShell env"
+    #: Opt-in (`init --powershell-env-hook`): the loader returns
+    #: `permissionDecision: "allow"` -- the only documented way for PreToolUse
+    #: to rewrite a command without prompting on every call -- which skips the
+    #: approval prompt for EVERY PowerShell tool call (deny/ask rules still
+    #: apply). Off, `init` removes an entry an earlier release wired.
+    powershell_env_hook: bool = False
 
     def _wire_powershell_pretooluse(self, hooks: dict) -> bool:
         """Windows only. Merges a no-matcher `PreToolUse` entry running

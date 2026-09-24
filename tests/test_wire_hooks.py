@@ -251,7 +251,7 @@ class TestDualShellSessionHooks:
             assert len(hooks[event]) == per_event, event
             shells = {e["hooks"][0].get("shell") for e in hooks[event]}
             assert shells == ({None, "powershell"} if windows else {None}), event
-        assert ("PreToolUse" in hooks) is windows
+        assert "PreToolUse" not in hooks  # the PowerShell env loader is opt-in
 
     def test_posix_retracts_powershell_entries_written_earlier(self, tmp_path, monkeypatch):
         """The upgrade path: an install written while both variants were
@@ -366,6 +366,7 @@ class TestPowerShellPreToolUse:
         the `_is_windows` seam (the real gate stays `os.name`, see
         TestDualShellSessionHooks.test_the_gate_is_the_real_os_name)."""
         monkeypatch.setattr(ClaudeAgent, "_is_windows", staticmethod(lambda: True))
+        monkeypatch.setattr(ClaudeAgent, "powershell_env_hook", True)  # opt-in
 
     def test_wires_pretooluse_inline_no_file(self, tmp_path):
         dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"

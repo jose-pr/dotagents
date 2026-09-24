@@ -359,6 +359,7 @@ def _apply_base(
     src: Path, dest: Path, force: bool, dry_run: bool, logger,
     agents: "list[str] | None" = None,
     wire_hooks: bool = False,
+    powershell_env_hook: bool = False,
 ) -> None:
     """Lay down the base: managed-block merge AGENTS.md (rendered for this
     store) and, for Claude, the `@` include in its own config dir. `init`'s
@@ -399,6 +400,8 @@ def _apply_base(
             dest, src, base_agents, force=force, dry_run=dry_run, logger=logger
         )
         if wire_hooks:
+            if isinstance(agent, _agents.ClaudeAgent):
+                agent.powershell_env_hook = powershell_env_hook
             agent.wire_hooks(dest, dry_run=dry_run, logger=logger)
 
 

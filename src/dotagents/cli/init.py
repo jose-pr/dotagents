@@ -56,6 +56,13 @@ class Init(DotAgentsArgs):
     "Skip wiring agent hooks and the shared skills link into the agent's config dir."
     ("--no-hooks",)
 
+    powershell_env_hook: bool = False
+    (
+        "Windows, Claude Code: also wire the PowerShell-tool env loader. It "
+        "AUTO-APPROVES every PowerShell tool call (skips the permission prompt)."
+    )
+    ("--powershell-env-hook",)
+
     def __call__(self) -> int:
         if self.dest is not None:
             dest = Path(self.dest).expanduser().resolve()
@@ -79,6 +86,7 @@ class Init(DotAgentsArgs):
             Path(src), dest, self.force, self.dry_run, self._logger_,
             agents=agent_names if agent_names else None,
             wire_hooks=not self.no_hooks,
+            powershell_env_hook=self.powershell_env_hook,
         )
 
         if self.from_ is not None and not self.dry_run:
