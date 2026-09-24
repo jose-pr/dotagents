@@ -263,8 +263,13 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
         # Windows env vars with parens in their names (`ProgramFiles(x86)`)
         # make `$env:FOO(X86) = ...` a parse error, and the curly-brace form
         # accepts any name, so it is used unconditionally.
+        # PowerShell treats U+2018..U+201B as single-quote delimiters too: an
+        # undoubled `’` ended the string and the rest ran as code in the
+        # `Invoke-Expression` loader. A name with `}` or a backtick cannot sit
+        # inside `${env:...}` at all, so it is left out.
         return "\n".join(
-            "${env:%s} = '%s'" % (k, env[k].replace("'", "''")) for k in keys
+            "${env:%s} = '%s'" % (k, _ps_quote_body(env[k]))
+            for k in keys if not any(c in k for c in "}`")
         )
     if fmt == "cmd":
         return "\n".join('set "%s=%s"' % (k, _cmd_value(env[k])) for k in keys)
@@ -278,6 +283,15 @@ def _format_env(env: "dict[str, str]", output_format: str) -> str:
         )
     # default / "export"
     return "\n".join("export %s=%s" % (k, _sh_quote(env[k])) for k in keys)
+
+
+_PS_SINGLE_QUOTES = "'\u2018\u2019\u201a\u201b"
+
+
+def _ps_quote_body(v: str) -> str:
+    """The inside of a PowerShell single-quoted string: every character
+    PowerShell reads as a single quote, doubled."""
+    return "".join(c + c if c in _PS_SINGLE_QUOTES else c for c in v)
 
 
 def _sh_quote(v: str) -> str:
@@ -439,7 +453,9 @@ class Env(DotAgentsArgs):
             env = _env.get_diff(scope, base_env=base, logger=self._logger_)
         else:
             changes = _env.get_environment(scope, base_env=base, logger=self._logger_)
-            env = dict(base)
+            # Inherited DOTAGENTS_* values are tool-internal secrets that are
+            # never printed; only a change the env layers make shows up.
+            env = {k: v for k, v in base.items() if not k.startswith("DOTAGENTS_")}
             env.update(changes)
 
         # UTF-8 straight to the buffer: a bare print() encodes with the console
