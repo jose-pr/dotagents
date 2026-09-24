@@ -13,8 +13,9 @@ property of :class:`Overlay`. Manifest keys:
 * `requires` — overlay names this one needs; `overlays add` installs them first.
 * `name`, `description`, `priority` — see :meth:`Overlay.read_manifest`.
 
-:func:`recompose_overlay_block` is the one operation over a *set* of overlays and
-stays a module function.
+The operations over a *set* of overlays stay module functions:
+``_compose_block`` folds their rules and routing into a base block, and
+:func:`recompose_overlay_block` rewrites a store's ``AGENTS.md`` with it.
 """
 
 from __future__ import annotations
@@ -932,6 +933,75 @@ class Overlay:
 # --------------------------------------------------------------------------- #
 
 
+def _compose_block(base_text: str, overlays, logger) -> str:
+    """Fold each overlay's `rules`/`routing` contributions into the base block.
+
+    Rules append to "Always-on rules" and routing to "Load on demand", after the
+    base's own -- the base carries the mechanism and should read first. The
+    overlays fold in **`(priority, name)` order**, NOT the caller's list
+    order: lower `priority` (default `DEFAULT_PRIORITY`, 500) sorts earlier, so a
+    numerically higher-priority overlay lands *last* and wins on conflict -- the
+    same convention `_context.py` uses. `name` is the tiebreaker, so the block is
+    deterministic regardless of discovery order. Returns `base_text` unchanged
+    when nothing contributes. `overlays` are `Overlay` instances or overlay dirs."""
+    from dotagents._merge import END_MARKER, _marker_lines
+
+    def block_end(text: str) -> int:
+        # The managed block's end marker line (outside fences), as `_merge`
+        # matches it; the end of the text when there is none.
+        ends = _marker_lines(text, END_MARKER)
+        return ends[0].start() if ends else len(text)
+
+    rules: "list[str]" = []
+    routing: "list[str]" = []
+    for overlay in Overlay.sort_by_priority(overlays):
+        manifest = overlay.read_manifest()
+        blocks, warnings = overlay.rule_blocks(manifest["rules"])  # type: ignore[arg-type]
+        for warning in warnings:
+            logger.warning("overlay %s: %s", manifest["name"], warning)
+        rules.extend(blocks)
+        routing.extend(manifest["routing"])  # type: ignore[arg-type]
+
+    if not rules and not routing:
+        return base_text
+
+    text = base_text
+    if rules:
+        # Append after the last always-on bullet, i.e. just before the next heading.
+        m = re.search(r"(?m)^## Load on demand", text)
+        if m is None:
+            # A custom `--from` base without the heading: the rules land at the
+            # end of the block instead, as the warning says.
+            logger.warning("base AGENTS.md has no 'Load on demand' heading; "
+                           "appending overlay rules at the end of the block")
+            insert_at = block_end(text)
+            text = text[:insert_at] + "\n".join(rules) + "\n\n" + text[insert_at:]
+        else:
+            text = text[: m.start()] + "\n".join(rules) + "\n\n" + text[m.start():]
+    if routing:
+        # The base's placeholder line only makes sense with no routing lines.
+        # Exactly that one line: anything after it is real content.
+        text = re.sub(r"(?m)^Nothing ships here by default[^\n]*\n", "", text)
+        # Overlay routing points at `$<NAME>_OVERLAY_ROOT/...` (the var
+        # `dotagents env` exports per installed overlay) rather than a hard
+        # store path; say so once, so an agent reading the file knows the
+        # token is an environment variable it can resolve, not a literal path.
+        if any("_OVERLAY_ROOT" in line for line in routing):
+            routing = [OVERLAY_ROOT_NOTE] + routing
+        insert_at = block_end(text)
+        text = text[:insert_at] + "\n".join(routing) + "\n" + text[insert_at:]
+    return text
+
+
+#: Emitted once above overlay routing lines that use the per-overlay root vars.
+OVERLAY_ROOT_NOTE = (
+    "Overlay paths below use `$<NAME>_OVERLAY_ROOT` -- an environment variable "
+    "`dotagents env` exports per installed overlay (its install dir); resolve it "
+    "in a shell (`echo $ENGINEERING_OVERLAY_ROOT`; PowerShell `$env:ENGINEERING_OVERLAY_ROOT`) "
+    "before opening the file with a file tool."
+)
+
+
 def recompose_overlay_block(
     agents_md: Path,
     base_block: str,
@@ -954,7 +1024,6 @@ def recompose_overlay_block(
     """
     from dotagents._fs import write_text_lf
     from dotagents._merge import _extract_block, find_block
-    from dotagents.cli import _compose_block
 
     if not agents_md.is_file():
         # No `init` here yet (an `overlays add` into a fresh project): create

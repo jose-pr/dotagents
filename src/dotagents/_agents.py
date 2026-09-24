@@ -84,7 +84,7 @@ def _deploy_hook_script(root: Path, name: str, *, dry_run: bool, logger, harness
     package does not carry the script."""
     import shutil
 
-    from dotagents.cli._common import BASE_ROOT
+    from dotagents._resources import BASE_ROOT
 
     src_script = Path(BASE_ROOT) / "dotagents" / "hooks" / name
     if not src_script.is_file():

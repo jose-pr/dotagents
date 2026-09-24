@@ -33,17 +33,13 @@ from duho import Cli, LoggingArgs
 
 from dotagents import __version__
 
-# Names imported through the package: `DotAgentsArgs` and `_write_stdout` by
-# command modules (the bundled ones and overlay-shipped ones), `_compose_block`
-# by `dotagents._overlays`; the rest are used below.
-from dotagents.cli._common import (  # noqa: F401
-    DotAgentsArgs,
-    _compose_block,
-    _package_data_dir,
-    _scratch_dir,
-    _write_stdout,
-    resolve_user_store,
-)
+from dotagents._resources import _package_data_dir, _scratch_dir
+from dotagents._scope import resolve_user_store
+
+# Names imported through the package by command modules (the bundled ones and
+# overlay-shipped ones) and tests.
+from dotagents._overlays import _compose_block  # noqa: F401
+from dotagents.cli._common import DotAgentsArgs, _write_stdout  # noqa: F401
 
 # Import each built-in command class to register it as a compiled subcommand.
 # Importing the command modules here (never the reverse) keeps the dependency

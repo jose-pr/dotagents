@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from dotagents._resources import BASE_ROOT
 from dotagents.cli._common import (
-    BASE_ROOT,
     STORE_CONFIG,
     DotAgentsArgs,
     _apply_base,

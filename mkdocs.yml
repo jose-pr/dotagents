@@ -49,6 +49,7 @@ nav:
       - Hooks: api/hooks.md
       - Skills: api/skills.md
       - Wrappers: api/wrappers.md
+      - Resources: api/resources.md
   - Changelog: changelog.md
 
 plugins:

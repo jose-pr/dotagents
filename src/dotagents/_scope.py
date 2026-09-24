@@ -425,8 +425,7 @@ def system_root_default() -> "Optional[Path]":
 
 #: The configurable user-scope store (D58). Every reader of the user store
 #: resolves it through this var (default `~/.agents`) rather than hardcoding the
-#: home path -- this is the same var `dotagents env` emits (D79). Re-exported by
-#: `dotagents.cli` for command modules.
+#: home path -- this is the same var `dotagents env` emits (D79).
 AGENTS_DIR_ENV = "AGENTS_HOME"
 
 

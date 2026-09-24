@@ -30,6 +30,9 @@ form its API. Generated from docstrings, organized by module:
 - **[Skills](skills.md)** — publishing an overlay's skills into a scope's shared dir.
 - **[Wrappers](wrappers.md)** — the `dotagents` / `dotagents.cmd` wrapper scripts
   `init` writes into a `bin/` dir.
+- **[Resources](resources.md)** — the package's own data: the bundled base overlay
+  and the base `AGENTS.md` block rendered for a store, reachable from a plain install
+  and from a `.pyz`.
 
 The package also ships `AGENTS.md`, a header-file-style summary of this API for an
 agent reading an installed copy.

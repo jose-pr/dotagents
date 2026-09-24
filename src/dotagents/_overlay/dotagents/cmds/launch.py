@@ -214,7 +214,8 @@ class Launch(DotAgentsArgs):
     def __call__(self) -> int:
         from dotagents import _agents, _context, _env, _scope
         from dotagents._fs import write_text_lf
-        from dotagents.cli._common import _scratch_dir, resolve_user_store
+        from dotagents._resources import _scratch_dir
+        from dotagents._scope import resolve_user_store
 
         project_root = _scope.project_root_default()
         scope = _scope.Scope.of(

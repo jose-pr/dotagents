@@ -77,7 +77,6 @@ are skipped.
   subclass may redeclare a field with the same type and default to change its help.
 - `_write_stdout(text) -> None` — write to stdout as UTF-8 whatever the console's
   encoding (a bare `print` fails on a non-Latin-1 character under cp1252).
-- `BASE_ROOT: Path` — the bundled base overlay dir (`_overlay/`).
 - `STORE_CONFIG = "dotagents/config.toml"`;
   `read_store_config(dest) -> dict[str, str]` (`{}` when absent or invalid);
   `write_store_config(dest, values) -> Path`.
@@ -88,6 +87,18 @@ are skipped.
   (said once when they were).
 - `CHECKOUT_BASE = "src/dotagents/_overlay"` — where `--from <dotagents checkout>`
   finds the base.
+- Re-exported from their own modules, for the command modules and tests that import
+  them from here: `BASE_ROOT`, `BASE_AGENTS_TEMPLATE`, `BASE_PROJECT_TEMPLATE`,
+  `AGENTS_MD_PLACEHOLDER`, `base_agents_text` (`dotagents._resources`),
+  `OVERLAY_ROOT_NOTE` (`dotagents._overlays`), `resolve_user_store`
+  (`dotagents._scope`).
+
+## `dotagents._resources`
+
+The package's own data; library code, importing nothing from `dotagents.cli`.
+
+- `BASE_ROOT: Path` — the bundled base overlay dir (`_overlay/`), extracted to a
+  per-process scratch dir when running from a `.pyz`.
 - `BASE_AGENTS_TEMPLATE = "dotagents/templates/AGENTS.md"`,
   `BASE_PROJECT_TEMPLATE = "dotagents/templates/PROJECT.md"`,
   `AGENTS_MD_PLACEHOLDER = "{{AGENTS_MD}}"`.
@@ -95,8 +106,6 @@ are skipped.
   store at `dest`: the project template for a project store when the base has one,
   else the user template, else `<src>/AGENTS.md`; `{{AGENTS_MD}}` rendered as the
   absolute POSIX path of `<dest>/AGENTS.md`.
-- `OVERLAY_ROOT_NOTE: str` — the line emitted above overlay routing lines that use
-  `$<NAME>_OVERLAY_ROOT`.
 
 ## Commands — `dotagents.cli.init`, `dotagents.cli.overlays`, `dotagents.cli.context`, `dotagents.cli.env`, `dotagents.cli.about`, `dotagents.cli.build_pyz`
 
@@ -222,6 +231,8 @@ returns the exit code.
     recorded file the source dropped is removed when unedited, kept unless `prune`
     when edited; replaced/pruned files copied under `backup_root` first; writes the
     install record (`source`, or the previous one when `None`).
+- `OVERLAY_ROOT_NOTE: str` — the line emitted once above overlay routing lines that
+  use `$<NAME>_OVERLAY_ROOT`.
 - `recompose_overlay_block(agents_md, base_block, overlays, dry_run, logger) -> bool`
   — rebuild the managed block from the pristine `base_block` over `overlays` in
   `sort_key` order; creates the file when absent; content outside the markers kept;
@@ -633,7 +644,7 @@ Set for an overlay's `setup.py`: `AGENTS_HOME` (user store), `AGENTS_SCOPE_ROOT`
   annotations` for `X | Y`; `Path.write_text(newline=)` is 3.10+ (use
   `_fs.write_text_lf`). On 3.9, `pathlib_next` needs `typing_extensions` installed.
 - **Inside a `.pyz`** `Path(__file__)` is not a real file: package data is reached
-  through `cli._common._package_data_dir(name)` (extracted once to a per-process
+  through `_resources._package_data_dir(name)` (extracted once to a per-process
   scratch dir removed at exit), and `cli.main()` repoints the built-in command
   modules' sources so `duho` still reads their flags and help.
 - **Writes are LF-only.** Use `_fs.write_text_lf`, never `Path.write_text`.

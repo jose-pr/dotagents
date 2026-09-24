@@ -1,34 +1,36 @@
-"""Shared CLI-only helpers used across the per-command modules.
+"""Helpers the CLI's command modules share.
 
-Pure helpers with no dependency on the command classes or the umbrella, so
-command modules can import from here without creating an import cycle
-(`cli/__init__.py` imports the command modules, not the reverse). The public
-names `_compose_block` and `_package_data_dir` are re-exported from
-`dotagents.cli` (see `cli/__init__.py`) because other package modules import
-them as `dotagents.cli._compose_block` / `dotagents.cli._package_data_dir`.
+`DotAgentsArgs` (the scope fields), `_write_stdout`, the store config that
+`init --from` records, `init`'s body (`_apply_base`) and `--from` resolution.
+Nothing here depends on the command classes or the umbrella, so command
+modules import from here without an import cycle (`cli/__init__.py` imports
+the command modules, not the reverse).
+
+The package data (`BASE_ROOT`, `base_agents_text`, `_package_data_dir`,
+`_scratch_dir`) lives in `dotagents._resources` and the block composition
+(`_compose_block`, `OVERLAY_ROOT_NOTE`) in `dotagents._overlays`, so library
+modules never import the CLI; they are re-exported here for the command
+modules and tests that import them from this module.
 """
 
-import importlib.resources
 import os
 import re
-import shutil
-import tempfile
 from pathlib import Path
 from typing import Optional
 
 from duho import Cmd, LoggingArgs
 
-
-_extracted_dirs_cache: "dict[str, Path]" = {}
-
-# The user-store resolver and its env-var names live in `dotagents._scope` (so
-# `resolve_scope` -- a non-CLI module -- can default the `-g` store through the
-# same chain without importing the CLI package); re-exported here because
-# command modules and the umbrella import them from `dotagents.cli`.
-from dotagents._scope import (  # noqa: E402
-    AGENTS_DIR_ENV,
-    resolve_user_store,
+from dotagents._overlays import OVERLAY_ROOT_NOTE, _compose_block  # noqa: F401 (re-exported)
+from dotagents._resources import (  # noqa: F401 (re-exported)
+    AGENTS_MD_PLACEHOLDER,
+    BASE_AGENTS_TEMPLATE,
+    BASE_PROJECT_TEMPLATE,
+    BASE_ROOT,
+    _package_data_dir,
+    _scratch_dir,
+    base_agents_text,
 )
+from dotagents._scope import resolve_user_store
 
 
 def _write_stdout(text: str) -> None:
@@ -81,79 +83,6 @@ class DotAgentsArgs(LoggingArgs, Cmd):
             self.global_scope, agents_dir=self.agents_dir, project_root=project_root,
         )
 
-
-_scratch: "Path | None" = None
-
-
-def _scratch_dir() -> Path:
-    """The ONE per-process temp directory for anything extracted out of a
-    zipapp (package data, the repointed module sources) and for `launch`'s
-    context file, created lazily on first use and removed at interpreter exit."""
-    global _scratch
-    if _scratch is None:
-        import atexit
-
-        _scratch = Path(tempfile.mkdtemp(prefix="dotagents-"))
-        atexit.register(shutil.rmtree, str(_scratch), True)
-    return _scratch
-
-
-def _package_data_dir(name: str) -> "Path | None":
-    """Resolve a directory under the installed `dotagents` package (e.g.
-    `_overlay` or `_payload`) to a real filesystem Path, working whether the
-    package is a plain directory (pip install / editable) or inside a zipapp.
-
-    Inside a zipapp, `importlib.resources.files()` returns a `zipfile.Path`
-    (a `Traversable`, not a real filesystem `Path`): `.is_dir()` correctly
-    reports membership in the archive, but `str(traversable)` produces a
-    path string that does not exist on disk (`Path(str(...)).exists()` is
-    always False -- there is no real file there to stat). So a zip-backed
-    hit is extracted once to a process-lifetime temp directory and that
-    real path is cached and returned; a plain-directory hit is returned
-    as-is. Returns None if the directory isn't present in the package at all.
-    """
-    if name in _extracted_dirs_cache:
-        return _extracted_dirs_cache[name]
-
-    traversable = importlib.resources.files("dotagents") / name
-    if not traversable.is_dir():
-        return None
-
-    as_path = Path(str(traversable))
-    if as_path.exists():
-        _extracted_dirs_cache[name] = as_path
-        return as_path
-
-    # Zip-backed (or otherwise non-filesystem) Traversable: extract under the
-    # ONE process scratch dir, removed at exit (see `_scratch_dir`).
-    extract_root = _scratch_dir() / name
-    if extract_root.exists():
-        shutil.rmtree(str(extract_root), ignore_errors=True)
-
-    def _extract(node, dest: Path):
-        dest.mkdir(parents=True, exist_ok=True)
-        for child in node.iterdir():
-            child_dest = dest / child.name
-            if child.is_dir():
-                _extract(child, child_dest)
-            else:
-                child_dest.write_bytes(child.read_bytes())
-
-    _extract(traversable, extract_root)
-    _extracted_dirs_cache[name] = extract_root
-    return extract_root
-
-
-# The base overlay (neutral minimum) is bundled package data at
-# `src/dotagents/_overlay`. `init` renders its block template into the store's
-# `AGENTS.md` and copies nothing else into the store: the bundled command
-# modules are discovered from the package, and the hook scripts are deployed
-# into an agent's own config dir. Overlays beyond the base are opt-in and
-# installed by name with `overlays add` from a source dir (`--repo` /
-# `$AGENTS_OVERLAYS_REPO`; this package bundles none of them).
-BASE_ROOT = _package_data_dir("_overlay") or (
-    Path(__file__).resolve().parent.parent / "_overlay"
-)
 
 #: The store's own config file, relative to the store. The only file besides
 #: `cmds/` that may live in `<store>/dotagents/` (D92/D93), and written only when
@@ -221,106 +150,6 @@ def store_base(dest: "str | os.PathLike[str]", logger=None) -> Path:
         if logger is not None:
             logger.warning("recorded base %r unusable (%s); using the bundled one", recorded, exc)
         return BASE_ROOT
-
-
-#: Where the base AGENTS.md block template lives inside a base overlay dir.
-BASE_AGENTS_TEMPLATE = "dotagents/templates/AGENTS.md"
-#: The block template for a PROJECT store: only what the project's overlays
-#: add. The user store's block already carries the always-on rules, and every
-#: session reads both, so a project copy of them was loaded twice.
-BASE_PROJECT_TEMPLATE = "dotagents/templates/PROJECT.md"
-#: Rendered by `base_agents_text` as the actual path of the store's AGENTS.md.
-AGENTS_MD_PLACEHOLDER = "{{AGENTS_MD}}"
-
-
-def base_agents_text(
-    src: "str | os.PathLike[str]", dest: "str | os.PathLike[str]", *, project: bool = False
-) -> str:
-    """The base AGENTS.md block for the store at ``dest``: the template
-    (``<src>/dotagents/templates/AGENTS.md``, or ``PROJECT.md`` for a project
-    store when the base has one; falling back to ``<src>/AGENTS.md`` for a
-    ``--from`` base that keeps it at its root) with ``{{AGENTS_MD}}`` rendered
-    as the ACTUAL path of the file being written, so the block's "annotate that
-    you read `…`" line names this store's file."""
-    src_path = Path(src)
-    template = src_path / BASE_AGENTS_TEMPLATE
-    if project and (src_path / BASE_PROJECT_TEMPLATE).is_file():
-        template = src_path / BASE_PROJECT_TEMPLATE
-    elif not template.is_file():
-        template = src_path / "AGENTS.md"
-    text = template.read_text(encoding="utf-8")
-    agents_md = (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
-    return text.replace(AGENTS_MD_PLACEHOLDER, agents_md)
-
-
-def _compose_block(base_text: str, overlays, logger) -> str:
-    """Fold each overlay's `rules`/`routing` contributions into the base block.
-
-    Rules append to "Always-on rules" and routing to "Load on demand", after the
-    base's own -- the base carries the mechanism and should read first. The
-    overlays fold in **`(priority, name)` order**, NOT the caller's list
-    order: lower `priority` (default `DEFAULT_PRIORITY`, 500) sorts earlier, so a
-    numerically higher-priority overlay lands *last* and wins on conflict -- the
-    same convention `_context.py` uses. `name` is the tiebreaker, so the block is
-    deterministic regardless of discovery order. Returns `base_text` unchanged
-    when nothing contributes. `overlays` are `Overlay` instances or overlay dirs."""
-    from dotagents._merge import END_MARKER, _marker_lines
-    from dotagents._overlays import Overlay
-
-    def block_end(text: str) -> int:
-        # The managed block's end marker line (outside fences), as `_merge`
-        # matches it; the end of the text when there is none.
-        ends = _marker_lines(text, END_MARKER)
-        return ends[0].start() if ends else len(text)
-
-    rules: "list[str]" = []
-    routing: "list[str]" = []
-    for overlay in Overlay.sort_by_priority(overlays):
-        manifest = overlay.read_manifest()
-        blocks, warnings = overlay.rule_blocks(manifest["rules"])  # type: ignore[arg-type]
-        for warning in warnings:
-            logger.warning("overlay %s: %s", manifest["name"], warning)
-        rules.extend(blocks)
-        routing.extend(manifest["routing"])  # type: ignore[arg-type]
-
-    if not rules and not routing:
-        return base_text
-
-    text = base_text
-    if rules:
-        # Append after the last always-on bullet, i.e. just before the next heading.
-        m = re.search(r"(?m)^## Load on demand", text)
-        if m is None:
-            # A custom `--from` base without the heading: the rules land at the
-            # end of the block instead, as the warning says.
-            logger.warning("base AGENTS.md has no 'Load on demand' heading; "
-                           "appending overlay rules at the end of the block")
-            insert_at = block_end(text)
-            text = text[:insert_at] + "\n".join(rules) + "\n\n" + text[insert_at:]
-        else:
-            text = text[: m.start()] + "\n".join(rules) + "\n\n" + text[m.start():]
-    if routing:
-        # The base's placeholder line only makes sense with no routing lines.
-        # Exactly that one line: anything after it is real content.
-        text = re.sub(r"(?m)^Nothing ships here by default[^\n]*\n", "", text)
-        # Overlay routing points at `$<NAME>_OVERLAY_ROOT/...` (the var
-        # `dotagents env` exports per installed overlay) rather than a hard
-        # store path; say so once, so an agent reading the file knows the
-        # token is an environment variable it can resolve, not a literal path.
-        if any("_OVERLAY_ROOT" in line for line in routing):
-            routing = [OVERLAY_ROOT_NOTE] + routing
-        insert_at = block_end(text)
-        text = text[:insert_at] + "\n".join(routing) + "\n" + text[insert_at:]
-    return text
-
-
-#: Emitted once above overlay routing lines that use the per-overlay root vars.
-OVERLAY_ROOT_NOTE = (
-    "Overlay paths below use `$<NAME>_OVERLAY_ROOT` -- an environment variable "
-    "`dotagents env` exports per installed overlay (its install dir); resolve it "
-    "in a shell (`echo $ENGINEERING_OVERLAY_ROOT`; PowerShell `$env:ENGINEERING_OVERLAY_ROOT`) "
-    "before opening the file with a file tool."
-)
 
 
 def _apply_base(

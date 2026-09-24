@@ -17,12 +17,9 @@ from typing import Optional
 
 from duho import Cli, LoggingArgs
 
-from dotagents.cli._common import (
-    base_agents_text,
-    DotAgentsArgs,
-    _write_stdout,
-    store_base,
-)
+from dotagents._resources import base_agents_text
+from dotagents.cli._common import DotAgentsArgs, _write_stdout, store_base
+
 
 def _redacted(spec) -> str:
     """A repo spec (text or parsed) fit for a log line."""
