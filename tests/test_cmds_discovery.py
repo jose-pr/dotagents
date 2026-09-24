@@ -248,6 +248,20 @@ def test_project_scope_contributes(monkeypatch, tmp_path):
     assert "toy" in names
 
 
+def test_a_checkouts_own_dotagents_cmds_is_not_a_source(monkeypatch, tmp_path):
+    # The project-root tier fell back to the `dotagents/cmds` default, so a
+    # cloned repo's top-level dotagents/cmds/*.py was imported by every call,
+    # the SessionStart hooks included -- with no `.agents/` present at all.
+    proj = tmp_path / "proj"
+    _write(proj / "dotagents" / "cmds" / "toy.py", TOY)
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
+    monkeypatch.delenv("AGENTS_CMDS_PATH", raising=False)
+    monkeypatch.chdir(proj)
+
+    assert "toy" not in _names(cli._discover([]))
+    assert all(Path(d) != proj / "dotagents" / "cmds" for d in cli._cmds_dirs([]))
+
+
 # --------------------------------------------------------------------------- #
 # Resilience + dedup
 # --------------------------------------------------------------------------- #

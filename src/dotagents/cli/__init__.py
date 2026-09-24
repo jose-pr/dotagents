@@ -259,7 +259,12 @@ def _cmds_dirs(argv=None) -> "list[Path]":
         agents_dir=resolve_user_store(_agents_dir_from_argv(argv)),
         project_root=_scope.project_root_default(),
     )
-    resolved = scope.paths({"default": "dotagents/cmds", "overlay": "cmds"}, include_missing=True)
+    # No project-root tier: a checkout's own `dotagents/cmds/` is not a store,
+    # and importing it would run a cloned repo's code on every invocation.
+    resolved = scope.paths(
+        {"default": "dotagents/cmds", "overlay": "cmds", "project-root": ""},
+        include_missing=True,
+    )
     return [path for _level, path, _root in resolved]
 
 
