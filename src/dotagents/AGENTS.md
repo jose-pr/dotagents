@@ -182,12 +182,26 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   (resolved; Claude adds its real `@` includes), `context_target` (the
   harness's instruction file under the project root that `write_context`
   merges a managed context block into — Claude `.claude/CLAUDE.md`, Codex
-  `AGENTS.md`, Gemini `GEMINI.md`, Cursor `.cursorrules`, Copilot
-  `.github/copilot-instructions.md`, pi `.pi/APPEND_SYSTEM.md`, Antigravity
-  `.agents/rules/dotagents.md`),
-  `write_base_config(dest, ...)` (Claude also writes the `@` include into
-  `~/.claude/CLAUDE.md` or `<project>/.claude/CLAUDE.md` — THE last mile; no
-  `<store>/CLAUDE.md` is written). The base overlay is
+  `AGENTS.md`, Gemini `GEMINI.md`, Cursor `.cursor/rules/dotagents.mdc`,
+  Copilot `.github/copilot-instructions.md`, pi `.pi/APPEND_SYSTEM.md`,
+  Antigravity `.agents/rules/dotagents.md`),
+  `write_base_config(dest, ...)` — the harness's LAST MILE only: `init`
+  (`_apply_base`) writes the store's `AGENTS.md` itself, once. Claude merges an
+  `@` include into `<$CLAUDE_CONFIG_DIR|~/.claude>/CLAUDE.md` (user) or
+  `<project>/.claude/CLAUDE.md`; Gemini an `@` import into `~/.gemini/GEMINI.md`
+  or `<project>/GEMINI.md`; pi a pointer in its config dir (user store only);
+  Codex, Antigravity, Cursor and Copilot write nothing here. `_apply_base` sets
+  `Agent.scope_level` ("user" / "project") and `Agent.project_root` from the
+  resolved scope, so adapters never re-derive the scope from `$AGENTS_HOME`;
+  Codex and Antigravity wire their global hooks for the user scope only. A
+  project include in a file git does not ignore gets a warning.
+  `detect_runtime_agent(environ, explicit=None)` (explicit > `$AGENTS_HARNESS` >
+  env markers, else None) feeds `stamp_identity`, which stamps nothing in a
+  plain shell; `resolve_active_agent` adds config-file detection and the Claude
+  default for picking a TARGET (`context`, `launch`). Claude's `loaded_paths`
+  follows `@` imports the way Claude does (anywhere on a line outside code
+  spans and fences, at most 4 hops, in the project root's and every ancestor's
+  CLAUDE files). The base overlay is
   `_overlay/dotagents/` only, and none of it is copied into the store:
   `templates/AGENTS.md` (the block TEMPLATE, rendered by
   `cli._common.base_agents_text(src, dest)` — `{{AGENTS_MD}}` becomes the
@@ -198,9 +212,8 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   never commands) and `hooks/` (the scripts `wire_hooks` deploys into an
   agent's own config dir — dependency-free, since they run under whatever
   Python the harness finds, and silent on stdout unless the hook protocol
-  reads it). What `init` writes into a store is the rendered managed blocks
-  (`AGENTS.md`, plus the per-agent file an adapter writes, e.g. `GEMINI.md`),
-  the `bin/` wrappers (at the running `.pyz`, else `"<python>" -m dotagents` —
+  reads it). What `init` writes into a store is the rendered managed block
+  (`AGENTS.md`), the `bin/` wrappers (at the running `.pyz`, else `"<python>" -m dotagents` —
   `_wrappers.write_module_wrappers`) and, with `--force`, the
   `install_backup/<timestamp>/` copies — never a `dotagents/` dir or a design
   log. The user scope is whatever `resolve_user_store()` returns, never the

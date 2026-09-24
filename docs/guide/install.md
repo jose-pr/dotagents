@@ -63,8 +63,6 @@ python dist/dotagents.pyz init --bin-dir ~/.local/bin    # lay down base + comma
 - `dotagents.{json,toml,yaml,yml}` — an optional overlay-repo registry for
   `overlays add` (see [Overlays](overlays.md)); `.cache/overlays/` holds remote
   overlay sources materialized from one.
-- `GEMINI.md`, `.cursorrules`, `.github/copilot-instructions.md` — the managed block
-  rendered for that adapter, written only when `init` runs for it (`--agents`).
 - `install_backup/<timestamp>/` — what `init --force` replaced.
 - `dotagents/cmds/` — only if you create it: your own command modules (see
   [Authoring → Custom commands](authoring.md#custom-commands)).
@@ -93,8 +91,12 @@ hooks `init` wires run them at session start.
 ## Wiring your agent runner
 
 `init` wires Claude Code plus any harness it is running inside (detected from its
-environment); `--agents a,b` replaces that set, so include `claude` to keep it. A
-harness without an include mechanism gets the assembled context through a hook,
+environment); `--agents a,b` replaces that set, so include `claude` to keep it (an
+unknown name is an error). Claude Code gets an include of the store's `AGENTS.md`
+(in `$CLAUDE_CONFIG_DIR` when that is set), Gemini CLI an `@` import in its
+`GEMINI.md`, pi a pointer in its config dir. Codex and Antigravity keep their hooks in
+a global config, so `init` wires them for the user store (`-g`) only. A harness
+without an include mechanism gets the assembled context through a hook,
 `dotagents launch`, or `dotagents context --write-agent`.
 
 ## Verify an install

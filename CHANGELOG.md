@@ -131,6 +131,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   tool's own secrets.
 - A git overlay spec whose ref or location starts with `-` is rejected: it was
   passed to git as an option (`@--upload-pack=<command>` ran the command).
+- `init` writes the store's `AGENTS.md` itself, whatever agents are named;
+  with `--agents gemini,cursor,copilot` it wrote none, and put `GEMINI.md`,
+  `.cursorrules` and `.github/copilot-instructions.md` inside the store, where
+  no harness looks. Gemini CLI now gets an `@` import of the store's
+  `AGENTS.md` in `~/.gemini/GEMINI.md` (or the project's `GEMINI.md`); Cursor
+  and Copilot get the context through `context --write-agent` or `launch`. An
+  unknown `--agents` name is an error instead of a warning.
+- Adapters are told the scope `init` resolved instead of guessing it from
+  `$AGENTS_HOME`: `init -g --agents-dir <dir>` now writes Claude's include and
+  hooks to `~/.claude`, not beside `<dir>`. Claude's config goes to
+  `$CLAUDE_CONFIG_DIR` when that is set.
+- A project-scope `init` no longer edits Codex's or Antigravity's global hook
+  config (it turned dotagents on in every workspace); run `init -g` for them.
+  Antigravity's hook runs under the interpreter `init` ran with.
+- `context --write-agent` / `launch` write Cursor's context to
+  `.cursor/rules/dotagents.mdc` with `alwaysApply: true` (`.cursorrules` is
+  legacy), and Cursor's and Copilot's own reading of the project's `AGENTS.md`
+  is no longer sent twice.
+- Claude's `@` imports are followed the way Claude reads them: anywhere on a
+  line outside code spans and fences, at most four hops deep, and in the CLAUDE
+  files of the project root's ancestors too, so neither an inline import is
+  sent twice nor a fenced example dropped.
+- `env` stamps no agent identity in a plain shell: a repository with an
+  `AGENTS.md` made it export `AGENT=codex` to any shell that sourced it.
+- The Claude include is skipped when the entry file already includes the same
+  file under another spelling (`@~/.agents/AGENTS.md`, an absolute path).
+- A project `init` warns when it writes the Claude include (or Gemini's) into a
+  file git does not ignore.
 - `tools/cloud-setup.sh` installs `dotagents-cli` by default; the `dotagents`
   name it used is not this project on PyPI.
 - `overlays add` / `sync` never delete a skill you placed or edited in the

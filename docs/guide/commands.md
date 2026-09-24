@@ -161,7 +161,8 @@ dotagents context --write-agent --agents codex # merge a managed block into <pro
   the project root (not with `-g`), as a managed `dotagents:context` block refreshed
   in place:
   Claude `.claude/CLAUDE.md`, Codex `AGENTS.md`, Gemini `GEMINI.md`, Cursor
-  `.cursorrules`, Copilot `.github/copilot-instructions.md`, pi
+  `.cursor/rules/dotagents.mdc` (an `alwaysApply: true` rule), Copilot
+  `.github/copilot-instructions.md`, pi
   `.pi/APPEND_SYSTEM.md` (the file pi appends to its system prompt), Antigravity
   `.agents/rules/dotagents.md`. Prefer the hook where the harness has one; this is
   the static alternative. Mutually exclusive with `[output]` and `--format json`.
