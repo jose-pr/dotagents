@@ -389,13 +389,9 @@ def _pwsh7_modules():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACL check")
-@pytest.mark.xfail(
-    strict=True,
-    reason="open: _system_root_is_safe spawns Windows PowerShell with the PSModulePath a "
-           "PowerShell 7 parent exports, so Get-Acl fails to load and every system store "
-           "is rejected when dotagents runs from pwsh",
-)
 def test_the_acl_check_survives_a_powershell_7_parent(monkeypatch):
+    """Windows PowerShell spawned with the PSModulePath a pwsh 7 parent exports
+    cannot load Get-Acl, so every system store was rejected under pwsh."""
     from dotagents._scope import _system_root_is_safe
 
     modules = _pwsh7_modules()
@@ -498,7 +494,6 @@ def _open(issue, why):
     return pytest.mark.xfail(strict=True, reason="open (review 2026-09-23 %s): %s" % (issue, why))
 
 
-@_open("overlays-05", "requires names are not validated")
 def test_requires_cannot_install_outside_the_overlays_dir(world, tmp_path):
     src, scope_root = world
     _overlay(tmp_path, "escape")  # beside the source, reachable as ../escape
@@ -508,7 +503,6 @@ def test_requires_cannot_install_outside_the_overlays_dir(world, tmp_path):
     assert sorted(p.name for p in (scope_root / "overlays").iterdir()) == ["top"]
 
 
-@_open("overlays-05", "rules paths are not confined to the overlay")
 def test_rules_cannot_merge_a_file_outside_the_overlay(world, tmp_path):
     src, scope_root = world
     secret = tmp_path / "secret.md"
@@ -524,7 +518,6 @@ def test_rules_cannot_merge_a_file_outside_the_overlay(world, tmp_path):
     assert "Secret" not in (scope_root / "AGENTS.md").read_text(encoding="utf-8")
 
 
-@_open("overlays-07", "a registry parse error escapes as a traceback")
 @pytest.mark.parametrize("name, text", [
     ("dotagents.json", '{"a": "x",}'),
     ("dotagents.toml", 'a = "x\n'),
@@ -539,7 +532,6 @@ def test_a_malformed_store_registry_is_a_clean_error(world, name, text):
     assert name in str(exc.value)
 
 
-@_open("overlays-06", "repo failures are swallowed as not-found")
 def test_a_broken_repo_fails_the_add_instead_of_dropping_a_requirement(world, tmp_path):
     """A requirement looked up in a repo that FAILS (here: missing) is an
     error, not the documented warning for a requirement no repo offers."""
@@ -550,7 +542,6 @@ def test_a_broken_repo_fails_the_add_instead_of_dropping_a_requirement(world, tm
              global_scope=True, agents_dir=scope_root, copy=True, dry_run=False)
 
 
-@_open("overlays-06", "repo failures are swallowed as not-found")
 def test_sync_with_a_mistyped_repo_is_an_error(world, tmp_path):
     src, scope_root = world
     _overlay(src, "one")
@@ -585,7 +576,6 @@ def test_remove_unlinks_a_symlinked_overlay_and_keeps_its_target(world, tmp_path
     assert (target / "overlay.toml").is_file(), "the link's target is the user's, not ours to delete"
 
 
-@_open("overlays-03", "sync records no provenance")
 def test_sync_keeps_the_repo_an_overlay_was_added_from(world, tmp_path, monkeypatch):
     """`add --repo private` then a plain `sync` with another repo configured:
     the overlay must not take files from that other repo."""
@@ -602,7 +592,6 @@ def test_sync_keeps_the_repo_an_overlay_was_added_from(world, tmp_path, monkeypa
     assert not (installed / "bin" / "pytool").exists()
 
 
-@_open("overlays-12", "sync never prunes files deleted upstream")
 def test_sync_overwrite_drops_a_file_removed_upstream(world):
     """An `env.py` renamed upstream kept running from the store, because its
     presence alone activates it."""

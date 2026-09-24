@@ -372,10 +372,17 @@ def _system_root_is_safe(path: Path) -> "tuple[bool, str]":
         "sids": ", ".join("'%s'" % sid for sid in _WINDOWS_TRUSTED_SIDS),
         "path": str(path).replace("'", "''"),
     }
+    # By absolute path: a bare "powershell" is looked up in the current
+    # directory before System32. And without PSModulePath: a PowerShell 7
+    # parent exports its own, from which Windows PowerShell cannot load
+    # Get-Acl, so every store was rejected when dotagents ran from pwsh.
+    system_root = os.environ.get("SystemRoot") or r"C:\Windows"
+    exe = os.path.join(system_root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
     try:
         res = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, text=True, timeout=30,
+            [exe, "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=30, env=env,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return False, "its ACL could not be read (%s)" % exc
