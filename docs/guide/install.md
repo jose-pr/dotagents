@@ -16,7 +16,7 @@ you added around it.
 
 **Scope**: project by default (`<cwd>/.agents`), or the user store with `-g`/`--global`
 (`~/.agents`). `--dest` overrides explicitly. `--bin-dir` additionally writes a
-`dotagents` wrapper command onto your PATH (meaningful when running from a built `.pyz`).
+`dotagents` wrapper command onto your PATH.
 
 ```bash
 dotagents init                          # project: <cwd>/.agents
@@ -56,7 +56,8 @@ python dist/dotagents.pyz init --bin-dir ~/.local/bin    # lay down base + comma
   resolution appended; nothing is deleted.
 - `bin/`, `lib/` — put on `PATH` / `PYTHONPATH` by `dotagents env`, along with the
   store's own env files (see [Commands → env](commands.md#env)). `init` writes the
-  `dotagents` wrapper into `bin/` when it runs from a `.pyz`.
+  `dotagents` wrappers into `bin/`: at the `.pyz` it runs from, or running
+  `"<python>" -m dotagents` for a plain install.
 - `dotagents.{json,toml,yaml,yml}` — an optional overlay-repo registry for
   `overlays add` (see [Overlays](overlays.md)); `.cache/overlays/` holds remote
   overlay sources materialized from one.

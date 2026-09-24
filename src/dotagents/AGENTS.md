@@ -200,7 +200,8 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   Python the harness finds, and silent on stdout unless the hook protocol
   reads it). What `init` writes into a store is the rendered managed blocks
   (`AGENTS.md`, plus the per-agent file an adapter writes, e.g. `GEMINI.md`),
-  the `bin/` wrappers (from a `.pyz`) and, with `--force`, the
+  the `bin/` wrappers (at the running `.pyz`, else `"<python>" -m dotagents` —
+  `_wrappers.write_module_wrappers`) and, with `--force`, the
   `install_backup/<timestamp>/` copies — never a `dotagents/` dir or a design
   log. The user scope is whatever `resolve_user_store()` returns, never the
   literal `~/.agents`.

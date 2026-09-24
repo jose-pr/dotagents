@@ -76,6 +76,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   block behind a UTF-8 byte-order mark instead of adding a second one.
 - A checkout's own top-level `dotagents/cmds/` is no longer a command source;
   only the stores' `dotagents/cmds/` (and overlays' `cmds/`) are.
+- `init` from a plain (pip) install writes `<store>/bin/dotagents[.cmd]`
+  wrappers running `"<python>" -m dotagents`; it wrote none, and on Windows the
+  PowerShell hooks called a `<store>\bin\dotagents.cmd` that did not exist, so
+  PowerShell sessions got no env and, without bash, no context. Wrappers left
+  pointing at a `.pyz` are replaced, with a warning. The PowerShell hooks also
+  fall back to `dotagents` on `PATH` and do nothing when there is none.
+- `context` for Claude includes a project's committed root `AGENTS.md` when a
+  CLAUDE file (such as the `.claude/CLAUDE.md` a project `init` writes) stops
+  Claude from reading it itself; it used to assume Claude always read it, so
+  the file reached neither. Claude's AGENTS.md is counted as loaded only when a
+  CLAUDE file `@`-includes it or none exists at or above its directory.
 - The Claude and Codex hooks put the project's `.agents/bin` on `PATH` as an
   absolute path. The relative `.agents/bin` they used was re-emitted into the
   session's `PATH` by `dotagents env`, where it resolved against whatever
