@@ -87,15 +87,18 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
 
     names = _names(cli._discover([]))
     # The compiled built-ins survive the app switch.
-    for builtin in ("init", "build-pyz", "context", "env", "overlays", "about"):
+    for builtin in ("init", "build-pyz", "context", "env", "path", "overlays", "about"):
         assert builtin in names
     # The bundled command modules: the findings queue (its subcommands are
     # nested classes, so none of them leaks out as a top-level command) and
     # launch.
     assert "findings" in names
     assert "launch" in names
-    for nested in ("add", "list", "show", "done", "reopen", "remove", "index", "path"):
+    for nested in ("add", "list", "show", "done", "reopen", "remove", "index"):
         assert nested not in names
+    # `findings path` stays nested: the one top-level `path` is the built-in.
+    commands = cli._discover([])
+    assert [c for c in commands if getattr(c, "_parsername_", None) == "path"] == [cli.PathCmd]
     # D85: link/sync left the package. They are `link-project`/`sync-project`,
     # shipped by the opt-in private-sync overlay together with their logic, so a
     # plain dotagents (no overlay installed) offers no private-sync command.
@@ -107,7 +110,7 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
     # bundled modules, and nothing else.
     assert "my-personal-tool" not in names
     assert set(names) == {
-        "init", "build-pyz", "context", "env", "overlays", "about", "findings", "launch",
+        "init", "build-pyz", "context", "env", "path", "overlays", "about", "findings", "launch",
     }
     # Built-ins are handed to `duho.app` via `commands=`, never `_subcommands_`.
     assert cli.Dotagents._subcommands_ == []

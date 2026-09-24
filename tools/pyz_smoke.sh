@@ -76,7 +76,7 @@ has_re "$h" "$(flag --agents)"
 # modules, findings and launch. Matched on the command-list line, since
 # `overlays`' own description mentions its `sync` subcommand.
 h=$(pyz --help)
-has "$h" "{init,build-pyz,context,env,overlays,about,findings,launch}"
+has "$h" "{init,build-pyz,context,env,path,overlays,about,findings,launch}"
 lacks "$h" "link-project"
 lacks "$h" "sync-project"
 lacks "$h" "audit"
@@ -157,6 +157,13 @@ has "$h" "Output format. Default 'auto'"
 has "$h" "--agents-dir AGENTS_DIR"
 lacks "$h" "--agents-dir-"
 has "$h" "--global, -g"
+# path: its flags survive, and it lists the user store's bin first.
+h=$(pyz path --help)
+has_re "$h" "$(flag --lib)"
+has "$h" "--format FORMAT"
+has "$h" "--global, -g"
+o=$(pyz path -g --format json)
+"$PYTHON" -c "import sys, json; d = json.load(sys.stdin); assert d and d[0].endswith('bin'), d" <<<"$o"
 # A store pinned with $AGENTS_HOME is actually walked.
 store="$SCRATCH/pinned"
 mkdir -p "$store"

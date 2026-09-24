@@ -58,6 +58,7 @@ from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
     OverlaySync,
     Overlays,
 )
+from dotagents.cli.path import PathCmd
 
 _LOGGER = logging.getLogger("dotagents")
 
@@ -70,6 +71,7 @@ _BUILTIN_COMMANDS = [
     BuildPyz,
     Context,
     Env,
+    PathCmd,
     Overlays,
     About,
 ]
