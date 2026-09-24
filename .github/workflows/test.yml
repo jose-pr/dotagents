@@ -85,7 +85,7 @@ jobs:
           export HOME="$(mktemp -d)"
           python install.py init -g
           test -f "$HOME/.agents/AGENTS.md"
-          test -f "$HOME/.agents/dotagents/DECISIONS.md"
+          test ! -e "$HOME/.agents/dotagents"    # no dotagents/ until you add a command
           test ! -e "$HOME/.agents/flows"        # base imposes no flows
       - name: Install base + opt-in overlays by name (overlay dirs)
         run: |
