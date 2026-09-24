@@ -112,7 +112,7 @@ def main() -> int:
     # Deliberately NOT ensure_ascii=False: the default escapes non-ASCII as
     # \uXXXX, so this print() is pure ASCII whatever the console's codepage.
     # ensure_ascii=False would need a UTF-8-safe stdout writer (see
-    # _write_stdout in cli/context.py) or it crashes on a cp1252 console.
+    # _write_stdout in cli/_common.py) or it crashes on a cp1252 console.
     print(json.dumps({"injectSteps": [{"ephemeralMessage": context_text}]}))
     return 0
 

@@ -517,12 +517,12 @@ def get_env_from_py(
 
     The script runs as a child with ``base_env`` (the accumulated environment)
     and prints its changes to stdout as JSON: ONE object, or one object PER
-    LINE, merged in order (a later line wins on a key). The per-line form is
-    what makes overlay-managed blocks composable: each overlay's ``setup.py``
-    appends its own block to the store's ``env.py`` and each block prints its
-    own object. A non-zero exit or unparseable output contributes nothing and
-    is logged by NAME only -- never abort assembly, and never echo the child's
-    stdout (it may carry secret values).
+    LINE, merged in order (a later line wins on a key), so a script made of
+    independent sections can let each print its own object instead of
+    merging them itself. (An overlay ships its own ``env.py`` at its root
+    rather than editing the store's.) A non-zero exit or unparseable output
+    contributes nothing and is logged by NAME only -- never abort assembly,
+    and never echo the child's stdout (it may carry secret values).
 
     The child runs with ``PYTHONIOENCODING=utf-8`` and its stdout is decoded as
     UTF-8 with ``surrogateescape``, so no byte it prints can fail the read. A
