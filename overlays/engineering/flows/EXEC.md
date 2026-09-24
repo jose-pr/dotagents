@@ -21,6 +21,13 @@ Do not re-plan, second-guess recorded decisions, or silently downgrade required 
    sub-plan only; update both when phase status changes. **Reconcile before
    continuing**: fix Progress that disagrees with the working tree or git history,
    and move any `Status: done` plan still at `plans/` top level into `completed/`.
+5. **Check for another executor in this tree** before editing: uncommitted changes
+   or fresh mtimes outside your plan's files mean someone else is live. Then verify
+   in isolation (your own worktree or a copy, a private build dir such as
+   `CARGO_TARGET_DIR`), leave their files alone — line endings included — and say
+   in the handoff which failures came from files you do not own. Parallel phases
+   get a worktree each, started from the commit named for them: a harness worktree
+   can begin at a stale commit, so check `git log -1` there before the first edit.
 
 ## Progress
 
