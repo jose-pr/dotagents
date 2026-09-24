@@ -212,7 +212,7 @@ fi
 
 # --- 3. Ensure the dotagents CLI is available. --------------------------------
 if ! command -v dotagents >/dev/null 2>&1 && ! python -m dotagents --version >/dev/null 2>&1; then
-    _spec="${DOTAGENTS_CLI_INSTALL:-dotagents}"
+    _spec="${DOTAGENTS_CLI_INSTALL:-dotagents-cli}"
     echo "dotagents: installing the CLI ($_spec)"
     pip install --quiet "$_spec" 2>/dev/null \
         || python -m pip install --quiet "$_spec" 2>/dev/null \
