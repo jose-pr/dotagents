@@ -27,6 +27,10 @@ END_MARKER = "<!-- dotagents:end -->"
 CONTEXT_BEGIN_MARKER = "<!-- dotagents:context:begin -->"
 CONTEXT_END_MARKER = "<!-- dotagents:context:end -->"
 
+#: Any dotagents managed-block marker line (`begin`/`end`, optionally
+#: namespaced: `context:begin`, `pointer:end`, ...).
+_ANY_MARKER_RE = re.compile(r"^[ \t]*<!-- dotagents:(?:[a-z-]+:)?(?:begin|end) -->[ \t]*$")
+
 
 def _marker_re(marker: str) -> "re.Pattern[str]":
     return re.compile(r"(?m)^[ \t]*%s[ \t]*$" % re.escape(marker))
@@ -55,13 +59,30 @@ def _fenced_spans(text: str) -> "list[tuple[int, int]]":
     return spans
 
 
+def _context_spans(text: str, fences: "list[tuple[int, int]]") -> "list[tuple[int, int]]":
+    """Character spans of ``dotagents:context`` blocks: the context they hold
+    is assembled from files that carry the base-config markers themselves."""
+    spans: "list[tuple[int, int]]" = []
+    outside = lambda m: not any(a <= m.start() < b for a, b in fences)  # noqa: E731
+    ends = [m for m in _marker_re(CONTEXT_END_MARKER).finditer(text) if outside(m)]
+    for begin in (m for m in _marker_re(CONTEXT_BEGIN_MARKER).finditer(text) if outside(m)):
+        end = next((m for m in ends if m.start() > begin.end()), None)
+        spans.append((begin.start(), end.end() if end else len(text)))
+    return spans
+
+
 def _marker_lines(text: str, marker: str, pos: int = 0) -> "list[re.Match[str]]":
     """Every `marker` line at or after `pos` that is not inside a code fence --
-    a fenced example of the markers is documentation, not a block."""
+    a fenced example of the markers is documentation, not a block -- nor, for
+    any other marker, inside a ``dotagents:context`` block, whose embedded text
+    is not this file's block."""
     fences = _fenced_spans(text)
+    skip = list(fences)
+    if marker not in (CONTEXT_BEGIN_MARKER, CONTEXT_END_MARKER):
+        skip += _context_spans(text, fences)
     return [
         m for m in _marker_re(marker).finditer(text, pos)
-        if not any(a <= m.start() < b for a, b in fences)
+        if not any(a <= m.start() < b for a, b in skip)
     ]
 
 
@@ -295,10 +316,17 @@ def merge_context_block(target: Path, context_text: str, *, dry_run: bool = Fals
     place if the block is there, appended after the user's own content
     otherwise. Never a raw overwrite: the target may be a context SOURCE (a
     harness's own ``AGENTS.md``), and overwriting it would re-inline the
-    previous run's output."""
-    block_text = "%s\n%s\n%s\n" % (
-        CONTEXT_BEGIN_MARKER, context_text.strip(), CONTEXT_END_MARKER,
+    previous run's output.
+
+    Marker lines inside ``context_text`` (a store's ``AGENTS.md`` carries its
+    own ``dotagents:begin``/``end``) are dropped: embedded, a later include
+    merge into the same file took them for its block and overwrote the
+    context between them."""
+    body = "\n".join(
+        ln for ln in context_text.strip().splitlines()
+        if not _ANY_MARKER_RE.match(ln)
     )
+    block_text = "%s\n%s\n%s\n" % (CONTEXT_BEGIN_MARKER, body, CONTEXT_END_MARKER)
     return merge_block(
         target, block_text, dry_run=dry_run,
         begin_marker=CONTEXT_BEGIN_MARKER, end_marker=CONTEXT_END_MARKER, append=True,

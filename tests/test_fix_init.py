@@ -413,3 +413,38 @@ def test_the_old_overlay_setup_helper_is_gone():
 
     assert not hasattr(cli, "_run_overlay_setup")
     assert not hasattr(_common, "_run_overlay_setup")
+
+
+def test_an_include_merge_never_lands_inside_a_context_block(tmp_path):
+    """`.claude/CLAUDE.md` can hold both blocks, and the context embeds the
+    store's AGENTS.md -- markers included. The include merge took those
+    embedded markers for its block and overwrote the store's rules."""
+    from dotagents import _merge
+
+    f = tmp_path / "CLAUDE.md"
+    store = "%s\n# STORE RULES\n%s\n" % (_merge.BEGIN_MARKER, _merge.END_MARKER)
+    _merge.merge_context_block(f, "# Context\n" + store + "tail\n")
+    assert _merge.BEGIN_MARKER not in f.read_text(encoding="utf-8"), "embedded markers dropped"
+    _merge.merge_include_line(f, "@../.agents/AGENTS.md")
+    text = f.read_text(encoding="utf-8")
+    assert "# STORE RULES" in text and "tail" in text
+    ctx_end = text.index(_merge.CONTEXT_END_MARKER)
+    assert text.index("@../.agents/AGENTS.md") > ctx_end, "the include is its own block"
+
+
+def test_a_context_block_written_by_an_earlier_release_is_left_alone(tmp_path):
+    """A file whose context block still embeds the base markers (written before
+    they were dropped) gets the include as a separate block."""
+    from dotagents import _merge
+
+    f = tmp_path / "CLAUDE.md"
+    f.write_text(
+        "%s\n%s\n# STORE RULES\n%s\n%s\n" % (
+            _merge.CONTEXT_BEGIN_MARKER, _merge.BEGIN_MARKER, _merge.END_MARKER,
+            _merge.CONTEXT_END_MARKER),
+        encoding="utf-8",
+    )
+    _merge.merge_include_line(f, "@../.agents/AGENTS.md")
+    text = f.read_text(encoding="utf-8")
+    assert "# STORE RULES" in text
+    assert text.index("@../.agents/AGENTS.md") > text.index(_merge.CONTEXT_END_MARKER)
