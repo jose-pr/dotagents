@@ -18,7 +18,7 @@ Contract B, the exact sequence :func:`get_environment` performs:
      first, THEN ALL ``env.py`` / ``env`` / ``local.env`` -- the concatenation of
      two contract-A resolutions (:func:`resolve_env_files`). The project-root
      level resolves NOTHING: a checkout's own top-level ``env.py`` / ``env`` /
-     ``local.env`` is never executed or sourced (D93).
+     ``local.env`` is never executed or sourced.
   3. **Within each tier**, files are in the contract-A precedence order: each
      store in ``Scope.stores`` -- system, user, project -- with its overlays
      first and itself second.
@@ -72,7 +72,7 @@ The identity/proxy model is wired into the output around the file chain:
     session is not a CGI handler, so there the upper-case var is the user's
     own setting; the chain is not meant to run inside one.
 
-Trust model (D93): ``env.py`` runs arbitrary code, from every store the walk
+Trust model: ``env.py`` runs arbitrary code, from every store the walk
 visits -- the system store (only when administrators alone can write it), the
 user store, and the project's ``<project>/.agents`` with their overlays. A
 project's ``.agents/`` is trusted like a harness's own ``.claude/settings.json``:
@@ -881,7 +881,7 @@ def resolve_env_files(scope: Scope) -> "list[tuple[str, Path, Optional[Path]]]":
     The project ROOT resolves nothing: the env chain runs at every session
     start, so a checkout's top-level ``env.py`` / ``env`` / ``local.env`` would
     be code a cloned repository runs the moment a session opened in it. A
-    user's own local overrides live in ``<project>/.agents/local.env`` (D93).
+    user's own local overrides live in ``<project>/.agents/local.env``.
     """
     pre_tier = scope.paths(
         {"default": "pre.env.py", "project-root": ""},
