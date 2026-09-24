@@ -1120,3 +1120,115 @@ def get_diff(
         {k: v for k, v in full.items() if k not in base or base[k] != v},
         removed=(k for k in full.removed if k in base),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Rendered-output cache (the per-call env loaders).
+# --------------------------------------------------------------------------- #
+
+#: The longest a cached rendering is reused, even with every tracked input
+#: unchanged: an ``env.py`` may read something the key cannot see (a secret
+#: store, the clock), so its output is re-derived at least this often.
+ENV_CACHE_TTL = 300.0
+
+#: Every env-file name the two tiers resolve (see :func:`resolve_env_files`).
+_ENV_FILE_NAMES = (
+    {"default": "pre.env.py", "project-root": ""},
+    {"default": "pre.env", "project-root": ""},
+    {"project": "pre.local.env"},
+    {"default": "env.py", "project-root": ""},
+    {"default": "env", "project-root": ""},
+    {"project": "local.env"},
+)
+
+
+def _stat_sig(path: Path) -> str:
+    try:
+        st = os.stat(str(path))
+    except OSError:
+        return "-"
+    return "%d:%d:%d:%d" % (st.st_mode, st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+def _tree_sig(path: Path) -> "list[str]":
+    """One entry per file under a ``lib`` dir: an ``env.py`` imports from it."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(str(path)):
+        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+        for name in sorted(filenames):
+            full = os.path.join(dirpath, name)
+            out.append("%s %s" % (full, _stat_sig(Path(full))))
+    return out
+
+
+def env_cache_key(scope: Scope, base_env: "dict[str, str]", *parts: str) -> str:
+    """A digest of everything an assembly for ``scope`` over ``base_env`` reads
+    that can be checked without running it: the scope's roots, the cwd, the
+    interpreter and this package's version, the installed overlays, every
+    env-file candidate's existence/mtime/size, every file under an existing
+    ``lib`` dir, the whole base environment, and the caller's ``parts`` (the
+    output format and mode)."""
+    import hashlib
+
+    from dotagents import __version__
+
+    scope = _absolute_scope(scope)
+    items = [
+        __version__, sys.executable or "", os.getcwd(), scope.level,
+        str(scope.user_root), str(scope.agents_root), str(scope.project_root),
+        str(scope.system_root), *parts,
+    ]
+    items += ["overlay %s %s" % (o.name, o.path) for o in scope.overlays]
+    items += [
+        "%s %s %s" % (level, path, _stat_sig(path))
+        for level, path, _root in scope.paths(*_ENV_FILE_NAMES, include_missing=True)
+    ]
+    for _level, path, _root in scope.paths({"default": "lib", "project-root": ""}, include_missing=True):
+        items.append("lib %s %s" % (path, _stat_sig(path)))
+        if path.is_dir():
+            items += _tree_sig(path)
+    items += sorted("%s=%s" % kv for kv in base_env.items())
+    h = hashlib.sha256()
+    for item in items:
+        h.update(item.encode("utf-8", "surrogatepass") + b"\0")
+    return h.hexdigest()
+
+
+def _env_cache_dir(scope: Scope) -> Path:
+    return Path(scope.user_root) / ".cache" / "env"
+
+
+def read_env_cache(scope: Scope, key: str, *, now: "Optional[float]" = None) -> "Optional[str]":
+    """The rendering cached under ``key``, or None when there is none or it is
+    older than :data:`ENV_CACHE_TTL`."""
+    import time
+
+    path = _env_cache_dir(scope) / key
+    try:
+        age = (time.time() if now is None else now) - os.stat(str(path)).st_mtime
+        if age < 0 or age >= ENV_CACHE_TTL:
+            return None
+        with open(str(path), encoding="utf-8", newline="") as fh:
+            return fh.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def write_env_cache(scope: Scope, key: str, text: str) -> None:
+    """Store a rendering (it holds env VALUES: written owner-only, through a
+    private temp file) and drop entries past :data:`ENV_CACHE_TTL`. Never
+    fails the caller: a store that cannot be written just is not cached."""
+    import time
+
+    from dotagents._fs import write_text_lf
+
+    cache = _env_cache_dir(scope)
+    try:
+        cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+        write_text_lf(cache / key, text, atomic=True)
+        cutoff = time.time() - ENV_CACHE_TTL
+        for entry in os.scandir(str(cache)):
+            if entry.name != key and entry.is_file() and entry.stat().st_mtime < cutoff:
+                os.unlink(entry.path)
+    except OSError:
+        pass

@@ -502,6 +502,13 @@ class Env(DotAgentsArgs):
     A var an env layer unsets (``null`` from an ``env.py``, ``unset`` in a
     plain file) is emitted as an unset where the format has one.
 
+    ``--cache`` reuses the output of an earlier run whose inputs were the same
+    -- the whole environment, the cwd, the stores and their overlays, every
+    env file's and ``lib`` file's mtime and size -- for up to five minutes
+    (an ``env.py`` may read something no key can see), stored owner-only under
+    ``<user store>/.cache/env/``. The env-loader hooks, which run before every
+    shell command, pass it; an edited env file is picked up on the next call.
+
     ``--format`` selects the emitted syntax and defaults to ``auto``, which
     detects the CALLING shell (parent-process chain) and picks a matching format
     so the output is sourceable where it runs: ``export`` (aliases
@@ -541,6 +548,14 @@ class Env(DotAgentsArgs):
     "Emit only vars that differ from the current environment."
     ("--diff",)
 
+    cache: bool = False
+    (
+        "Reuse the output of an earlier identical run (same environment, cwd, "
+        "store, overlays and env/lib files, at most 5 minutes old) instead of "
+        "running the env files again; the per-command env loaders use it."
+    )
+    ("--cache",)
+
     # Both flags come from `DotAgentsArgs`; only their HELP is restated here
     # (same flags, defaults and types), because this command's `-g` is narrower
     # than the base's and its store is always the user store.
@@ -578,6 +593,16 @@ class Env(DotAgentsArgs):
         if output_format == "auto":
             output_format = _env.detect_shell_format()
 
+        key = None
+        if self.cache:
+            # A hook runs this before EVERY shell call; the assembly (one
+            # child process per env file) is skipped while its inputs hold.
+            key = _env.env_cache_key(scope, base, output_format, "diff" if self.diff else "full")
+            cached = _env.read_env_cache(scope, key)
+            if cached is not None:
+                _write_stdout(cached)
+                return 0
+
         if self.diff:
             env = _env.get_diff(scope, base_env=base, logger=self._logger_)
             removed = env.removed
@@ -594,5 +619,8 @@ class Env(DotAgentsArgs):
 
         # UTF-8 straight to the buffer: a bare print() encodes with the console
         # codepage and dies on the first non-Latin-1 character in any value.
-        _write_stdout(_format_env(env, output_format, removed) + "\n")
+        text = _format_env(env, output_format, removed) + "\n"
+        if key is not None:
+            _env.write_env_cache(scope, key, text)
+        _write_stdout(text)
         return 0

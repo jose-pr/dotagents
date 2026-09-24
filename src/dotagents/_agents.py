@@ -558,8 +558,10 @@ class ClaudeAgent(Agent):
     #
     # `env --diff`, not the full env: each PowerShell tool call is its own
     # process (the AGENTS_RUNTIME_SET guard never survives to the next call),
-    # so the loader runs on EVERY call; the change set is all it needs. The
-    # store is `$env:AGENTS_HOME` when set.
+    # so the loader runs on EVERY call; the change set is all it needs. And
+    # `--cache`: while the env, cwd and env/lib files are unchanged, `env`
+    # replays its previous output instead of re-running every env file (one
+    # child process each). The store is `$env:AGENTS_HOME` when set.
     #
     # The loader CAPTURES `env`'s output (`| Invoke-Expression`), and PowerShell
     # decodes captured native output with [Console]::OutputEncoding -- the OEM
@@ -574,7 +576,7 @@ class ClaudeAgent(Agent):
         r'$h = [Console]::In.ReadToEnd() | ConvertFrom-Json; '
         r'if ($h.tool_name -eq "PowerShell" -and -not $env:AGENTS_RUNTIME_SET -and $h.tool_input.command) { '
         r'$p = '
-        r"""'if (-not $env:AGENTS_RUNTIME_SET) { $env:AGENTS_RUNTIME_SET = "1"; $s = if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" }; $c = "$s\bin\dotagents.cmd"; if (-not (Test-Path $c)) { $c = (Get-Command dotagents -ErrorAction SilentlyContinue).Source }; if ($c) { $oe = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); try { & $c env --diff --format powershell 2>$null | Invoke-Expression } finally { [Console]::OutputEncoding = $oe } } }; '; """
+        r"""'if (-not $env:AGENTS_RUNTIME_SET) { $env:AGENTS_RUNTIME_SET = "1"; $s = if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" }; $c = "$s\bin\dotagents.cmd"; if (-not (Test-Path $c)) { $c = (Get-Command dotagents -ErrorAction SilentlyContinue).Source }; if ($c) { $oe = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); try { & $c env --diff --format powershell --cache 2>$null | Invoke-Expression } finally { [Console]::OutputEncoding = $oe } } }; '; """
         r'$u = $h.tool_input.PSObject.Copy(); '
         r'$u.command = $p + $h.tool_input.command; '
         r'@{hookSpecificOutput=@{hookEventName="PreToolUse";permissionDecision="allow";updatedInput=$u}} | ConvertTo-Json -Depth 10 -Compress '

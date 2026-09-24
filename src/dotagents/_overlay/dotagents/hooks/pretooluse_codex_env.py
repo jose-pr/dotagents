@@ -18,7 +18,9 @@ Claude PowerShell hook uses): the `dotagents env` spawn happens on the first
 Bash call, and every later call re-evaluates the cheap `[ -z ... ]` check in
 its own process. The guard only skips the spawn if one call's export is
 inherited by the next, which is not guaranteed; the snippet is correct either
-way.
+way. `env --cache` keeps the spawn cheap when it does run: while the env, cwd
+and env/lib files are unchanged it replays the previous output instead of
+running every env file again.
 
 Shipped as a file, not inlined: Codex documents hook commands as
 `python3 ~/.codex/hooks/*.py`, and a `.py` file has no execution-policy or
@@ -77,7 +79,7 @@ def main() -> int:
         'if [ -z "$AGENTS_RUNTIME_SET" ]; then export AGENTS_RUNTIME_SET=1; '
         'd="$PWD/.agents/bin/dotagents"; [ -f "$d" ] || d="${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"; '
         '[ -f "$d" ] || d=dotagents; '
-        'eval "$("$d" env --diff --format export 2>/dev/null)"; fi; '
+        'eval "$("$d" env --diff --format export --cache 2>/dev/null)"; fi; '
     )
 
     updated_input = dict(tool_input)

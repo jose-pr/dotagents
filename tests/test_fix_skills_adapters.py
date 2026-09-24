@@ -332,3 +332,118 @@ def test_pi_pointer_leaves_a_context_block_alone(tmp_path):
     span = _merge.find_block(after, _merge.CONTEXT_BEGIN_MARKER, _merge.CONTEXT_END_MARKER)
     assert after[span[0]:span[1]] in before, "the context block is intact"
     assert "Base rule" in after and "`.agents/AGENTS.md`" in after
+
+
+# --------------------------------------------------------------------------
+# hooks-08: the per-call env loaders reuse the output while inputs hold
+# --------------------------------------------------------------------------
+
+_COUNTING_ENV_PY = (
+    "import json, os\n"
+    "with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'runs.txt'), 'a') as fh:\n"
+    "    fh.write('x')\n"
+    "print(json.dumps({'CACHED_VALUE': %r}))\n"
+)
+
+
+@pytest.fixture
+def env_store(tmp_path, monkeypatch):
+    store = tmp_path / "store"
+    write_text_lf(store / "env.py", _COUNTING_ENV_PY % "one")
+    monkeypatch.setenv("AGENTS_HOME", str(store))
+    return store
+
+
+def _env(capsys, cache=True):
+    from dotagents.cli.env import Env
+
+    cmd = Env()
+    cmd.format, cmd.diff, cmd.cache, cmd.global_scope = "json", True, cache, True
+    assert cmd() == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def _runs(store):
+    try:
+        return len((store / "runs.txt").read_text(encoding="utf-8"))
+    except OSError:
+        return 0
+
+
+def test_cached_env_skips_the_assembly_while_inputs_hold(env_store, capsys):
+    first = _env(capsys)
+    assert first["CACHED_VALUE"] == "one" and _runs(env_store) == 1
+    assert _env(capsys) == first
+    assert _runs(env_store) == 1, "the env.py ran again"
+
+
+def test_cached_env_sees_an_edited_env_file(env_store, capsys):
+    _env(capsys)
+    write_text_lf(env_store / "env.py", _COUNTING_ENV_PY % "two, longer")
+    assert _env(capsys)["CACHED_VALUE"] == "two, longer"
+
+
+def test_cached_env_sees_a_changed_environment(env_store, capsys, monkeypatch):
+    _env(capsys)
+    monkeypatch.setenv("SOMETHING_NEW", "1")
+    _env(capsys)
+    assert _runs(env_store) == 2
+
+
+def test_cached_env_sees_a_new_overlay_env_file(env_store, capsys):
+    _env(capsys)
+    write_text_lf(env_store / "overlays" / "extra" / "env.py", "import json\nprint(json.dumps({'FROM_OVERLAY': '1'}))\n")
+    assert _env(capsys)["FROM_OVERLAY"] == "1"
+
+
+def test_cached_env_expires(env_store, capsys, monkeypatch):
+    from dotagents import _env as env_mod
+
+    _env(capsys)
+    monkeypatch.setattr(env_mod, "ENV_CACHE_TTL", 0.0)
+    _env(capsys)
+    assert _runs(env_store) == 2
+
+
+def test_uncached_env_writes_no_cache(env_store, capsys):
+    _env(capsys, cache=False)
+    _env(capsys, cache=False)
+    assert _runs(env_store) == 2
+    assert not (env_store / ".cache" / "env").exists()
+
+
+def test_both_env_loaders_ask_for_the_cache(tmp_path):
+    import subprocess
+    import sys
+
+    assert "env --diff --format powershell --cache" in ClaudeAgent.PRETOOLUSE_POWERSHELL_COMMAND
+    script = (Path(_agents.__file__).parent / "_overlay" / "dotagents" / "hooks"
+              / _agents.CodexAgent.PRETOOLUSE_HOOK_SCRIPT)
+    proc = subprocess.run(
+        [sys.executable, str(script)], input='{"tool_input":{"command":"echo hi"}}',
+        capture_output=True, text=True, env={**os.environ, "DOTAGENTS_HOOK_SHELL": "posix"},
+    )
+    cmd = json.loads(proc.stdout)["hookSpecificOutput"]["updatedInput"]["command"]
+    assert "env --diff --format export --cache" in cmd
+
+
+def test_scope_overlays_are_scanned_once_until_a_store_changes(tmp_path, monkeypatch):
+    from dotagents import _overlays, _scope
+
+    store = tmp_path / "store"
+    (store / "overlays" / "one").mkdir(parents=True)
+    scope = _scope.Scope("user", store)
+    calls = []
+    real = _overlays.Overlay.installed.__func__
+
+    def counting(cls, *stores):
+        calls.append(stores)
+        return real(cls, *stores)
+
+    monkeypatch.setattr(_overlays.Overlay, "installed", classmethod(counting))
+    for _ in range(3):
+        scope.paths("env.py", "env")
+    assert [o.name for o in scope.overlays] == ["one"]
+    assert len(calls) == 1
+    (store / "overlays" / "two").mkdir()
+    assert [o.name for o in scope.overlays] == ["one", "two"], "an added overlay is seen"

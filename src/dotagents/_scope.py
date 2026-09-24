@@ -66,6 +66,14 @@ def _is_within(path: "str | os.PathLike[str]", root: "str | os.PathLike[str]") -
     return key.startswith(root_key.rstrip(os.sep) + os.sep)
 
 
+def _listing(directory: Path) -> "Optional[tuple[str, ...]]":
+    """The sorted entry names of ``directory``, or None when it is not one."""
+    try:
+        return tuple(sorted(os.listdir(str(directory))))
+    except OSError:
+        return None
+
+
 class Scope:
     """Where a session's config lives -- the one object every walk takes.
 
@@ -193,8 +201,19 @@ class Scope:
     @property
     def overlays(self) -> "list[Overlay]":
         """Every overlay a session in this scope uses (:meth:`Overlay.installed`
-        over :attr:`stores`: the project's copy shadows a same-named store copy)."""
-        return Overlay.installed(*self.stores)
+        over :attr:`stores`: the project's copy shadows a same-named store copy).
+
+        Memoized on the stores and their ``overlays/`` listings: one ``env``
+        run walks :meth:`paths` several times, and each rescan checked every
+        entry; an overlay added or removed since (``overlays add`` reads this
+        again after installing) changes a listing and is seen."""
+        stores = self.stores
+        key = tuple((str(store), _listing(Path(store) / "overlays")) for store in stores)
+        memo = self.__dict__.get("_overlays_memo")
+        if memo is None or memo[0] != key:
+            memo = (key, Overlay.installed(*stores))
+            self.__dict__["_overlays_memo"] = memo
+        return list(memo[1])
 
     def paths(
         self, *names: "str | dict[str, str]", include_missing: bool = False
