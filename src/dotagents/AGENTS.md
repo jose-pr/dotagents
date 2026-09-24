@@ -31,12 +31,13 @@ and an error saying a command is required, and exits 2.
 | Command | Contract |
 | --- | --- |
 | `init [-g] [--dest D] [--from SRC] [--bin-dir D] [--agents a,b] [--no-hooks] [--powershell-env-hook] [--force] [--dry-run]` | Merge the base block into `<store>/AGENTS.md`, write `<store>/bin/dotagents[.cmd]`, and per active agent (`--agents`, else detected + `claude`) write its include and hooks. `--force` replaces `AGENTS.md`'s content, backed up under `<store>/install_backup/<timestamp>/`. `--from` records its base in `<store>/dotagents/config.toml`. |
-| `overlays add NAME... [-g] [--repo SPEC]... [--copy] [--no-setup] [--no-requires] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/`, publish its skills, run its `setup.py`, recompose the managed block. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused; a fresh install whose setup fails is rolled back. No name: exit 2. |
+| `overlays add NAME... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/`, publish its skills, run its `setup.py`, recompose the managed block. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused; a fresh install whose setup fails is rolled back. No name: exit 2. |
 | `overlays remove NAME... [-g] [--force] [--dry-run]` | Delete the overlay dirs, unpublish the skills they published, recompose the block. Refuses an overlay another installed overlay requires unless `--force`. No name: exit 2. |
-| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--overwrite] [--prune] [--no-setup] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it). Files that differ from the source are kept unless `--overwrite`; files the source dropped are removed if unedited, else kept unless `--prune`; replaced/pruned files are backed up under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/`, or its setup fails. |
+| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--overwrite] [--prune] [--no-setup] [--setup-timeout S] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it). Files that differ from the source are kept unless `--overwrite`; files the source dropped are removed if unedited, else kept unless `--prune`; replaced/pruned files are backed up under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/`, or its setup fails. |
 | `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` flagged) and what the repos offer. |
 | `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; manifest, setup, skills, file count, recorded source. No name: exit 2. |
 | `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
+| `path [-g] [--lib] [--format list\|native\|posix\|json]` | Print the bin dirs `env` puts on `PATH` (`--lib`: the existing lib dirs it puts on `PYTHONPATH`), highest precedence first; runs no env file. `posix` is `:`-joined, MSYS2 form on Windows. |
 | `env [-g] [--format F] [--diff] [--cache]` | Print the assembled environment (`--diff`: only what differs from the caller's; `--cache`: replay the previous output while `env_cache_key` holds, up to `ENV_CACHE_TTL`) in format `F`: `auto` (default: the calling shell), `export`/`posix`/`sh`/`bash`, `dotenv`/`env`, `powershell`/`pwsh`/`ps`, `cmd`/`bat`/`batch`, `fish`, `json`, `ini`, `yaml`. |
 | `launch [AGENT] [-g] [--command PROG] [--no-context] [--inline] [--write-agent] [--dry-run] [-- ARGS...]` | Run the agent's CLI with the env applied and the context handed over; the exit code is the harness's (`128+N` on signal N). |
 | `findings add\|list\|show\|done\|reopen\|remove\|index\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding, `done` moves it to `processed/` with a required resolution, `INDEX.md` regenerated on every change. |
@@ -108,14 +109,15 @@ The package's own data; library code, importing nothing from `dotagents.cli`.
   else the user template, else `<src>/AGENTS.md`; `{{AGENTS_MD}}` rendered as the
   absolute POSIX path of `<dest>/AGENTS.md`.
 
-## Commands — `dotagents.cli.init`, `dotagents.cli.overlays`, `dotagents.cli.context`, `dotagents.cli.env`, `dotagents.cli.about`, `dotagents.cli.build_pyz`
+## Commands — `dotagents.cli.init`, `dotagents.cli.overlays`, `dotagents.cli.context`, `dotagents.cli.env`, `dotagents.cli.path`, `dotagents.cli.about`, `dotagents.cli.build_pyz`
 
 One `duho` command class per command above; fields are the flags, `__call__()`
 returns the exit code.
 
 - `init.Init`; `overlays.Overlays` (umbrella) with `OverlayAdd`, `OverlayRemove`,
   `OverlayList`, `OverlaySync`, `OverlayShow`; `context.Context` (`FORMATS =
-  ("markdown", "system-reminder", "json")`); `env.Env`; `build_pyz.BuildPyz`;
+  ("markdown", "system-reminder", "json")`); `env.Env`; `path.PathCmd`
+  (`PATH_FORMATS = ("list", "native", "posix", "json")`); `build_pyz.BuildPyz`;
   `about.About`.
 - `about`: `DISTRIBUTION = "dotagents-cli"`, `BUNDLE_FILE = "_bundle.json"` (written
   by `build-pyz` into the package), `RUNTIME_PACKAGES = ("duho", "pathlib_next",
@@ -177,7 +179,9 @@ returns the exit code.
 
 ## `dotagents._overlays`
 
-- `DEFAULT_PRIORITY = 500`.
+- `DEFAULT_PRIORITY = 500`. `DEFAULT_SETUP_TIMEOUT = 300` — seconds a setup script
+  may run when neither `--setup-timeout` nor the manifest's `setup_timeout` says
+  otherwise; `0` from either means no limit.
 - `parse_manifest_text(text, origin="overlay.toml") -> Optional[dict]` — the TOML
   document via `tomllib` / `tomli`, else a built-in reader (top-level strings,
   string arrays including multi-line strings, an integer); `None` plus one warning
@@ -214,12 +218,16 @@ returns the exit code.
     `requires` (valid names only, normalized, de-duplicated), `priority`; a missing
     or invalid manifest gives empty contributions.
   - `find_setup_script() -> Optional[Path]`.
+  - `setup_timeout(override=None) -> int` — `override`, else the manifest's
+    `setup_timeout` (a non-negative int; anything else is ignored with a warning),
+    else `DEFAULT_SETUP_TIMEOUT`; `0` = no limit.
   - `run_setup(*, agents_dir, dry_run, logger, scope_root=None, scope_level=None,
-    base_env=None) -> Optional[int]` — runs `setup.py` under `sys.executable` with
+    base_env=None, timeout=None) -> Optional[int]` — runs `setup.py` under `sys.executable` with
     cwd = the overlay dir and env `base_env` (default `os.environ`; `overlays` passes
     the scope's assembled env) plus `AGENTS_HOME=agents_dir`, `AGENTS_SCOPE_ROOT=scope_root or
     agents_dir`, `AGENTS_SCOPE=scope_level` (when given), `AGENTS_OVERLAY_DIR`;
-    returns its exit code, `None` when there is no script, `0` on `dry_run`.
+    returns its exit code, `None` when there is no script, `0` on `dry_run`, `124`
+    when it ran past `setup_timeout(timeout)` and was stopped.
   - `files() -> list[Path]` — every file to install: not the manifest, not the
     install record, not under `SKIP_PARTS`, not `*.pyc`.
   - `read_install_record() -> dict` — `{"source": dict | None, "files": {rel:

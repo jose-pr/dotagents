@@ -24,6 +24,7 @@ otherwise.
 | `overlays` | Manage opt-in overlays by name: `add` / `remove` / `list` / `sync` / `show`. |
 | `context` | Assemble the effective context for one or more agents. |
 | `env` | Assemble the chained env-file layers + identity vars, in a chosen format. |
+| `path` | Print the bin dirs `env` puts on `PATH` (or, with `--lib`, the lib dirs it puts on `PYTHONPATH`). |
 | `build-pyz` | Build the self-contained `dotagents.pyz` zipapp (from a source checkout). |
 | `about` | `dotagents-cli <version>`, then the packages bundled in the `.pyz` (or installed beside a plain install) with their versions. |
 | `findings` | Per-scope findings queue: `add` / `list` / `show` / `done` / `reopen` / `remove` / `index` / `path`. |
@@ -350,6 +351,24 @@ warning. A file whose `source` fails, or that calls `exit`, contributes nothing.
     output as secret. The command itself never logs `DOTAGENTS_*` / `AGENTS_*`
     values, and its full (non-`--diff`) output leaves inherited `DOTAGENTS_*`
     values out.
+
+## path
+
+The dirs `env` puts at the front of `PATH` — or with `--lib`, of `PYTHONPATH` —
+highest precedence first. Nothing is run (no env file, no `env.py`), so it is a
+cheap way to put the overlay bins on a shell's `PATH`:
+
+```bash
+export PATH="$(dotagents path --format posix):$PATH"   # bash / Git Bash
+dotagents path --lib --format json                     # the lib dirs, as JSON
+```
+
+- `--format list` (default, one per line), `native` (`os.pathsep`-joined), `posix`
+  (`:`-joined; on Windows each dir in its MSYS2 form, `/c/...`), `json`.
+- The bin list includes dirs that do not exist yet, as `env` does; the lib list only
+  existing ones.
+- `-g` / `--agents-dir` mean what they mean for `env`: `-g` leaves the project's dirs
+  out, `--agents-dir` names the user store.
 
 ## findings
 

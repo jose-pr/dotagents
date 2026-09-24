@@ -199,6 +199,11 @@ small built-in reader that covers these keys. Keys:
 | `routing` | Lines appended to the core's "Load on demand" routing table. |
 | `rules` | Overlay-relative markdown paths whose rule bullets append to "Always-on rules". |
 | `priority` | Merge order (lower sorts earlier; unprioritized default is 500). |
+| `setup_timeout` | Seconds the setup script may run before it is stopped (default 300; `0` = no limit). |
+
+`overlay.toml` is the only manifest. A leading `---` frontmatter block in a
+`CONTEXT.md` (the `priority:` / `scope:` / `dependencies:` an older overlay format
+kept there) is not read, and `context` leaves it out of what it assembles.
 
 ## Skills
 
@@ -223,6 +228,11 @@ Presence of a script is the opt-in; skip it with `--no-setup`. The author contra
 - **Environment** carries `AGENTS_HOME` (the user store), `AGENTS_SCOPE_ROOT` (the
   store the overlay is installed into), `AGENTS_SCOPE` (`user` or `project`) and
   `AGENTS_OVERLAY_DIR` (the overlay's own installed dir) — never hardcode a home path.
+- **Environment** is also the scope's assembled `dotagents env`: every overlay's `lib/`
+  on `PYTHONPATH`, its `bin/` on `PATH`.
+- **Time limit**: 300 seconds, or the manifest's `setup_timeout`, or the command's
+  `--setup-timeout` (which wins); `0` means no limit. A script still running then is
+  stopped, and that counts as a failure (exit 124).
 - A **non-zero exit fails the install** with a clear error, not a silent skip, and a
   fresh `add` is rolled back. Any outward or irreversible action must be confirmed by
   the *script* itself.

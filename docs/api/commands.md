@@ -12,6 +12,8 @@ guide describes what each does from the command line.
 
 ::: dotagents.cli.env
 
+::: dotagents.cli.path
+
 ::: dotagents.cli.about
 
 ::: dotagents.cli.build_pyz

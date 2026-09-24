@@ -92,6 +92,8 @@ dotagents, so it works on every platform). See the contract in
   `PYTHONPATH`, `bin/` on `PATH`), plus the user store (`AGENTS_HOME`), the store you are installed
   into (`AGENTS_SCOPE_ROOT`, with `AGENTS_SCOPE` = `user` / `project`) and your own
   installed dir (`AGENTS_OVERLAY_DIR`) — never hardcode a home path;
+- it has 300 seconds unless `setup_timeout` in `overlay.toml` (or the user's
+  `--setup-timeout`) says otherwise; `0` means no limit;
 - a non-zero exit fails the install loudly; confirm any irreversible action yourself.
 
 ## Custom commands

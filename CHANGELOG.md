@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   from `dotagents.cli._common`.
 - `Agent.include_entry` and `Agent.base_config_note` describe what `init`
   writes for each harness.
+- `dotagents path` prints the bin dirs `dotagents env` puts on `PATH`
+  (`--lib`: the lib dirs it puts on `PYTHONPATH`), highest precedence first,
+  as a list, `os.pathsep`-joined, `:`-joined POSIX (`/c/...` on Windows) or
+  JSON, without running any env file.
+- An overlay's setup script is stopped after 300 seconds, or the manifest's
+  `setup_timeout`, or `overlays add` / `sync --setup-timeout`; `0` means no
+  limit. A stopped script fails the install like any other failure.
 
 ### Changed
 
@@ -151,6 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `AGENTS_OVERLAYS_REF`; the old `DOTAGENTS_OVERLAYS_*` names still work when
   the new ones are unset.
 - The findings index is rewritten atomically.
+- A `---` frontmatter block at the top of an overlay's `CONTEXT.md` is left
+  out of the assembled context; `overlay.toml` is the only manifest.
 
 ### Removed
 
