@@ -307,13 +307,37 @@ def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: b
 
 def _skills_notice(logger, scope, skills: "list[str]") -> None:
     """Publishing reaches `<scope>/skills/`; an agent that reads its OWN skills
-    dir (Claude: `<config>/skills/`) only gets a new skill linked by `init`."""
+    dir (Claude: `<config>/skills/`) and was never wired by `init` for this
+    store gets a new skill linked only by `init`."""
     if skills:
         logger.info(
             "skill(s) %s published to %s; re-run `dotagents init%s` to link new "
             "skills into agents' own skills dirs (Claude's <config>/skills)",
             ", ".join(skills), scope.shared_skills_dir, " -g" if scope.global_scope else "",
         )
+
+
+def _link_agent_skills(scope, logger, skills: "list[str]" = ()) -> None:
+    """Keep each agent's OWN skills dir in step with ``<scope>/skills/`` after
+    an add / sync / remove: every adapter whose config already carries
+    dotagents' wiring for this store links new skills, refreshes its copies
+    and prunes removed ones (:meth:`Agent.link_skills`). With no wired agent,
+    newly published ``skills`` get the "re-run init" notice instead."""
+    from dotagents import _agents
+
+    wired = False
+    for agent in _agents.get_all_agents():
+        agent.scope_level = scope.level
+        agent.project_root = scope.project_root
+        try:
+            if not agent.skills_wired(scope.agents_root):
+                continue
+        except OSError:
+            continue
+        wired = True
+        agent.link_skills(scope.agents_root, dry_run=False, logger=logger)
+    if not wired:
+        _skills_notice(logger, scope, list(skills))
 
 
 def _unmet_requires(overlays) -> "dict[str, list[str]]":
@@ -336,8 +360,9 @@ class OverlayAdd(DotAgentsArgs):
     ``<scope>/.agents/overlays/<name>/`` (discoverable) with a record of the
     repo it came from, merges its D59 routing/rules into the installed
     ``AGENTS.md`` managed block, and publishes its ``skills/`` from the
-    INSTALLED copy into the shared ``<scope>/.agents/skills/`` (re-run
-    ``init`` to link new ones into an agent's own skills dir). ``--copy``
+    INSTALLED copy into the shared ``<scope>/.agents/skills/``, linking them
+    into each agent's own skills dir that ``init`` already wired for the
+    scope (Claude's ``<config>/skills/``; otherwise re-run ``init``). ``--copy``
     mirrors skills as real dirs instead of symlinks (Windows / no-symlink). An
     overlay whose setup fails on a fresh install is rolled back; the managed
     block is recomposed over whatever is installed either way."""
@@ -410,7 +435,7 @@ class OverlayAdd(DotAgentsArgs):
             ]
             _recompose(scope, self._logger_, dry_run=self.dry_run, extra=extra)
         if not self.dry_run:
-            _skills_notice(self._logger_, scope, skills)
+            _link_agent_skills(scope, self._logger_, skills)
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
         return 0
@@ -419,8 +444,9 @@ class OverlayAdd(DotAgentsArgs):
 class OverlayRemove(DotAgentsArgs):
     """Remove installed overlays, unpublish their skills, recompose AGENTS.md.
 
-    Each overlay dir is deleted, its skills unpublished, and ``AGENTS.md``'s
-    managed block recomposed over what remains.
+    Each overlay dir is deleted, its skills unpublished (and removed from each
+    agent's own skills dir ``init`` wired), and ``AGENTS.md``'s managed block
+    recomposed over what remains.
 
     Deletes only ``<scope>/.agents/overlays/<name>/`` (a symlinked or
     junctioned overlay is unlinked, its target untouched) and unpublishes only
@@ -513,6 +539,9 @@ class OverlayRemove(DotAgentsArgs):
                     scope, self._logger_, dry_run=self.dry_run,
                     without=frozenset(removed_names) if self.dry_run else frozenset(),
                 )
+            if removed_names and not self.dry_run:
+                # Prune what the removed skills left in agents' own skills dirs.
+                _link_agent_skills(scope, self._logger_)
 
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
@@ -896,8 +925,8 @@ class OverlaySync(DotAgentsArgs):
             # Recompose over ALL installed overlays in (priority, name) order
             # (D68) -- not just the pattern-matched subset synced above.
             _recompose(scope, self._logger_, dry_run=self.dry_run)
-        if skills and not self.dry_run:
-            _skills_notice(self._logger_, scope, skills)
+        if not self.dry_run:
+            _link_agent_skills(scope, self._logger_, skills)
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
         if failures:

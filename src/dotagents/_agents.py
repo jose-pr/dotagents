@@ -215,6 +215,21 @@ class Agent:
         """
         pass
 
+    def skills_wired(self, dest: Path) -> bool:
+        """True when this harness's config dir already carries dotagents'
+        wiring for the store ``dest`` -- so ``overlays add``/``sync``/``remove``
+        keep its skills dir current (:meth:`link_skills`) without an ``init``.
+        False on the base class: nothing to keep current."""
+        return False
+
+    def link_skills(
+        self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
+    ) -> None:
+        """Link ``<dest>/skills/<name>`` into the harness's OWN skills dir, and
+        prune what a removed skill left there. A no-op on the base class: only
+        a harness that reads a skills dir of its own overrides it."""
+        pass
+
     def detect(self, root: Path) -> bool:
         """Return True if this agent's config is present in the given root."""
         return any((root / f).exists() for f in self.context_files)
@@ -365,6 +380,65 @@ class ClaudeAgent(Agent):
                 "%s is not gitignored: the include points at .agents/, which is never "
                 "committed -- keep the file out of commits (or add it to .gitignore)", entry,
             )
+
+    # --- skills --------------------------------------------------------
+
+    def skills_wired(self, dest: Path) -> bool:
+        """Claude is wired for ``dest`` when its entry file (``CLAUDE.md`` in
+        :meth:`_config_root`) includes the store's AGENTS.md, or its skills
+        dir already holds skills linked from this store."""
+        from dotagents import _skills
+
+        root = self._config_root(dest)
+        if _skills.linked_names(Path(dest) / "skills", root / "skills"):
+            return True
+        seen: "set[Path]" = set()
+        _claude_includes(root / "CLAUDE.md", seen)
+        try:
+            return (Path(dest).expanduser().resolve() / "AGENTS.md") in seen
+        except OSError:
+            return False
+
+    def link_skills(
+        self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
+    ) -> None:
+        """The skills last mile: publishing into `<scope>/skills/` only helps
+        if Claude reads that dir, and it never does. So each skill is linked
+        PER SKILL into `<config>/skills/<name>` (a user's own skills there are
+        never a conflict): a symlink, else (Windows) a junction, else a copy.
+        Ownership is recorded beside them, so a stale copy is refreshed and a
+        skill the store no longer has is removed; a same-named skill the user
+        placed or edited is left alone, with a warning (see
+        :func:`dotagents._skills.link_skills_into`)."""
+        from dotagents import _skills
+
+        root = Path(config_root) if config_root else self._config_root(dest)
+        shared_skills = Path(dest) / "skills"
+        target = root / "skills"
+        has_skills = shared_skills.is_dir() and any(
+            d.is_dir() and not d.name.startswith(".") for d in shared_skills.iterdir()
+        )
+        if not has_skills and not _skills.linked_names(shared_skills, target) and not target.is_dir():
+            if logger:
+                logger.info("no skills to link (%s has none)", shared_skills)
+            return
+        result = _skills.link_skills_into(shared_skills, target, dry_run=dry_run, logger=logger)
+        if result.copied and logger:
+            logger.warning(
+                "skill(s) %s were COPIED, not linked (no symlink or junction support "
+                "here): a copy is a snapshot -- `dotagents init` and `overlays sync` "
+                "refresh it while it is unedited", ", ".join(result.copied),
+            )
+        # A project's `.claude/` is often committed: links/copies there point
+        # teammates at a `.agents/` that never is (the include gets the same care).
+        if config_root is None and not self._user_scope(dest) and logger and result.owned:
+            exposed = [n for n in result.owned if _git_tracked_or_unignored(target / n)]
+            if exposed:
+                logger.warning(
+                    "%s is not gitignored: skill(s) %s there come from .agents/, which is "
+                    "never committed -- keep them out of commits (or add %s to .gitignore)",
+                    target, ", ".join(exposed), target,
+                )
 
     # --- hooks ---------------------------------------------------------
     #
@@ -520,9 +594,7 @@ class ClaudeAgent(Agent):
         Additive and idempotent: unrelated settings keys and foreign hooks survive,
         and a second run writes nothing.
         """
-        import os
-
-        from dotagents import _hooks, _skills
+        from dotagents import _hooks
 
         # Scope-aware, like the rest of dotagents: a project-scope `init` must not
         # silently edit the user's GLOBAL settings. `dest` is `<scope>/.agents`, so
@@ -536,42 +608,8 @@ class ClaudeAgent(Agent):
         else:
             root = self._config_root(dest)
 
-        # 1. Skills last mile. Publishing into `<scope>/skills/` only helps if the
-        #    agent reads that dir; without this link it never does. PER SKILL,
-        #    into `<config>/skills/<name>`, so a user's own `~/.claude/skills`
-        #    dir is never a conflict. A same-named skill the user placed there
-        #    by hand is a conflict and is left alone, with a warning.
-        shared_skills = Path(dest) / "skills"
-        skill_dirs = (
-            sorted(d for d in shared_skills.iterdir() if d.is_dir())
-            if shared_skills.is_dir() else []
-        )
-        if not skill_dirs:
-            if logger:
-                logger.info("no skills to link (%s has none)", shared_skills)
-        elif dry_run:
-            if logger:
-                logger.info(
-                    "would link %d skill(s): %s -> %s", len(skill_dirs), shared_skills,
-                    root / "skills",
-                )
-        else:
-            copied = False
-            for skill in skill_dirs:
-                result = _skills.sync_path(skill, root / "skills" / skill.name, prefer_symlink=True)
-                if not result.success:
-                    if logger:
-                        logger.warning("skill %s not linked: %s", skill.name, result.message)
-                    continue
-                copied = copied or result.mode == "copy"
-                if logger and "already" not in result.message:
-                    logger.info("skill %s (%s): %s", skill.name, result.mode, result.message)
-            if copied and logger:
-                logger.warning(
-                    "some skills were COPIED, not symlinked (no symlink support here): "
-                    "a copy is a point-in-time snapshot and goes stale when overlay "
-                    "skills change -- re-run `dotagents init` to refresh it"
-                )
+        # 1. Skills last mile (`link_skills`; `overlays add/sync/remove` call it too).
+        self.link_skills(dest, dry_run=dry_run, logger=logger, config_root=config_root)
 
         # 2. Hooks. In a project, write `settings.local.json` -- the gitignored
         # personal file. `settings.json` there is checked into source control, and
