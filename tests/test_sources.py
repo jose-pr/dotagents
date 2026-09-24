@@ -300,18 +300,29 @@ def test_registry_documents_and_entry_forms(tmp_path):
         reg.overlay_dir("web")
     # Resolved (and missing) with the uri extra; names the extra without it.
     assert any(s in str(exc.value) for s in ("does not exist", "cannot reach", "uri extra")), str(exc.value)
-    _write(tmp_path / "r.toml", '[overlays]\na = "/srv/a"\n')
-    assert _sources.load_repo(str(tmp_path / "r.toml"), cache).entries == {"a": "/srv/a"}
-    pytest.importorskip("yaml")
-    _write(tmp_path / "r.yaml", "overlays:\n  a: /srv/a\n")
-    assert _sources.load_repo(str(tmp_path / "r.yaml"), cache).entries == {"a": "/srv/a"}
     _write(tmp_path / "bad.json", json.dumps({"a": 1}))
     with pytest.raises(SystemExit) as exc:
         _sources.load_repo(str(tmp_path / "bad.json"), cache)
     assert "must be a source string" in str(exc.value)
     _write(tmp_path / "r.ini", "x")
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="unknown format"):
         _sources.load_repo(str(tmp_path / "r.ini"), cache)
+
+
+# The optional formats get tests of their own that skip up front, so a missing
+# parser never hides the JSON / unknown-format assertions above.
+
+def test_toml_registry(tmp_path):
+    if sys.version_info < (3, 11):
+        pytest.importorskip("tomli")
+    _write(tmp_path / "r.toml", '[overlays]\na = "/srv/a"\n')
+    assert _sources.load_repo(str(tmp_path / "r.toml"), SourceCache(tmp_path / "cache")).entries == {"a": "/srv/a"}
+
+
+def test_yaml_registry(tmp_path):
+    pytest.importorskip("yaml")
+    _write(tmp_path / "r.yaml", "overlays:\n  a: /srv/a\n")
+    assert _sources.load_repo(str(tmp_path / "r.yaml"), SourceCache(tmp_path / "cache")).entries == {"a": "/srv/a"}
 
 
 def test_env_repos_are_ordered_by_key_then_the_default():
