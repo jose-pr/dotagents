@@ -49,9 +49,12 @@ The identity/proxy model is wired into the output around the file chain:
     value already present in the base env -- unless ``explicit`` names the
     agent, in which case the identity is that agent's regardless (``launch``
     starts a harness from inside another one).
-  * **Roots** are seeded right after identity, also before the chain and also
-    only-if-unset: the two scope roots ``AGENTS_HOME`` / ``AGENTS_PROJECT_ROOT``,
-    the interpreter ``AGENTS_PYTHON`` (``sys.executable`` -- the Python the CLI
+  * **Roots** are seeded right after identity, also before the chain. The two
+    scope roots ``AGENTS_HOME`` / ``AGENTS_PROJECT_ROOT`` name the stores this
+    walk actually used, as absolute paths: an inherited value naming the same
+    directory holds, any other is replaced (in a user-scope walk, which walks
+    no project, ``AGENTS_PROJECT_ROOT`` is only-if-unset). Only-if-unset: the
+    interpreter ``AGENTS_PYTHON`` (``sys.executable`` -- the Python the CLI
     is running under, a default any shim or helper can trust), and one
     ``<NAME>_OVERLAY_ROOT`` per installed overlay (:attr:`Scope.overlays`,
     the same set :func:`get_overlay_roots` lists, named by
@@ -81,6 +84,7 @@ diff must treat it as sensitive; this module logs var NAMES only.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -915,6 +919,27 @@ def apply_proxy_model(osenv: "dict[str, str]") -> "dict[str, str]":
 # --------------------------------------------------------------------------- #
 
 
+def _absolute_scope(scope: Scope) -> Scope:
+    """``scope`` with every root made absolute (a copy, when any was not)."""
+    roots = ("agents_root", "user_root", "project_root", "system_root")
+    if all(getattr(scope, r) is None or Path(getattr(scope, r)).is_absolute() for r in roots):
+        return scope
+    out = copy.copy(scope)
+    for r in roots:
+        value = getattr(scope, r)
+        if value is not None:
+            setattr(out, r, Path(os.path.abspath(value)))
+    return out
+
+
+def _same_dir(a: str, b: str) -> bool:
+    """True if two path strings name the same directory."""
+    try:
+        return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+    except (OSError, ValueError):
+        return a == b
+
+
 def get_environment(
     scope: Scope,
     *,
@@ -932,10 +957,13 @@ def get_environment(
     """
     from dotagents._agents import stamp_identity
 
+    # Absolute roots: every path this emits (the roots, overlay roots, bin and
+    # lib dirs) is read by children that may run in another cwd.
+    scope = _absolute_scope(scope)
     agents_dir = scope.user_root
     # The project root a user-scope walk pins: the resolved default, so the
     # emitted AGENTS_PROJECT_ROOT still names the project the session is in.
-    project_root = scope.project_root or project_root_default()
+    project_root = scope.project_root or Path(os.path.abspath(project_root_default()))
     global_scope = scope.global_scope
 
     osenv = dict(base_env if base_env is not None else os.environ)
@@ -961,11 +989,25 @@ def get_environment(
         if value and not osenv.get(key):
             _apply({key: value})
 
+    def _pin_walked(key: str, value: str) -> None:
+        """The root this walk USED: an inherited value naming the same
+        directory holds (no spurious diff); any other is replaced -- a session
+        pinned to store A that runs `env --agents-dir B` walked B, and every
+        later `context` / `init -g` / `overlays` call must act on B too."""
+        current = osenv.get(key)
+        if current and _same_dir(current, value):
+            return
+        _apply({key: value})
+
     # --- Scope roots --- pin the two scope roots so every command/subprocess agrees:
     # AGENTS_HOME = the user store (agents_dir, ~/.agents by default); AGENTS_PROJECT_ROOT
-    # = this project's root (resolve_scope reads it).
-    _seed("AGENTS_HOME", str(agents_dir))
-    _seed("AGENTS_PROJECT_ROOT", str(project_root))
+    # = this project's root (resolve_scope reads it). A user-scope walk (-g)
+    # never walked a project, so there AGENTS_PROJECT_ROOT is only a default.
+    _pin_walked("AGENTS_HOME", str(agents_dir))
+    if scope.project_root is not None:
+        _pin_walked("AGENTS_PROJECT_ROOT", str(project_root))
+    else:
+        _seed("AGENTS_PROJECT_ROOT", str(project_root))
     # --- Interpreter --- AGENTS_PYTHON = the Python dotagents itself is running
     # under, so shims and helper scripts have a known-good default: a bare
     # `python`/`python3` on PATH may be a Store alias stub, an emulated build,

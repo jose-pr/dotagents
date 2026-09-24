@@ -411,6 +411,85 @@ def test_agents_pythonpath_from_another_scope_is_replaced(roots):
     assert env["AGENTS_PYTHONPATH"] == str(agents_dir / "lib")
 
 
+# --------------------------------------------------------------------------
+# env-10: the emitted roots are the stores the walk used, absolute.
+# --------------------------------------------------------------------------
+
+def test_emitted_agents_home_is_the_store_walked(tmp_path):
+    """Inside a session pinned to store A, `env --agents-dir B` walked B but
+    emitted AGENTS_HOME=A (only-if-unset), so later commands acted on A."""
+    store_a, store_b = tmp_path / "storeA", tmp_path / "storeB"
+    (store_b / "overlays" / "foo").mkdir(parents=True)
+    store_a.mkdir()
+    env = _env.get_environment(
+        Scope.of(agents_dir=store_b, global_scope=True),
+        base_env={"PATH": "/usr/bin", "AGENTS_HOME": str(store_a)},
+    )
+    assert env["AGENTS_HOME"] == str(store_b)
+    assert env["FOO_OVERLAY_ROOT"] == str(store_b / "overlays" / "foo")
+
+
+def test_emitted_project_root_is_the_project_walked(tmp_path):
+    store = tmp_path / "store"
+    proj_a, proj_b = tmp_path / "projA", tmp_path / "projB"
+    for d in (store, proj_a / ".agents", proj_b / ".agents"):
+        d.mkdir(parents=True)
+    env = _env.get_environment(
+        _scope(store, proj_b),
+        base_env={"PATH": "/usr/bin", "AGENTS_PROJECT_ROOT": str(proj_a)},
+    )
+    assert env["AGENTS_PROJECT_ROOT"] == str(proj_b)
+
+
+def test_an_inherited_root_naming_the_same_dir_holds(tmp_path):
+    """No spurious diff when the pin is the same directory spelled
+    differently (a trailing separator, and case on Windows)."""
+    store, proj = tmp_path / "store", tmp_path / "proj"
+    (proj / ".agents").mkdir(parents=True)
+    store.mkdir()
+    spelled = str(store) + os.sep
+    if os.name == "nt":
+        spelled = spelled.upper()
+    base = {"PATH": "/usr/bin", "AGENTS_HOME": spelled, "AGENTS_PROJECT_ROOT": str(proj)}
+    diff = _env.get_diff(_scope(store, proj), base_env=base)
+    assert "AGENTS_HOME" not in diff and "AGENTS_PROJECT_ROOT" not in diff
+
+
+def test_relative_roots_are_emitted_absolute(tmp_path, monkeypatch):
+    """`env --agents-dir ./storeB --diff` emitted "AGENTS_HOME": "storeB",
+    which resolves differently in a child running in another cwd."""
+    (tmp_path / "storeB" / "overlays" / "foo" / "bin").mkdir(parents=True)
+    (tmp_path / "proj" / ".agents").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    env = _env.get_environment(
+        Scope.of(agents_dir=Path("storeB"), project_root=Path("proj")),
+        base_env={"PATH": "/usr/bin"},
+    )
+    assert env["AGENTS_HOME"] == str(tmp_path / "storeB")
+    assert env["AGENTS_PROJECT_ROOT"] == str(tmp_path / "proj")
+    assert env["FOO_OVERLAY_ROOT"] == str(tmp_path / "storeB" / "overlays" / "foo")
+    assert str(tmp_path / "storeB" / "overlays" / "foo" / "bin") in env["PATH"].split(os.pathsep)
+
+
+def test_env_cli_agents_dir_wins_over_the_inherited_store(tmp_path, monkeypatch, capsys):
+    from dotagents.cli.env import Env
+
+    (tmp_path / "storeA").mkdir()
+    (tmp_path / "storeB").mkdir()
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "storeA"))
+    monkeypatch.delenv("AGENTS_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    cmd = Env()
+    cmd.format = "json"
+    cmd.diff = True
+    cmd.global_scope = True
+    cmd.agents_dir = Path("storeB")
+    assert cmd() == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["AGENTS_HOME"] == str(tmp_path / "storeB")
+
+
 def test_find_bash_warns_once_when_there_is_none(monkeypatch, caplog):
     import logging
 
