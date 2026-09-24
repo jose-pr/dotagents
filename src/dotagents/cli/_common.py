@@ -248,7 +248,10 @@ def _no_subcommand(cmd, hint: str) -> int:
     if parser is not None and hasattr(parser, "print_help"):
         parser.print_help()
     else:
-        cmd._logger_.info(hint)
+        # `_logger_` needs a `_parsername_`, which the top-level umbrella has none of.
+        import logging
+
+        logging.getLogger(getattr(cmd, "_parsername_", None) or "dotagents").info(hint)
     return 2
 
 
