@@ -123,7 +123,6 @@ def test_loaded_paths_follow_includes_recursively(home, tmp_path):
         home / ".agents" / "AGENTS.md",
         home / ".agents" / "kb" / "MORE.md",
         project / ".agents" / "AGENTS.md",
-        project / "AGENTS.md",  # the static entry, present or not
     ):
         assert expected.resolve() in loaded
 
@@ -131,6 +130,28 @@ def test_loaded_paths_follow_includes_recursively(home, tmp_path):
 # --------------------------------------------------------------------------
 # --write-agent lands in the harness's real file, as a managed block
 # --------------------------------------------------------------------------
+
+def test_claude_reads_a_root_agents_md_only_while_no_claude_file_exists(home, tmp_path, monkeypatch):
+    """Claude reads AGENTS.md as a fallback. A project-scope `init` creates
+    `.claude/CLAUDE.md`; after that a static "AGENTS.md" entry subtracted a
+    committed root AGENTS.md that reached neither Claude nor `context`."""
+    # Bound the upward walk: the machine's real home (an ancestor of tmp_path,
+    # not the faked one) carries its own `.claude/CLAUDE.md`.
+    monkeypatch.setattr(_agents.ClaudeAgent, "_walk_stop", tmp_path)
+    project = tmp_path / "proj"
+    project.mkdir()
+    write_text_lf(project / "AGENTS.md", "ROOT-AGENTS-MD\n")
+    claude = _agents.ClaudeAgent()
+    root_md = (project / "AGENTS.md").resolve()
+    assert root_md in claude.loaded_paths(project), "no CLAUDE file: Claude reads it"
+
+    write_text_lf(project / ".claude" / "CLAUDE.md", "@../.agents/AGENTS.md\n")
+    assert root_md not in claude.loaded_paths(project), "CLAUDE file present: context must carry it"
+
+    # ...unless the CLAUDE file includes it.
+    write_text_lf(project / ".claude" / "CLAUDE.md", "@../.agents/AGENTS.md\n@../AGENTS.md\n")
+    assert root_md in claude.loaded_paths(project)
+
 
 def test_write_context_merges_a_block_into_the_project_file(tmp_path):
     project = tmp_path / "proj"

@@ -171,11 +171,19 @@ class Agent:
 class ClaudeAgent(Agent):
     name = "claude"
     context_files = ["CLAUDE.md"]
-    # What Claude Code loads by itself: the project-root AGENTS.md, plus whatever
-    # its entry files `@`-include -- resolved live by `loaded_paths`, never
-    # assumed statically (the store's AGENTS.md is loaded only if an include
-    # actually points at it).
-    harness_loads = ["AGENTS.md"]
+    # What Claude Code loads by itself is resolved live by `loaded_paths`, never
+    # assumed statically: whatever its entry files `@`-include (the store's
+    # AGENTS.md only if an include points at it), and a directory's AGENTS.md
+    # only while no CLAUDE file is in play at or above it -- Claude reads
+    # AGENTS.md as a FALLBACK (`claude-md-or-agents-md`), and a project-scope
+    # `init` creates `.claude/CLAUDE.md`, after which a static "AGENTS.md" here
+    # dropped a committed root AGENTS.md from every session.
+    harness_loads: "list[str]" = []
+    #: Files whose presence at or above a directory stops Claude reading that
+    #: directory's AGENTS.md (the user-level `~/.claude/CLAUDE.md` does not).
+    _CLAUDE_FILES = ("CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md")
+    #: Seam for tests: stop the upward walk here (None = the filesystem root).
+    _walk_stop: "Optional[Path]" = None
     #: Claude Code's entry files, relative to the project root (`~/`-prefixed =
     #: the user-level one). `@path` lines in any of them are includes.
     ENTRY_FILES = ("~/.claude/CLAUDE.md", "CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md")
@@ -203,7 +211,35 @@ class ClaudeAgent(Agent):
                 _claude_includes(Path(entry), seen)
             else:
                 _claude_includes(Path(project_root) / entry, seen)
+        seen.update(self._fallback_agents_md(Path(project_root)))
         return super().loaded_paths(project_root) + sorted(seen)
+
+    def _fallback_agents_md(self, project_root: Path) -> "list[Path]":
+        """The AGENTS.md files Claude reads by itself: the project root's and
+        each ancestor's, each only while no CLAUDE file exists at or above it."""
+        try:
+            home = Path.home().resolve()
+            chain = [project_root.resolve(), *project_root.resolve().parents]
+        except OSError:
+            return []
+        if self._walk_stop is not None:
+            stop = Path(self._walk_stop).resolve()
+            chain = [d for d in chain if d == stop or stop in d.parents]
+
+        def has_claude(d: Path) -> bool:
+            for name in self._CLAUDE_FILES:
+                if d == home and name == ".claude/CLAUDE.md":
+                    continue  # the user-level file, not a project one
+                if (d / name).is_file():
+                    return True
+            return False
+
+        claude_at = [has_claude(d) for d in chain]
+        out = []
+        for i, d in enumerate(chain):
+            if not any(claude_at[i:]) and (d / "AGENTS.md").is_file():
+                out.append(d / "AGENTS.md")
+        return out
 
     def _config_root(self, dest: Path) -> Path:
         """`~/.claude` for the user store, `<project>/.claude` otherwise
