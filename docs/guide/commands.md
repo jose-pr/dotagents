@@ -98,7 +98,8 @@ removes PowerShell handlers an earlier run wrote.
 Claude Code's PowerShell tool never reads `$CLAUDE_ENV_FILE`, so its commands do not
 see the env layers. On Windows, `init --powershell-env-hook` adds a `PreToolUse` hook
 (matched on the `PowerShell` tool) that prepends the `dotagents env` change set to each
-PowerShell call. **It auto-approves every PowerShell tool call**: rewriting a command
+PowerShell call (`env --diff --cache`, so an unchanged environment is not reassembled
+on every call). **It auto-approves every PowerShell tool call**: rewriting a command
 without a prompt on each one requires `permissionDecision: "allow"`, which skips the
 approval prompt (your deny and ask rules still apply). It is off by default, and a
 plain `init` removes one an earlier release wired.
@@ -114,9 +115,12 @@ hook processes — it is absent from the session's own shell, so checking for it
 Skills are linked **one directory per skill**: each `<store>/skills/<name>` becomes
 `<Claude config>/skills/<name>`, so a skills directory of your own is never replaced,
 and a same-named skill you placed there yourself is kept (with a warning). A link is a
-symlink where the OS permits one and a **copy** otherwise (notably Windows without
-Developer Mode); a copy is a point-in-time snapshot, so re-run `dotagents init` after
-overlay skills change. `overlays add` says so when it publishes a new skill.
+symlink where the OS permits one, else on Windows a directory junction, else a
+**copy**. `init` and `overlays add` / `sync` / `remove` (once `init` has wired Claude
+for that store) keep them current: a copy you have not edited is refreshed, a skill
+the store no longer has is removed, and a copy you edited is kept with a warning.
+Which entries are dotagents' is recorded in `<Claude config>/skills/.dotagents-linked.json`.
+In a project, `init` warns when those skills are not gitignored.
 
 **Codex** — user store (`-g`) only, since its hooks file is global. `init` deploys two
 small Python scripts into `<codex-home>/hooks/` (`$CODEX_HOME`, else `~/.codex`), run
@@ -170,7 +174,8 @@ dotagents overlays show python             # describe one: manifest, requires, s
   (re)installed and set up. It validates and resolves every name against the repos
   before touching anything — the first repo that offers a name wins — records where
   each overlay came from, and publishes skills from the installed copy, never
-  replacing a skill already in the shared `skills/` dir. A fresh install whose setup
+  replacing a skill already in the shared `skills/` dir (and links them into
+  Claude's skills dir when `init` wired Claude for the store). A fresh install whose setup
   script fails is rolled back.
 - **`sync`** refreshes each installed overlay from the repo it was installed from
   (recorded in `<overlay>/.dotagents-install.json`); `--repo` replaces that recorded
@@ -181,8 +186,8 @@ dotagents overlays show python             # describe one: manifest, requires, s
   `<store>/install_backup/<timestamp>/overlays/<name>/` first. A `requires` added
   upstream is installed, and a published skill copy you edited is kept unless
   `--overwrite`.
-- **`remove`** deletes the overlay's directory, unpublishes the skills it published,
-  and recomposes `AGENTS.md`'s managed block over the overlays that remain, so its
+- **`remove`** deletes the overlay's directory, unpublishes the skills it published
+  (and their links in Claude's skills dir), and recomposes `AGENTS.md`'s managed block over the overlays that remain, so its
   rules and routing leave with it. It refuses an overlay another installed overlay
   requires (and no other store provides) unless `--force`.
 - **`list`** shows the installed overlays per store (in a project, the user store's
@@ -258,6 +263,10 @@ dotagents env --diff --format json   # only vars that differ from the caller's e
   parent-process chain) and emits sourceable output for it. An explicit `--format`
   always wins.
 - `--diff` — emit only the change set vs. the caller's environment.
+- `--cache` — replay the previous output while nothing it depends on changed (the
+  environment, the working directory, the stores, the overlays, every env and `lib`
+  file), for at most five minutes; the per-command env loaders use it. The cache is
+  owner-only, under `<user store>/.cache/env/`.
 - `-g` / `--global` — skip the project-level env files (the store is unaffected).
 - `--agents-dir <dir>` — user store override for this run.
 
@@ -294,9 +303,11 @@ form and drop names that are not shell identifiers.
    (`my-ov` → `MY_OV_OVERLAY_ROOT`). That is the same name `context` expands as a
    `<NAME_OVERLAY_ROOT>` placeholder, so an env file and a context file refer to an
    overlay's install dir by one name.
-3. **`PATH`** — every level's `bin/` (each store's overlays, then the store) is
-   prepended, including ones that do not exist yet, so an `env.py` and every
-   subprocess can call an overlay's helpers by name.
+3. **`PATH`** — every level's `bin/` (each store's overlays, then the store) goes
+   to the front in that order, including ones that do not exist yet, so an `env.py`
+   and every subprocess can call an overlay's helpers by name. The order holds even
+   when the calling shell already had some of them, and empty or relative inherited
+   entries are dropped.
 4. **`AGENTS_PYTHONPATH`** — every level's `lib/` that exists, highest precedence
    first (`os.pathsep`-joined). `env` puts these on the `PYTHONPATH` of the `env.py`
    scripts it runs, so they can `import` an overlay's `lib/` module, but never on the
@@ -420,15 +431,17 @@ What happens, in order:
 3. **The harness** — the agent's program (`claude`, `codex`, `gemini`,
    `cursor-agent`, `copilot`, `pi`), resolved on the PATH from step 1 so a harness an
    overlay's `bin/` provides is found, or `--command <program>` for one under
-   another name. dotagents' flags come first and the passthrough after, so yours
+   another name. On Windows the current directory is never searched (a
+   `claude.cmd` at a repository's root is not the harness). dotagents' flags come first and the passthrough after, so yours
    win where the harness takes the last value. The exit code is the harness's
    (128+N when a signal N killed it). On Windows a `.cmd` / `.bat` harness runs
    through cmd.exe, which would execute or expand `& | < > ^ % ! "` and cut an
    argument at a newline, so an argument holding one is refused rather than
    passed on rewritten.
 
-`--dry-run` prints the command line and the names of the exported changes (never
-their values) and runs nothing. `--agents-dir` overrides the user store, as for
+`--dry-run` prints the command line, the names of the exported changes (never
+their values) and, on an `unset:` line, the variables an env layer removed, and runs
+nothing. Those removed variables never reach the harness. `--agents-dir` overrides the user store, as for
 `env` and `context`. Like `findings`, the command is bundled and discovered from the
 package; a same-named `launch.py` in a scope's `dotagents/cmds/` overrides it.
 
@@ -501,8 +514,11 @@ vendored (plus the `pathlib_next` extras named by `--extras`), so it runs with n
   `/usr/bin/env python3`).
 - `--duho-version`, `--pathlib-next-version` — the versions vendored (defaults: the
   floors the package declares).
-- `--extras <a,b>` — `pathlib_next` extras to vendor too (`uri`, `http`, `sftp`,
-  `s3`), so the `.pyz` can read those overlay sources; none by default.
+- `--extras <a,b>` — `pathlib_next` extras to vendor too (`uri`, `http`, `s3`),
+  so the `.pyz` can read those overlay sources; none by default. Everything is
+  vendored as pure-Python wheels resolved for Python 3.9, so the file does not
+  depend on the machine that built it; `sftp` needs native modules and fails the
+  build with a message saying so. The archive is compressed.
 
 Each release attaches a built one:
 <https://github.com/jose-pr/dotagents/releases/latest/download/dotagents.pyz>.

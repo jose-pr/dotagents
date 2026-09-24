@@ -104,10 +104,13 @@ dotagents init --dry-run                # show what would happen
 dotagents init --force                  # replace AGENTS.md's content wholesale (backed up)
 ```
 
-`--from <path-or-uri>` selects another *base* (a directory, or a `file:`, `http(s):`,
-`zip:`, `sftp:` or `s3:` URI via `pip install "dotagents-cli[uri]"`); the bundled base
-ships inside the package, so you need it only for a base of your own. `init` records
-it, and later `init` and `overlays` runs compose over it.
+`--from <source>` selects another *base*: a base overlay directory, a dotagents
+checkout (its `src/dotagents/_overlay`), a `file:`, `http(s):`, `zip:`, `sftp:` or `s3:`
+URI (`pip install "dotagents-cli[uri]"` for all but `file:`), or a git repository
+(`repo[@ref][#path]`). A remote one is fetched into `<user store>/.cache/overlays/`.
+The bundled base ships inside the package, so `--from` is only for a base of your own.
+`init` records it (without any credentials in the URL), and later `init` and
+`overlays` runs compose over it.
 
 `init` wires Claude Code plus any harness it is running inside (detected from its
 environment); `--agents a,b` replaces that set, so include `claude` to keep it.
@@ -186,7 +189,8 @@ authors:
 
 ### Downloadable `dotagents.pyz`
 
-A self-contained zipapp with `duho` and `pathlib_next` bundled in, so it needs no
+A self-contained zipapp with `duho`, `pathlib_next` and `tomli` bundled in (pure
+Python, so one file runs on any OS and on Python 3.9+), so it needs no
 `pip install`. Each release attaches one:
 <https://github.com/jose-pr/dotagents/releases/latest/download/dotagents.pyz>.
 

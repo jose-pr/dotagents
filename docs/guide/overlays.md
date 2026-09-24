@@ -93,7 +93,8 @@ installed from.) A repo is **always a collection** of overlays, in one of two sh
   checkout of the `repo` branch has them under `overlays/`, any folder);
 - a **registry** — a JSON, TOML or YAML file mapping `<name-or-alias>` to the
   **source** of that one overlay (the whole document, or its `overlays` key). TOML
-  needs Python 3.11+ or `tomli`, YAML needs `pyyaml`.
+  uses `tomli` below Python 3.11 (installed with the package, bundled in the
+  `.pyz`); YAML needs `pip install 'dotagents-cli[yaml]'`.
 
 Both the repo and each source are written as a spec, `<location>[@<ref>][#<path>]`:
 `<location>` is a local path, an `http(s)://` URL, or a git repository

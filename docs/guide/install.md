@@ -47,15 +47,20 @@ dotagents init --dry-run                # show what would happen
 dotagents init --force                  # replace AGENTS.md's content wholesale (backed up)
 ```
 
-`--from <path-or-uri>` selects another *base* (a directory, or a `file:` / `http(s):` /
-`zip:` / `sftp:` / `s3:` URI via `pip install "dotagents-cli[uri]"`). The bundled base
-ships inside the package, so you need it only for a base of your own. `init` records it
-in `<store>/dotagents/config.toml`, and later `init` and `overlays` runs compose over it.
+`--from <source>` selects another *base*: a base overlay directory, a dotagents
+checkout (its `src/dotagents/_overlay`), a `file:`, `http(s):`, `zip:`, `sftp:` or `s3:`
+URI (`pip install "dotagents-cli[uri]"` for all but `file:`), or a git repository
+(`repo[@ref][#path]`). A remote one is fetched into `<user store>/.cache/overlays/`.
+The bundled base ships inside the package, so `--from` is only for a base of your own.
+`init` records it in
+`<store>/dotagents/config.toml` (without any credentials in the URL), and later `init` and
+`overlays` runs compose over it.
 
 ## Downloadable `dotagents.pyz`
 
-A self-contained zipapp with `duho` and `pathlib_next` bundled in (plus whatever
-`build-pyz --extras` added), so it needs no `pip install`. Each release attaches one:
+A self-contained zipapp with `duho`, `pathlib_next` and `tomli` bundled in as
+pure-Python wheels (plus whatever `build-pyz --extras` added), so it needs no
+`pip install` and runs on any OS with Python 3.9+. Each release attaches one:
 <https://github.com/jose-pr/dotagents/releases/latest/download/dotagents.pyz>.
 
 ```bash
