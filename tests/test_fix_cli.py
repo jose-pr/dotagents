@@ -268,3 +268,62 @@ def test_a_new_builtin_module_is_covered_without_a_second_list():
     modules = cli._command_modules([New])
     assert {"dotagents.cli.brand_new", "dotagents.cli.leaf", "dotagents.cli._common",
             "duho.presets"} <= set(modules)
+
+
+# --------------------------------------------------------------------------- #
+# findings: encodings
+# --------------------------------------------------------------------------- #
+
+
+def test_a_non_utf8_note_is_skipped_and_left_alone(findings_mod, tmp_path, capsys, caplog):
+    F = findings_mod.Findings
+    d = tmp_path / "q"
+    d.mkdir()
+    note = d / "handnote.md"
+    raw = b"caf\xe9 note\n"
+    note.write_bytes(raw)
+
+    with caplog.at_level(logging.WARNING):
+        assert _run(F.Add, description="second finding", dir=d) == 0
+        assert _run(F.List, dir=d) == 0
+    out = capsys.readouterr().out
+    assert "second-finding: second finding" in out
+    assert note.read_bytes() == raw, "never rewritten"
+    assert any("handnote.md" in r.getMessage() and "not UTF-8" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_a_bom_does_not_hide_the_frontmatter(findings_mod, tmp_path):
+    F = findings_mod.Findings
+    d = tmp_path / "q"
+    d.mkdir()
+    (d / "bommed.md").write_bytes(
+        b"\xef\xbb\xbf---\nname: bommed\ndescription: written by PowerShell 5\n"
+        b"status: active\n---\n\nthe details\n"
+    )
+    finding = findings_mod.FindingsStore(d).get("bommed")
+    assert finding.description == "written by PowerShell 5"
+
+    _run(F.Done, name="bommed", resolution="fixed", dir=d)
+    text = (d / "processed" / "bommed.md").read_bytes().decode("utf-8")
+    assert text.startswith("---\nname: bommed\n")
+    assert text.count("---\n") == 2, "one frontmatter, not one nested in the body"
+
+
+def test_stdin_is_decoded_as_utf8_whatever_the_locale(findings_mod, tmp_path, monkeypatch):
+    F = findings_mod.Findings
+    d = tmp_path / "q"
+    piped = "arrow \u2192 and caf\u00e9\n"
+    monkeypatch.setattr(
+        sys, "stdin", io.TextIOWrapper(io.BytesIO(piped.encode("utf-8")), encoding="cp1252")
+    )
+    _run(F.Add, description="third", body_file=Path("-"), dir=d)
+    assert piped.strip() in (d / "third.md").read_text(encoding="utf-8")
+
+
+def test_a_non_utf8_body_file_is_a_clean_error(findings_mod, tmp_path):
+    F = findings_mod.Findings
+    body = tmp_path / "body.md"
+    body.write_bytes(b"caf\xe9\n")
+    with pytest.raises(SystemExit, match="not UTF-8"):
+        _run(F.Add, description="x", body_file=body, dir=tmp_path / "q")

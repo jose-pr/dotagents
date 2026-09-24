@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import re
 import sys
 from pathlib import Path
@@ -73,6 +74,8 @@ _META_KEYS = ("name", "description", "status", "created", "processed")
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 _MAX_SLUG = 60
 
+_LOGGER = logging.getLogger("dotagents.findings")
+
 
 def slugify(text: str) -> str:
     """A finding's file name from free text: lowercase, runs of anything that is
@@ -88,7 +91,9 @@ def _today() -> str:
 
 
 def _read(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    """UTF-8, with a leading BOM dropped (PowerShell 5's `-Encoding UTF8`
+    writes one, and it would hide the frontmatter)."""
+    return path.read_text(encoding="utf-8-sig")
 
 
 def _write(path: Path, text: str) -> None:
@@ -98,6 +103,19 @@ def _write(path: Path, text: str) -> None:
         fh.write(text)
 
 
+def _read_stdin() -> str:
+    """stdin as UTF-8 whatever the locale says: decoded from the raw bytes,
+    since the text layer uses the ANSI code page on Windows and would store
+    piped UTF-8 as mojibake without an error."""
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is None:  # an already-decoded stream (a test's StringIO)
+        return sys.stdin.read()
+    try:
+        return buffer.read().decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise SystemExit("error: stdin is not UTF-8 (%s)" % exc)
+
+
 def _read_text_arg(inline: "Optional[str]", file: "Optional[Path]") -> "Optional[str]":
     """Resolve a ``--x TEXT`` / ``--x-file PATH`` pair; ``-`` reads stdin."""
     if inline is not None:
@@ -105,8 +123,12 @@ def _read_text_arg(inline: "Optional[str]", file: "Optional[Path]") -> "Optional
     if file is None:
         return None
     if str(file) == "-":
-        return sys.stdin.read()
-    return _read(Path(file).expanduser())
+        return _read_stdin()
+    path = Path(file).expanduser()
+    try:
+        return _read(path)
+    except UnicodeDecodeError as exc:
+        raise SystemExit("error: %s is not UTF-8 (%s)" % (path, exc))
 
 
 class Finding:
@@ -223,7 +245,12 @@ class FindingsStore:
         for p in sorted(directory.glob("*.md")):
             if p.name in _NOT_FINDINGS or p.name.startswith("_"):
                 continue
-            out.append(Finding.load(p))
+            try:
+                out.append(Finding.load(p))
+            except UnicodeDecodeError:
+                # Left alone, never rewritten: one hand-written note in another
+                # encoding must not take the whole queue down.
+                _LOGGER.warning("skipping %s: not UTF-8", p)
         return out
 
     def active(self) -> "list[Finding]":
