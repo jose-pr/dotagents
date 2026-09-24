@@ -214,11 +214,12 @@ class Scope:
         """Directory of discovered command modules for this scope (D76):
         ``<agents_root>/dotagents/cmds``, a seam alongside ``overlays``/``skills``.
 
-        ``init`` creates it (with the README only; the bundled modules are always
-        discovered from the package itself), and ``dotagents.cli._discover`` runs
-        ``duho.discover_commands`` over it (per scope, user + project) so a
-        user's own ``*.py`` command modules dropped here are picked up with zero
-        config."""
+        ``init`` never creates it -- the dir exists once a user adds a command
+        module (the bundled modules are discovered from the package itself).
+        Discovery (``dotagents.cli._cmds_dirs``) walks the same
+        ``dotagents/cmds`` name at every level through :meth:`paths` and skips
+        a missing dir, so a user's own ``*.py`` command modules dropped here are
+        picked up with zero config."""
         return self.agents_root / "dotagents" / "cmds"
 
     def overlay_dir(self, name: str) -> Path:

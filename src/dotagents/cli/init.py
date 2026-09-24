@@ -8,8 +8,9 @@ from dotagents.cli._common import BASE_ROOT, DotAgentsArgs, _apply_base, _resolv
 
 
 class Init(DotAgentsArgs):
-    """Lay down the neutral base config -- the `AGENTS.md` scaffolding and design-log
-    convention, never the opinionated overlays (those come from `overlays add`).
+    """Lay down the neutral base config -- the store's `AGENTS.md` managed block
+    plus each harness's include and hooks -- never the opinionated overlays
+    (those come from `overlays add`).
 
     Scope: **project** by default (``<cwd>/.agents``), or the **user** store with
     ``-g/--global`` (``~/.agents``). ``--dest`` overrides the resolved location.

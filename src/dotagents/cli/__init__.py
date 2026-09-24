@@ -2,9 +2,9 @@
 subcommands, plus command modules discovered from `cmds` directories (D76/D84).
 
 The bundled command modules live in `_overlay/dotagents/cmds/` (`findings`,
-`launch`). `init` lays down that dir's README only, as the user's drop-in point:
-a `.py` command module placed in `<scope>/dotagents/cmds/` is discovered like any
-other (D84).
+`launch`) and are discovered from the package; `init` copies nothing from that
+dir. A `.py` command module a user places in `<scope>/dotagents/cmds/` (a dir
+they create for it) is discovered like any other (D84).
 
 The per-command classes live in sibling modules (`cli/init.py`, `cli/overlays.py`,
 ...); this package base holds the shared helpers (in `cli/_common.py`, re-exported
@@ -40,7 +40,6 @@ from dotagents import __version__
 # command modules and external importers (`dotagents._overlays`, `dotagents._scope`).
 from dotagents.cli._common import (  # noqa: F401
     AGENTS_DIR_ENV,
-    BASE_PLAIN_FILES,
     BASE_ROOT,
     DotAgentsArgs,
     _apply_base,
@@ -137,10 +136,10 @@ class Dotagents(LoggingArgs, Cli):
 def _bundled_cmds_dir() -> "Path | None":
     """The bundled command-module dir, `<package>/_overlay/dotagents/cmds` (D76).
 
-    Ships `findings.py` (the per-scope findings queue), `launch.py` (start a
-    harness with the env and context applied) and a README. It is always a
-    discovery source; `init` lays down only the README (a create-if-absent copy
-    of the modules would pin the first-installed version). Resolved via
+    Ships `findings.py` (the per-scope findings queue) and `launch.py` (start
+    a harness with the env and context applied). It is always a discovery
+    source, and `init` copies nothing from it (a create-if-absent copy of the
+    modules would pin the first-installed version). Resolved via
     `_package_data_dir`, which extracts a zip-backed `_overlay` to a real temp
     dir once, so the modules imported from here always have an on-disk
     `__file__` and `_repoint_zipapp_sources` need not cover them. Returns None

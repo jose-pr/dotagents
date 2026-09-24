@@ -145,21 +145,15 @@ def _package_data_dir(name: str) -> "Path | None":
 
 
 # The base overlay (neutral minimum) is bundled package data at
-# `src/dotagents/_overlay`; `init` lays it down. Overlays beyond the base are
-# opt-in and installed by name with `overlays add` from a source dir
-# (`--repo` / `$AGENTS_OVERLAYS_REPO`; this package bundles none of them).
+# `src/dotagents/_overlay`. `init` renders its block template into the store's
+# `AGENTS.md` and copies nothing else into the store: the bundled command
+# modules are discovered from the package, and the hook scripts are deployed
+# into an agent's own config dir. Overlays beyond the base are opt-in and
+# installed by name with `overlays add` from a source dir (`--repo` /
+# `$AGENTS_OVERLAYS_REPO`; this package bundles none of them).
 BASE_ROOT = _package_data_dir("_overlay") or (
     Path(__file__).resolve().parent.parent / "_overlay"
 )
-
-# Base files that are create-if-absent only (never overwrite): everything the
-# base overlay ships except the AGENTS.md block template, which `init` renders
-# into `<store>/AGENTS.md` as a managed block.
-BASE_PLAIN_FILES = [
-    "dotagents/README.md",
-    "dotagents/AGENTS.md",
-    "dotagents/DECISIONS.md",
-]
 
 #: Where the base AGENTS.md block template lives inside a base overlay dir.
 BASE_AGENTS_TEMPLATE = "dotagents/templates/AGENTS.md"
@@ -323,9 +317,10 @@ def _apply_base(
     agents: "list[str] | None" = None,
     wire_hooks: bool = False,
 ) -> None:
-    """Lay down the base overlay: managed-block merge AGENTS.md (rendered for
-    this store) and, for Claude, the `@` include in its own config dir;
-    create-if-absent the plain files. `init`'s body.
+    """Lay down the base: managed-block merge AGENTS.md (rendered for this
+    store) and, for Claude, the `@` include in its own config dir. `init`'s
+    body. It creates no `dotagents/` dir and no design log: a scope's
+    `dotagents/cmds/` exists once its owner adds a command module there.
 
     With `wire_hooks`, each active agent also gets its hooks merged and the shared
     skills dir linked into its config dir (a no-op for adapters that don't
@@ -372,44 +367,6 @@ def _apply_base(
                     dry_run=dry_run,
                     logger=logger,
                 )
-
-    for rel in BASE_PLAIN_FILES:
-        source_path = Path(src) / rel
-        if not source_path.exists():
-            continue
-        target_path = dest / rel
-        if target_path.exists():
-            logger.info("skipped (present): %s", rel)
-            continue
-        logger.info("created: %s", rel)
-        if not dry_run:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(source_path), str(target_path))
-
-    # Create `<dest>/dotagents/cmds/` (the user extension point: a `*.py` command
-    # module dropped here is discovered with zero config) and lay down its docs
-    # (`*.md`, create-if-absent like the plain files). The bundled `.py` modules
-    # are deliberately NOT copied: the bundled dir is always a discovery source
-    # (`cli._bundled_cmds_dir`), and a create-if-absent copy would pin the
-    # first-installed version and shadow every later one.
-    cmds_src = Path(src) / "dotagents" / "cmds"
-    cmds_dest = dest / "dotagents" / "cmds"
-    if not dry_run:
-        cmds_dest.mkdir(parents=True, exist_ok=True)
-    if cmds_src.is_dir():
-        sources = sorted(cmds_src.glob("*.md"))
-        for source_path in sources:
-            if source_path.name.startswith("_"):
-                continue
-            rel = "dotagents/cmds/%s" % source_path.name
-            target_path = cmds_dest / source_path.name
-            if target_path.exists():
-                logger.info("skipped (present): %s", rel)
-                continue
-            logger.info("created: %s", rel)
-            if not dry_run:
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(source_path), str(target_path))
 
 
 def _resolve_from(from_arg: "str | None", default: Path) -> Path:

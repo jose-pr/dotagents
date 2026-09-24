@@ -47,7 +47,8 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   the bundled dir is always a discovery source. `link-project` / `sync-project`
   are shipped by the opt-in **private-sync** overlay from its own `cmds/` +
   `lib/_link.py` (D85), not by the package. A personal command module
-  dropped into a scope's `dotagents/cmds/` is discovered like any other, so private
+  dropped into a scope's `dotagents/cmds/` (a dir its owner creates — `init`
+  writes no `dotagents/` dir) is discovered like any other, so private
   tooling never has to live in the repo (D84). `audit` is repo CI tooling
   (`tools/audit.py`), not a command.
 - Command discovery layers sources, later wins: built-ins < bundled `cmds` <
@@ -175,14 +176,22 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `write_base_config(dest, ...)` (Claude also writes the `@` include into
   `~/.claude/CLAUDE.md` or `<project>/.claude/CLAUDE.md` — THE last mile; no
   `<store>/CLAUDE.md` is written). The base overlay is
-  `_overlay/dotagents/` only: `templates/AGENTS.md` (the block
-  TEMPLATE, rendered by `cli._common.base_agents_text(src, dest)` —
-  `{{AGENTS_MD}}` becomes the actual path of the store's `AGENTS.md`, so
-  "annotate that you read `…`" names the real file; `init` and every recompose
-  use it), `AGENTS.md` (dev notes for that directory, read when working in it),
-  `README.md` (user-facing), `DECISIONS.md`, `cmds/`, `hooks/`.
-  The user scope is whatever `resolve_user_store()` returns, never the literal
-  `~/.agents`.
+  `_overlay/dotagents/` only, and none of it is copied into the store:
+  `templates/AGENTS.md` (the block TEMPLATE, rendered by
+  `cli._common.base_agents_text(src, dest)` — `{{AGENTS_MD}}` becomes the
+  actual path of the store's `AGENTS.md`, so "annotate that you read `…`"
+  names the real file; `init` and every recompose use it), `cmds/` (the
+  bundled command modules, discovered from the package; a same-named module in
+  a scope's `dotagents/cmds/` overrides one; `_`-prefixed files are helpers,
+  never commands) and `hooks/` (the scripts `wire_hooks` deploys into an
+  agent's own config dir — dependency-free, since they run under whatever
+  Python the harness finds, and silent on stdout unless the hook protocol
+  reads it). What `init` writes into a store is the rendered managed blocks
+  (`AGENTS.md`, plus the per-agent file an adapter writes, e.g. `GEMINI.md`),
+  the `bin/` wrappers (from a `.pyz`) and, with `--force`, the
+  `install_backup/<timestamp>/` copies — never a `dotagents/` dir or a design
+  log. The user scope is whatever `resolve_user_store()` returns, never the
+  literal `~/.agents`.
 - `_skills` — publish an overlay's `skills/<name>/` into a scope's shared skills dir
   (symlink-preferred, copy fallback); unpublish removes only what the overlay
   published — a copy counts as the overlay's only when its file set AND bytes
@@ -385,7 +394,7 @@ the pinned root makes that cwd-independent. `-g/--global` on these two means
   modules to real temp files. Discovered `cmds` modules are extracted by
   `_package_data_dir` before import, so they need no repoint.
 - **Package data in a `.pyz`.** `_package_data_dir(name)` resolves a package-data dir
-  by name — `_overlay` (the base overlay `init` writes) and `_overlays_src` (bundled
+  by name — `_overlay` (the base overlay; `init` renders its template) and `_overlays_src` (bundled
   example overlays, when a build includes them) — via `importlib.resources` (a
   zip-backed `Traversable` is extracted once), never `Path(__file__).exists()`
   (always False in a zipapp). Everything a `.pyz` run extracts — package data

@@ -47,9 +47,6 @@ DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 # validating that content is the overlays branch's concern, not main's.
 SCAN = [
     "src/dotagents/_overlay/dotagents/templates/AGENTS.md",
-    "src/dotagents/_overlay/dotagents/AGENTS.md",
-    "src/dotagents/_overlay/dotagents/README.md",
-    "src/dotagents/_overlay/dotagents/DECISIONS.md",
 ]
 REFS = []
 # The personal leak scanner is no longer a required tool of main: it is a personal
@@ -58,10 +55,14 @@ REFS = []
 # The auditor itself is repo CI tooling only: this file is BOTH the script (run it
 # directly, which is what CI does) and a duho command class defined at the bottom of
 # it -- but it is NOT shipped. There is no `dotagents audit` command, nothing bundles
-# it into `src/dotagents/_overlay/dotagents/cmds/` (that dir holds the README and
-# the bundled `findings` module), and the `.pyz` CI job asserts `audit` is absent
+# it into `src/dotagents/_overlay/dotagents/cmds/` (that dir holds the bundled
+# `findings` and `launch` modules), and the `.pyz` CI job asserts `audit` is absent
 # from the built artifact's help.
 EXIST_ONLY = [
+    "src/dotagents/_overlay/dotagents/cmds/findings.py",
+    "src/dotagents/_overlay/dotagents/cmds/launch.py",
+    "src/dotagents/_overlay/dotagents/hooks/preinvocation_antigravity_context.py",
+    "src/dotagents/_overlay/dotagents/hooks/pretooluse_codex_env.py",
     "tools/audit.py",
     "tools/cloud-setup.sh",
 ]
@@ -96,13 +97,14 @@ def audit(root, probe=None):
         jobs += [(p, REF_PATTERNS) for p in EXAMPLES]
     if probe:
         jobs.append((probe, BASE_PATTERNS))
+    width = max(len(str(rel)) for rel, _ in jobs) + 2
     for rel, patterns in jobs:
         path = Path(rel) if probe and rel is probe else root / rel
         if not path.is_file():
             failures.append("MISSING: %s" % rel)
             continue
         size = path.stat().st_size
-        table.append("%-55s%7d" % (rel, size))
+        table.append("%-*s%7d" % (width, rel, size))
         if patterns:
             text = path.read_text(encoding="utf-8", errors="replace")
             for pat in patterns:
