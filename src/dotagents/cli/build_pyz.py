@@ -10,6 +10,8 @@ from pathlib import Path
 
 from duho import Cmd, LoggingArgs
 
+from dotagents._fs import write_text_lf
+
 #: The interpreter the vendored dependencies are resolved for: the floor of
 #: pyproject.toml's `requires-python`. pip picks pure-Python wheels only
 #: (`--platform any --implementation py`), so the zipapp runs on any
@@ -163,13 +165,15 @@ class BuildPyz(LoggingArgs, Cmd):
             bundled = {}
             for path in sorted(stage.rglob("*.dist-info")):
                 bundled.update(_dist_info_name_version(path))
-            (dotagents_pkg_dest / "_bundle.json").write_text(
+            # Generated files are written LF, like every copied source, so the
+            # artifact's bytes do not depend on the OS it was built on.
+            write_text_lf(
+                dotagents_pkg_dest / "_bundle.json",
                 json.dumps({
                     "packages": bundled,
                     "extras": extras,
                     "python": "%d.%d.%d" % sys.version_info[:3],
                 }, indent=2) + "\n",
-                encoding="utf-8",
             )
             for path in stage.rglob("*.dist-info"):
                 shutil.rmtree(path, ignore_errors=True)
@@ -179,10 +183,9 @@ class BuildPyz(LoggingArgs, Cmd):
                 if path.is_dir():
                     shutil.rmtree(path, ignore_errors=True)
 
-            main_py = stage / "__main__.py"
-            main_py.write_text(
+            write_text_lf(
+                stage / "__main__.py",
                 "from dotagents.cli import main\n\nraise SystemExit(main())\n",
-                encoding="utf-8",
             )
 
             out_path = Path(self.out)

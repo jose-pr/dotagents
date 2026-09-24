@@ -114,6 +114,13 @@ def test_extras_help_says_sftp_cannot_be_vendored():
 # --------------------------------------------------------------------------
 
 
+def test_generated_files_are_lf(built):
+    archive, _ = built
+    for name in ("__main__.py", "dotagents/_bundle.json"):
+        data = archive.read(name)
+        assert data and b"\r\n" not in data, name
+
+
 def test_package_init_is_copied_not_rewritten(built):
     archive, _ = built
     text = archive.read("dotagents/__init__.py").decode("utf-8")
