@@ -18,6 +18,10 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   root: `agents_dir` (`--agents-dir`) → `$AGENTS_HOME` → `~/.agents`. Use it (not `resolve_scope`) when the
   store is always the user store and the project scope only adds/removes tiers,
   as in `env` / `context`.
+- `dotagents.cli._common.store_base(dest, logger=None) -> Path` — the base overlay a
+  store's block is composed from: the `base` an `init --from` recorded in
+  `<store>/dotagents/config.toml` (`read_store_config` / `write_store_config`),
+  else the bundled `BASE_ROOT`. `init` and `overlays add/remove/sync` all use it.
 - Compiled command classes live in `dotagents.cli.<name>` (`init`, `overlays`
   — `add` (installs and sets up each manifest's `requires` before the overlay
   itself, `--no-requires` to skip; a requirement the scope's walk already has

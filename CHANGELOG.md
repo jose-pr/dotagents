@@ -60,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Re-running `init` on a store with overlays installed keeps their rules and
   routing in `AGENTS.md`'s managed block; it used to rewrite the block from the
   bare base until the next `overlays sync`.
+- A base chosen with `init --from` is recorded in
+  `<store>/dotagents/config.toml`, and a later plain `init` and every `overlays
+  add` / `remove` / `sync` compose over it; they used to switch back to the
+  bundled base. Delete the file's `base` line to return to the bundled one.
 - `init --force` keeps the original of every file it replaces. Adapters that
   write the same file in one run share one `install_backup/<timestamp>/`, a
   backup is never overwritten, and a file outside the store is backed up under

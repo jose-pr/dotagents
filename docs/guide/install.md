@@ -65,6 +65,9 @@ python dist/dotagents.pyz init --bin-dir ~/.local/bin    # lay down base + comma
 - `install_backup/<timestamp>/` — what `init --force` replaced.
 - `dotagents/cmds/` — only if you create it: your own command modules (see
   [Authoring → Custom commands](authoring.md#custom-commands)).
+- `dotagents/config.toml` — only after `init --from`: records that base, so a later
+  `init` and every `overlays add` / `remove` / `sync` compose over it. Delete its
+  `base` line to return to the bundled base.
 
 ## What runs, and from where
 
