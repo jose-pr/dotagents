@@ -134,6 +134,13 @@ def parse_spec(text: str) -> Spec:
     if at and head and tail and not re.search(r"[/:\\]", tail) and not head.endswith(("://", ":")):
         location, ref = head, tail
     if explicit_git or location.endswith(".git") or location.startswith(_GIT_PREFIXES):
+        # Passed to git as arguments: a leading `-` would be read as an option
+        # (`@--upload-pack=<cmd>` ran <cmd>).
+        for part, what in ((location, "location"), (ref, "ref")):
+            if part and part.startswith("-"):
+                raise SystemExit(
+                    "error: overlay source %r: the git %s must not start with '-'" % (text, what)
+                )
         return Spec("git", location, ref, path)
     if "://" in location:
         return Spec("url", location, None, path)
@@ -289,7 +296,7 @@ class SourceCache(object):
             self.root.mkdir(parents=True, exist_ok=True)
             if self.logger:
                 self.logger.info("cloning %s", redact(spec.location))
-            self._git(["clone", "--quiet", spec.location, str(dest)], None)
+            self._git(["clone", "--quiet", "--", spec.location, str(dest)], None)
             self._fresh.add(key)
         elif key not in self._fresh:
             proc = self._git(["fetch", "--quiet", "--tags", "--prune", "origin"], dest, check=False)
