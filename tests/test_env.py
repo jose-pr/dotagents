@@ -296,11 +296,11 @@ def test_resolved_file_order(tree):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("", encoding="utf-8")
 
-    # pre-tier at user + project + project-root
+    # pre-tier at user + project (the project root contributes nothing)
     touch(agents_dir / "pre.env")
     touch(project_root / ".agents" / "pre.local.env")
     touch(project_root / "pre.local.env")
-    # main-tier at overlays + user + project + project-root
+    # main-tier at overlays + user + project
     touch(agents_dir / "overlays" / "aa" / "env")
     touch(agents_dir / "env")
     touch(project_root / ".agents" / "local.env")
@@ -316,12 +316,12 @@ def test_resolved_file_order(tree):
     main_start = min(i for i, (_l, n) in enumerate(order) if not n.startswith("pre."))
     assert pre_end < main_start
 
-    # Within the main tier: overlay(s) -> user -> project -> project-root.
+    # Within the main tier: overlay(s) -> user -> project; no project root.
     main = [(lvl, n) for lvl, n in order if not n.startswith("pre.")]
     levels = [lvl for lvl, _ in main]
     assert levels.index("aa") < levels.index("user")
     assert levels.index("user") < levels.index("project")
-    assert levels.index("project") < levels.index("project-root")
+    assert "project-root" not in [lvl for lvl, _ in order]
 
 
 def test_global_scope_drops_project_levels(tree):

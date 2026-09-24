@@ -59,20 +59,18 @@ def test_project_root_env_py_is_never_executed(roots):
     assert env["FROM_DOT_AGENTS"] == "1"
 
 
-def test_project_root_local_env_still_resolves(roots):
-    """`local.env` / `pre.local.env` at the project root stay: they are the
-    user's own gitignored files, not something a checkout ships."""
+def test_project_root_contributes_no_env_files(roots):
+    """A checkout's top-level `local.env` was bash-sourced at every session
+    start: a committed one ran a cloned repo's commands. Only the project's
+    `.agents/local.env` resolves now."""
     agents_dir, project_root = roots
-    (project_root / "local.env").write_text("", encoding="utf-8")
-    (project_root / "pre.local.env").write_text("", encoding="utf-8")
-    (project_root / "env").write_text("", encoding="utf-8")
-    (project_root / "pre.env").write_text("", encoding="utf-8")
+    for name in ("local.env", "pre.local.env", "env", "pre.env"):
+        (project_root / name).write_text("", encoding="utf-8")
+    (project_root / ".agents" / "local.env").write_text("", encoding="utf-8")
     resolved = _env.resolve_env_files(scope=Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=False))
     names = [(lvl, p.name) for lvl, p, _ in resolved]
-    assert ("project-root", "local.env") in names
-    assert ("project-root", "pre.local.env") in names
-    assert ("project-root", "env") not in names
-    assert ("project-root", "pre.env") not in names
+    assert not [n for n in names if n[0] == "project-root"]
+    assert ("project", "local.env") in names
 
 
 def test_directory_named_env_is_not_an_env_file(roots):

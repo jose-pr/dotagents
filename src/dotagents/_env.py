@@ -12,11 +12,11 @@ Contract B, the exact sequence :func:`get_environment` performs:
   2. **Two tiers, in order**: ALL ``pre.env.py`` / ``pre.env`` / ``pre.local.env``
      first, THEN ALL ``env.py`` / ``env`` / ``local.env`` -- the concatenation of
      two contract-A resolutions (:func:`resolve_env_files`). The project-root
-     level resolves ONLY ``pre.local.env`` / ``local.env``: a checkout's own
-     top-level ``env.py`` / ``env`` is never executed or sourced.
+     level resolves NOTHING: a checkout's own top-level ``env.py`` / ``env`` /
+     ``local.env`` is never executed or sourced (D93).
   3. **Within each tier**, files are in the contract-A precedence order: each
      store in ``Scope.stores`` -- system, user, project -- with its overlays
-     first and itself second, then project-root.
+     first and itself second.
   4. **Chained, later-overrides-earlier**: each file is evaluated against the
      ACCUMULATED environment of every file before it; the result also
      accumulates. Later files win on conflicting keys.
@@ -34,8 +34,8 @@ The identity/proxy model is wired into the output around the file chain:
     file chain, so env files can branch on ``AGENTS_HARNESS`` and override the
     stamped ``AGENTS_MODEL`` etc. (chained: a later file wins). Never clobbers a
     value already present in the base env -- unless ``explicit`` names the
-    agent, in which case the identity is that agent's regardless (the static
-    Codex env block is written FOR Codex, from whichever harness runs ``init``).
+    agent, in which case the identity is that agent's regardless (``launch``
+    starts a harness from inside another one).
   * **Roots** are seeded right after identity, also before the chain and also
     only-if-unset: the two scope roots ``AGENTS_HOME`` / ``AGENTS_PROJECT_ROOT``,
     the interpreter ``AGENTS_PYTHON`` (``sys.executable`` -- the Python the CLI
@@ -51,9 +51,12 @@ The identity/proxy model is wired into the output around the file chain:
     ``http_proxy`` stays lowercase-populated per httpoxy). ``AGENTS_PROXY`` is
     NOT fanned out into the global ``HTTP_PROXY``.
 
-Security (Leakage rule): ``env.py`` runs arbitrary code, but only from files
-resolved under the store/overlay/``<project>/.agents`` locations by contract A
--- never from the project root itself. Never log the
+Trust model (D93): ``env.py`` runs arbitrary code, from every store the walk
+visits -- the system store (only when administrators alone can write it), the
+user store, and the project's ``<project>/.agents`` with their overlays. A
+project's ``.agents/`` is trusted like a harness's own ``.claude/settings.json``:
+opening a session in a repo trusts it. The project ROOT outside ``.agents/``
+never contributes code. Security (Leakage rule): never log the
 resulting ``DOTAGENTS_*``/``AGENTS_*`` secret VALUES -- callers that print the
 diff must treat it as sensitive; this module logs var NAMES only.
 """
@@ -545,23 +548,24 @@ def resolve_env_files(scope: Scope) -> "list[tuple[str, Path, Optional[Path]]]":
     Each tier is one contract-A resolution (:meth:`Scope.paths`). Per-level
     filename resolution (contract A point 2): ``pre.env.py``/``pre.env`` and
     ``env.py``/``env`` resolve at every level EXCEPT project-root; the project
-    (``<project>/.agents``) and project-root levels ADDITIONALLY resolve
-    ``pre.local.env`` / ``local.env``. Only existing regular FILES are returned
-    (a directory named ``env`` -- a common virtualenv name -- is not an env file).
+    level (``<project>/.agents``) ADDITIONALLY resolves ``pre.local.env`` /
+    ``local.env``. Only existing regular FILES are returned (a directory named
+    ``env`` -- a common virtualenv name -- is not an env file).
 
-    project-root ``env.py`` / ``env`` are never resolved: the env chain runs at
-    every session start, so a checkout's top-level ``env.py`` would be code
-    execution from an untrusted repository the moment a session opened in it.
+    The project ROOT resolves nothing: the env chain runs at every session
+    start, so a checkout's top-level ``env.py`` / ``env`` / ``local.env`` would
+    be code a cloned repository runs the moment a session opened in it. A
+    user's own local overrides live in ``<project>/.agents/local.env`` (D93).
     """
     pre_tier = scope.paths(
         {"default": "pre.env.py", "project-root": ""},
         {"default": "pre.env", "project-root": ""},
-        {"project": "pre.local.env", "project-root": "pre.local.env"},
+        {"project": "pre.local.env"},
     )
     main_tier = scope.paths(
         {"default": "env.py", "project-root": ""},
         {"default": "env", "project-root": ""},
-        {"project": "local.env", "project-root": "local.env"},
+        {"project": "local.env"},
     )
     return [item for item in pre_tier + main_tier if item[1].is_file()]
 
