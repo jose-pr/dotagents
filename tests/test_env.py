@@ -406,13 +406,19 @@ def test_py_partly_broken_output_contributes_nothing(tree):
 
 
 def test_py_nonzero_is_skipped_not_fatal(tree):
+    """A failing env.py contributes nothing -- not even the valid JSON it
+    printed before exiting non-zero -- and does not abort the assembly: a
+    later file in the chain still applies."""
     agents_dir, project_root = tree
-    (agents_dir / "env.py").write_text(
-        "import sys\nsys.stderr.write('boom')\nsys.exit(3)\n", encoding="utf-8"
+    (agents_dir / "overlays" / "aa" / "env.py").write_text(
+        "import json, sys\nprint(json.dumps({'LEAKED': '1'}))\nsys.stdout.flush()\n"
+        "sys.stderr.write('boom')\nsys.exit(3)\n",
+        encoding="utf-8",
     )
-    # A failing env.py contributes nothing and does not abort assembly.
+    (agents_dir / "env.py").write_text(_py_emit({"AFTER": "1"}), encoding="utf-8")
     env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
-    assert "PATH" in env  # assembly still produced a result
+    assert "LEAKED" not in env
+    assert env["AFTER"] == "1"
 
 
 def test_plain_env_file_sourced(tree, bash_on_path):
@@ -498,10 +504,22 @@ def test_env_py_runs_under_a_pinned_agents_python(tree, tmp_path, monkeypatch):
     monkeypatch.setattr(_env.subprocess, "run", spy)
     _run(agents_dir, project_root, {"PATH": "/usr/bin", "AGENTS_PYTHON": str(tmp_path / "missing" / "python")})
     assert spawned[-1] == sys.executable, "a pin that names no file falls back to the running interpreter"
+
+    # A pin that is NOT the running interpreter -- a wrapper around it that
+    # marks the environment -- so honouring the pin is observable.
+    if os.name == "nt":
+        pinned = tmp_path / "pinned-python.cmd"
+        pinned.write_bytes(('@echo off\r\nset "VIA_PIN=yes"\r\n"%s" %%*\r\n' % sys.executable).encode("utf-8"))
+    else:
+        pinned = tmp_path / "pinned-python"
+        pinned.write_text('#!/bin/sh\nVIA_PIN=yes exec "%s" "$@"\n' % sys.executable, encoding="utf-8")
+        pinned.chmod(0o755)
+    (agents_dir / "env.py").write_text(_py_echo_seen("VIA_PIN", "SEEN_VIA_PIN"), encoding="utf-8")
     spawned.clear()
-    _run(agents_dir, project_root, {"PATH": "/usr/bin", "AGENTS_PYTHON": sys.executable})
-    assert spawned[-1] == sys.executable
-    assert _env.interpreter({"AGENTS_PYTHON": sys.executable}) == sys.executable
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin", "AGENTS_PYTHON": str(pinned)})
+    assert spawned[-1] == str(pinned)
+    assert env["SEEN_VIA_PIN"] == "yes", "env.py ran under the pin"
+    assert _env.interpreter({"AGENTS_PYTHON": str(pinned)}) == str(pinned)
 
 
 def test_identity_no_blanket_rewrite_artifacts(tree):
