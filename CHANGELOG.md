@@ -67,6 +67,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Windows PowerShell handlers that `init` adds beside Claude Code's bash
+  hooks decide whether to run the way Claude Code decides which shell to use.
+  They checked for `bash` on PATH: a default Git install (only `Git\cmd` on
+  PATH) got the context twice, and a box with WSL's `bash.exe` stub and no Git
+  Bash got none.
+- The Claude Code and Codex hooks run `dotagents` by path instead of putting
+  `.agents/bin` and the store's `bin` on PATH, which `env --diff` then
+  persisted into the session: after a `cd` the first project's `bin` stayed
+  ahead of everything.
+- The PowerShell env loader (`init --powershell-env-hook`) runs only for
+  PowerShell tool calls, not before every tool call, and reads `dotagents env`
+  as UTF-8: a non-ASCII value arrived garbled.
+- Re-running `init` keeps keys you added to a dotagents hook entry (a
+  `timeout`, say) and no longer deletes malformed hook entries from your
+  settings. dotagents' hooks are labelled `dotagents: ...`, so an unrelated
+  hook with the same generic label is no longer mistaken for one of them.
+- A `bin/dotagents` wrapper run through a symlink finds its `.pyz` beside the
+  real file, and `dotagents.cmd` works when the Python interpreter's path is
+  not ASCII (`C:\Users\José\...`).
 - Re-running `init` on a store with overlays installed keeps their rules and
   routing in `AGENTS.md`'s managed block; it used to rewrite the block from the
   bare base until the next `overlays sync`.

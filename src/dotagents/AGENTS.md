@@ -235,8 +235,12 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   sharing a matcher-object with an older shape of ours keeps its object; ours
   moves to its own), an entry that is exactly what we would write is left
   alone and any other shape of ours (revised command, `shell`, `matcher`,
-  `commandWindows`, status) is replaced in place, malformed entries are
-  dropped rather than raising, and invalid JSON raises `SystemExit` instead of
+  `commandWindows`, status) is refreshed in place, keeping any key the user
+  added to it (a `timeout`, say). Ours is recognised by its status message,
+  written namespaced (`"dotagents: Loading ..."`); the bare label an earlier
+  release wrote still matches, for both merge and `remove_hook`, on a command
+  that runs `dotagents`. Malformed
+  entries are kept as they are, never raising, and invalid JSON raises `SystemExit` instead of
   silently overwriting the user's file. Writes are LF-only and atomic, with
   non-ASCII kept as-is. `shell` (Claude: `"bash"`/`"powershell"`,
   picks the interpreter for the hook's own command) and `command_windows`
@@ -286,14 +290,20 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   not a soft failure, so every session there would silently get neither env
   nor context. Every handler in a matched group fires unconditionally
   (hooks.md), so on Windows both always run; the PowerShell variants therefore
-  **select themselves: they run only when `bash` is not on PATH**
-  (`Get-Command bash`), otherwise a box with both interpreters would inject the
-  same context twice per session. The PowerShell
+  **select themselves: they run only when Claude Code would find no Git
+  Bash** -- detected the way Claude detects it (`$CLAUDE_CODE_GIT_BASH_PATH`,
+  `Git\bin\bash.exe` under either Program Files, or `git` on PATH with
+  `..\..\bin\bash.exe` beside it), never `Get-Command bash`, which finds the
+  WSL launcher stub -- otherwise a box with both would inject the same context
+  twice per session. The PowerShell
   `SessionStart` variant is context-only (`dotagents context`), not
   env+context: `$CLAUDE_ENV_FILE`'s documented effect is "subsequent BASH
   commands" regardless of which shell wrote it, so writing to it from a
-  PowerShell-shelled hook would feed nothing. Every hook command resolves the
-  store as `$AGENTS_HOME`, else `~/.agents` (bash: `${AGENTS_HOME:-$HOME/.agents}`),
+  PowerShell-shelled hook would feed nothing. Every hook command runs
+  `dotagents` BY PATH -- the project's `.agents/bin` wrapper, else the store's,
+  else `dotagents` on PATH -- never by splicing those bins onto PATH, which
+  `env --diff` would then report as a change and persist into the session. The
+  store is `$AGENTS_HOME`, else `~/.agents` (bash: `${AGENTS_HOME:-$HOME/.agents}`),
   and the bash `CwdChanged` handler re-pins `AGENTS_PROJECT_ROOT` into
   `$CLAUDE_ENV_FILE` when the new cwd carries a `.agents/` (the SessionStart pin
   is only-if-unset, so without this a `cd` into another project would keep the
@@ -302,7 +312,7 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `ClaudeAgent.powershell_env_hook`; it AUTO-APPROVES every PowerShell tool
   call, and without the flag `init` removes the entry):
   `ClaudeAgent._wire_powershell_pretooluse` additionally wires
-  a no-matcher `PreToolUse` hook (fires on every tool call), `shell:
+  a `PreToolUse` hook matched on `"PowerShell"`, `shell:
   "powershell"`, running `PRETOOLUSE_POWERSHELL_COMMAND` INLINE — deliberately
   not a `.ps1` file, since a script file is subject to PowerShell's execution
   policy (RemoteSigned/AllSigned/Restricted) and dotagents has no code-signing
@@ -317,7 +327,10 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   each their own fresh process and cannot. Each PowerShell TOOL call is a fresh
   process too, so the guard never carries over and the loader runs on every
   call: it therefore runs `env --diff` (the change set), not the whole
-  environment through `Invoke-Expression`. Every literal `\` in the
+  environment through `Invoke-Expression`. That pipe CAPTURES `env`'s output,
+  which PowerShell decodes with `[Console]::OutputEncoding` (the OEM code page),
+  so the loader switches it to UTF-8 around the call and restores it after.
+  Every literal `\` in the
   command constant must be a raw string — a bare `\b` in a normal Python string
   literal silently becomes a backspace character, corrupting the emitted path.
 - **Codex's two hooks are scripts** deployed to `<codex-home>/hooks/`
