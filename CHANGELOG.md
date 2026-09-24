@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   until then every `findings` subcommand reads it with `--dir` (`dotagents
   findings list --dir <store>/dotagents/findings`).
 
+- The system store is walked only when it exists and only administrators can
+  write it: on POSIX `/etc/agents` (or `$AGENTS_SYSTEM_ROOT`) must be
+  root-owned and not group- or world-writable; on Windows there is no default
+  (`/etc/agents` was drive-relative, and any local account could create it) and
+  `$AGENTS_SYSTEM_ROOT` must be an absolute path whose ACL grants write only to
+  Administrators, SYSTEM or TrustedInstaller. A system store that fails the
+  check is skipped with a warning; a missing one no longer puts its `bin/` on
+  `PATH`.
+
 ### Fixed
 
 - Re-running `init` on a store with overlays installed keeps their rules and

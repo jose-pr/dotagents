@@ -97,10 +97,12 @@ that prefix for shared helper modules. A command that works on a scope inherits
 instead of redeclaring the flags.
 
 Sources layer so that a later one overrides a same-named command: the built-ins, then
-the bundled `findings` and `launch`, then store by store — system (`/etc/agents`), the
-user store, the project's `.agents/` — each store's overlays' `cmds/` before the
-store's own `dotagents/cmds/`, and last `$AGENTS_CMDS_PATH` entries (os.pathsep-split)
-and `--cmdspath` entries. So your user-store command overrides one shipped by an
+the bundled `findings` and `launch`, then store by store — the system store (see
+below), the user store, the project's `.agents/` — each store's overlays' `cmds/`
+before the store's own `dotagents/cmds/`, and last `$AGENTS_CMDS_PATH` entries
+(os.pathsep-split) and `--cmdspath` entries. The system store is `/etc/agents` on
+POSIX or `$AGENTS_SYSTEM_ROOT` (the only way to have one on Windows), and it counts
+only when it exists and only administrators can write it. So your user-store command overrides one shipped by an
 overlay installed in the user (or system) store, and a project's overlays and
 `.agents/dotagents/cmds/` override yours. A module that fails to
 import (a syntax error, an exception at import time) is skipped with a warning naming
