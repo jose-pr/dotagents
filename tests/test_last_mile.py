@@ -213,6 +213,11 @@ def test_cli_rejects_bad_format_and_conflicting_flags():
     cmd.write_agent = True
     with pytest.raises(SystemExit, match="--write-agent"):
         cmd()
+    cmd = Context()
+    cmd.write_agent = True
+    cmd.global_scope = True
+    with pytest.raises(SystemExit, match="cannot take -g"):
+        cmd()
 
 
 # --------------------------------------------------------------------------

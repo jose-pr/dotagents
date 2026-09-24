@@ -87,6 +87,10 @@ class Context(DotAgentsArgs):
             raise SystemExit("error: --write-agent writes markdown; it cannot take --format json")
         if self.write_agent and self.out != "-":
             raise SystemExit("error: --write-agent and an output path are mutually exclusive")
+        if self.write_agent and self.global_scope:
+            # -g is "the user store only": writing that into a project's
+            # (usually committed) instruction file is what -g exists to avoid.
+            raise SystemExit("error: --write-agent writes into the project; it cannot take -g")
 
         project_root = _scope.project_root_default()
         scope = _scope.Scope.of(

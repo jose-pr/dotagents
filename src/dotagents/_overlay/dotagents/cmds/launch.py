@@ -65,6 +65,19 @@ def _spawn(argv: "list[str]", env: "dict[str, str]") -> int:
             continue
 
 
+def _git_tracks(root: Path, rel: str) -> bool:
+    """Whether the git repository at ``root`` tracks ``rel`` (False when there
+    is no repository or no git)."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", rel],
+            capture_output=True, text=True,
+        )
+    except OSError:
+        return False
+    return res.returncode == 0
+
+
 def _describe(argv: "list[str]") -> str:
     """A command line a human can read: elements with a space (or empty)
     double-quoted. Not ``shlex.join`` -- it is not for a shell, and its
@@ -110,6 +123,13 @@ class Launch(DotAgentsArgs):
     "Also inline the on-demand .md files the context sources reference."
     ("--inline",)
 
+    write_agent: bool = False
+    (
+        "For an agent with no append flag, merge the context into its own "
+        "instruction file even when git tracks it or -g is set."
+    )
+    ("--write-agent",)
+
     dry_run: bool = False
     "Print the command line and the names of the exported changes; run nothing."
     ("--dry-run",)
@@ -146,7 +166,24 @@ class Launch(DotAgentsArgs):
         os.environ.update(changes)
         env = dict(os.environ)
 
-        # 2. Context.
+        # 2. The harness, resolved before anything is written: a launch that
+        # fails with "not found" must leave the project untouched.
+        program = self.command or agent.launch_command
+        if not program:
+            raise SystemExit(
+                "error: %s has no command-line harness dotagents knows how to start; "
+                "pass --command <program>" % agent.name
+            )
+        exe = shutil.which(program, path=env.get("PATH"))
+        if exe is None:
+            if not self.dry_run:
+                raise SystemExit(
+                    "error: %r not found on PATH (after applying the dotagents env)" % program
+                )
+            self._logger_.warning("%r is not on PATH (after applying the dotagents env)", program)
+            exe = program
+
+        # 3. Context.
         extra: "list[str]" = []
         if not self.no_context:
             text = _context.assemble_context(agent, scope, inline=self.inline)
@@ -157,7 +194,7 @@ class Launch(DotAgentsArgs):
                 args = agent.launch_context_args(context_file)
                 if args is not None:
                     extra = list(args)
-                elif agent.context_target:
+                elif agent.context_target and self._may_write(agent, project_root):
                     self._logger_.info(
                         "%s takes no appended system prompt; merging the context "
                         "into %s (the managed block it loads itself)",
@@ -177,21 +214,6 @@ class Launch(DotAgentsArgs):
                     "nothing to hand over -- %s already loads every source", agent.name
                 )
 
-        # 3. The harness.
-        program = self.command or agent.launch_command
-        if not program:
-            raise SystemExit(
-                "error: %s has no command-line harness dotagents knows how to start; "
-                "pass --command <program>" % agent.name
-            )
-        exe = shutil.which(program, path=env.get("PATH"))
-        if exe is None:
-            if not self.dry_run:
-                raise SystemExit(
-                    "error: %r not found on PATH (after applying the dotagents env)" % program
-                )
-            self._logger_.warning("%r is not on PATH (after applying the dotagents env)", program)
-            exe = program
         argv = [exe, *extra, *self._passthrough_]
 
         if self.dry_run:
@@ -201,3 +223,24 @@ class Launch(DotAgentsArgs):
             return 0
         self._logger_.debug("%s", _describe(argv))
         return _spawn(argv, env)
+
+    def _may_write(self, agent, project_root) -> bool:
+        """Whether the context may be merged into ``agent.context_target``.
+        That file is often committed (AGENTS.md, GEMINI.md, .cursorrules,
+        copilot-instructions.md), and the context carries the user store's
+        private rules -- so not into a file git tracks, and not under ``-g``
+        (user store only), unless ``--write-agent`` asks for it."""
+        if self.write_agent:
+            return True
+        if self.global_scope:
+            reason = "-g"
+        elif _git_tracks(Path(project_root), agent.context_target):
+            reason = "git tracks %s" % agent.context_target
+        else:
+            return True
+        self._logger_.warning(
+            "%s takes no appended system prompt, and the context is not merged into "
+            "%s (%s): it is at $%s only. Pass --write-agent to merge it anyway.",
+            agent.name, agent.context_target, reason, CONTEXT_FILE_ENV,
+        )
+        return False

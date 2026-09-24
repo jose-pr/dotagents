@@ -309,3 +309,51 @@ def test_spawn_keeps_waiting_through_a_keyboard_interrupt(launch_mod, monkeypatc
 
 def test_describe_quotes_only_what_needs_it(launch_mod):
     assert launch_mod._describe(["claude", "--model", "a b", ""]) == 'claude --model "a b" ""'
+
+
+def _git_repo_tracking(project, rel):
+    import subprocess
+
+    target = project / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# committed\n", encoding="utf-8")
+    for args in (["init", "-q"], ["add", rel]):
+        subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
+    return target
+
+
+def test_a_tracked_instruction_file_is_not_written_without_write_agent(launch_mod, monkeypatch, tmp_path):
+    """GEMINI.md / AGENTS.md / .cursorrules are usually committed, and the
+    context carries the user store's private rules: merging into them put that
+    text one `git commit -a` from publication."""
+    program = _program(tmp_path)
+    _context_is(monkeypatch, CONTEXT)
+    calls = _capture_spawn(monkeypatch, launch_mod)
+    target = _git_repo_tracking(tmp_path / "project", "GEMINI.md")
+
+    assert _run(launch_mod, agent="gemini", command=str(program)) == 0
+    assert target.read_text(encoding="utf-8") == "# committed\n"
+    (argv, env), = calls
+    assert Path(env["AGENTS_CONTEXT_FILE"]).read_text(encoding="utf-8") == CONTEXT
+
+    calls.clear()
+    assert _run(launch_mod, agent="gemini", command=str(program), write_agent=True) == 0
+    assert CONTEXT.strip() in target.read_text(encoding="utf-8")
+
+
+def test_global_scope_does_not_write_the_instruction_file(launch_mod, monkeypatch, tmp_path):
+    program = _program(tmp_path)
+    _context_is(monkeypatch, CONTEXT)
+    _capture_spawn(monkeypatch, launch_mod)
+    assert _run(launch_mod, agent="gemini", command=str(program), global_scope=True) == 0
+    assert not (tmp_path / "project" / "GEMINI.md").exists()
+
+
+def test_a_missing_harness_writes_nothing(launch_mod, monkeypatch, tmp_path):
+    """The file was written before the executable was resolved, so a launch
+    that failed with "not found" still left the project modified."""
+    _context_is(monkeypatch, CONTEXT)
+    _capture_spawn(monkeypatch, launch_mod)
+    with pytest.raises(SystemExit, match="not found"):
+        _run(launch_mod, agent="gemini", command="no-such-harness-xyz")
+    assert not (tmp_path / "project" / "GEMINI.md").exists()
