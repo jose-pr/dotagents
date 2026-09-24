@@ -226,7 +226,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   hook with the same generic label is no longer mistaken for one of them.
 - A `bin/dotagents` wrapper run through a symlink finds its `.pyz` beside the
   real file, and `dotagents.cmd` works when the Python interpreter's path is
-  not ASCII (`C:\Users\José\...`).
+  not ASCII (a user folder with an accented name, say).
 - Re-running `init` on a store with overlays installed keeps their rules and
   routing in `AGENTS.md`'s managed block; it used to rewrite the block from the
   bare base until the next `overlays sync`.
