@@ -6,9 +6,9 @@ Every path this checks is a path in the dotagents SOURCE REPO
 branch, which holds the example overlays under `overlays/<name>/`. It is **not**
 a validator for an installed `~/.agents` config, which has no `src/` tree.
 
-So it lives in `tools/` (repo CI tooling, like `cloud-setup.sh`) and is **not** a
-`dotagents` subcommand, not bundled in the package, and not shipped in the
-`.pyz`: a user of dotagents has no use for it.
+So it lives in `tools/` (repo CI tooling, like `cloud-setup.sh` and
+`pyz_smoke.sh`) and is **not** a `dotagents` subcommand, not bundled in the
+package, and not shipped in the `.pyz`: a user of dotagents has no use for it.
 
 Personal-leak / hygiene scanning (machine paths, usernames, private repo names) is
 NOT this tool's job (D84) -- that is a personal command module in the user's
@@ -62,6 +62,7 @@ REQUIRED = [
     "src/dotagents/_overlay/dotagents/hooks/sessionstart_codex_context.py",
     "tools/audit.py",
     "tools/cloud-setup.sh",
+    "tools/pyz_smoke.sh",
 ]
 
 # Generic, structural forbidden patterns only (D84). No personal/machine markers

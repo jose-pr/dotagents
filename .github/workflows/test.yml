@@ -1,7 +1,20 @@
 name: Test
 
-# Validates the config: manifest completeness, forbidden patterns, template
-# instantiation, and a clean install (base + overlays) into a scratch HOME.
+# CI for main:
+#   - test:     the unit suite on {ubuntu, windows, macos} x {3.9, 3.14} with
+#               the dev extra (so no extra-dependent test skips);
+#   - audit:    tools/audit.py -- the base overlay, the example overlays'
+#               manifests, and their reference templates (3.11+);
+#   - overlays: the example overlays' own test suites;
+#   - install:  CLI steps (init, overlays, link-project/sync-project) in a
+#               scratch HOME;
+#   - pyz:      tools/pyz_smoke.sh against a fresh dotagents.pyz, on Linux
+#               and Windows.
+# The example overlays live on the `repo` branch, checked out into
+# ./overlays-src by the jobs that need them.
+#
+# release.yml runs this workflow as its test gate (workflow_call), so a
+# release tag is never the first time any of it runs.
 on:
   workflow_dispatch:
     inputs:
@@ -9,6 +22,20 @@ on:
         description: "Git ref to test (branch, tag, or SHA)"
         required: false
         default: ""
+      overlays_ref:
+        description: "Ref of the example overlays (the `repo` branch, a tag, or a SHA)"
+        required: false
+        default: "repo"
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
+        default: ""
+      overlays_ref:
+        type: string
+        required: false
+        default: "repo"
   push:
     branches:
       - main
@@ -19,18 +46,28 @@ on:
 permissions:
   contents: read
 
+# One run per ref under test; a newer push supersedes an older one only on a
+# pull request, so every commit on main keeps its own result.
 concurrency:
-  group: test-${{ github.ref }}
-  cancel-in-progress: true
+  group: test-${{ inputs.ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# bash everywhere (Git Bash on Windows): GitHub runs it with -eo pipefail, so a
+# crashing producer fails its pipeline. A negative check is written as an
+# explicit `if ...; then exit 1; fi`, because errexit ignores `! pipeline`.
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  audit:
-    name: Audit (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+  test:
+    name: Test (py${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.13"] # default mode must run on the 3.9 floor
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.9", "3.14"] # the floor and the newest supported
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,18 +75,67 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install the package (audit's command surface is a duho Cmd)
-        # tools/audit.py imports duho unconditionally for its argument
-        # definition; the audit LOGIC is stdlib-only, but the entrypoint is not.
+      - name: Install the package with the dev extra
+        run: python -m pip install -e ".[dev]"
+      - name: Unit tests
+        run: python -m pytest tests -q -rs
+
+  audit:
+    name: Audit (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.14"] # the default mode must run on the 3.9 floor
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Fetch the example overlays (`repo` branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.overlays_ref || 'repo' }}
+          path: overlays-src
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the package
+        # audit.py's command surface is a duho Cmd, and it reads overlay.toml
+        # with dotagents' own manifest reader.
         run: python -m pip install -e .
-      - name: Audit config structure
-        run: python tools/audit.py --root .
+      - name: Audit repo structure and overlay manifests
+        run: python tools/audit.py --root . --overlays overlays-src
       # Personal-leak / hygiene scanning is NOT in CI (D84): it is a personal tool
       # the user runs locally before a push -- CI has no personal patterns to scan
-      # for and audit is structural-only now.
-      - name: Template instantiation checks (3.11+ only)
+      # for, and audit is structural only.
+      - name: Reference template checks (3.11+ only)
         if: matrix.python-version != '3.9'
-        run: python tools/audit.py --check-templates --root .
+        run: python tools/audit.py --check-templates --root . --overlays overlays-src
+
+  overlays:
+    name: Example overlays' own tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Fetch the example overlays (`repo` branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.overlays_ref || 'repo' }}
+          path: overlays-src
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install the package with the dev extra
+        run: python -m pip install -e ".[dev]"
+      - name: Run the overlays' test suites
+        # An empty config file keeps main's own pytest settings out of the
+        # overlays' run; each overlay brings its own conftest.
+        run: |
+          printf '[pytest]\n' > "$RUNNER_TEMP/overlays-pytest.ini"
+          python -m pytest -c "$RUNNER_TEMP/overlays-pytest.ini" \
+            --rootdir overlays-src/overlays overlays-src/overlays -q -rs -p no:cacheprovider
 
   install:
     name: Install into scratch HOME
@@ -61,23 +147,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Fetch example overlays (separate branch)
-        # The example overlays live on the `overlays` orphan branch, not in main's
-        # tree (D77): they are on the `repo` branch, under overlays/<name>. Check
-        # that branch out into ./overlays-src so the overlays-command
-        # integration steps below can resolve them via --repo overlays-src/overlays
-        # (the branch keeps them at overlays/<name>/). The pure-unit pytest step
-        # below uses tmp fixtures and needs none of this.
+      - name: Fetch the example overlays (`repo` branch)
+        # The steps below resolve overlays via --repo overlays-src/overlays.
         uses: actions/checkout@v4
         with:
-          ref: repo
+          ref: ${{ inputs.overlays_ref || 'repo' }}
           path: overlays-src
       - name: Install the dotagents CLI package
         run: python -m pip install -e .
-      - name: Unit tests (agent registry + context generator, plans 00/04)
-        run: |
-          python -m pip install pytest
-          python -m pytest tests/ -q
       - name: Dry run (minimal base overlay via init)
         run: python install.py init -g --dry-run
       - name: Init lays down the base overlay only
@@ -100,7 +177,8 @@ jobs:
           export HOME="$(mktemp -d)"
           python install.py init -g
           python -m dotagents overlays add engineering --repo overlays-src/overlays -g
-          python -m dotagents overlays add engineering --repo overlays-src/overlays -g 2>&1 | grep -q "skip (exists)"
+          out=$(python -m dotagents overlays add engineering --repo overlays-src/overlays -g 2>&1)
+          grep -qF "skip (exists)" <<<"$out"
       - name: overlays add/list/remove into a scope (discover, not track)
         run: |
           export HOME="$(mktemp -d)"
@@ -109,19 +187,24 @@ jobs:
           python -m dotagents overlays add python --repo overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"     # installed as a dir
           test -f "$HOME/.agents/overlays/python/overlay.toml"     # self-describing
-          grep -q "kb/PYTHON.md" "$HOME/.agents/AGENTS.md"         # D59 routing merged
+          grep -qF "kb/PYTHON.md" "$HOME/.agents/AGENTS.md"        # routing merged
           # list discovers it by presence (no registry file).
-          python -m dotagents overlays list --repo overlays-src/overlays -g | grep -q "python"
-          python -m dotagents overlays list --repo overlays-src/overlays -g --json | grep -q '"installed"'
+          out=$(python -m dotagents overlays list --repo overlays-src/overlays -g)
+          grep -qF "python" <<<"$out"
+          out=$(python -m dotagents overlays list --repo overlays-src/overlays -g --json)
+          grep -qF '"installed"' <<<"$out"
           # glob-filtered sync is a no-op-safe refresh.
           python -m dotagents overlays sync 'py*' --repo overlays-src/overlays -g
           # remove deletes the overlay dir AND recomposes the managed block over what
           # remains, so the routing it merged leaves with it (the un-merge).
           python -m dotagents overlays remove python -g
           test ! -e "$HOME/.agents/overlays/python"
-          ! grep -q "kb/PYTHON.md" "$HOME/.agents/AGENTS.md"
+          if grep -qF "kb/PYTHON.md" "$HOME/.agents/AGENTS.md"; then
+            echo "overlays remove left the python routing in AGENTS.md" >&2; exit 1
+          fi
           # show describes an overlay from the source when it is not installed.
-          python -m dotagents overlays show python --repo overlays-src/overlays -g | grep -q "python (source)"
+          out=$(python -m dotagents overlays show python --repo overlays-src/overlays -g)
+          grep -qF "python (source)" <<<"$out"
       - name: Link a project into the private store, then sync (git bootstrap)
         run: |
           export HOME="$(mktemp -d)"
@@ -139,11 +222,13 @@ jobs:
           python -m dotagents link-project "$proj"
           test -L "$proj/.agents"                              # symlinked
           test -f "$HOME/.agents/projects/$(basename "$proj")/plans/seed.md"  # adopted
-          cat "$proj/.agents/plans/seed.md" | grep -q seed     # reachable through the link
-          python -m dotagents link-project "$proj" 2>&1 | grep -q "already" # idempotent
+          grep -qF seed "$proj/.agents/plans/seed.md"          # reachable through the link
+          out=$(python -m dotagents link-project "$proj" 2>&1)
+          grep -qF "already" <<<"$out"                         # idempotent
           # Bootstrap the private repo as git and commit the store.
           python -m dotagents sync-project --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "init"
-          git -C "$HOME/.agents" ls-files | grep -q "projects/$(basename "$proj")/plans/seed.md"
+          out=$(git -C "$HOME/.agents" ls-files)
+          grep -qF "projects/$(basename "$proj")/plans/seed.md" <<<"$out"
       - name: A .agents that is itself a git checkout is never adopted or copied back
         run: |
           export HOME="$(mktemp -d)"
@@ -157,10 +242,12 @@ jobs:
           git init -q "$proj/.agents"
           echo "checkout" > "$proj/.agents/AGENTS.md"
           git -C "$proj/.agents" add -A && git -C "$proj/.agents" commit -qm seed
-          python -m dotagents link-project "$proj" 2>&1 | grep -q "skip:"
+          out=$(python -m dotagents link-project "$proj" 2>&1)
+          grep -qF "skip:" <<<"$out"
           test -d "$proj/.agents" && test ! -L "$proj/.agents"   # left in place, untouched
           test ! -e "$HOME/.agents/projects/$(basename "$proj")/AGENTS.md"  # not adopted
-          python -m dotagents sync-project --project "$proj" --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "sync" 2>&1 | grep -q "skip copy-back"
+          out=$(python -m dotagents sync-project --project "$proj" --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "sync" 2>&1)
+          grep -qF "skip copy-back" <<<"$out"
           test ! -e "$HOME/.agents/projects/$(basename "$proj")/AGENTS.md"  # not copied back
           # --force backs the checkout up (git state intact) and links the store.
           python -m dotagents link-project "$proj" --force
@@ -181,136 +268,30 @@ jobs:
           echo "edit" > "$proj/.agents/plans/local.md"
           python -m dotagents sync-project --project "$proj" --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "sync"
           test -f "$HOME/.agents/projects/$(basename "$proj")/plans/local.md"  # copied back
-      - name: Built .pyz keeps flags/help/positional under the vendored duho (zipapp shim)
-        run: |
-          export HOME="$(mktemp -d)"
-          python -m dotagents build-pyz --out dist/dotagents.pyz
-          # The repo's tools/ is CI tooling and must NOT ride along in the artifact
-          # (it used to, as dotagents/_tools, for wrappers that no longer exist).
-          test -z "$(python -c "import zipfile;print(''.join(n for n in zipfile.ZipFile('dist/dotagents.pyz').namelist() if '_tools' in n))")"
-          # A declared flag must NOT degrade to a name-derived one (--from, not --from-).
-          python dist/dotagents.pyz init --help | grep -q -- "--from FROM"
-          ! python dist/dotagents.pyz init --help | grep -q -- "--from-"
-          # D85: the .pyz ships NO private-sync command. link/sync left the package
-          # with their logic; link-project/sync-project come from the opt-in
-          # private-sync overlay, so a bare .pyz with an empty HOME must offer none
-          # of the four names.
-          # Assert against the COMMAND-LIST line ("{init,build-pyz,...}"), not the
-          # whole help: `overlays`' own description mentions its `sync` subcommand,
-          # which would false-positive a naive grep.
-          python dist/dotagents.pyz --help | grep -q -- "{init,build-pyz,context,env,overlays,about,findings,launch}"
-          # `about` from the .pyz: the CLI first, then what build-pyz vendored.
-          python dist/dotagents.pyz about | head -1 | grep -q -- "^dotagents-cli "
-          python dist/dotagents.pyz about | grep -q -- "^duho "
-          python dist/dotagents.pyz about | grep -q -- "^pathlib_next "
-          python dist/dotagents.pyz about --json | python -c "import sys,json; d=json.load(sys.stdin); assert d['bundle'] and 'duho' in d['packages'], d"
-          # The second bundled command module, launch: its positional, its
-          # declared flags and their help survive the zipapp shim too.
-          python dist/dotagents.pyz launch --help | grep -q -- "\[agent\]"
-          python dist/dotagents.pyz launch --help | grep -q -- "--command COMMAND"
-          ! python dist/dotagents.pyz launch --help | grep -q -- "--command-"
-          python dist/dotagents.pyz launch --help | grep -q -- "--no-context"
-          python dist/dotagents.pyz launch --help | grep -q -- "--dry-run"
-          python dist/dotagents.pyz launch --help | grep -q -- "Which agent to start"
-          # A dry run assembles env + context and prints the command line; the
-          # program need not exist (a warning, not an error, under --dry-run).
-          python dist/dotagents.pyz launch claude --dry-run -g -- -p hi | grep -q -- "claude .*-p hi"
-          ! python dist/dotagents.pyz --help | grep -q -- "link"
-          ! python dist/dotagents.pyz --help | grep -q -- "sync-project"
-          # A DISCOVERED command module must still keep its flags/help/positional
-          # through the zipapp (the shim this job guards). Install the private-sync
-          # overlay into HOME and exercise its link-project the way the bundled
-          # link used to be exercised.
-          python dist/dotagents.pyz overlays add private-sync --repo overlays-src/overlays -g
-          python dist/dotagents.pyz --help | grep -q -- "link-project"
-          python dist/dotagents.pyz --help | grep -q -- "sync-project"
-          python dist/dotagents.pyz link-project --help | grep -q -- "--copy"
-          ! python dist/dotagents.pyz link-project --help | grep -q -- "--copy-"
-          python dist/dotagents.pyz link-project --help | grep -q -- "--store-dir STORE_DIR"
-          python dist/dotagents.pyz link-project --help | grep -qi "Project directory to link"
-          python dist/dotagents.pyz sync-project --help | grep -q -- "--project PROJECT"
-          python dist/dotagents.pyz sync-project --help | grep -q -- "--no-pull"
-          ! python dist/dotagents.pyz sync-project --help | grep -q -- "--no-pull-"
-          python dist/dotagents.pyz sync-project --help | grep -q -- "--remote REMOTE"
-          # The `link-project` positional must be accepted (not "unrecognized arguments").
-          proj="$(mktemp -d)"; printf '.agents/\n' > "$proj/.gitignore"
-          python dist/dotagents.pyz link-project "$proj"
-          test -L "$proj/.agents"
-          # The context command's flags (list --agents, --format) must survive the
-          # zipapp AST-introspection degradation, and its help text must be present.
-          python dist/dotagents.pyz context --help | grep -q -- "--format FORMAT"
-          python dist/dotagents.pyz context --help | grep -q -- "--agents"
-          python dist/dotagents.pyz context --help | grep -q -- "Output format: markdown"
-          # context/env inherit -g/--agents-dir from DotAgentsArgs (a base class in
-          # ANOTHER module -- the exact shape that degraded once before, see the
-          # pyvenv asserts below). Assert the real short flag and the non-degraded
-          # `--agents-dir AGENTS_DIR` metavar, not just the long form's presence.
-          python dist/dotagents.pyz context --help | grep -q -- "--agents-dir AGENTS_DIR"
-          ! python dist/dotagents.pyz context --help | grep -q -- "--agents-dir-"
-          python dist/dotagents.pyz context --help | grep -q -- "\-\-global, -g"
-          # init's --agents list flag must not degrade to a name-derived form.
-          python dist/dotagents.pyz init --help | grep -q -- "--agents"
-          # context --format json runs and emits parseable JSON (empty HOME -> claude).
-          python dist/dotagents.pyz context --format json --agents claude -g | python -c "import sys,json; json.load(sys.stdin)"
-          # context defaults to STDOUT (positional out defaults to '-'), never writing a file.
-          python dist/dotagents.pyz context --help | grep -q -- "out"
-          # Needs a store to print (HOME is empty until here), and an agent whose
-          # harness does not already load it: init -g writes claude's include, and
-          # context subtracts what the harness loads -- so assert with codex.
-          python dist/dotagents.pyz init -g >/dev/null 2>&1
-          test -n "$(python dist/dotagents.pyz context -g --agents codex 2>/dev/null)"   # bare context prints to stdout
-          # env command (plan 07): --format/--diff/-g flags + help must survive the
-          # zipapp AST-introspection degradation.
-          python dist/dotagents.pyz env --help | grep -q -- "--format FORMAT"
-          python dist/dotagents.pyz env --help | grep -q -- "--diff"
-          python dist/dotagents.pyz env --help | grep -q -- "Output format. Default 'auto'"
-          python dist/dotagents.pyz env --help | grep -q -- "--agents-dir AGENTS_DIR"
-          ! python dist/dotagents.pyz env --help | grep -q -- "--agents-dir-"
-          python dist/dotagents.pyz env --help | grep -q -- "\-\-global, -g"
-          # A store pinned with $AGENTS_HOME is actually walked -- the .pyz-level
-          # proof of the root-resolution fix (unit coverage: tests/test_env_cli_scope.py).
-          store="$(mktemp -d)"; printf 'export FROM_PINNED_STORE=yes\n' > "$store/env"
-          AGENTS_HOME="$store" python dist/dotagents.pyz env --format export -g | grep -q "FROM_PINNED_STORE"
-          # env --format json runs and emits parseable JSON (identity vars stamped).
-          python dist/dotagents.pyz env --diff --format json -g | python -c "import sys,json; json.load(sys.stdin)"
-          # env --format export dispatches and prints export lines.
-          python dist/dotagents.pyz env --format export -g | grep -q -- "export AGENT="
-          # Per-shell formats (D83): each emits its own syntax through the zipapp.
-          python dist/dotagents.pyz env --format powershell -g | grep -q -- "\${env:AGENT} = '"
-          python dist/dotagents.pyz env --format cmd -g | grep -q -- 'set "AGENT='
-          python dist/dotagents.pyz env --format dotenv -g | grep -q -- "^AGENT="
-          # auto (the default) resolves to a concrete format and prints SOMETHING.
-          python dist/dotagents.pyz env -g | grep -q -- "AGENT"
-          # overlays add: the `<name>` positional + aliased flags (--repo, -g) must
-          # survive the zipapp (duho AST-introspection-in-pyz gotcha). --repo must
-          # NOT degrade to --repo-, and -g must select the user scope.
-          python dist/dotagents.pyz overlays add --help | grep -q -- "--repo"
-          ! python dist/dotagents.pyz overlays add --help | grep -q -- "--repo-"
-          # --no-setup (the setup-runner escape hatch) must survive the zipapp too.
-          python dist/dotagents.pyz overlays add --help | grep -q -- "--no-setup"
-          ! python dist/dotagents.pyz overlays add --help | grep -q -- "--no-setup-"
-          # `audit` is NOT a dotagents command and NOT in the .pyz (D84 follow-up):
-          # tools/audit.py validates THIS REPO's layout (src/dotagents/_overlay/...,
-          # tools/...), so it is CI tooling, not a user-facing feature. Personal
-          # command modules (in the user's private .agents/) are never shipped
-          # either. Assert audit is absent from the shipped surface, and that the
-          # one bundled command module, findings, is present.
-          ! python dist/dotagents.pyz --help | grep -q -- "audit"
-          python dist/dotagents.pyz --help | grep -q -- "findings"
-          python dist/dotagents.pyz init
-          python dist/dotagents.pyz overlays add python --repo overlays-src/overlays -g
-          test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"
-          # pyvenv/py (D-latest): DISCOVERED commands that INHERIT a dotagents-defined
-          # base class (DotAgentsArgs, in cli/_common.py -- not their own module) are a
-          # DIFFERENT zipapp gap than the ones above: duho's AST introspection walks the
-          # MRO, so the base class's module needs repointing too, not just the leaf
-          # command module's own file. This regressed exactly this way once already
-          # (`-g` silently vanished, `--global` degraded to the name-derived
-          # `--global-scope`) before `dotagents.cli._common` was added to
-          # `_COMMAND_MODULES` -- assert directly against the real short flag, not just
-          # presence of the long form, so a future regression here fails loud.
-          python dist/dotagents.pyz pyvenv --help | grep -q -- "\-\-global, -g"
-          ! python dist/dotagents.pyz pyvenv --help | grep -q -- "--global-scope"
-          python dist/dotagents.pyz py --help | grep -q -- "\-\-global, -g"
-          python dist/dotagents.pyz pyvenv -g --dry-run
-          python dist/dotagents.pyz py -g -- -c "print(1)" | grep -q -- "^1$"
+
+  pyz:
+    name: Built .pyz (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Fetch the example overlays (`repo` branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.overlays_ref || 'repo' }}
+          path: overlays-src
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the dotagents CLI package
+        run: python -m pip install -e .
+      - name: Build dotagents.pyz
+        run: python -m dotagents build-pyz --out dist/dotagents.pyz
+      - name: Smoke-test the pyz (flags, help, commands survive the zipapp)
+        # Runs in its own scratch HOME/USERPROFILE and working directory.
+        run: bash tools/pyz_smoke.sh dist/dotagents.pyz overlays-src/overlays
