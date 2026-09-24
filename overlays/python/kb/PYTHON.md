@@ -13,9 +13,13 @@ Python-specific extras/overrides on top of the generic repo standard in
 - **Python Version**: modern floor (e.g. `requires-python = ">=3.9"`). Add
   `from __future__ import annotations` to every file using bare `X | Y` unions in a
   runtime-evaluated position — omitting it breaks the older end of the range.
-- **Typing**: ship `src/<package_name>/py.typed` in the wheel. Hatchling includes it
-  automatically for standard `src/` layouts; avoid explicit packages config — it can
-  break editable metadata builds.
+- **Typing**: ship `src/<package_name>/py.typed` in the wheel. Hatchling includes
+  it with the package, with or without an explicit `packages` list.
+- **Wheel packages**: hatchling finds `src/<package_name>/` by itself only when the
+  import name matches the distribution name (`my-lib` → `my_lib`). When they differ
+  (`dotagents-cli` ships `dotagents`), set
+  `[tool.hatch.build.targets.wheel] packages = ["src/<package_name>"]` — the reference
+  `pyproject.toml` always does, so a copy works either way.
 - **Ship the consumer's docs in the package** [D40]: `README.md` (`readme = "README.md"`
   → long-description) and `src/<pkg>/AGENTS.md` (the agent-facing library-interface
   doc, see REPO.md) must land in the built sdist AND wheel.
@@ -30,16 +34,28 @@ Python-specific extras/overrides on top of the generic repo standard in
   repo-relative links (`src/...`, `CHANGELOG.md`, `LICENSE`), since an installed
   consumer has no repo. Point at the project URL instead. The root `AGENTS.md`
   may link freely — it is only ever read in a checkout. Hatchling
-  puts `README.md` in the sdist by default; to ship them as real files inside the
-  installed package (so a consuming agent can read them via `importlib.resources` from
-  site-packages), force-include into the wheel, e.g.
-  `[tool.hatch.build.targets.wheel.force-include]` with
-  `"AGENTS.md" = "<package_name>/AGENTS.md"` (same for `README.md` if you want it
-  importable-adjacent). Verify with `python -m build` + `unzip -l dist/*.whl`.
+  puts `README.md` in the sdist by default. `src/<pkg>/AGENTS.md` lives inside the
+  package, so it ships in the wheel with no configuration — **never** force-include an
+  `AGENTS.md` into `<pkg>/`: with a repo-root `AGENTS.md` beside it the wheel build
+  fails (`A second file is being added to the wheel archive at the same path`). To ship
+  the README inside the installed package too (readable via `importlib.resources`),
+  force-include only it: `[tool.hatch.build.targets.wheel.force-include]` with
+  `"README.md" = "<package_name>/README.md"`. Verify with `python -m build` +
+  `unzip -l dist/*.whl`.
 - **Optional Dependencies**: zero *required* runtime deps where feasible. One extra
   per integration (`pkg[s3]`, never a catch-all bucket), guarded in code by
   `try/except ImportError` with a stdlib fallback or clearly degraded behavior —
   never a hard crash on import. `dev`/`docs` extras are tooling, not features.
+- **Dependency ranges** (runtime deps and feature extras, in `pyproject.toml` only —
+  a constraint restated anywhere else drifts):
+  - a **pre-1.0** dependency: floor at the minor's `.0`, ceiling at the next minor —
+    `>=X.Y.0,<X.(Y+1)`. Raise the floor above `.0` **only** when the code uses an API
+    added in a later patch, and name that API and patch in a comment beside it;
+  - **1.0 and above**: major-scoped — `>=1.0,<2`; a minor floor only when the code
+    uses an API added in that minor.
+  - "Update to the latest" means move the range to the latest *series*, not pin the
+    latest patch. The floors are tested: the `floors` job of the reference
+    `test.yml` installs every declared dependency AT its floor.
 - **README badges** (fill the template's badge row): version
   `img.shields.io/pypi/v/<project_name>.svg` → `pypi.org/project/<project_name>/`;
   pythons `img.shields.io/pypi/pyversions/<project_name>.svg`. PyPI badges 404 until
