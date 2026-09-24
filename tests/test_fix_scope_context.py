@@ -126,3 +126,53 @@ def test_writing_outside_the_pinned_root_warns(tmp_path, monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="dotagents"):
         _scope.resolve_scope(False, agents_dir=proj_b / ".agents")
     assert not [r for r in caplog.records if "outside the pinned" in r.getMessage()]
+
+
+# --------------------------------------------------------------------------
+# Context assembly fixtures
+# --------------------------------------------------------------------------
+
+@pytest.fixture
+def ctx(tmp_path, monkeypatch):
+    """A user store with a `py` overlay, and a project with its own store."""
+    store = tmp_path / "store"
+    project = tmp_path / "proj"
+    ov = store / "overlays" / "py"
+    (project / ".agents").mkdir(parents=True)
+    ov.mkdir(parents=True)
+    monkeypatch.setenv("AGENTS_HOME", str(store))
+    monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(project))
+    monkeypatch.chdir(project)
+    return store, project, ov
+
+
+def _gemini(scope, **kw):
+    return _context.assemble_context(_agents.GeminiAgent(), scope, **kw)
+
+
+def _cli(**fields):
+    from dotagents.cli.context import Context
+
+    command = Context()
+    command.agents = ["gemini"]
+    for key, value in fields.items():
+        setattr(command, key, value)
+    return command
+
+
+# --------------------------------------------------------------------------
+# scope-context-10: overlay sources sort by Overlay.sort_key, before stores
+# --------------------------------------------------------------------------
+
+def test_context_orders_overlays_like_the_managed_block(ctx):
+    store, project, ov = ctx
+    write_text_lf(store / "AGENTS.md", "STORE-RULES\n")
+    overlays = (("a-dir", "zzz", 500), ("b-dir", "aaa", 500), ("late", "late", 20000))
+    for dirname, name, priority in overlays:
+        d = store / "overlays" / dirname
+        write_text_lf(d / "overlay.toml", 'name = "%s"\npriority = %d\n' % (name, priority))
+        write_text_lf(d / "CONTEXT.md", "CTX-%s\n" % dirname)
+    scope = Scope.of(agents_dir=store, project_root=project, global_scope=True)
+    text = _gemini(scope)
+    order = [text.index(m) for m in ("CTX-b-dir", "CTX-a-dir", "CTX-late", "STORE-RULES")]
+    assert order == sorted(order)

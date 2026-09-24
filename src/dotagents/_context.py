@@ -189,22 +189,20 @@ def _resolve_and_filter_sources(
     )
     project_root = scope.project_root or _scope.project_root_default()
 
-    # Apply overlay priority: overlays sort among themselves by their declared
-    # priority (lower first, read from the manifest by `Overlay.priority`; the
-    # unprioritized default is `DEFAULT_PRIORITY`, 500); non-overlay levels
-    # (system/user/project) keep the resolver's precedence order, placed after
-    # all overlays via a high sentinel. Stable sort preserves resolver order
-    # within equal keys.
+    # Apply overlay priority: overlays first, in `Overlay.sort_key` order --
+    # (priority, manifest name, directory name), the order `_compose_block`
+    # folds overlay rules in -- so a lower priority reads earlier; then every
+    # non-overlay level (system/user/project/project-root) in the resolver's
+    # precedence order (the sort is stable). No priority value can move an
+    # overlay after a store's AGENTS.md.
     #
     # An overlay entry is the one whose `root` is set: the resolver labels it
     # with the overlay's NAME, not the literal "overlay".
-    _NON_OVERLAY_SENTINEL = 10_000
-
     def _sort_key(item):
         level, path, root = item
         if root is not None:
-            return (_overlays.Overlay(root).priority, path.name)
-        return (_NON_OVERLAY_SENTINEL, "")
+            return (0,) + _overlays.Overlay(root).sort_key
+        return (1,)
 
     sources.sort(key=_sort_key)
 
