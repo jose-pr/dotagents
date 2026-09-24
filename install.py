@@ -4,22 +4,26 @@
 Thin front over ``dotagents.cli.main()``, kept at this filename so existing
 muscle-memory/docs pointing at ``python install.py`` still work.
 
-Self-bootstrapping: the CLI needs the ``dotagents`` package and its
-``duho``/``pathlib_next`` dependencies importable. If they aren't -- e.g. a raw
-checkout with nothing installed yet -- this shim installs them **into the same
-interpreter that is running it** (``sys.executable -m pip install -e .``) and
-retries, exactly once, so a first-time user can run ``python install.py init``
-with no separate ``pip install`` step. Using ``sys.executable -m pip`` (not a
-bare ``pip`` off PATH) guarantees the install lands in *this* Python, so the
-import that follows actually sees it. When everything is already importable it
-just dispatches -- no pip is ever run.
+Self-bootstrapping, inside a virtual environment: the CLI needs the
+``dotagents`` package and its ``duho``/``pathlib_next`` dependencies
+importable. If they aren't -- e.g. a fresh venv with nothing installed yet --
+this shim installs this checkout **into the interpreter that is running it**
+(``sys.executable -m pip install -e .``) and retries, exactly once. When
+everything is already importable it just dispatches -- no pip is ever run.
 
-Usage: python install.py <init|overlays|context|env|build-pyz|...> [options]
+Outside a virtual environment it refuses to install anything unless
+``--bootstrap`` is passed, and it refuses even then when the interpreter is
+externally managed (PEP 668), where pip would fail anyway. The alternatives
+it names: a venv, ``pip install dotagents-cli``, or the release ``dotagents.pyz``.
+
+Usage: python install.py [--bootstrap] <init|overlays|context|env|build-pyz|...> [options]
 Run `python install.py --help` for the full subcommand/flag reference.
 """
+import importlib
 import os
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -28,6 +32,17 @@ _SRC = _HERE / "src"
 # Set to "1" once we've already tried a pip install, so a still-broken import
 # can't loop forever re-installing.
 _BOOTSTRAP_FLAG = "DOTAGENTS_BOOTSTRAPPED"
+
+#: Opt-in to installing into an interpreter that is not a virtual environment.
+_BOOTSTRAP_ARG = "--bootstrap"
+
+_ALTERNATIVES = (
+    "  - create a virtual environment and run this again from it:\n"
+    "      python -m venv .venv  (then activate it)\n"
+    "  - install the released CLI into one:  pip install dotagents-cli\n"
+    "  - or use the self-contained release pyz, which needs no install:\n"
+    "      https://github.com/jose-pr/dotagents/releases/latest/download/dotagents.pyz\n"
+)
 
 
 def _import_main():
@@ -45,6 +60,21 @@ def _import_main():
     except ImportError:
         return None
     return main
+
+
+def _in_virtualenv():
+    """True inside a venv/virtualenv, or a conda environment."""
+    if sys.prefix != getattr(sys, "base_prefix", sys.prefix):
+        return True
+    conda = os.environ.get("CONDA_PREFIX")
+    return bool(conda) and Path(conda).resolve() == Path(sys.prefix).resolve()
+
+
+def _externally_managed():
+    """True when this interpreter carries a PEP 668 ``EXTERNALLY-MANAGED``
+    marker, which makes pip refuse to install into it."""
+    stdlib = sysconfig.get_path("stdlib")
+    return bool(stdlib) and (Path(stdlib) / "EXTERNALLY-MANAGED").is_file()
 
 
 def _bootstrap():
@@ -69,14 +99,38 @@ def _bootstrap():
     return proc.returncode == 0
 
 
+def _refusal():
+    """Why this interpreter will not be bootstrapped, or None when it may be."""
+    if _in_virtualenv():
+        return None
+    if _BOOTSTRAP_ARG not in sys.argv[1:]:
+        return (
+            "dotagents: the CLI is not importable, and %s is not a virtual "
+            "environment, so nothing was installed into it. Either:\n%s"
+            "  - or pass %s to install this checkout into it anyway.\n"
+            % (sys.executable, _ALTERNATIVES, _BOOTSTRAP_ARG)
+        )
+    if _externally_managed():
+        return (
+            "dotagents: %s is externally managed (PEP 668), so pip will not "
+            "install into it. Instead:\n%s" % (sys.executable, _ALTERNATIVES)
+        )
+    return None
+
+
 def main():
     entry = _import_main()
     if entry is None and not os.environ.get(_BOOTSTRAP_FLAG):
+        refusal = _refusal()
+        if refusal:
+            sys.stderr.write(refusal)
+            return 1
         os.environ[_BOOTSTRAP_FLAG] = "1"
         if _bootstrap():
-            # Drop any negatively-cached import attempts, then retry.
-            for mod in ("dotagents", "dotagents.cli"):
-                sys.modules.pop(mod, None)
+            # The dependencies landed in a directory already on sys.path; the
+            # import system caches directory listings, so drop those caches
+            # before retrying.
+            importlib.invalidate_caches()
             entry = _import_main()
     if entry is None:
         sys.stderr.write(
@@ -85,6 +139,8 @@ def main():
             % (sys.executable, _HERE)
         )
         return 1
+    if _BOOTSTRAP_ARG in sys.argv[1:]:
+        sys.argv.remove(_BOOTSTRAP_ARG)
     return entry()
 
 
