@@ -935,6 +935,37 @@ class TestAntigravityHooks:
         assert proc.returncode == 0
         assert proc.stdout.strip() == ""
 
+    def test_workspace_paths_pin_the_project(self, tmp_path):
+        """The first existing `workspacePaths` entry is the project: its
+        `.agents/bin` supplies `dotagents`, which runs with that root pinned,
+        whatever the hook process's own cwd."""
+        import subprocess
+        import sys
+
+        dest, root = tmp_path / "agents", tmp_path / "gemini_config"
+        dest.mkdir()
+        AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        script = root / "hooks" / AntigravityAgent.PREINVOCATION_HOOK_SCRIPT
+        workspace = tmp_path / "workspace"
+        stub_dir = workspace / ".agents" / "bin"
+        stub_dir.mkdir(parents=True)
+        if os.name == "nt":
+            (stub_dir / "dotagents.cmd").write_text("@echo off\r\necho ROOT=%AGENTS_PROJECT_ROOT%\r\n", encoding="utf-8")
+        else:
+            (stub_dir / "dotagents").write_text('#!/bin/sh\necho "ROOT=$AGENTS_PROJECT_ROOT"\n', encoding="utf-8")
+            (stub_dir / "dotagents").chmod(0o755)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+
+        payload = {"invocationNum": 0, "workspacePaths": [str(tmp_path / "gone"), str(workspace)]}
+        proc = subprocess.run(
+            [sys.executable, str(script)], input=json.dumps(payload),
+            capture_output=True, text=True, cwd=str(elsewhere),
+        )
+        assert proc.returncode == 0, proc.stderr
+        message = json.loads(proc.stdout)["injectSteps"][0]["ephemeralMessage"]
+        assert message == "ROOT=%s" % workspace
+
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell parser")
 def test_powershell_hook_commands_parse():

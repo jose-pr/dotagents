@@ -144,6 +144,20 @@ def test_env_diff_json_holds_only_what_changed(tmp_path, monkeypatch, capsys):
     assert Path(out["AGENTS_PROJECT_ROOT"]) == Path.cwd(), "unset before: part of the diff"
 
 
+def test_env_global_with_agents_dir_uses_that_store_and_no_project(tmp_path, capsys):
+    """`-g --agents-dir X`: the store is X, and `-g` drops the project tier
+    (here: the cwd's `.agents`)."""
+    store = tmp_path / "x-store"
+    store.mkdir()
+    (store / "env.py").write_text("import json\nprint(json.dumps({'FROM_X': '1'}))\n", encoding="utf-8")
+    project = Path.cwd() / ".agents"
+    project.mkdir()
+    (project / "env.py").write_text("import json\nprint(json.dumps({'FROM_PROJECT': '1'}))\n", encoding="utf-8")
+    assert _main(["env", "-g", "--agents-dir", str(store), "--format", "json"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["FROM_X"] == "1" and "FROM_PROJECT" not in out
+
+
 # --------------------------------------------------------------------------
 # argv helpers that run before any parser exists
 # --------------------------------------------------------------------------
