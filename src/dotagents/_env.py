@@ -20,8 +20,8 @@ Contract B, the exact sequence :func:`get_environment` performs:
   4. **Chained, later-overrides-earlier**: each file is evaluated against the
      ACCUMULATED environment of every file before it; the result also
      accumulates. Later files win on conflicting keys.
-  5. **``.py`` files are EXECUTED** (:func:`get_env_from_py` runs the script and
-     reads back its env changes as JSON -- one object, or one object per line
+  5. **``.py`` files are EXECUTED** (:func:`get_env_from_py` runs the script as
+     ``env.py --level <level> [--global]`` and reads back its env changes as JSON -- one object, or one object per line
      merged in order, so overlay-managed blocks appended to one ``env.py`` can
      each print their own); plain files are **sourced**
      (:func:`get_env_from_file`, via ``bash ... env -0``).
@@ -280,8 +280,10 @@ def _posix_parent_comm(ppid: int) -> str:
 
 
 def _norm_comm(name: str) -> str:
-    """Lowercase basename of a command/path, ``.exe`` suffix stripped."""
-    base = os.path.basename(name.strip()).lower()
+    """Lowercase basename of a command/path, ``.exe`` suffix stripped, and the
+    leading ``-`` that marks a login shell dropped (macOS ``ps`` reports a
+    login fish as ``-fish``)."""
+    base = os.path.basename(name.strip()).lower().lstrip("-")
     if base.endswith(".exe"):
         base = base[:-4]
     return base
@@ -373,6 +375,12 @@ def get_env_from_py(
 ) -> "dict[str, str]":
     """Execute an ``env.py`` and read back its JSON object(s) of env changes.
 
+    The script runs as ``<python> env.py --level <level> [--global]``:
+    ``<level>`` is the contract-A level it was found at (``system``, ``user``,
+    ``project``, or an overlay's name) and ``--global`` says the project tiers
+    are skipped. ``--agent <level>`` is passed as well -- the old name of
+    ``--level`` (it never named an agent), kept for scripts that read it.
+
     The script runs as a child with ``base_env`` (the accumulated environment)
     and prints its changes to stdout as JSON: ONE object, or one object PER
     LINE, merged in order (a later line wins on a key). The per-line form is
@@ -382,7 +390,7 @@ def get_env_from_py(
     is logged by NAME only -- never abort assembly, and never echo the child's
     stdout (it may carry secret values).
     """
-    args = [interpreter(base_env), str(env_py), "--agent", level]
+    args = [interpreter(base_env), str(env_py), "--level", level, "--agent", level]
     if global_scope:
         args.append("--global")
     try:
