@@ -410,7 +410,7 @@ def test_resolve_source_keeps_its_contract(tmp_path):
     source = _scope.resolve_source([str(tmp_path / "dir")])
     assert "shared" in source.available() and source.overlay_dir("shared") == tmp_path / "dir" / "shared"
     assert str(tmp_path / "dir") in source.root
-    assert _scope.OverlaySource(tmp_path / "dir").available() == sorted(_scope.OverlaySource(tmp_path / "dir").available())
+    assert DirRepo(tmp_path / "dir").available() == sorted(DirRepo(tmp_path / "dir").available())
 
 
 # --------------------------------------------------------------------------

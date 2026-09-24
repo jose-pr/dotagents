@@ -125,12 +125,11 @@ returns the exit code.
   - `Scope.of(*, agents_dir, project_root=None, global_scope=False) -> Scope` — the
     read walk's scope: user scope when `global_scope` or no `project_root`, else a
     project scope at `<project_root>/.agents`.
-  - Properties: `global_scope` (user level), `system_store` (= `system_root`),
-    `project_store` (`None` in the user scope), `stores` (system, user, project —
-    existing roles only, a directory listed once), `overlays`
-    (`Overlay.installed(*stores)`), `overlay_root` (`<agents_root>/overlays`),
-    `shared_skills_dir` (`<agents_root>/skills`), `cmds_dir`
-    (`<agents_root>/dotagents/cmds`).
+  - Attributes: `level`, `agents_root`, `user_root`, `project_root`, `system_root`.
+    Properties: `global_scope` (user level), `project_store` (`None` in the user
+    scope), `stores` (system, user, project — existing roles only, a directory
+    listed once), `overlays` (`Overlay.installed(*stores)`), `overlay_root`
+    (`<agents_root>/overlays`), `shared_skills_dir` (`<agents_root>/skills`).
   - `store_level(store) -> str` — `"system"` / `"user"` / `"project"`; `ValueError`
     for another path.
   - `overlay_dir(name) -> Path` — `<overlay_root>/<name>`.
@@ -158,7 +157,6 @@ returns the exit code.
   warning; no pin: the cwd.
 - `filter_names(names, pattern) -> list[str]` — `fnmatch` filter; `None` / `"*"`
   keep all.
-- `OverlaySource(root)` — a `_sources.DirRepo` over `root`.
 - `resolve_source(repos=None, *, scope=None, logger=None, allow_empty=False) ->
   CompositeSource` — `_sources.resolve` over `repos`, the env repos, then the
   project store's and the user store's registries, caching under
@@ -222,12 +220,6 @@ returns the exit code.
     recorded file the source dropped is removed when unedited, kept unless `prune`
     when edited; replaced/pruned files copied under `backup_root` first; writes the
     install record (`source`, or the previous one when `None`).
-  - `apply_to(dest, dry_run)` — create-if-absent copy of `files()` into `dest` at
-    their relative paths; returns `(written, skipped, lines)`. Not used by the
-    commands.
-  - `merge_rules_into(agents_md, dry_run, logger) -> bool` — fold this overlay's
-    routing and rules into an existing managed block in place. Not used by the
-    commands (they use `recompose_overlay_block`).
 - `recompose_overlay_block(agents_md, base_block, overlays, dry_run, logger) -> bool`
   — rebuild the managed block from the pristine `base_block` over `overlays` in
   `sort_key` order; creates the file when absent; content outside the markers kept;

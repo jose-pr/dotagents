@@ -289,23 +289,34 @@ def test_overlay_files_excludes_manifest_and_caches(tmp_path):
     assert not any("__pycache__" in n for n in names)
 
 
-def test_merge_overlay_rules_into_agents_md(tmp_path):
+def test_recompose_merges_overlay_routing_into_agents_md(tmp_path):
     src = make_source(tmp_path)
     scope = make_scope(tmp_path)
     agents_md = scope.agents_root / "AGENTS.md"
-    changed = Overlay(src / "py-demo").merge_rules_into(agents_md, False, logger())
+    agents_md.write_text("# mine\n\n" + BASE_AGENTS + "\ntrailing note\n", encoding="utf-8")
+    changed = _overlays.recompose_overlay_block(
+        agents_md, BASE_AGENTS, [src / "py-demo"], False, logger()
+    )
     assert changed
     text = agents_md.read_text(encoding="utf-8")
     assert "~/.agents/kb/PY.md" in text
     # Content outside the managed block is untouched; block still terminated.
+    assert text.startswith("# mine\n\n") and text.endswith("\ntrailing note\n")
     assert text.count(END) == 1
+    # A second run over the same set is a no-op: nothing is appended twice.
+    assert not _overlays.recompose_overlay_block(
+        agents_md, BASE_AGENTS, [src / "py-demo"], False, logger()
+    )
 
 
-def test_merge_overlay_rules_noop_when_no_contributions(tmp_path):
+def test_recompose_is_a_noop_when_no_overlay_contributes(tmp_path):
     src = make_source(tmp_path)
     scope = make_scope(tmp_path)
     agents_md = scope.agents_root / "AGENTS.md"
-    assert Overlay(src / "plain").merge_rules_into(agents_md, False, logger()) is False
+    assert _overlays.recompose_overlay_block(
+        agents_md, BASE_AGENTS, [src / "plain"], False, logger()
+    ) is False
+    assert agents_md.read_text(encoding="utf-8") == BASE_AGENTS
 
 
 # --------------------------------------------------------------------------- #

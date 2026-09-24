@@ -11,7 +11,7 @@ import pytest
 
 from dotagents import _env
 from dotagents._scope import Scope
-from dotagents import _scope
+from dotagents import _scope, _sources
 
 
 
@@ -193,4 +193,4 @@ def test_source_available_applies_the_overlay_name_rule(tmp_path):
     src = tmp_path / "src"
     for name in ("good", "__pycache__", ".hidden", "2fast"):
         (src / name).mkdir(parents=True)
-    assert _scope.OverlaySource(src).available() == ["good"]
+    assert _sources.DirRepo(src).available() == ["good"]

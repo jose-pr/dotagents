@@ -252,10 +252,7 @@ def _parse_priority(text: str) -> int:
     m = re.search(r"(?m)^priority\s*=\s*([+-]?\d(?:_?\d)*)\s*$", text)
     if m is None:
         return DEFAULT_PRIORITY
-    try:
-        return int(m.group(1).replace("_", ""))
-    except ValueError:
-        return DEFAULT_PRIORITY
+    return int(m.group(1).replace("_", ""))  # the pattern admits only valid ints
 
 
 def _hand_parse(text: str) -> "dict[str, object]":
@@ -602,12 +599,9 @@ class Overlay:
     @property
     def priority(self) -> int:
         """The manifest ``priority``, ``DEFAULT_PRIORITY`` when absent or
-        unparseable. Lower sorts earlier."""
-        manifest = self.read_manifest()
-        try:
-            return int(manifest.get("priority", DEFAULT_PRIORITY))  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            return DEFAULT_PRIORITY
+        unparseable (:meth:`read_manifest` already did the checking). Lower
+        sorts earlier."""
+        return self.read_manifest()["priority"]  # type: ignore[return-value]
 
     @property
     def sort_key(self) -> "tuple[int, str, str]":
@@ -813,38 +807,6 @@ class Overlay:
             blocks.append(body.rstrip())
         return blocks, warnings
 
-    def _copy_into(
-        self, sources: "list[Path]", dest: Path, dry_run: bool, verb: str,
-        overwrite: bool = False,
-    ):
-        """Copy `sources` (under this overlay) to the same relative path under
-        `dest`, create-if-absent; never clobber -- unless `overwrite`, which
-        replaces an existing file whose CONTENT differs (an identical file is
-        still a skip). Returns (written, skipped, lines)."""
-        written = skipped = 0
-        lines = []
-        for src in sources:
-            rel = src.relative_to(self.path)
-            target = dest / rel
-            if target.exists():
-                if not overwrite or _same_content(src, target):
-                    lines.append("skip (exists): %s" % rel.as_posix())
-                    skipped += 1
-                    continue
-                lines.append("update: %s" % rel.as_posix())
-            else:
-                lines.append("%s: %s" % (verb, rel.as_posix()))
-            if not dry_run:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(src), str(target))
-            written += 1
-        return written, skipped, lines
-
-    def apply_to(self, dest: Path, dry_run: bool):
-        """Copy the overlay's files into `dest` (create-if-absent; never clobber
-        an existing file). Returns (copied, skipped) counts and per-file log lines."""
-        return self._copy_into(self.files(), dest, dry_run, "overlay")
-
     def install_to(
         self,
         dest_overlay_dir: Path,
@@ -963,47 +925,6 @@ class Overlay:
                 "files": new_files,
             })
         return result
-
-    def merge_rules_into(self, agents_md: Path, dry_run: bool, logger) -> bool:
-        """Fold this overlay's routing + rules into an already-installed
-        AGENTS.md's managed block, in place (additive).
-
-        Extracts the current block (between the dotagents markers), runs the
-        same `_compose_block` fold `init` uses over just that block text, and
-        writes the result back between the markers -- content outside the block
-        is never touched. A no-op (returns False) when the overlay contributes
-        nothing, the file is absent, or it carries no managed block. The
-        `overlays` command uses :func:`recompose_overlay_block` instead, which
-        also gets priority ordering right across overlays."""
-        from dotagents._fs import write_text_lf
-        from dotagents._merge import find_block
-        from dotagents.cli import _compose_block
-
-        manifest = self.read_manifest()
-        if not manifest["routing"] and not manifest["rules"]:
-            return False
-        if not agents_md.is_file():
-            logger.warning(
-                "no installed AGENTS.md at %s; overlay rules/routing not merged", agents_md
-            )
-            return False
-        existing = agents_md.read_text(encoding="utf-8")
-        span = find_block(existing)
-        if span is None:
-            logger.warning(
-                "AGENTS.md has no dotagents managed block; overlay rules/routing not "
-                "merged (run `dotagents init` first)"
-            )
-            return False
-        start, end = span
-        block = existing[start:end]
-        merged = _compose_block(block, [self], logger)
-        if merged == block:
-            return False
-        new_text = existing[:start] + merged + existing[end:]
-        if not dry_run:
-            write_text_lf(agents_md, new_text)
-        return True
 
 
 # --------------------------------------------------------------------------- #

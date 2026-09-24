@@ -1,28 +1,27 @@
-"""Scope and overlay-source resolution for ``dotagents overlays``.
+"""Where a session's config lives, and where overlays come from.
 
-Two orthogonal axes the ``overlays`` command needs, kept out of ``cli.py`` (which
-only wires args) to match ``_overlays.py`` / ``_skills.py``:
+* **Scope** -- the stores a command writes to and a session reads.
+  :class:`Scope` is the ``user`` scope (``<agents_dir>/``, the configurable
+  store: ``$AGENTS_HOME``, default ``~/.agents``) or a ``project`` scope
+  (``<project>/.agents/``, which also walks the user store). An overlay
+  installs into ``<store>/overlays/<name>/`` and skills publish into the
+  shared ``<store>/skills/``; installed overlays are **discovered** by their
+  presence under ``overlays/``, with no registry file. :meth:`Scope.paths` is
+  the contract-A walk every reader (``env``, ``context``, command discovery)
+  goes through. :func:`resolve_scope` picks a writing command's scope,
+  :func:`resolve_user_store`, :func:`project_root_default` and
+  :func:`install_project_root` resolve its parts.
 
-* **Scope** -- *where installed overlays live*. ``user`` is ``<agents_dir>/`` (the
-  configurable store, default ``~/.agents``); ``project`` is ``<project>/.agents/``.
-  An overlay installs into ``<scope>/overlays/<name>/`` and skills publish into the
-  shared ``<scope>/skills/``. There is no registry file: installed overlays are
-  **discovered** by their presence under ``overlays/``.
+* **Source** -- where an overlay to install comes from. :func:`resolve_source`
+  returns the repos in precedence order (``--repo``, the env repos, the
+  project and user stores' ``dotagents.*`` registries); a repo is a directory
+  of overlays, a registry file, or a git spec, and the first offering a name
+  wins. See :mod:`dotagents._sources` for the returned object.
 
-* **Source** -- *where an overlay to install comes from*. ``resolve_source`` returns
-  the repos in precedence order (``--repo``, the env repos, the project and
-  user stores' ``dotagents.*`` registries; no build bundles overlays); a repo
-  is a directory of overlays, a registry file, or a git spec, and the first
-  offering a name wins. See ``dotagents._sources`` for the returned object.
-
-The ``system`` store (``Scope.system_root``: ``/etc/agents`` on POSIX, or
-``$AGENTS_SYSTEM_ROOT``; only when administrators alone can write it) is walked by the Contract-A resolver (``Scope.paths``)
-for overlays/env/context/bin/cmds like any store, first in precedence, but
-nothing installs into it -- there is no ``--system`` scope for ``init`` /
-``overlays``.
-
-Never print ``DOTAGENTS_*`` values (Leakage): this module reads the env var but
-only ever reports the resolved path, never the raw value.
+The ``system`` store (:func:`system_root_default`: ``$AGENTS_SYSTEM_ROOT``, or
+``/etc/agents`` on POSIX; only when administrators alone can write it) is
+walked like any store, first in precedence, but nothing installs into it --
+there is no ``--system`` scope for ``init`` / ``overlays``.
 """
 
 from __future__ import annotations
@@ -159,11 +158,6 @@ class Scope:
         return self.level == "user"
 
     @property
-    def system_store(self) -> "Optional[Path]":
-        """Alias of :attr:`system_root`, for symmetry with :attr:`project_store`."""
-        return self.system_root
-
-    @property
     def project_store(self) -> "Optional[Path]":
         """The project's store (``agents_root``) -- ``None`` in the user scope."""
         return None if self.global_scope else self.agents_root
@@ -278,19 +272,6 @@ class Scope:
     def shared_skills_dir(self) -> Path:
         return self.agents_root / "skills"
 
-    @property
-    def cmds_dir(self) -> Path:
-        """Directory of discovered command modules for this scope:
-        ``<agents_root>/dotagents/cmds``, a seam alongside ``overlays``/``skills``.
-
-        ``init`` never creates it -- the dir exists once a user adds a command
-        module (the bundled modules are discovered from the package itself).
-        Discovery (``dotagents.cli._cmds_dirs``) walks the same
-        ``dotagents/cmds`` name at every level through :meth:`paths` and skips
-        a missing dir, so a user's own ``*.py`` command modules dropped here are
-        picked up with zero config."""
-        return self.agents_root / "dotagents" / "cmds"
-
     def overlay_dir(self, name: str) -> Path:
         return self.overlay_root / name
 
@@ -298,7 +279,6 @@ class Scope:
         if self.global_scope:
             return "Scope(user, root=%s)" % self.agents_root
         return "Scope(project, root=%s, user_root=%s)" % (self.agents_root, self.user_root)
-
 
 
 def resolve_scope(
@@ -565,14 +545,6 @@ def filter_names(names: "list[str]", pattern: "Optional[str]") -> "list[str]":
     if not pattern or pattern == "*":
         return list(names)
     return [n for n in names if fnmatch.fnmatch(n, pattern)]
-
-
-def OverlaySource(root):  # noqa: N802 -- reads as a class at the call site
-    """A directory of overlays (``<root>/<name>/``): :class:`dotagents._sources.DirRepo`."""
-    from dotagents._sources import DirRepo
-
-    return DirRepo(root)
-
 
 
 def resolve_source(

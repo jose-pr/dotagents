@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from dotagents import _agents
+from dotagents import _env
 from dotagents import _overlays
 from dotagents import _scope
 
@@ -39,14 +40,6 @@ def _expand_placeholders(
             lambda m: roots.get(m.group(1) or m.group(2), m.group(0)), text
         )
     return text
-
-
-def _overlay_roots(scope: _scope.Scope) -> "list[Path]":
-    """Every installed overlay's dir (:attr:`Scope.overlays`: the user store's,
-    then the project's, shadowing applied) -- the same set ``dotagents env``
-    names with a ``<NAME>_OVERLAY_ROOT`` var, so a placeholder resolves for ANY
-    installed overlay, not only one that happens to ship a ``CONTEXT.md``."""
-    return [overlay.path for overlay in scope.overlays]
 
 
 # A relative path token ending in .md: one or more path segments, no spaces,
@@ -362,7 +355,7 @@ def _assemble(
     """The shared body of both assemblers: ``(text, source_paths)``."""
     filtered_sources, harness_loaded = _resolve_and_filter_sources(agent, scope)
     project_root = scope.project_root or _scope.project_root_default()
-    overlay_roots = _overlay_roots(scope)
+    overlay_roots = _env.get_overlay_roots(scope)
 
     assembled_parts = []
     source_paths: "list[str]" = []
