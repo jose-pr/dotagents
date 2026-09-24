@@ -461,6 +461,9 @@ class TestCodexHooks:
             CodexAgent.SESSION_START_COMMAND
         ]
         assert "dotagents context" in CodexAgent.SESSION_START_COMMAND
+        # Without it `context` resolves the agent from the hook's environment,
+        # lands on Claude, and subtracts what Claude loads: Codex got nothing.
+        assert "dotagents context --agents codex" in CodexAgent.SESSION_START_COMMAND
 
     def test_session_start_has_no_env_write(self, tmp_path):
         """SessionStart itself still carries no CLAUDE_ENV_FILE-style write --

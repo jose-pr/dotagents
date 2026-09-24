@@ -713,7 +713,7 @@ class CodexAgent(Agent):
     # Same PATH prefix as Claude's hook, for the same reason: `<scope>/bin/`
     # holds the wrapper `init` wrote.
     SESSION_START_COMMAND = (
-        'PATH=".agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH" dotagents context'
+        'PATH=".agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH" dotagents context --agents codex'
     )
 
     # PreToolUse gives Codex the LIVE env half SessionStart cannot: its
