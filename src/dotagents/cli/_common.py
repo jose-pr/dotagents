@@ -217,12 +217,9 @@ def _compose_block(base_text: str, overlays, logger) -> str:
         else:
             text = text[: m.start()] + "\n".join(rules) + "\n\n" + text[m.start():]
     if routing:
-        # The base's placeholder sentence only makes sense with no routing lines.
-        text = re.sub(
-            r"(?m)^Nothing ships here by default[^\n]*\n(?:[^\n#<][^\n]*\n)*",
-            "",
-            text,
-        )
+        # The base's placeholder line only makes sense with no routing lines.
+        # Exactly that one line: anything after it is real content.
+        text = re.sub(r"(?m)^Nothing ships here by default[^\n]*\n", "", text)
         # Overlay routing points at `$<NAME>_OVERLAY_ROOT/...` (the var
         # `dotagents env` exports per installed overlay) rather than a hard
         # store path; say so once, so an agent reading the file knows the
@@ -327,8 +324,14 @@ def _apply_base(
     implement it). Done here because this is where the active-agent list is
     already resolved."""
     from dotagents import _agents
+    from dotagents._overlays import Overlay
 
-    base_agents = base_agents_text(src, dest)
+    # Compose over the overlays already installed in this store, exactly as
+    # `overlays add/remove/sync` do (`recompose_overlay_block`): a re-run of
+    # `init` refreshes the block without stripping their rules and routing.
+    base_agents = _compose_block(
+        base_agents_text(src, dest), Overlay.discover(Path(dest) / "overlays"), logger
+    )
 
     # True only when the caller named agents with `--agents`. Writes that touch an
     # agent's own main config file are gated on this, so merely *running* under a

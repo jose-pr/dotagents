@@ -96,6 +96,49 @@ def test_reinit_leaves_an_existing_dotagents_dir_alone(tmp_path):
     assert sorted(p.name for p in (store / "dotagents").iterdir()) == ["DECISIONS.md", "README.md", "cmds"]
 
 
+def _add_tiny(store, tmp_path, routing="- Tiny -> $TINY_OVERLAY_ROOT/kb/T.md"):
+    src = tmp_path / "src" / "tiny"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "overlay.toml").write_text('name = "tiny"\nrouting = ["%s"]\n' % routing, encoding="utf-8")
+    cmd = OverlayAdd()
+    cmd.name, cmd.repo, cmd.global_scope, cmd.agents_dir, cmd.copy, cmd.dry_run = (
+        ["tiny"], [str(tmp_path / "src")], True, store, True, False)
+    assert cmd() == 0
+
+
+def test_reinit_keeps_the_installed_overlays_rules(tmp_path):
+    # Re-running init rewrote the block from the bare template, dropping every
+    # installed overlay's rules and routing until the next `overlays sync`.
+    store = tmp_path / "user"
+    _apply_base(BASE_ROOT, store, force=False, dry_run=False, logger=_log(), agents=["codex"])
+    _add_tiny(store, tmp_path)
+    after_add = (store / "AGENTS.md").read_text(encoding="utf-8")
+    assert "TINY_OVERLAY_ROOT" in after_add
+    _apply_base(BASE_ROOT, store, force=False, dry_run=False, logger=_log(), agents=["codex"])
+    assert (store / "AGENTS.md").read_text(encoding="utf-8") == after_add
+
+
+def test_routing_keeps_the_named_agent_line(tmp_path):
+    # The placeholder regex used to swallow the line after it.
+    store = tmp_path / "user"
+    _apply_base(BASE_ROOT, store, force=False, dry_run=False, logger=_log(), agents=["codex"])
+    _add_tiny(store, tmp_path)
+    text = (store / "AGENTS.md").read_text(encoding="utf-8")
+    assert "A named agent with its own" in text
+    assert "Nothing ships here by default" not in text
+
+
+def test_force_keeps_the_original_when_two_adapters_write_it(tmp_path):
+    # Codex and Antigravity both force-write <store>/AGENTS.md; the second
+    # used to "back up" the first's output over the only copy of the original.
+    store = tmp_path / "user"
+    store.mkdir()
+    (store / "AGENTS.md").write_text("MY PRECIOUS HAND-WRITTEN AGENTS.md\n", encoding="utf-8")
+    _apply_base(BASE_ROOT, store, force=True, dry_run=False, logger=_log(), agents=["codex", "antigravity"])
+    backups = list((store / "install_backup").rglob("AGENTS.md"))
+    assert [p.read_text(encoding="utf-8") for p in backups] == ["MY PRECIOUS HAND-WRITTEN AGENTS.md\n"]
+
+
 def test_dry_run_writes_nothing(tmp_path):
     store = tmp_path / "user"
     _apply_base(BASE_ROOT, store, force=False, dry_run=True, logger=_log(), agents=["codex"])
@@ -105,13 +148,7 @@ def test_dry_run_writes_nothing(tmp_path):
 def test_recompose_keeps_the_rendered_path(tmp_path):
     store = tmp_path / "user"
     _apply_base(BASE_ROOT, store, force=False, dry_run=False, logger=_log(), agents=["codex"])
-    src = tmp_path / "src" / "tiny"
-    src.mkdir(parents=True)
-    (src / "overlay.toml").write_text('name = "tiny"\nrouting = ["- Tiny -> $TINY_OVERLAY_ROOT/kb/T.md"]\n', encoding="utf-8")
-    cmd = OverlayAdd()
-    cmd.name, cmd.repo, cmd.global_scope, cmd.agents_dir, cmd.copy, cmd.dry_run = (
-        ["tiny"], [str(tmp_path / "src")], True, store, True, False)
-    assert cmd() == 0
+    _add_tiny(store, tmp_path)
     text = (store / "AGENTS.md").read_text(encoding="utf-8")
     assert "annotate that you read `%s`" % (store.resolve() / "AGENTS.md").as_posix() in text
     assert "{{" not in text and "TINY_OVERLAY_ROOT" in text

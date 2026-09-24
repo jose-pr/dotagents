@@ -223,6 +223,50 @@ def test_merge_refuses_a_begin_without_end(tmp_path):
         _merge.merge_block(target, BASE)
 
 
+def test_merge_ignores_marker_lines_inside_code_fences(tmp_path):
+    """A fenced example of the BEGIN line paired with the real END and the
+    user text between them was replaced."""
+    target = tmp_path / "CLAUDE.md"
+    write_text_lf(
+        target,
+        "# my notes\n\n```md\n<!-- dotagents:begin -->\n```\n\nIMPORTANT USER TEXT\n\n"
+        "<!-- dotagents:begin -->\n@old\n<!-- dotagents:end -->\n",
+    )
+    assert _merge.merge_block(target, BASE, append=True) == "block-refreshed"
+    text = target.read_text(encoding="utf-8")
+    assert "IMPORTANT USER TEXT" in text and "@old" not in text and "BASE RULES" in text
+    assert text.startswith("# my notes\n\n```md\n<!-- dotagents:begin -->\n```\n")
+
+
+def test_merge_sees_a_block_behind_a_utf8_bom(tmp_path):
+    target = tmp_path / "AGENTS.md"
+    target.write_bytes(b"\xef\xbb\xbf<!-- dotagents:begin -->\nOLD\n<!-- dotagents:end -->\n\nMine.\n")
+    assert _merge.merge_block(target, BASE) == "block-refreshed"
+    data = target.read_bytes()
+    assert not data.startswith(b"\xef\xbb\xbf")
+    assert data.count(b"<!-- dotagents:begin -->") == 1 and b"Mine." in data
+
+
+def test_force_backups_mirror_paths_and_never_overwrite(tmp_path):
+    store = tmp_path / "store"
+    root = _merge.timestamped_backup_root(store)
+    assert _merge.timestamped_backup_root(store) == root, "one root per store per run"
+    target = store / "AGENTS.md"
+    write_text_lf(target, "ORIGINAL\n")
+    assert _merge.merge_block(target, BASE, force=True, backup_root=root) == "replaced (--force, backed up)"
+    # A second adapter force-writing other text in the same run: the backup keeps the original.
+    other = BASE.replace("BASE RULES", "OTHER")
+    assert _merge.merge_block(target, other, force=True, backup_root=root) == "replaced (--force)"
+    assert (root / "AGENTS.md").read_text(encoding="utf-8") == "ORIGINAL\n"
+    assert _merge.merge_block(target, other, force=True, backup_root=root) == "unchanged"
+    # A same-named file outside the store is mirrored elsewhere, not over it.
+    outside = tmp_path / "pi" / "AGENTS.md"
+    mirrored = _merge._backup_path(outside, root)
+    assert mirrored != root / "AGENTS.md"
+    assert mirrored.parts[-2:] == ("pi", "AGENTS.md")
+    assert mirrored.relative_to(root).parts[0] == "external"
+
+
 def test_merge_reports_a_markerless_base_as_a_usage_error(tmp_path):
     with pytest.raises(SystemExit, match="managed block"):
         _merge.merge_block(tmp_path / "x.md", "no markers here\n")

@@ -29,6 +29,6 @@ Startup: annotate that you read `{{AGENTS_MD}}`.
 
 ## Load on demand
 Read the matching file BEFORE such a task; skip it otherwise, never preemptively.
-Nothing ships here by default — add one routing line per file as you grow this
-config. A named agent with its own `~/.agents/<agent>.md` reads that too.
+A named agent with its own `~/.agents/<agent>.md` reads that too.
+Nothing ships here by default — add one routing line per file as you grow it.
 <!-- dotagents:end -->

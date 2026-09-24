@@ -1016,7 +1016,9 @@ class PiAgent(Agent):
                 "`dotagents init` manages (the always-on rules and the routing to "
                 "on-demand files).\n%s\n" % (BEGIN_MARKER, store_agents, END_MARKER)
             )
-            branch = merge_block(entry, pointer, force=force, dry_run=dry_run, backup_root=backup_root)
+            # pi's own file is the user's: block-merged even under `--force`,
+            # like Claude's include, so their text around the block survives.
+            branch = merge_block(entry, pointer, dry_run=dry_run)
             if logger: logger.info("%s: %s (pointer to the store)", branch, entry)
 
     @staticmethod

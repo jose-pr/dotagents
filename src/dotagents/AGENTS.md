@@ -154,8 +154,14 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   the overlay test). `LEVEL_NAMES` are reserved as overlay names.
 - `_merge` — managed-block merge for `init`'s `AGENTS.md`, delimited by
   `<!-- dotagents:begin -->` / `<!-- dotagents:end -->` marker LINES (a prose
-  mention of a marker is not a marker; `find_block` returns the span). A begin
-  with no end after it is refused; a base without markers is a usage error.
+  mention of a marker is not a marker, and neither is one inside fenced code;
+  `find_block` returns the span). A begin with no end after it is refused; a
+  base without markers is a usage error; a target's UTF-8 BOM is read through
+  and not written back. `merge_block(..., force=True, backup_root=...)` backs a
+  replaced target up at its mirrored path under the root (`external/…` for a
+  file outside the store), never over an earlier backup, and returns
+  `"replaced (--force, backed up)"` / `"replaced (--force)"` / `"unchanged"`
+  accordingly; `timestamped_backup_root(dest)` is one root per store per process.
   `begin_marker`/`end_marker` override the pair for other comment syntaxes
   (`#` for TOML), and `append=True` puts a first-time block at the END of the
   file — required for TOML, where a `[table]` header captures every key line

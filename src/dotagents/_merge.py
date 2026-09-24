@@ -32,20 +32,54 @@ def _marker_re(marker: str) -> "re.Pattern[str]":
     return re.compile(r"(?m)^[ \t]*%s[ \t]*$" % re.escape(marker))
 
 
+_FENCE_RE = re.compile(r"(?m)^[ \t]{0,3}(`{3,}|~{3,})[^\n]*$")
+
+
+def _fenced_spans(text: str) -> "list[tuple[int, int]]":
+    """Character spans of fenced code blocks (``` or ~~~, CommonMark-style: a
+    fence closes on the same character at least as long). An unclosed fence
+    runs to the end of the text."""
+    spans: "list[tuple[int, int]]" = []
+    opening = None
+    start = 0
+    for m in _FENCE_RE.finditer(text):
+        fence = m.group(1)
+        if opening is None:
+            opening, start = fence, m.start()
+        elif (fence[0] == opening[0] and len(fence) >= len(opening)
+              and m.group(0).strip() == fence):  # a closing fence carries no info string
+            spans.append((start, m.end()))
+            opening = None
+    if opening is not None:
+        spans.append((start, len(text)))
+    return spans
+
+
+def _marker_lines(text: str, marker: str, pos: int = 0) -> "list[re.Match[str]]":
+    """Every `marker` line at or after `pos` that is not inside a code fence --
+    a fenced example of the markers is documentation, not a block."""
+    fences = _fenced_spans(text)
+    return [
+        m for m in _marker_re(marker).finditer(text, pos)
+        if not any(a <= m.start() < b for a, b in fences)
+    ]
+
+
 def find_block(
     text: str, begin_marker: str = BEGIN_MARKER, end_marker: str = END_MARKER
 ) -> "tuple[int, int] | None":
     """``(start, end)`` character span of the managed block in ``text`` -- from
-    the first BEGIN marker line through the first END marker line after it --
-    or ``None`` when there is no block. A BEGIN with no END after it is not a
-    block (the caller decides whether that is an error)."""
-    begin = _marker_re(begin_marker).search(text)
-    if begin is None:
+    the first BEGIN marker line through the first END marker line after it,
+    ignoring marker lines inside fenced code -- or ``None`` when there is no
+    block. A BEGIN with no END after it is not a block (the caller decides
+    whether that is an error)."""
+    begins = _marker_lines(text, begin_marker)
+    if not begins:
         return None
-    end = _marker_re(end_marker).search(text, begin.end())
-    if end is None:
+    ends = _marker_lines(text, end_marker, begins[0].end())
+    if not ends:
         return None
-    return begin.start(), end.end()
+    return begins[0].start(), ends[0].end()
 
 
 def _extract_block(
@@ -69,9 +103,32 @@ def _extract_block(
     return text[span[0] : span[1]]
 
 
-def _backup(target: Path, backup_root: Path) -> None:
-    backup_root.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(target, backup_root / target.name)
+def _backup_path(target: Path, backup_root: Path) -> Path:
+    """Where `target` is backed up under `backup_root`: its path relative to the
+    store (``backup_root``'s grandparent, see :func:`timestamped_backup_root`),
+    or ``external/<absolute path>`` for a file outside it -- so two targets that
+    share a basename (the store's ``AGENTS.md`` and pi's) never collide."""
+    target = Path(target).resolve()
+    store = Path(backup_root).resolve().parent.parent
+    try:
+        rel = target.relative_to(store)
+    except ValueError:
+        anchor = target.parts[0].replace(":", "").strip("\\/")  # "C" on Windows, "" on POSIX
+        rel = Path("external", *([anchor] if anchor else []), *target.parts[1:])
+    return Path(backup_root) / rel
+
+
+def _backup(target: Path, backup_root: Path) -> bool:
+    """Copy `target` to its mirrored path under `backup_root`, unless a backup
+    of it already exists there -- the first backup of a run holds the original,
+    and a later adapter re-writing the same file must not replace it with the
+    text an earlier adapter just wrote. Returns whether a copy was made."""
+    dest = _backup_path(target, backup_root)
+    if dest.exists():
+        return False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(target, dest)
+    return True
 
 
 def merge_block(
@@ -87,11 +144,14 @@ def merge_block(
 ) -> str:
     """Merge `block_source_text` (a fully marker-wrapped skeleton file's
     contents) into `target`, returning the branch taken:
-    "created" / "block-inserted" / "block-refreshed" / "replaced (--force, backed up)".
+    "created" / "block-inserted" / "block-refreshed" / "unchanged" /
+    "replaced (--force, backed up)" / "replaced (--force)".
 
     Never overwrites content outside the markers unless `force` is True (then
-    the whole file is replaced, after being backed up to `backup_root` if the
-    target pre-exists).
+    the whole file is replaced, after being backed up under `backup_root` if the
+    target pre-exists -- at a path mirroring the target's, and never over an
+    earlier backup of the same file; "backed up" is reported only when a copy
+    was made).
 
     `begin_marker`/`end_marker` default to the Markdown/HTML comment pair; pass a
     different pair for other comment syntaxes (e.g. `#`-prefixed markers for TOML).
@@ -108,20 +168,27 @@ def merge_block(
     block = _extract_block(block_source_text, begin_marker, end_marker)
 
     if force:
-        existed = target.exists()
-        if existed and backup_root is not None:
+        if not target.exists():
             if not dry_run:
-                _backup(target, backup_root)
+                write_text_lf(target, block_source_text)
+            return "created"
+        if target.read_text(encoding="utf-8-sig") == block_source_text:
+            return "unchanged"
+        backed_up = False
+        if backup_root is not None:
+            backed_up = dry_run or _backup(target, backup_root)
         if not dry_run:
             write_text_lf(target, block_source_text)
-        return "replaced (--force, backed up)" if existed else "created"
+        return "replaced (--force, backed up)" if backed_up else "replaced (--force)"
 
     if not target.exists():
         if not dry_run:
             write_text_lf(target, block_source_text)
         return "created"
 
-    existing = target.read_text(encoding="utf-8")
+    # utf-8-sig: a leading BOM (PowerShell 5's `-Encoding UTF8`) would otherwise
+    # hide a block on line 1 from the `^` anchor; it is not written back.
+    existing = target.read_text(encoding="utf-8-sig")
 
     span = find_block(existing, begin_marker, end_marker)
     if span is not None:
@@ -132,7 +199,7 @@ def merge_block(
         if not dry_run:
             write_text_lf(target, new_text)
         return "block-refreshed"
-    if _marker_re(begin_marker).search(existing):
+    if _marker_lines(existing, begin_marker):
         raise SystemExit(
             "error: %s has a %r line with no %r after it -- fix the file, then re-run"
             % (target, begin_marker, end_marker)
@@ -168,7 +235,7 @@ def merge_include_line(
     file's own content stays first."""
     line = include_line.strip()
     if not force and target.exists():
-        existing = target.read_text(encoding="utf-8")
+        existing = target.read_text(encoding="utf-8-sig")
         if any(ln.strip() == line for ln in existing.splitlines()):
             return "skipped (present)"
     block_text = "%s\n%s\n%s\n" % (BEGIN_MARKER, line, END_MARKER)
@@ -194,5 +261,14 @@ def merge_context_block(target: Path, context_text: str, *, dry_run: bool = Fals
     )
 
 
+_backup_roots: "dict[Path, Path]" = {}
+
+
 def timestamped_backup_root(dest: Path) -> Path:
-    return dest / "install_backup" / time.strftime("%Y%m%d-%H%M%S")
+    """``<dest>/install_backup/<timestamp>``, ONE per store per process: every
+    adapter of an ``init --force`` run backs up into the same root, so
+    :func:`_backup`'s never-overwrite rule sees the earlier copies."""
+    key = Path(dest).resolve()
+    if key not in _backup_roots:
+        _backup_roots[key] = Path(dest) / "install_backup" / time.strftime("%Y%m%d-%H%M%S")
+    return _backup_roots[key]
