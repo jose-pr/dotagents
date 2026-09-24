@@ -124,9 +124,9 @@ def _describe(argv: "list[str]") -> str:
 
 
 class Launch(DotAgentsArgs):
-    """Start an agent's CLI with dotagents' environment applied and its
-    assembled context handed over as appended system-prompt text.
+    """Start an agent's CLI with dotagents' environment and context applied.
 
+    The assembled context is handed over as appended system-prompt text.
     ``dotagents launch <agent> -- <the agent's own arguments>``. ``-g`` skips
     the project tiers of the env and context walk (the ``env`` / ``context``
     meaning), it does not select another store.

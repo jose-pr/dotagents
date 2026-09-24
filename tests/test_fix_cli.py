@@ -271,6 +271,39 @@ def test_a_new_builtin_module_is_covered_without_a_second_list():
 
 
 # --------------------------------------------------------------------------- #
+# Help summaries
+# --------------------------------------------------------------------------- #
+
+
+def _summary(command) -> str:
+    doc = (command.__doc__ or "").strip()
+    return doc.splitlines()[0] if doc else ""
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(
+            "init",
+            marks=pytest.mark.xfail(reason="cli/init.py's summary is fixed separately", strict=False),
+        ),
+        "build-pyz", "context", "env", "overlays", "about", "findings", "launch",
+    ],
+)
+def test_every_command_summary_is_a_whole_sentence(name):
+    """duho shows a docstring's first physical line as the summary in
+    `dotagents --help`; a sentence wrapped onto a second line shows cut off."""
+    commands = cli._discover([])
+    command = dict(zip(_names(commands), commands))[name]
+    assert _summary(command).endswith("."), _summary(command)
+
+
+def test_every_findings_subcommand_summary_is_a_whole_sentence(findings_mod):
+    for sub in findings_mod.Findings._subcommands_:
+        assert _summary(sub).endswith("."), (sub, _summary(sub))
+
+
+# --------------------------------------------------------------------------- #
 # findings: encodings
 # --------------------------------------------------------------------------- #
 

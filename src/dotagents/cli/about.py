@@ -67,8 +67,9 @@ def packages() -> "tuple[dict[str, str], Optional[dict]]":
 
 
 class About(LoggingArgs, Cmd):
-    """Print the CLI's version and every package bundled or installed with it,
-    one `<distribution> <version>` per line, `dotagents-cli` first."""
+    """Print the CLI's version and the packages bundled or installed with it.
+
+    One `<distribution> <version>` per line, `dotagents-cli` first."""
 
     _parsername_ = "about"
 
