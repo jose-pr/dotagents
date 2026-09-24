@@ -361,28 +361,42 @@ def test_env_cli_emits_the_unset(roots, monkeypatch, capsys):
 # env-08: overlay lib/ dirs never reach the session's PYTHONPATH.
 # --------------------------------------------------------------------------
 
-def test_an_overlay_lib_does_not_shadow_the_stdlib_session_wide(roots):
-    """Every existing lib/ was prepended to the session's PYTHONPATH, ahead of
-    site-packages and the stdlib for every Python the agent runs: an overlay
-    module shadowed any same-named one (the net overlay's certifi shim broke
-    every `requests` HTTPS call)."""
+def test_a_process_the_session_starts_imports_an_overlay_lib(roots):
+    """A skill script or `bin` launcher of one overlay imports another's lib:
+    every Python the session starts gets the libs on PYTHONPATH."""
     import subprocess
 
     agents_dir, project_root = roots
-    lib = agents_dir / "overlays" / "shadow" / "lib"
+    lib = agents_dir / "overlays" / "base" / "lib"
     lib.mkdir(parents=True)
-    (lib / "csv.py").write_text("SHADOW = True\n", encoding="utf-8")
+    (lib / "base_helpers.py").write_text("VALUE = 'from base'\n", encoding="utf-8")
     base = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env = _run(agents_dir, project_root, base)
-    assert "PYTHONPATH" not in env
-    assert env["AGENTS_PYTHONPATH"] == str(lib)
+    assert env["PYTHONPATH"] == env["AGENTS_PYTHONPATH"] == str(lib)
     session = dict(base)
     session.update(env)
     out = subprocess.run(
-        [sys.executable, "-c", "import csv; print(hasattr(csv, 'SHADOW'))"],
+        [sys.executable, "-c", "import base_helpers; print(base_helpers.VALUE)"],
         capture_output=True, text=True, env=session,
     ).stdout.strip()
-    assert out == "False"
+    assert out == "from base"
+
+
+def test_another_scopes_libs_leave_pythonpath(roots, tmp_path):
+    """After a `cd` into another project, the first project's libs must not
+    stay importable: the entries the inherited AGENTS_PYTHONPATH named go."""
+    agents_dir, project_root = roots
+    (agents_dir / "lib").mkdir()
+    old = str(tmp_path / "old-project" / ".agents" / "lib")
+    mine = str(tmp_path / "my-own")
+    base = {"PATH": "/usr/bin", "AGENTS_PYTHONPATH": old,
+            "PYTHONPATH": os.pathsep.join([old, mine])}
+    env = _run(agents_dir, project_root, base)
+    assert env["PYTHONPATH"].split(os.pathsep) == [str(agents_dir / "lib"), mine]
+    # No lib anywhere: the stale one leaves, the caller's own entry stays.
+    (agents_dir / "lib").rmdir()
+    env = _run(agents_dir, project_root, base)
+    assert env["PYTHONPATH"] == mine and "AGENTS_PYTHONPATH" in env.removed
 
 
 def test_env_py_child_gets_the_libs_ahead_of_the_inherited_pythonpath(roots):
@@ -398,7 +412,7 @@ def test_env_py_child_gets_the_libs_ahead_of_the_inherited_pythonpath(roots):
     assert env["SEEN"].split(os.pathsep) == [
         str(project_root / ".agents" / "lib"), str(agents_dir / "lib"), extra,
     ]
-    assert "PYTHONPATH" not in env
+    assert env["PYTHONPATH"] == env["SEEN"]
 
 
 def test_agents_pythonpath_from_another_scope_is_replaced(roots):

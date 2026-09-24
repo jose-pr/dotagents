@@ -226,7 +226,7 @@ def test_bin_paths_excludes_project_root(tree):
 # Existing dirs only; project-root excluded; seeded before the env chain.
 # --------------------------------------------------------------------------
 
-def test_lib_dirs_published_in_agents_pythonpath(tree):
+def test_lib_dirs_lead_pythonpath_and_are_published_in_agents_pythonpath(tree):
     agents_dir, project_root = tree
     (agents_dir / "overlays" / "aa" / "lib").mkdir()
     (agents_dir / "lib").mkdir()
@@ -240,8 +240,9 @@ def test_lib_dirs_published_in_agents_pythonpath(tree):
         str(agents_dir / "lib"),
         str(agents_dir / "overlays" / "aa" / "lib"),
     ]
-    # The session's PYTHONPATH is not touched.
-    assert "PYTHONPATH" not in env
+    # The session's PYTHONPATH carries them first, the inherited entries after:
+    # a skill script or bin launcher an overlay starts imports any overlay's lib.
+    assert env["PYTHONPATH"].split(os.pathsep) == parts + ["/site/extra"]
 
 
 def test_no_lib_dirs_leaves_pythonpath_alone(tree):
