@@ -4,8 +4,8 @@ A **repo** is always a *collection* of overlays, the place that answers "give
 me overlay ``<name>``". Two shapes:
 
 * a **directory of overlays** -- each subdirectory is an overlay,
-  ``<dir>/<name>/`` (the ``.pyz``'s bundled ``overlays/``, a checkout of the
-  `repo` branch's ``overlays/``, any folder);
+  ``<dir>/<name>/`` (a checkout of the `repo` branch's ``overlays/``, any
+  folder);
 * a **registry** -- a JSON / TOML / YAML document mapping ``<name-or-alias>``
   to the **source** of that one overlay. Either the whole document is the
   mapping, or its ``overlays`` key is.
@@ -46,32 +46,55 @@ repository at the same ref with the path joined onto the registry file's
 directory (``overlays/reg.toml`` saying ``./rust`` means
 ``<repo>@<ref>#overlays/rust``), and for a registry at a URL the URL beside
 it (``https://h/cfg/reg.json`` saying ``./rust`` means ``https://h/cfg/rust``).
+A relative *git* location (``../shared.git@v2``) is another repository, found
+the way a relative submodule URL is: beside the registry's repository, or
+beside the registry file when that is local or at a URL.
 
 Repos are consulted in order, and **the first that offers a name wins**:
 ``--repo`` values as given, then ``$AGENTS_OVERLAYS_REPO_<KEY>`` sorted by
 ``KEY``, then ``$AGENTS_OVERLAYS_REPO`` (the default repo), then
-``<project store>/dotagents.{json,toml,yaml,yml}``, then the user store's, then
-the bundled ``overlays/`` of this build. Repos load lazily, in that order, so a
-git repo late in the list is never cloned for a name an earlier one had.
+``<project store>/dotagents.{json,toml,yaml,yml}``, then the user store's.
+Repos load lazily, in that order, so a git repo late in the list is never
+cloned for a name an earlier one had.
 
 Git checkouts live under ``<user store>/.cache/overlays/<repo>-<hash>/`` (one
 per repository and ref) and are refreshed (``fetch`` + checkout) once per process; a fetch that
 fails against an existing checkout is a warning, and the checkout is used as
-it is. Credentials embedded in a repo URL never reach a log line.
+it is. The cache root carries a ``.gitignore`` of ``*``, so a store kept in git
+never records a checkout. Credentials embedded in a repo URL never reach a log
+line, a cache directory name or a checkout's ``.git/config``.
+
+Failures are typed: :class:`OverlayNotFound` when every repo loaded and none
+offers the name, :class:`SourceError` for everything else (a repo that cannot
+be read, cloned or parsed). Both are ``SystemExit`` subclasses, so an uncaught
+one still ends a command with its message; a caller that wants to tolerate a
+missing name catches only :class:`OverlayNotFound`.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import posixpath
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit, uses_relative
 import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from dotagents._overlays import Overlay
+
+
+class SourceError(SystemExit):
+    """A repo or source could not be read, fetched, cloned or parsed.
+
+    A ``SystemExit`` (its message is the exit message), so a caller that does
+    not handle it still ends with a one-line error rather than a traceback."""
+
+
+class OverlayNotFound(SourceError):
+    """Every repo consulted loaded fine and none offers the overlay asked for --
+    the one failure a caller may treat as "absent"."""
 
 #: The default repo, and one repo per ``AGENTS_OVERLAYS_REPO_<KEY>`` variable
 #: (ordered by ``KEY``, consulted before the default).
@@ -138,7 +161,7 @@ def parse_spec(text: str) -> Spec:
         # (`@--upload-pack=<cmd>` ran <cmd>).
         for part, what in ((location, "location"), (ref, "ref")):
             if part and part.startswith("-"):
-                raise SystemExit(
+                raise SourceError(
                     "error: overlay source %r: the git %s must not start with '-'" % (text, what)
                 )
         return Spec("git", location, ref, path)
@@ -208,11 +231,11 @@ class SourceCache(object):
             if spec.path:
                 target = target / spec.path
             if not target.exists():
-                raise SystemExit("error: overlay source does not exist: %s" % target)
+                raise SourceError("error: overlay source does not exist: %s" % target)
             return target
         UriPath = uri_path_class()
         if UriPath is None:
-            raise SystemExit(
+            raise SourceError(
                 "error: %s: a %s:// source needs the pathlib_next uri extra "
                 "(pip install 'dotagents-cli[uri]', or [http] / [sftp] / [s3] for the "
                 "scheme's own client)" % (redact(spec.location), url_scheme(spec.location))
@@ -227,11 +250,11 @@ class SourceCache(object):
         try:
             is_dir = remote.is_dir()
             if not is_dir and not remote.exists():
-                raise SystemExit("error: %s does not exist" % shown)
+                raise SourceError("error: %s does not exist" % shown)
         except SystemExit:
             raise
         except Exception as exc:  # the scheme's client: 404, auth, network
-            raise SystemExit("error: cannot reach %s: %s" % (shown, redact(str(exc))))
+            raise SourceError("error: cannot reach %s: %s" % (shown, redact(str(exc))))
         local = self.root / "uri" / self._slug(spec.location, spec.path)
         key = "uri:" + str(local)
         if key in self._fresh:
@@ -245,7 +268,7 @@ class SourceCache(object):
                 result = local / (remote.name or "registry")
                 result.write_bytes(remote.read_bytes())
         except Exception as exc:
-            raise SystemExit("error: cannot fetch %s: %s" % (shown, redact(str(exc))))
+            raise SourceError("error: cannot fetch %s: %s" % (shown, redact(str(exc))))
         self._fresh.add(key)
         if self.logger:
             self.logger.info("fetched %s", shown)
@@ -269,9 +292,9 @@ class SourceCache(object):
                 capture_output=True, text=True, env=env,
             )
         except OSError as exc:
-            raise SystemExit("error: git is needed for a git overlay source: %s" % exc)
+            raise SourceError("error: git is needed for a git overlay source: %s" % exc)
         if check and proc.returncode != 0:
-            raise SystemExit(
+            raise SourceError(
                 "error: git %s failed (exit %d): %s"
                 % (args[0], proc.returncode, redact(proc.stderr.strip() or proc.stdout.strip()))
             )
@@ -329,7 +352,7 @@ class SourceCache(object):
             if fetched.returncode == 0:
                 self._git(["checkout", "--quiet", "--detach", "FETCH_HEAD"], dest)
                 return
-        raise SystemExit(
+        raise SourceError(
             "error: %s has no branch, tag or commit %r" % (redact(spec.location), spec.ref or "HEAD")
         )
 
@@ -343,7 +366,7 @@ def parse_document(text: str, suffix: str, origin: str) -> "dict[str, str]":
     or its ``overlays`` key)."""
     suffix = suffix.lower()
     if suffix == ".json":
-        doc = json.loads(text)
+        loads, what, errors = json.loads, "JSON", (ValueError,)
     elif suffix == ".toml":
         try:
             import tomllib  # type: ignore[import-not-found]
@@ -351,40 +374,74 @@ def parse_document(text: str, suffix: str, origin: str) -> "dict[str, str]":
             try:
                 import tomli as tomllib  # type: ignore[no-redef]
             except ImportError:
-                raise SystemExit(
+                raise SourceError(
                     "error: registry %s is TOML, which needs Python 3.11+ or `pip install tomli`" % origin
                 )
-        doc = tomllib.loads(text)
+        loads, what, errors = tomllib.loads, "TOML", (ValueError,)
     elif suffix in (".yaml", ".yml"):
         try:
             import yaml  # type: ignore[import-untyped]
         except ImportError:
-            raise SystemExit("error: registry %s is YAML, which needs `pip install pyyaml`" % origin)
-        doc = yaml.safe_load(text)
+            raise SourceError("error: registry %s is YAML, which needs `pip install pyyaml`" % origin)
+        loads, what, errors = yaml.safe_load, "YAML", (ValueError, yaml.YAMLError)
     else:
-        raise SystemExit(
+        raise SourceError(
             "error: registry %s: unknown format %r (use .json, .toml, .yaml or .yml)" % (origin, suffix)
         )
+    try:
+        doc = loads(text)
+    except errors as exc:
+        raise SourceError("error: registry %s is not valid %s: %s" % (origin, what, redact(str(exc))))
     if isinstance(doc, dict) and isinstance(doc.get("overlays"), dict):
         doc = doc["overlays"]
     if not isinstance(doc, dict):
-        raise SystemExit("error: registry %s must be a mapping of overlay name -> source" % origin)
+        raise SourceError("error: registry %s must be a mapping of overlay name -> source" % origin)
     entries: "dict[str, str]" = {}
     for key, value in doc.items():
         if not isinstance(value, str) or not value.strip():
-            raise SystemExit("error: registry %s: entry %r must be a source string" % (origin, key))
+            raise SourceError("error: registry %s: entry %r must be a source string" % (origin, key))
         entries[str(key)] = value.strip()
     return entries
 
 
-def _read_url(url: str) -> str:
-    import urllib.request
-
+def _read_text(path: Path, origin: str) -> str:
+    """A local registry file's text; unreadable or non-UTF-8 is a SourceError."""
     try:
-        with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310 -- the user named it
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SourceError("error: cannot read registry %s: %s" % (origin, exc))
+
+
+def _read_url(url: str) -> str:
+    """Fetch an http(s) registry with the standard library. Userinfo in the URL
+    (``https://user:token@host/…``) is sent as HTTP Basic auth to the URL
+    without it -- ``urlopen`` would otherwise read ``token@host`` as a port --
+    and never follows a redirect to another host. Every failure is a
+    SourceError whose message is redacted."""
+    import base64
+    import http.client
+    import urllib.request
+    from urllib.parse import unquote
+
+    shown = redact(url)
+    parts = urlsplit(url)
+    auth = None
+    if "@" in parts.netloc:
+        userinfo, _, hostport = parts.netloc.rpartition("@")
+        user, _, password = userinfo.partition(":")
+        auth = "Basic " + base64.b64encode(
+            ("%s:%s" % (unquote(user), unquote(password))).encode("utf-8")
+        ).decode("ascii")
+        url = urlunsplit((parts.scheme, hostport, parts.path, parts.query, parts.fragment))
+    try:
+        request = urllib.request.Request(url)
+        if auth:
+            # Unredirected: a redirect never carries the credential elsewhere.
+            request.add_unredirected_header("Authorization", auth)
+        with urllib.request.urlopen(request, timeout=30) as resp:  # noqa: S310 -- the user named it
             return resp.read().decode("utf-8")
-    except OSError as exc:
-        raise SystemExit("error: cannot read registry %s: %s" % (redact(url), exc))
+    except (OSError, ValueError, http.client.HTTPException) as exc:  # UnicodeDecodeError is a ValueError
+        raise SourceError("error: cannot read registry %s: %s" % (shown, redact(str(exc))))
 
 
 # --------------------------------------------------------------------------
@@ -423,7 +480,7 @@ class DirRepo(object):
         alike."""
         found = self._lookup(name)
         if found is None:
-            raise SystemExit(
+            raise OverlayNotFound(
                 "error: overlay %r not found in source %s (available: %s)"
                 % (name, self.origin, ", ".join(self.available()) or "none")
             )
@@ -466,12 +523,12 @@ class RegistryRepo(object):
     def overlay_dir(self, name: str) -> Path:
         key = self.key_for(name)
         if key is None:
-            raise SystemExit("error: overlay %r not in registry %s" % (name, self.origin))
+            raise OverlayNotFound("error: overlay %r not in registry %s" % (name, self.origin))
         spec = parse_spec(self.entries[key])
         spec = resolve_relative(spec, self.base, origin=self.origin, key=key)
         target = locate(spec, self.cache)
         if not target.is_dir():
-            raise SystemExit("error: registry %s: %r resolves to %s, not a directory" % (self.origin, key, spec.display()))
+            raise SourceError("error: registry %s: %r resolves to %s, not a directory" % (self.origin, key, spec.display()))
         if not (target / "overlay.toml").is_file():
             # A directory of overlays named as an entry: the one called `name`.
             for candidate in (target / name, target / Overlay.normalize_name(name)):
@@ -514,7 +571,7 @@ def resolve_relative(spec: Spec, base: "Optional[Spec]", *, origin: str, key: st
         if rel == "..":
             rel = "../"
         if rel.startswith("../"):
-            raise SystemExit(
+            raise SourceError(
                 "error: registry %s: %r (%s) leaves the repository it is in"
                 % (origin, key, spec.location)
             )
@@ -534,7 +591,7 @@ def locate(spec: Spec, cache: SourceCache) -> Path:
         root = cache.checkout(spec)
         target = root / spec.path if spec.path else root
         if not target.exists():
-            raise SystemExit("error: %s has no %r" % (redact(spec.location), spec.path))
+            raise SourceError("error: %s has no %r" % (redact(spec.location), spec.path))
         return target
     if spec.kind == "url":
         return cache.materialize(spec)
@@ -542,7 +599,7 @@ def locate(spec: Spec, cache: SourceCache) -> Path:
     if spec.path:
         target = target / spec.path
     if not target.exists():
-        raise SystemExit("error: overlay source does not exist: %s" % target)
+        raise SourceError("error: overlay source does not exist: %s" % target)
     return target
 
 
@@ -565,7 +622,7 @@ def load_repo(spec_text: str, cache: SourceCache) -> Any:
     target = locate(spec, cache)
     if target.is_dir():
         return DirRepo(target, origin)
-    entries = parse_document(target.read_text(encoding="utf-8"), target.suffix, origin)
+    entries = parse_document(_read_text(target, origin), target.suffix, origin)
     # Relative entries resolve against the registry FILE: its directory, or
     # for a file inside a git checkout, the same repository and ref with the
     # file's directory as the path prefix.
@@ -607,6 +664,12 @@ def env_repos(environ: "Optional[dict]" = None) -> "list[str]":
     return repos
 
 
+NO_SOURCE_MESSAGE = (
+    "error: no overlay source: pass --repo <repo>, set AGENTS_OVERLAYS_REPO, "
+    "or add a dotagents.{json,toml,yaml} registry to the store."
+)
+
+
 class CompositeSource(object):
     """The repos in precedence order, loaded lazily; the first offering a name
     wins. This is what the overlay commands talk to (``available`` /
@@ -629,20 +692,35 @@ class CompositeSource(object):
     def repos(self) -> "list[Any]":
         return [self._repo(i) for i in range(len(self.specs))]
 
-    def available(self) -> "list[str]":
+    def available(self, on_error: Any = None) -> "list[str]":
+        """Every name the repos offer, first-offered order. A repo that fails
+        to load raises -- unless ``on_error(spec, exc)`` is given, which is
+        called for it instead so the other repos are still listed."""
         seen: "list[str]" = []
-        for repo in self.repos():
+        for index in range(len(self.specs)):
+            try:
+                repo = self._repo(index)
+            except SourceError as exc:
+                if on_error is None:
+                    raise
+                on_error(self.specs[index], exc)
+                continue
             for name in repo.available():
                 if name not in seen:
                     seen.append(name)
         return seen
 
     def overlay_dir(self, name: str) -> Path:
+        """The directory of overlay ``name`` from the first repo offering it.
+        :class:`OverlayNotFound` when no repo does; a repo that cannot be
+        loaded is a :class:`SourceError`, never "not found"."""
         for index in range(len(self.specs)):
             repo = self._repo(index)
             if repo.has(name):
                 return repo.overlay_dir(name)
-        raise SystemExit(
+        if not self.specs:
+            raise OverlayNotFound(NO_SOURCE_MESSAGE)
+        raise OverlayNotFound(
             "error: overlay %r not found in source %s (available: %s)"
             % (name, self.root, ", ".join(self.available()) or "none")
         )
@@ -659,18 +737,17 @@ def resolve(
     bundled: "Optional[Path]",
     environ: "Optional[dict]" = None,
     logger: Any = None,
+    allow_empty: bool = False,
 ) -> CompositeSource:
     """The source the commands use: ``specs`` (``--repo`` values), the env
     repos, the stores' registry files, then the bundled directory. Raises when
-    there is nothing at all."""
+    there is nothing at all, unless ``allow_empty``: then an empty source
+    answers every name with :class:`OverlayNotFound`."""
     environ = os.environ if environ is None else environ
     ordered = list(specs or []) + env_repos(environ)
     ordered += [str(p) for p in registry_files(*stores)]
     if bundled is not None:
         ordered.append(str(bundled))
-    if not ordered:
-        raise SystemExit(
-            "error: no overlay source. This build bundles no overlays; pass --repo <repo>, "
-            "set AGENTS_OVERLAYS_REPO, or add a dotagents.{json,toml,yaml} registry to the store."
-        )
+    if not ordered and not allow_empty:
+        raise SourceError(NO_SOURCE_MESSAGE)
     return CompositeSource(ordered, SourceCache(cache_root, logger))

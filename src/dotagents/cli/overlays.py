@@ -23,6 +23,13 @@ from dotagents.cli._common import (
 )
 
 
+def _redacted(spec) -> str:
+    """A repo spec (text or parsed) fit for a log line."""
+    from dotagents._sources import Spec, redact
+
+    return spec.display() if isinstance(spec, Spec) else redact(str(spec))
+
+
 def _validated_names(raw_names, what: str) -> "list[str]":
     """Validate + normalize every requested name up front with the shared
     overlay-name rule (D84): `add My_Overlay` and `add my-overlay` resolve the
@@ -58,6 +65,7 @@ def _install_order(
     asked for explicitly is never treated that way: `add x` always re-installs
     and re-sets-up `x`."""
     from dotagents._overlays import Overlay
+    from dotagents._sources import OverlayNotFound
 
     order: "list[str]" = []
     done: "set[str]" = set()
@@ -72,7 +80,9 @@ def _install_order(
             )
         try:
             src = source.overlay_dir(name)
-        except SystemExit:
+        except OverlayNotFound:
+            # Only "no repo offers it": a repo that cannot be loaded (a failed
+            # clone, a malformed registry) is an error, not a missing name.
             if not chain:
                 raise
             logger.warning(
@@ -352,9 +362,17 @@ class OverlayList(DotAgentsArgs):
             ]
             for store in scope.stores
         }
+        from dotagents._sources import SourceError
+
+        def _broken(spec, exc) -> None:
+            self._logger_.warning("repo %s not listed: %s", _redacted(spec), exc)
+
         try:
-            available = _scope.resolve_source(self.repo, scope=scope, logger=self._logger_).available()
-        except SystemExit:
+            available = _scope.resolve_source(
+                self.repo, scope=scope, logger=self._logger_,
+            ).available(on_error=_broken)
+        except SourceError as exc:  # nothing configured at all
+            self._logger_.warning("%s", exc)
             available = []
         names = {o.name for o in active}
 
@@ -536,10 +554,12 @@ class OverlaySync(DotAgentsArgs):
         self._logger_.info("scope: %s (%s)", scope.level, scope.agents_root)
         agents_md = scope.agents_root / "AGENTS.md"
 
+        from dotagents._sources import OverlayNotFound
+
         for name in names:
             try:
                 overlay_src = source.overlay_dir(name)
-            except SystemExit:
+            except OverlayNotFound:
                 self._logger_.warning("overlay %r not in source; skipping", name)
                 continue
             dest_dir = scope.overlay_dir(name)
