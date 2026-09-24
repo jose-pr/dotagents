@@ -4,11 +4,10 @@ Keep your global config **and** every project's private working notes (plans, kb
 findings) in a single private git repo — synced across machines and cloud sessions —
 without ever committing any of it into the (often public) project repos.
 
-This workflow is entirely opt-in — and it is **not part of dotagents**. `init` never
-touches a project directory, and the two commands this model needs, `link-project` and
-`sync-project`, are shipped by the `private-sync` overlay itself (commands *and* the
-logic behind them). Installing the overlay is what makes them exist; a plain dotagents
-has no private-sync surface at all.
+This workflow is entirely opt-in — and it is **not part of dotagents**. The two
+commands this model needs, `link-project` and `sync-project`, are shipped by the
+`private-sync` overlay itself (commands *and* the logic behind them). Installing the
+overlay is what makes them exist; a plain dotagents has no private-sync surface at all.
 
 ## The idea
 
@@ -22,17 +21,20 @@ entry.
 
 ## Commands
 
+The overlay goes into the user store, since the store is what it syncs:
+
 ```bash
-dotagents init                                            # base config
-dotagents overlays add private-sync --repo <overlays-checkout>/overlays  # commands + kb + hooks
+dotagents init -g                                             # base config in ~/.agents
+dotagents overlays add private-sync -g \
+  --repo "https://github.com/jose-pr/dotagents.git@repo#overlays"   # commands + kb + hooks
 
 # link-project / sync-project come FROM that overlay -- run `overlays add` first.
-python -m dotagents link-project .   # symlink this project's .agents into its store
-                                     #   (an existing real .agents/ is adopted on the
-                                     #    first link; --copy mirrors it as a real dir
-                                     #    for no-symlink systems)
-python -m dotagents sync-project -m "msg"   # git pull --rebase / commit / push the store
-python -m dotagents sync-project --remote <url> -m init   # one-command bootstrap
+dotagents link-project .   # symlink this project's .agents into its store
+                           #   (an existing real .agents/ is adopted on the
+                           #    first link; --copy mirrors it as a real dir
+                           #    for no-symlink systems)
+dotagents sync-project -m "msg"   # git pull --rebase / commit / push the store
+dotagents sync-project --remote <url> -m init   # one-command bootstrap
 ```
 
 Where the store lives and how it reaches other machines are **conventions, not
@@ -50,9 +52,12 @@ leaves the machine is a perfectly valid setup.
 
 ## Cloud sessions
 
-The `private-sync` overlay installs SessionStart / Stop hooks that clone or pull the
-private repo and link/sync the project each session — register them in your runner's
-settings (a ready-made snippet ships with the overlay).
+The `private-sync` overlay ships SessionStart / Stop hook scripts that clone or pull
+the private repo and link/sync the project each session. `overlays add` does not
+register them: add them to your runner's settings yourself (for Claude Code,
+`~/.claude/settings.json`), using the snippet the overlay ships in
+`$PRIVATE_SYNC_OVERLAY_ROOT/hooks/settings.snippet.json`. The bootstrap below does that
+merge for you.
 
 For a **fresh container** with no config yet, point the web environment's setup-script
 field at the self-contained bootstrap shipped in this repo — it fetches the latest each
@@ -69,7 +74,8 @@ curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-se
     success. `&&` propagates the curl failure instead.
 
 The bootstrap authenticates (bypassing a hosted-runner `github.com` → proxy git
-rewrite), clones/pulls the store, installs the CLI, and links the project — driven by
-`AGENTS_REMOTE` / `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL`
-environment variables (the token is never committed). The full walkthrough ships with
-the `private-sync` overlay.
+rewrite), clones/pulls the store, installs the CLI, links the project, and wires the
+hooks into `~/.claude/settings.json` — driven by `AGENTS_REMOTE` /
+`DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL` environment variables (the token is
+never committed). The full walkthrough ships with the `private-sync` overlay
+(`$PRIVATE_SYNC_OVERLAY_ROOT/kb/PRIVATE_SYNC.md`).

@@ -1,8 +1,10 @@
 # Authoring an overlay
 
-An overlay is just a directory with the files you want laid into a scope, plus an
+An overlay is just a directory with the files you want installed into a scope, plus an
 optional `overlay.toml` manifest. Anyone can write one; name its parent directory (a
-directory of overlays), a registry, or a git repo with `--repo` — see the overlays guide.
+directory of overlays), a registry, or a git repo with `--repo` — see the
+[overlays guide](overlays.md). Keep the source outside `<store>/overlays/`:
+`overlays remove` deletes the installed directory outright.
 
 ## Minimal overlay
 
@@ -17,19 +19,22 @@ my-overlay/
 name = "my-overlay"
 description = "My team's conventions for topic X."
 routing = [
-    "- Working on topic X → `kb/MY_TOPIC.md`",
+    "- Working on topic X → `$MY_OVERLAY_OVERLAY_ROOT/kb/MY_TOPIC.md`",
 ]
 ```
 
 Install it:
 
 ```bash
-python -m dotagents overlays add my-overlay --repo /path/to/parent -g
+dotagents overlays add my-overlay --repo /path/to/parent -g
 ```
 
-The overlay's files land at the same relative path in the scope, and each `routing`
-line is appended additively to the core's "Load on demand" table so agents know when to
-read `kb/MY_TOPIC.md`.
+The overlay installs as a directory, `~/.agents/overlays/my-overlay/` here, and each
+`routing` line is appended to the core's "Load on demand" table so agents know when to
+read the file. Refer to your own files through the overlay's root variable,
+`$MY_OVERLAY_OVERLAY_ROOT` (the name upper-cased, `-` → `_`, plus `_OVERLAY_ROOT`):
+`dotagents env` exports it and `dotagents context` expands it, so the line resolves
+wherever the store lives. A bare `kb/MY_TOPIC.md` would name a file that is not there.
 
 ## Contributing rules
 
@@ -41,14 +46,21 @@ rules" section:
 rules = ["rules/my-rules.md"]
 ```
 
-Keep the core small — rules are always loaded, so they cost context every session. Put
-detail behind routing instead.
+Only the leading run of bullets is taken, up to the file's next `## ` heading, so the
+file can explain itself below that. Keep the core small — rules are always loaded, so
+they cost context every session. Put detail behind routing instead.
 
 ## Priority
 
 When several overlays contribute to the same merged region, `priority` decides order
 (lower sorts earlier; the unprioritized default is 500). Set it only when order
 matters.
+
+## Requirements
+
+`requires = ["engineering"]` makes `overlays add` install the named overlays first
+(unless the scope already has them), and `overlays remove` refuse to remove one while
+yours needs it.
 
 ## Setup scripts
 
@@ -59,14 +71,15 @@ dotagents, so it works on every platform). See the contract in
 
 - idempotent, check-then-act;
 - cwd is your installed overlay dir;
-- the environment carries the resolved store path and your own installed dir — never
-  hardcode a home path;
+- the environment carries the user store (`AGENTS_HOME`), the store you are installed
+  into (`AGENTS_SCOPE_ROOT`, with `AGENTS_SCOPE` = `user` / `project`) and your own
+  installed dir (`AGENTS_OVERLAY_DIR`) — never hardcode a home path;
 - a non-zero exit fails the install loudly; confirm any irreversible action yourself.
 
 ## Custom commands
 
-A **command module** is a `*.py` file defining a `duho` command class — a
-`class X(LoggingArgs, Cmd)` with a `__call__` entry point — and each one becomes a
+A **command module** is a `*.py` file defining a `duho` command class with a
+`__call__` entry point, and each one becomes a
 `dotagents <name>` subcommand, discovered at run time with no registration. An overlay
 ships its modules in its own `cmds/` dir. For your own, create `dotagents/cmds/` in a
 store: `~/.agents/dotagents/cmds/` for every session, `<project>/.agents/dotagents/cmds/`
@@ -75,26 +88,31 @@ first module.
 
 ```python
 # ~/.agents/dotagents/cmds/hello.py
-from duho import Cmd, LoggingArgs
+from dotagents.cli import DotAgentsArgs
 
 
-class Hello(LoggingArgs, Cmd):
-    """Say hello."""
+class Hello(DotAgentsArgs):
+    """Say hello, and name the store this command would act on."""
 
     _parsername_ = "hello"
 
     who: str = "world"
+    "Who to greet."
     ("--who",)
 
     def __call__(self) -> int:
-        print("hello, %s" % self.who)
+        scope = self.resolve_scope()  # honours -g / --agents-dir, like every command
+        print("hello, %s (store: %s)" % (self.who, scope.agents_root))
         return 0
 ```
 
-Then `dotagents hello --who you`. Files whose name starts with `_` are skipped — use
-that prefix for shared helper modules. A command that works on a scope inherits
-`dotagents.cli.DotAgentsArgs` (the `-g` / `--agents-dir` pair and `resolve_scope()`)
-instead of redeclaring the flags.
+Then `dotagents hello --who you`. `DotAgentsArgs` brings the `-g` / `--agents-dir` pair
+and `resolve_scope()`, so a command that works on a store never redeclares them; a
+command that needs neither can subclass `duho`'s `LoggingArgs` and `Cmd` directly. A
+field's help is the string after it and its flags the tuple after that. Files whose
+name starts with `_` are skipped — use that prefix for shared helper modules. Only
+module-level command classes become commands: nest the subcommands of an umbrella
+command inside it, or they register as top-level commands too.
 
 Sources layer so that a later one overrides a same-named command: the built-ins, then
 the bundled `findings` and `launch`, then store by store — the system store (see
@@ -106,8 +124,10 @@ only when it exists and only administrators can write it. So your user-store com
 overlay installed in the user (or system) store, and a project's overlays and
 `.agents/dotagents/cmds/` override yours. A module that fails to
 import (a syntax error, an exception at import time) is skipped with a warning naming
-it; it never takes the other commands down with it. The private-sync overlay's
-`link-project` / `sync-project` are exactly this mechanism.
+it; it never takes the other commands down with it, and neither does a command whose
+parser cannot be built. The bundled `findings` and `launch` are ordinary command
+modules discovered from the package, and the private-sync overlay ships
+`link-project` / `sync-project` from its own `cmds/` the same way.
 
 ## Skills
 

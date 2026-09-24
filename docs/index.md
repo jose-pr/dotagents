@@ -34,19 +34,21 @@ carry the opinions.
 
 ## Quick start
 
+<!-- quickstart:begin -->
 ```bash
-# Lay down the neutral base config into ~/.agents (block-merges AGENTS.md):
-dotagents init -g
-
-# Layer in opinionated overlays by name, into the user scope:
-dotagents overlays add engineering python -g
-
-# See what's installed vs. available:
+dotagents init -g   # the base config in ~/.agents, plus the Claude Code include and hooks
+export AGENTS_OVERLAYS_REPO="https://github.com/jose-pr/dotagents.git@repo#overlays"
+dotagents overlays add engineering python -g   # cloned with git, so git must be on PATH
 dotagents overlays list -g
+ls ~/.agents/overlays/engineering/flows/PLAN.md
 ```
+<!-- quickstart:end -->
 
-`init` also wires your agent runner to it — for Claude Code, an include of the store's
-`AGENTS.md` in `~/.claude/CLAUDE.md` and the session hooks.
+`init -g` writes the user store's `AGENTS.md` and wires your agent runner to it — for
+Claude Code, an include of that file in `~/.claude/CLAUDE.md` plus the session hooks.
+`AGENTS_OVERLAYS_REPO` names where overlays come from (here, the example overlays on
+this repo's `repo` branch); set it in your shell profile, or pass `--repo <spec>` to
+each `overlays` command instead.
 
 Continue with the [Install](guide/install.md) guide, or jump to
 [Commands](guide/commands.md) for the full CLI surface.
@@ -54,7 +56,13 @@ Continue with the [Install](guide/install.md) guide, or jump to
 ## Distribution
 
 The PyPI distribution is named **`dotagents-cli`** (the import package stays `dotagents`
-and the command stays `dotagents`, so `pip install dotagents-cli` gives you both). It is
-**not published to PyPI yet** — for now dotagents is distributed from source (a checkout,
-or a self-contained `dotagents.pyz` zipapp attached to each GitHub release). The
-[Install](guide/install.md) guide covers every mode.
+and the command stays `dotagents`):
+
+```bash
+pip install dotagents-cli            # the CLI and `import dotagents`
+pip install "dotagents-cli[uri]"     # + non-git remote overlay sources and `init --from` URIs
+```
+
+The `http`, `sftp` and `s3` extras add those schemes' own clients. With no `pip` at
+all, use the self-contained `dotagents.pyz` zipapp attached to each GitHub release.
+The [Install](guide/install.md) guide covers every mode.

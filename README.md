@@ -41,25 +41,23 @@ them. Everything else is repo infrastructure.
 | --- | --- |
 | `src/dotagents/` | The installable `dotagents` CLI (`init`/`overlays`/`context`/`env`/`build-pyz`/`about`, plus the bundled `findings`/`launch`) — that is the whole shipped surface; commands beyond it come from overlays or your own `dotagents/cmds/` modules |
 | `src/dotagents/_overlay/` | The **base overlay**: the `AGENTS.md` block template `init` renders into the store (no `dotagents/` dir, no design log), the two bundled commands (`findings`, `launch`), and the hook scripts `init` deploys into an agent's config dir. Neutral — imposes no flows |
-| `tools/` | Repo tooling, not shipped: `audit.py` (CI structure check) and `cloud-setup.sh`. Personal scanning tools are not here either — keep them as command modules in your own private `.agents/dotagents/cmds/` |
+| `tools/` | Repo tooling, not shipped: `audit.py` (CI structure check), `pyz_smoke.sh` (the `.pyz` smoke test) and `cloud-setup.sh`. Personal scanning tools are not here either — keep them as command modules in your own private `.agents/dotagents/cmds/` |
 | `install.py` | Thin shim over `dotagents.cli.main()` for a source checkout; installs the checkout's dependencies into the virtual environment running it (`--bootstrap` to allow another interpreter) |
 
-The **example overlays** — the `flows` workflow set, per-language `kb/` + templates,
-`references`, `release`, `private-sync`, `net`, `recovery`, `tools` — live on a separate
+The **example overlays** — `engineering` (the planning/execution/review workflow set,
+its rules, repo templates and helper tools), the per-language `python` / `node` /
+`rust`, `release`, `private-sync`, `net` and `recovery` — live on a separate
 [`repo` branch](https://github.com/jose-pr/dotagents/tree/repo), not in `main`'s
-tree: they are swappable payloads, not part of the tool. `dotagents overlays add <name>`
-resolves them from there (or from any `--repo`). See the
+tree: they are swappable payloads, not part of the tool. Name that branch as a repo
+(`--repo`, see below) to install them. See the
 [docs](https://jose-pr.github.io/dotagents/) for what each ships.
 
-Named-agent directives aren't a shipped overlay — a named agent (Claude, Antigravity,
-…) just reads its own `~/.agents/<agent>.md` on top of the shared `AGENTS.md`, which the
-base overlay's routing already states. This repo's own working material (decisions,
-findings, plans) lives **privately** in its untracked `.agents/` — like every project,
-`.agents/` is never tracked or pushed.
+This repo's own working material (decisions, findings, plans) lives **privately** in
+its untracked `.agents/` — like every project, `.agents/` is never tracked or pushed.
 
 Each overlay's `<name>/overlay.toml` carries a `name`/`description`/`requires`/`routing`
 manifest read by the `dotagents overlays` subcommand, which manages overlays by name
-(`add`/`remove`/`list`/`sync`) — see [Managing overlays](#managing-overlays) below.
+(`add`/`remove`/`list`/`sync`/`show`) — see [Managing overlays](#managing-overlays) below.
 
 ## Install
 
@@ -69,38 +67,59 @@ pip install dotagents-cli   # gives you `import dotagents` and the `dotagents` c
 
 Or skip `pip` entirely with the self-contained downloadable `.pyz` (see below).
 
-**`dotagents init`** lays down the neutral base config.
+## Quick start
 
-`init` writes the store's `AGENTS.md` managed block, points Claude Code at it (an
-include in `~/.claude/CLAUDE.md` for the user store, `<project>/.claude/CLAUDE.md` for a
-project), and wires each supporting agent's hooks so `dotagents context` reaches it
-automatically at session start (`--no-hooks` opts out) — but imposes no opinions (those
-come from `overlays add`). The block is marker-delimited, so re-running `init` never
-clobbers what you've added around it. **Scope**: project by default (the `.agents` of
-the project you are in — the nearest directory up with a `.git` or its own `.agents`),
-or the user store with `-g`/`--global` (`~/.agents`).
+<!-- quickstart:begin -->
+```bash
+dotagents init -g   # the base config in ~/.agents, plus the Claude Code include and hooks
+export AGENTS_OVERLAYS_REPO="https://github.com/jose-pr/dotagents.git@repo#overlays"
+dotagents overlays add engineering python -g   # cloned with git, so git must be on PATH
+dotagents overlays list -g
+ls ~/.agents/overlays/engineering/flows/PLAN.md
+```
+<!-- quickstart:end -->
+
+`AGENTS_OVERLAYS_REPO` names where overlays come from; set it in your shell profile, or
+pass `--repo <spec>` to each `overlays` command instead. CI runs this block as written.
+
+## `dotagents init`
+
+`init` lays down the neutral base config. It writes the store's `AGENTS.md` managed
+block, points Claude Code at it (an include in `~/.claude/CLAUDE.md` for the user
+store, `<project>/.claude/CLAUDE.md` for a project), and wires each supporting agent's
+hooks so `dotagents env` and `dotagents context` reach it at session start
+(`--no-hooks` opts out) — but imposes no opinions (those come from `overlays add`). The
+block is marker-delimited, so re-running `init` never clobbers what you've added around
+it. **Scope**: the user store with `-g`/`--global` (`~/.agents`, or `$AGENTS_HOME`);
+without it, the current directory's `.agents` — run it from the project root. When a
+session has pinned `$AGENTS_PROJECT_ROOT` (or `$CLAUDE_PROJECT_DIR`) and you are inside
+that directory, the pinned root is used; outside it, the nearest directory up with a
+`.git` or its own `.agents`, with a warning.
 
 ```bash
-dotagents init                          # project: <project>/.agents
+dotagents init                          # project: ./.agents
 dotagents init -g                       # user store: ~/.agents
 dotagents init --bin-dir ~/.local/bin   # also write a `dotagents` command on PATH
 dotagents init --dry-run                # show what would happen
-dotagents init --force                  # replace AGENTS.md wholesale (backed up)
+dotagents init --force                  # replace AGENTS.md's content wholesale (backed up)
 ```
 
-`--from <path-or-uri>` selects the *base* source for a `pip install`-only environment
-(a git checkout dir, `file:`, `http(s):`, `zip:`, `sftp:`, or `s3:` URI via
-`pip install "dotagents-cli[uri]"`); `init`'s base ships inside the package, so it needs no
-`--from`.
+`--from <path-or-uri>` selects another *base* (a directory, or a `file:`, `http(s):`,
+`zip:`, `sftp:` or `s3:` URI via `pip install "dotagents-cli[uri]"`); the bundled base
+ships inside the package, so you need it only for a base of your own. `init` records
+it, and later `init` and `overlays` runs compose over it.
+
+`init` wires Claude Code plus any harness it is running inside (detected from its
+environment); `--agents a,b` replaces that set, so include `claude` to keep it.
 
 Overlays beyond the base are managed by name with `dotagents overlays add <name>` — it
-installs into `<scope>/.agents/overlays/<name>/` (discoverable) and publishes the
-overlay's skills into the shared skills dir. See below.
+installs into `<store>/overlays/<name>/` (discoverable) and publishes the overlay's
+skills into the store's shared `skills/` dir. See below.
 
 ### Managing overlays
 
-`dotagents overlays` manages opt-in overlays **by name**, resolving each name against
-**repos** in order — the first that offers the name wins. A repo is always a
+`dotagents overlays` manages opt-in overlays **by name**. `add` resolves each name
+against **repos** in order — the first that offers the name wins. A repo is always a
 **collection** of overlays: a directory (each subdirectory an overlay, e.g. a checkout of
 the [`repo` branch](https://github.com/jose-pr/dotagents/tree/repo), whose overlays sit
 under `overlays/<name>`) or a
@@ -113,56 +132,72 @@ repository root is the overlay); a relative path is relative to the registry fil
 inside a git checkout stays in the same repository at the same ref. Name repos with `--repo`,
 `$AGENTS_OVERLAYS_REPO_<KEY>` / `$AGENTS_OVERLAYS_REPO`, or a `dotagents.{json,toml,yaml}`
 in the project or user store.
-Installed overlays are *discovered* by their presence under `<scope>/.agents/overlays/`.
+Installed overlays are *discovered* by their presence under `<store>/overlays/`, and
+each records the repo it was installed from.
 
 ```bash
-dotagents overlays add python engineering  # install into the scope, publish skills, merge D59 rules/routing
-dotagents overlays list                    # installed (discovered) + available (from source)
+dotagents overlays add python engineering  # install into the scope, publish skills, merge rules/routing
+dotagents overlays list                    # installed (discovered) + available (from the repos)
 dotagents overlays sync 'py*'              # refresh installed overlays matching a glob, resync their skills
 dotagents overlays remove python           # delete the overlay dir + unpublish its skills
+dotagents overlays show python             # manifest, requires, setup, skills, where it came from
 ```
 
-Scope is **project** by default (`<project>/.agents/`, when run inside one) or **user**
-with `-g`/`--global` (`~/.agents/`, the configurable store). Each overlay installs as a
-directory (kept, discoverable), its `routing`/`rules` merge additively into `AGENTS.md`'s
-managed block, and its `skills/<name>/` are symlinked (or `--copy`'d, for Windows /
-no-symlink) into the shared `<scope>/.agents/skills/` so every agent sees the same skills.
-`add`/`sync` are additive and never clobber a file you hand-edited inside an installed
-overlay. Removing an overlay deletes only its dir and unpublishes only the skills **it**
-published; its lines in `AGENTS.md`'s managed block are not auto-pruned (a warning points
-at the manual edit, or re-run `install`).
+Scope is **project** by default (the current directory's `.agents/`, resolved as for
+`init`) or **user** with `-g`/`--global` (`~/.agents/`, the configurable store). Each
+overlay installs as a directory (kept, discoverable), what its manifest `requires` is
+installed first, its `routing`/`rules` merge into `AGENTS.md`'s managed block, and its
+`skills/<name>/` are symlinked (or `--copy`'d, for Windows / no-symlink) into the
+store's shared `skills/` so every agent sees the same skills.
+
+- `add` and `sync` never clobber a file you hand-edited inside an installed overlay:
+  a file that differs from the source is kept and reported. A fresh `add` whose setup
+  script fails is rolled back.
+- `sync` refreshes each overlay from the repo it was installed from (`--repo` replaces
+  that source), removes files the source dropped that you never edited, installs a
+  `requires` added upstream, and re-merges the managed block. `--overwrite` also
+  replaces edited files and `--prune` removes edited files the source dropped; both
+  back each file up under `<store>/install_backup/` first.
+- `remove` deletes the overlay's directory, unpublishes only the skills **it**
+  published, and recomposes `AGENTS.md`'s managed block over the overlays that remain,
+  so its rules and routing leave with it. It refuses an overlay another installed
+  overlay requires, unless `--force`.
+- `list` and `show` flag a `requires` no installed overlay provides; `show` names the
+  repo an installed overlay came from.
 
 **Overlay setup scripts.** An overlay may ship an **idempotent** `setup.py` at its root
 (the recommended form: it runs under the same Python that runs dotagents, so it works on
 every OS). After `add`/`sync` copies the overlay
 in, dotagents runs the script automatically — so anything a human would otherwise
 hand-follow (PATH/lib wiring, self-registration) is one script the tool runs, not a doc.
-When both are present, `setup.py` wins. Presence of a script is the opt-in; skip it with
-`--no-setup`. The contract for authors:
+Presence of the script is the opt-in; skip it with `--no-setup`. The contract for
+authors:
 
 - **Idempotent** — safe to run on every `add`/`sync`; check-then-act, never blindly append.
-- **cwd** is the installed overlay dir (`<scope>/.agents/overlays/<name>/`), so reference
+- **cwd** is the installed overlay dir (`<store>/overlays/<name>/`), so reference
   your own files by relative path.
-- **Env** carries `AGENTS_HOME` (the resolved store path — never hardcode
-  `~/.agents`) and `AGENTS_OVERLAY_DIR` (your own installed dir).
+- **Env** carries `AGENTS_HOME` (the user store — never hardcode `~/.agents`),
+  `AGENTS_SCOPE_ROOT` (the store the overlay is installed into: the user store with
+  `-g`, the project's `.agents` otherwise), `AGENTS_SCOPE` (`user` or `project`) and
+  `AGENTS_OVERLAY_DIR` (your own installed dir).
 - A **non-zero exit fails the install** with a clear error (not a silent skip). For any
   outward or irreversible action the *script* must confirm first — the runner invokes a
   script you chose to install; it does not second-guess it.
 
-**Downloadable `dotagents.pyz`** — a self-contained zipapp with `duho` and
-`pathlib_next` bundled in, so it needs no `pip install`:
+### Downloadable `dotagents.pyz`
+
+A self-contained zipapp with `duho` and `pathlib_next` bundled in, so it needs no
+`pip install`. Each release attaches one:
+<https://github.com/jose-pr/dotagents/releases/latest/download/dotagents.pyz>.
 
 ```bash
-python -m dotagents build-pyz --out dist/dotagents.pyz   # build it (needs this repo checkout)
-python dist/dotagents.pyz init --bin-dir ~/.local/bin    # lay down the base + a `dotagents` command, offline
+python dotagents.pyz init -g --bin-dir ~/.local/bin      # lay down the base + a `dotagents` command
+python -m dotagents build-pyz --out dist/dotagents.pyz   # or build it yourself (needs this repo checkout)
 ```
 
-`init` wires Claude Code plus any harness it is running inside (detected from its
-environment); `--agents a,b` replaces that set, so include `claude` to keep it.
-
 **Or let your agent do it:** point it at this repo and say —
-> Read README.md, install `dotagents-cli` (into a virtual environment, or with `pipx`), run
-> `dotagents init -g && dotagents overlays add engineering -g`, and confirm
+> Read README.md, install `dotagents-cli` (into a virtual environment, or with `pipx`),
+> run the Quick start block, and confirm
 > `~/.agents/overlays/engineering/flows/PLAN.md` exists.
 
 ## Validate

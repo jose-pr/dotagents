@@ -37,6 +37,7 @@ nav:
   - API Reference:
       - Overview: api/reference.md
       - CLI: api/cli.md
+      - Commands: api/commands.md
       - Agents: api/agents.md
       - Overlays: api/overlays.md
       - Scope: api/scope.md
@@ -47,6 +48,7 @@ nav:
       - Filesystem: api/fs.md
       - Hooks: api/hooks.md
       - Skills: api/skills.md
+      - Wrappers: api/wrappers.md
   - Changelog: changelog.md
 
 plugins:
