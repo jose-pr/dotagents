@@ -33,7 +33,9 @@ running session, done up front here):
    literal ``--`` is passed through untouched (duho's ``_passthrough_``
    convention), after the flags dotagents adds, so yours win where the
    harness takes the last value. The exit code is the harness's (``128 + N``
-   when a signal N killed it).
+   when a signal N killed it). On Windows a harness that is a ``.cmd`` /
+   ``.bat`` shim runs through cmd.exe, which re-parses its arguments, so an
+   argument containing ``& | < > ^ % ! "`` or a newline is refused.
 
 The command is bundled with dotagents (discovered from the package, like
 ``findings``); a same-named ``launch.py`` in a scope's ``dotagents/cmds/``
@@ -54,6 +56,12 @@ from dotagents.cli import DotAgentsArgs, _write_stdout
 CONTEXT_FILE_ENV = "AGENTS_CONTEXT_FILE"
 
 
+#: Characters cmd.exe acts on inside a `.cmd` / `.bat` command line even where
+#: `subprocess.list2cmdline` does not quote (`&|<>^`), expands in any case
+#: (`%`, and `!` under delayed expansion), or that end or break the quoting.
+_CMD_EXE_UNSAFE = frozenset('&|<>^%!"\r\n')
+
+
 def _spawn(argv: "list[str]", env: "dict[str, str]") -> int:
     """Run ``argv`` with ``env`` on the real terminal streams and return its
     exit code. Ctrl-C reaches the child through the shared console; this
@@ -70,6 +78,29 @@ def _spawn(argv: "list[str]", env: "dict[str, str]") -> int:
         except KeyboardInterrupt:
             continue
         return 128 - rc if rc < 0 else rc
+
+
+def _via_cmd_exe(exe: str) -> bool:
+    """Whether Windows runs ``exe`` through ``cmd.exe /c`` (a ``.cmd`` / ``.bat``
+    file: the npm shims for claude, codex, gemini, copilot and pi)."""
+    return os.name == "nt" and Path(exe).suffix.lower() in (".cmd", ".bat")
+
+
+def _refuse_cmd_exe_metachars(exe: str, args: "list[str]") -> None:
+    """cmd.exe re-parses a batch file's command line: an unquoted ``&`` starts
+    a second command and ``%VAR%`` is expanded inside any argument, and no
+    escaping of ``%`` survives ``cmd /c`` reliably. So an argument carrying one
+    of those characters is refused rather than handed over altered."""
+    for arg in args:
+        bad = sorted(set(arg) & _CMD_EXE_UNSAFE)
+        if bad:
+            raise SystemExit(
+                "error: %s is a batch file that cmd.exe re-parses, and the argument "
+                "%r contains %s, which cmd.exe would act on. Put the text in a file "
+                "the harness reads, or pass --command with the harness's own "
+                "executable (e.g. node and its script)."
+                % (exe, arg, " ".join(repr(c) for c in bad))
+            )
 
 
 def _git_tracks(root: Path, rel: str) -> bool:
@@ -225,6 +256,8 @@ class Launch(DotAgentsArgs):
                 )
 
         argv = [exe, *extra, *self._passthrough_]
+        if _via_cmd_exe(exe):
+            _refuse_cmd_exe_metachars(exe, argv[1:])
 
         if self.dry_run:
             _write_stdout(

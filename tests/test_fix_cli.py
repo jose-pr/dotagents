@@ -453,3 +453,28 @@ def test_the_context_file_is_stable_and_outside_temp(launch_mod, monkeypatch, tm
     assert not str(first).startswith(tempfile.gettempdir() + os.sep + "dotagents-")
     assert first.read_text(encoding="utf-8") == "# rules\n"
     assert (cache / ".gitignore").read_text(encoding="utf-8") == "*\n"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="cmd.exe re-parsing is Windows-only")
+@pytest.mark.parametrize("arg", ["x&whoami", "say 100%USERNAME%", "a|b", "line\nbreak", 'q"uote'])
+def test_cmd_shim_arguments_cmd_exe_would_rewrite_are_refused(launch_mod, monkeypatch, tmp_path, arg):
+    program = _program(tmp_path)
+    calls = _capture_spawn(monkeypatch, launch_mod)
+    with pytest.raises(SystemExit, match="cmd.exe"):
+        _run(launch_mod.Launch, passthrough=["-p", arg], agent="claude",
+             command=str(program), no_context=True)
+    assert calls == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="cmd.exe re-parsing is Windows-only")
+def test_plain_arguments_and_real_executables_are_untouched(launch_mod, monkeypatch, tmp_path):
+    calls = _capture_spawn(monkeypatch, launch_mod)
+    shim = _program(tmp_path)
+    _run(launch_mod.Launch, passthrough=["-p", "hello world"], agent="claude",
+         command=str(shim), no_context=True)
+    exe = _program(tmp_path, name="real-harness", suffix=".exe")
+    _run(launch_mod.Launch, passthrough=["-p", "x&y 100%"], agent="claude",
+         command=str(exe), no_context=True)
+    assert [argv[1:] for argv in calls] == [["-p", "hello world"], ["-p", "x&y 100%"]]
+    assert launch_mod._via_cmd_exe(r"C:\x\CLAUDE.CMD") and launch_mod._via_cmd_exe("a.bat")
+    assert not launch_mod._via_cmd_exe(r"C:\x\node.exe")

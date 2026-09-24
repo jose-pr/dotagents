@@ -178,6 +178,9 @@ def test_pi_gets_the_context_inline_on_posix_and_via_its_append_file_on_windows(
     calls = _capture_spawn(monkeypatch, launch_mod)
 
     monkeypatch.setattr(_agents.PiAgent, "_is_windows", staticmethod(lambda: False))
+    # POSIX has no cmd.exe; the fake harness is a `.cmd` only because the test
+    # host may be Windows, which would (rightly) refuse the multi-line argument.
+    monkeypatch.setattr(launch_mod, "_via_cmd_exe", lambda exe: False)
     _run(launch_mod, passthrough=["-p", "hi"], agent="pi", command=str(program))
     (argv, env), = calls
     assert argv[1:] == ["--append-system-prompt", CONTEXT, "-p", "hi"]
