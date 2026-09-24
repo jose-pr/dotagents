@@ -4,8 +4,6 @@ These are the reason `init` produces a *working* command rather than a directory
 config. Everything downstream shells out to `dotagents` by name -- the SessionStart
 hook, overlay `bin/` entries, overlay setup scripts calling a sibling -- so a wrapper
 that resolves to the wrong interpreter fails silently everywhere at once.
-
-Run: ``PYTHONPATH=src python -m pytest tests/test_wrappers.py``
 """
 
 import os
@@ -13,9 +11,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+import pytest
 
-from dotagents._wrappers import write_wrappers  # noqa: E402
+from _shell import BASH
+from dotagents._wrappers import write_wrappers
 
 
 def test_writes_both_forms_on_every_platform(tmp_path):
@@ -97,21 +96,54 @@ def test_crlf_in_cmd_and_lf_in_sh(tmp_path):
     assert b"\r\n" in cmd
 
 
+PROBE = "import sys; print('ran', *sys.argv[1:])\n"
+
+
+def _run_sh(script, cwd):
+    proc = subprocess.run([BASH, str(script), "hello"], capture_output=True, text=True, cwd=str(cwd))
+    assert proc.returncode == 0, proc.stderr
+    assert "ran hello" in proc.stdout, proc.stdout + proc.stderr
+
+
+def _run_cmd(script, cwd):
+    proc = subprocess.run(["cmd", "/c", str(script), "hello"], capture_output=True, text=True, cwd=str(cwd))
+    assert proc.returncode == 0, proc.stderr
+    assert "ran hello" in proc.stdout, proc.stdout + proc.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="needs a working bash")
 def test_the_sh_wrapper_actually_runs(tmp_path):
-    """End-to-end: the generated script must execute, not just look right."""
+    """End-to-end: the generated script must execute, not just look right. A
+    broken wrapper FAILS here -- it used to be reported as "no POSIX sh"."""
     pyz = tmp_path / "probe.pyz"
-    pyz.write_text("import sys; print('ran', *sys.argv[1:])\n", encoding="utf-8")
+    pyz.write_text(PROBE, encoding="utf-8")
     write_wrappers(tmp_path / "bin", pyz)
+    _run_sh(tmp_path / "bin" / "dotagents", tmp_path)
 
-    script = tmp_path / "bin" / "dotagents"
-    proc = subprocess.run(
-        ["sh", str(script), "hello"], capture_output=True, text=True
-    )
-    if proc.returncode != 0 and "sh" in (proc.stderr or ""):  # pragma: no cover
-        import pytest
 
-        pytest.skip("no POSIX sh available")
-    assert "ran hello" in proc.stdout
+@pytest.mark.skipif(BASH is None, reason="needs a working bash")
+def test_the_relative_sh_wrapper_runs_from_any_cwd(tmp_path):
+    """What `init` writes into `<scope>/bin`: the pyz found relative to the
+    wrapper's own directory, whatever the caller's cwd."""
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    (scope / "dotagents.pyz").write_text(PROBE, encoding="utf-8")
+    write_wrappers(scope / "bin", scope / "dotagents.pyz", relative=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _run_sh(scope / "bin" / "dotagents", elsewhere)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="cmd.exe")
+@pytest.mark.parametrize("relative", [False, True])
+def test_the_cmd_wrapper_actually_runs(tmp_path, relative):
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    (scope / "dotagents.pyz").write_text(PROBE, encoding="utf-8")
+    write_wrappers(scope / "bin", scope / "dotagents.pyz", relative=relative)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _run_cmd(scope / "bin" / "dotagents.cmd", elsewhere)
 
 
 def test_relative_falls_back_when_no_relative_path_exists(tmp_path, monkeypatch):
