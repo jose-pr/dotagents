@@ -295,6 +295,42 @@ def _string_list(value: object) -> "list[str]":
     return [v.strip("\n") for v in value if isinstance(v, str) and v.strip()]
 
 
+def _file_digest(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class InstallResult(object):
+    """What :meth:`Overlay.install_to` did. Unpacks as the historical
+    ``(written, skipped, lines)``, ``skipped`` being unchanged + kept."""
+
+    def __init__(self) -> None:
+        self.written = 0
+        self.unchanged = 0
+        #: Files left alone that DIFFER from the source (hand edits, or a
+        #: source change not applied without ``--overwrite``).
+        self.kept: "list[str]" = []
+        #: Files removed because the source no longer ships them.
+        self.removed: "list[str]" = []
+        #: Files the source no longer ships that were edited here, so kept.
+        self.orphans_kept: "list[str]" = []
+        #: Files copied to the backup root before being replaced or pruned.
+        self.backed_up: "list[str]" = []
+        self.lines: "list[str]" = []
+
+    @property
+    def skipped(self) -> int:
+        return self.unchanged + len(self.kept)
+
+    def __iter__(self):
+        return iter((self.written, self.skipped, self.lines))
+
+
 def _same_content(a: Path, b: Path) -> bool:
     try:
         if a.stat().st_size != b.stat().st_size:
@@ -609,7 +645,10 @@ class Overlay:
                 return candidate
         return None
 
-    def run_setup(self, *, agents_dir: Path, dry_run: bool, logger) -> "Optional[int]":
+    def run_setup(
+        self, *, agents_dir: Path, dry_run: bool, logger,
+        scope_root: "Optional[Path]" = None, scope_level: "Optional[str]" = None,
+    ) -> "Optional[int]":
         """Run the overlay's idempotent ``setup`` script if it ships one.
 
         Returns the script's exit code, or ``None`` when the overlay has no setup
@@ -622,9 +661,14 @@ class Overlay:
         invokes it:
 
         * **cwd** = the installed overlay dir, so the script sees its own files.
-        * **env** carries ``AGENTS_HOME`` = the resolved store path (D58), so the
-          script never hardcodes ``~/.agents``, and ``AGENTS_OVERLAY_DIR`` = its
-          own installed dir.
+        * **env** carries ``AGENTS_HOME`` = ``agents_dir``, the USER store
+          (D58) -- what the variable means everywhere else, so a ``dotagents``
+          call the script makes resolves the same stores -- plus
+          ``AGENTS_SCOPE_ROOT`` = the store the overlay is installed into
+          (``scope_root``; the user store for a ``-g`` install, the project's
+          ``.agents`` otherwise), ``AGENTS_SCOPE`` = ``user`` / ``project``
+          (``scope_level``, when given) and ``AGENTS_OVERLAY_DIR`` = its own
+          installed dir.
         * the script runs under the interpreter running dotagents.
 
         A non-zero exit is returned so the caller can raise a clear error --
@@ -640,6 +684,9 @@ class Overlay:
 
         env = dict(os.environ)
         env["AGENTS_HOME"] = str(agents_dir)
+        env["AGENTS_SCOPE_ROOT"] = str(scope_root if scope_root is not None else agents_dir)
+        if scope_level:
+            env["AGENTS_SCOPE"] = scope_level
         env["AGENTS_OVERLAY_DIR"] = str(self.path)
 
         import sys
@@ -664,20 +711,57 @@ class Overlay:
         ".ruff_cache", ".tox", ".venv", "node_modules",
     })
 
+    #: Beside an INSTALLED overlay's files: where it came from and the digest of
+    #: every file dotagents wrote, so ``sync`` resolves from the same repo and
+    #: can tell a file deleted upstream (and untouched here) from a hand edit.
+    INSTALL_RECORD = ".dotagents-install.json"
+
     def files(self) -> "list[Path]":
-        """Files the overlay installs: everything except its manifest, VCS
-        metadata and tool caches (:attr:`SKIP_PARTS`) and compiled ``*.pyc``."""
+        """Files the overlay installs: everything except its manifest, its
+        install record, VCS metadata and tool caches (:attr:`SKIP_PARTS`) and
+        compiled ``*.pyc``."""
         out = []
         for p in sorted(self.path.rglob("*")):
             rel = p.relative_to(self.path)
             if (
                 p.is_file()
                 and p.name != self.MANIFEST_NAME
+                and rel.parts != (self.INSTALL_RECORD,)
                 and p.suffix != ".pyc"
                 and not self.SKIP_PARTS.intersection(rel.parts)
             ):
                 out.append(p)
         return out
+
+    # -- the install record ---------------------------------------------------
+
+    @property
+    def install_record_path(self) -> Path:
+        return self.path / self.INSTALL_RECORD
+
+    def read_install_record(self) -> "dict[str, Any]":
+        """``{"source": {...} | None, "files": {rel: sha256}}`` of an installed
+        overlay; empty for a source dir or an install that predates records."""
+        import json
+
+        try:
+            data = json.loads(self.install_record_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        files = data.get("files")
+        data["files"] = {
+            str(k): str(v) for k, v in files.items() if isinstance(v, str)
+        } if isinstance(files, dict) else {}
+        return data
+
+    def _write_install_record(self, record: "dict[str, Any]") -> None:
+        import json
+
+        from dotagents._fs import write_text_lf
+
+        write_text_lf(self.install_record_path, json.dumps(record, indent=1, sort_keys=True) + "\n")
 
     def rule_blocks(self, rel_paths: "list[str]") -> "tuple[list[str], list[str]]":
         """Extract `- **…` bullet blocks from each referenced markdown file.
@@ -759,22 +843,124 @@ class Overlay:
         an existing file). Returns (copied, skipped) counts and per-file log lines."""
         return self._copy_into(self.files(), dest, dry_run, "overlay")
 
-    def install_to(self, dest_overlay_dir: Path, dry_run: bool, overwrite: bool = False):
+    def install_to(
+        self,
+        dest_overlay_dir: Path,
+        dry_run: bool,
+        overwrite: bool = False,
+        *,
+        prune: bool = False,
+        backup_root: "Optional[Path]" = None,
+        source: "Optional[dict[str, Any]]" = None,
+    ) -> "InstallResult":
         """Install the overlay as a *directory* under `<scope>/overlays/<name>/`:
         the overlay is the discoverable unit.
 
         Copies every file the overlay ships (minus caches -- see :meth:`files`)
         into `dest_overlay_dir`, create-if-absent so re-adding an overlay never
-        clobbers a file the user hand-edited inside the installed copy;
-        `overwrite` (`sync --overwrite`) replaces files whose content differs
-        from the source. The overlay's own `overlay.toml` is copied too so a
-        later `sync`/`list`/`show` can re-read its manifest from the installed
-        copy. Returns (written, skipped) counts and log lines."""
-        # Ship the manifest alongside the files so the installed dir is self-describing.
-        sources = self.files()
+        clobbers a file the user hand-edited inside the installed copy: such a
+        file is KEPT and reported (:attr:`InstallResult.kept`), never counted as
+        unchanged. `overwrite` (`sync --overwrite`) replaces files whose content
+        differs from the source, first copying each to `backup_root` when one is
+        given. The overlay's own `overlay.toml` is always refreshed, so a new
+        `routing` / `rules` / `requires` upstream reaches the installed copy.
+
+        The install record (:attr:`INSTALL_RECORD`) keeps the digest of every
+        file written and `source` (where the overlay came from; the previous
+        value when `None`). A recorded file the source no longer ships is
+        removed when it is still exactly what was installed, and kept (and
+        reported) when it was edited here -- unless `prune`, which removes it
+        too (backed up like an overwrite). An install without a record (made
+        before records existed) prunes nothing.
+
+        Returns an :class:`InstallResult`, which still unpacks as the old
+        ``(written, skipped, lines)``."""
+        dest = Path(dest_overlay_dir)
+        installed = Overlay(dest)
+        record = installed.read_install_record()
+        old_files: "dict[str, str]" = record.get("files", {})
+        new_files: "dict[str, str]" = {}
+        result = InstallResult()
+
+        def backup(rel: str, target: Path) -> None:
+            if backup_root is None or dry_run:
+                return
+            saved = backup_root / rel
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(target), str(saved))
+            result.backed_up.append(rel)
+
+        def write(src: Path, target: Path) -> None:
+            if not dry_run:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(src), str(target))
+
+        for src in self.files():
+            rel = src.relative_to(self.path).as_posix()
+            target = dest / rel
+            digest = _file_digest(src)
+            if target.is_file():
+                if _same_content(src, target):
+                    result.lines.append("skip (exists): %s" % rel)
+                    result.unchanged += 1
+                    new_files[rel] = digest
+                    continue
+                if not overwrite:
+                    result.lines.append("keep (differs from source): %s" % rel)
+                    result.kept.append(rel)
+                    if rel in old_files:
+                        new_files[rel] = old_files[rel]
+                    continue
+                backup(rel, target)
+                result.lines.append("update: %s" % rel)
+            else:
+                result.lines.append("install: %s" % rel)
+            write(src, target)
+            result.written += 1
+            new_files[rel] = digest
+
+        # The manifest is dotagents' own metadata: always the source's.
         if self.manifest_path.is_file():
-            sources.append(self.manifest_path)
-        return self._copy_into(sources, dest_overlay_dir, dry_run, "install", overwrite)
+            target = dest / self.MANIFEST_NAME
+            if target.is_file() and _same_content(self.manifest_path, target):
+                result.unchanged += 1
+            else:
+                result.lines.append(
+                    "%s: %s" % ("update" if target.is_file() else "install", self.MANIFEST_NAME)
+                )
+                write(self.manifest_path, target)
+                result.written += 1
+
+        # Files installed earlier that the source no longer ships.
+        for rel, digest in sorted(old_files.items()):
+            if rel in new_files:
+                continue
+            target = dest / rel
+            if not target.is_file():
+                continue
+            if _file_digest(target) != digest and not prune:
+                result.lines.append("keep (gone from source, modified here): %s" % rel)
+                result.orphans_kept.append(rel)
+                new_files[rel] = digest
+                continue
+            if _file_digest(target) != digest:
+                backup(rel, target)
+            result.lines.append("remove (gone from source): %s" % rel)
+            result.removed.append(rel)
+            if not dry_run:
+                target.unlink()
+                parent = target.parent
+                while parent != dest and parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+                    parent = parent.parent
+
+        if not dry_run:
+            dest.mkdir(parents=True, exist_ok=True)
+            installed._write_install_record({
+                "source": source if source is not None else record.get("source"),
+                "files": new_files,
+            })
+        return result
 
     def merge_rules_into(self, agents_md: Path, dry_run: bool, logger) -> bool:
         """Fold this overlay's D59 routing + rules into an already-installed

@@ -104,7 +104,7 @@ def test_sync_with_an_unloadable_repo_fails_rather_than_skipping(world, tmp_path
     src, store = world
     _overlay(src, "demo", files=[("kb/D.md", "d\n")])
     assert _add(src, store, "demo") == 0
-    with pytest.raises(SystemExit, match="does not exist"):
+    with pytest.raises(SystemExit, match="sync failed for: demo"):
         _sync(store, repo=[str(tmp_path / "no-such-repo")])
 
 
@@ -535,3 +535,263 @@ def test_a_dotted_install_from_an_older_rule_is_still_found(world):
     assert sorted(p.name for p in (store / "overlays").iterdir()) == ["foo.bar"], "re-add reuses it"
     assert _run(OverlayRemove, name=["foo.bar"], global_scope=True, agents_dir=store, dry_run=False) == 0
     assert not legacy.exists()
+
+
+# --------------------------------------------------------------------------
+# overlays-03: sync resolves an overlay from the repo it was installed from
+# --------------------------------------------------------------------------
+
+@pytest.fixture
+def two_repos(tmp_path):
+    private, public = tmp_path / "private", tmp_path / "public"
+    _overlay(private, "python", files=[("kb/PY.md", "priv\n")])
+    _overlay(public, "python", files=[("kb/PY.md", "pub\n"), ("bin/pytool", "#!/bin/sh\n")])
+    return private, public
+
+
+def test_sync_uses_the_recorded_repo_not_the_first_offering_one(world, two_repos, monkeypatch):
+    _src, store = world
+    private, public = two_repos
+    assert _add(private, store, "python") == 0
+    monkeypatch.setenv("AGENTS_OVERLAYS_REPO", str(public))
+    assert _sync(store) == 0
+    assert not (store / "overlays" / "python" / "bin" / "pytool").exists()
+    assert _sync(store, overwrite=True) == 0
+    assert (store / "overlays" / "python" / "kb" / "PY.md").read_text(encoding="utf-8") == "priv\n"
+
+
+def test_the_record_holds_an_absolute_redacted_source(world, two_repos, monkeypatch):
+    _src, store = world
+    private, _public = two_repos
+    monkeypatch.chdir(private.parent)
+    assert _add(Path("private"), store, "python") == 0  # a --repo relative to the cwd
+    record = Overlay(store / "overlays" / "python").read_install_record()
+    assert record["source"]["kind"] == "dir"
+    assert Path(record["source"]["location"]) == private
+    assert record["files"]["kb/PY.md"]
+
+
+def test_an_explicit_repo_replaces_the_recorded_source(world, two_repos, caplog):
+    _src, store = world
+    private, public = two_repos
+    _add(private, store, "python")
+    with caplog.at_level(logging.INFO):
+        assert _sync(store, repo=[str(public)]) == 0
+    assert (store / "overlays" / "python" / "bin" / "pytool").is_file()
+    assert any("now from" in r.getMessage() for r in caplog.records)
+    assert Path(Overlay(store / "overlays" / "python").read_install_record()["source"]["location"]) == public
+
+
+def test_a_credentialed_record_matches_the_configured_repo(tmp_path):
+    url = "https://alice:s3cret@example.invalid/org/x.git@main"
+    record = _sources.source_record(url)
+    assert record["lossy"] and "s3cret" not in json.dumps(record)
+    chain = _sources.CompositeSource(["/somewhere/else", url], _sources.SourceCache(tmp_path / "c"))
+    assert chain.find_repo(record) == url
+
+
+# --------------------------------------------------------------------------
+# overlays-10: remove unpublishes only after the delete, and always recomposes
+# --------------------------------------------------------------------------
+
+def test_a_failed_remove_keeps_skills_and_still_recomposes(world, monkeypatch):
+    from dotagents.cli import overlays as overlays_cmd
+
+    src, store = world
+    _overlay(src, "one", routing=["- ONE-ROUTE -> x"])
+    _overlay(src, "two", routing=["- TWO-ROUTE -> y"], skill="two-skill")
+    _add(src, store, "one", "two")
+    real = overlays_cmd._remove_tree
+
+    def flaky(path):
+        if Path(path).name == "two":
+            raise PermissionError("[WinError 5] Access is denied")
+        real(path)
+
+    monkeypatch.setattr(overlays_cmd, "_remove_tree", flaky)
+    with pytest.raises(PermissionError):
+        _run(OverlayRemove, name=["one", "two"], global_scope=True, agents_dir=store, dry_run=False)
+    text = (store / "AGENTS.md").read_text(encoding="utf-8")
+    assert "ONE-ROUTE" not in text, "what was removed is un-merged even though a later removal failed"
+    assert "TWO-ROUTE" in text
+    assert (store / "skills" / "two-skill").exists(), "the overlay that was not deleted keeps its skill"
+
+
+def test_remove_unlinks_a_linked_overlay_and_keeps_its_target(world, tmp_path):
+    src, store = world
+    dev = _overlay(tmp_path / "dev", "myov", routing=["- MYOV -> x"])
+    link = store / "overlays" / "myov"
+    link.parent.mkdir(parents=True)
+    try:
+        os.symlink(str(dev), str(link), target_is_directory=True)
+    except (OSError, NotImplementedError):
+        if os.name != "nt":
+            pytest.skip("no symlink support")
+        import _winapi
+
+        _winapi.CreateJunction(str(dev), str(link))
+    assert _run(OverlayRemove, name=["myov"], global_scope=True, agents_dir=store, dry_run=False) == 0
+    assert not os.path.lexists(str(link))
+    assert (dev / "overlay.toml").is_file()
+
+
+# --------------------------------------------------------------------------
+# overlays-11: add is transactional per overlay
+# --------------------------------------------------------------------------
+
+def test_a_failed_setup_rolls_back_that_overlay_and_merges_the_rest(world):
+    src, store = world
+    _overlay(src, "aaa", routing=["- AAA-ROUTE -> x"])
+    _overlay(src, "bbb", routing=["- BBB-ROUTE -> y"], skill="bbb-skill", setup="import sys\nsys.exit(4)\n")
+    _overlay(src, "ccc", routing=["- CCC-ROUTE -> z"])
+    with pytest.raises(SystemExit, match="setup for overlay 'bbb' failed"):
+        _add(src, store, "aaa", "bbb")
+    assert sorted(p.name for p in (store / "overlays").iterdir()) == ["aaa"]
+    assert not (store / "skills" / "bbb-skill").exists()
+    assert "AAA-ROUTE" in (store / "AGENTS.md").read_text(encoding="utf-8")
+    _add(src, store, "ccc")
+    assert "BBB-ROUTE" not in (store / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_an_interrupted_fresh_install_leaves_nothing_behind(world, monkeypatch):
+    src, store = world
+    _overlay(src, "half", files=[("kb/A.md", "a\n"), ("kb/B.md", "b\n")])
+    real = Overlay.install_to
+
+    def interrupted(self, dest, *args, **kwargs):
+        real(self, dest, *args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Overlay, "install_to", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _add(src, store, "half")
+    left = sorted(p.name for p in (store / "overlays").iterdir()) if (store / "overlays").exists() else []
+    assert left == [], "neither a partial overlays/half nor a staging dir"
+
+
+# --------------------------------------------------------------------------
+# overlays-12: sync reports kept files, refreshes the manifest, prunes
+# --------------------------------------------------------------------------
+
+def test_sync_reports_a_differing_file_as_kept_not_unchanged(world, caplog):
+    src, store = world
+    _overlay(src, "demo", files=[("kb/D.md", "d\n")])
+    _add(src, store, "demo")
+    (store / "overlays" / "demo" / "kb" / "D.md").write_text("edited\n", encoding="utf-8")
+    with caplog.at_level(logging.INFO):
+        _sync(store, repo=[str(src)])
+    assert any("kept kb/D.md" in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+    assert not any("2 unchanged" in r.getMessage() for r in caplog.records)
+
+
+def test_plain_sync_refreshes_the_manifest(world):
+    src, store = world
+    _overlay(src, "demo")
+    _add(src, store, "demo")
+    _overlay(src, "demo", routing=["- NEW-ROUTE -> x"])  # upstream adds routing
+    _sync(store, repo=[str(src)])
+    assert "NEW-ROUTE" in (store / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_sync_prunes_files_dropped_upstream_unless_edited(world, tmp_path):
+    src, store = world
+    ov = _overlay(src, "demo", files=[("env.py", "OLD\n"), ("kb/K.md", "k\n")])
+    _add(src, store, "demo")
+    installed = store / "overlays" / "demo"
+    (installed / "kb" / "K.md").write_text("edited here\n", encoding="utf-8")
+    (ov / "env.py").rename(ov / "pre.env.py")
+    (ov / "kb" / "K.md").unlink()
+    assert _sync(store, repo=[str(src)]) == 0
+    assert not (installed / "env.py").exists(), "an unmodified file the source dropped is removed"
+    assert (installed / "pre.env.py").is_file()
+    assert (installed / "kb" / "K.md").is_file(), "an edited one is kept"
+    assert _sync(store, repo=[str(src)], prune=True) == 0
+    assert not (installed / "kb" / "K.md").exists()
+    backups = list((store / "install_backup").rglob("K.md"))
+    assert backups and backups[0].read_text(encoding="utf-8") == "edited here\n"
+
+
+def test_sync_overwrite_backs_up_what_it_replaces(world):
+    src, store = world
+    _overlay(src, "demo", files=[("kb/D.md", "d\n")])
+    _add(src, store, "demo")
+    (store / "overlays" / "demo" / "kb" / "D.md").write_text("mine\n", encoding="utf-8")
+    assert _sync(store, repo=[str(src)], overwrite=True) == 0
+    assert (store / "overlays" / "demo" / "kb" / "D.md").read_text(encoding="utf-8") == "d\n"
+    backups = list((store / "install_backup").rglob("D.md"))
+    assert backups and backups[0].read_text(encoding="utf-8") == "mine\n"
+
+
+# --------------------------------------------------------------------------
+# overlays-21: setup scripts see the user store as AGENTS_HOME
+# --------------------------------------------------------------------------
+
+def test_project_setup_gets_the_user_store_as_agents_home(world, tmp_path, monkeypatch):
+    src, user_store = world
+    out = tmp_path / "setup-env.json"
+    _overlay(src, "probe", setup=(
+        "import json, os\n"
+        "json.dump({k: os.environ.get(k) for k in ('AGENTS_HOME', 'AGENTS_SCOPE_ROOT', 'AGENTS_SCOPE')},"
+        " open(%r, 'w'))\n" % str(out)
+    ))
+    project_store = tmp_path / "proj" / ".agents"
+    project_store.mkdir(parents=True)
+    (project_store / "AGENTS.md").write_text(BASE_AGENTS, encoding="utf-8")
+    monkeypatch.setenv("AGENTS_HOME", str(user_store))
+    assert _run(OverlayAdd, name=["probe"], repo=[str(src)], global_scope=False,
+                agents_dir=project_store, copy=True, dry_run=False) == 0
+    seen = json.loads(out.read_text(encoding="utf-8"))
+    assert Path(seen["AGENTS_HOME"]) == user_store
+    assert Path(seen["AGENTS_SCOPE_ROOT"]) == project_store
+    assert seen["AGENTS_SCOPE"] == "project"
+
+
+# --------------------------------------------------------------------------
+# overlays-22: reverse dependencies and new requires
+# --------------------------------------------------------------------------
+
+def test_remove_refuses_a_required_overlay_unless_forced(world):
+    src, store = world
+    _overlay(src, "engineering")
+    _overlay(src, "python", requires=["engineering"])
+    _add(src, store, "python")
+    with pytest.raises(SystemExit, match="required by python"):
+        _run(OverlayRemove, name=["engineering"], global_scope=True, agents_dir=store, dry_run=False)
+    assert (store / "overlays" / "engineering").is_dir()
+    assert _run(OverlayRemove, name=["engineering"], global_scope=True, agents_dir=store,
+                dry_run=False, force=True) == 0
+    assert not (store / "overlays" / "engineering").exists()
+    # Removing both together is fine: nothing left requires it.
+
+
+def test_sync_installs_a_requirement_added_upstream(world):
+    src, store = world
+    _overlay(src, "engineering", files=[("flows/PLAN.md", "p\n")])
+    _overlay(src, "python")
+    _add(src, store, "python")
+    _overlay(src, "python", requires=["engineering"])  # upstream now requires it
+    assert _sync(store, repo=[str(src)]) == 0
+    assert (store / "overlays" / "engineering" / "flows" / "PLAN.md").is_file()
+
+
+def test_list_and_show_flag_an_unmet_requirement(world, capsys):
+    src, store = world
+    _overlay(src, "python", requires=["engineering"])
+    _add(src, store, "python", no_requires=True)
+    _run(OverlayList, repo=[str(src)], global_scope=True, agents_dir=store, json=False)
+    assert "python  (requires missing: engineering)" in capsys.readouterr().out
+    _run(OverlayShow, name="python", repo=[], global_scope=True, agents_dir=store, json=True)
+    assert json.loads(capsys.readouterr().out)["unmet_requires"] == ["engineering"]
+
+
+# --------------------------------------------------------------------------
+# overlays-25: add says how new skills reach an agent's own skills dir
+# --------------------------------------------------------------------------
+
+def test_add_says_init_links_new_skills(world, caplog):
+    src, store = world
+    _overlay(src, "withskill", skill="hello")
+    with caplog.at_level(logging.INFO):
+        _add(src, store, "withskill")
+    assert any("re-run `dotagents init" in r.getMessage() and "hello" in r.getMessage()
+               for r in caplog.records)

@@ -747,6 +747,51 @@ def load_repo(spec_text: "Union[str, Spec]", cache: SourceCache) -> Any:
     return RegistryRepo(origin, entries, cache, base=base)
 
 
+def source_record(spec: "Union[str, Spec]") -> "dict[str, Any]":
+    """The repo ``spec`` as an install record keeps it: a local path made
+    absolute (a ``--repo`` given relative to the cwd must still resolve from
+    anywhere), the location REDACTED (a record lives in the store, which may be
+    kept in git), and ``lossy`` set when redaction dropped something -- such a
+    record identifies the repo but cannot be fetched from by itself."""
+    if isinstance(spec, str):
+        spec = parse_spec(spec)
+    location = spec.location
+    if spec.kind == "dir" or (spec.kind == "git" and is_relative(spec)):
+        location = os.path.abspath(os.path.expanduser(location))
+    shown = redact(location)
+    return {
+        "kind": spec.kind, "location": shown, "ref": spec.ref, "path": spec.path,
+        "lossy": shown != location,
+    }
+
+
+def spec_from_record(record: "Any") -> "Optional[Spec]":
+    """The :class:`Spec` of a :func:`source_record`, or ``None`` if malformed."""
+    if not isinstance(record, dict):
+        return None
+    kind, location = record.get("kind"), record.get("location")
+    if kind not in ("git", "url", "dir") or not isinstance(location, str) or not location:
+        return None
+    ref, path = record.get("ref"), record.get("path")
+    return Spec(
+        kind, location,
+        ref if isinstance(ref, str) and ref else None,
+        path if isinstance(path, str) and path else None,
+    )
+
+
+def record_display(record: "Any") -> str:
+    spec = spec_from_record(record)
+    return spec.display() if spec is not None else "?"
+
+
+def _record_key(record: "dict[str, Any]") -> "tuple[Any, ...]":
+    location = record["location"]
+    if record["kind"] == "dir":
+        location = os.path.normcase(os.path.normpath(location))
+    return (record["kind"], location, record.get("ref"), record.get("path"))
+
+
 def registry_files(*stores: "Optional[Path]") -> "list[Path]":
     """``<store>/dotagents.<suffix>`` for each store that has one (first suffix
     present per store), in the order given."""
@@ -827,10 +872,36 @@ class CompositeSource(object):
         """The directory of overlay ``name`` from the first repo offering it.
         :class:`OverlayNotFound` when no repo does; a repo that cannot be
         loaded is a :class:`SourceError`, never "not found"."""
+        return self.locate(name)[0]
+
+    def only(self, spec: "Union[str, Spec]") -> "CompositeSource":
+        """A source of just the repo ``spec``, sharing this one's cache (so a
+        repo already fetched this process is not fetched again)."""
+        return CompositeSource([spec], self.cache)
+
+    def find_repo(self, record: "dict[str, Any]") -> "Optional[Union[str, Spec]]":
+        """The spec in this chain that IS the repo ``record`` describes
+        (:func:`source_record`), or ``None`` -- it carries any credential the
+        redacted record lacks."""
+        wanted = spec_from_record(record)
+        if wanted is None:
+            return None
+        key = _record_key(source_record(wanted))
+        for spec in self.specs:
+            try:
+                if _record_key(source_record(spec)) == key:
+                    return spec
+            except (ValueError, SourceError):
+                continue
+        return None
+
+    def locate(self, name: str) -> "tuple[Path, Union[str, Spec]]":
+        """``(overlay dir, repo spec)``: :meth:`overlay_dir` plus which repo
+        of the chain offered it (what ``add`` records as the overlay's source)."""
         for index in range(len(self.specs)):
             repo = self._repo(index)
             if repo.has(name):
-                return repo.overlay_dir(name)
+                return repo.overlay_dir(name), self.specs[index]
         if not self.specs:
             raise OverlayNotFound(NO_SOURCE_MESSAGE)
         raise OverlayNotFound(

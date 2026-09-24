@@ -311,6 +311,57 @@ def resync_overlay_skills(
     return updated
 
 
+def owned_overlay_skills(overlay_dir: Path, shared_skills: Path, *, logger=None) -> "list[str]":
+    """The names under ``shared_skills`` that are THIS overlay's publications
+    (a symlink to its skill, or a copy matching it) -- decided while the
+    overlay still exists, so ``overlays remove`` can delete the overlay first
+    and unpublish only once that succeeded (:func:`unpublish_skills`). A
+    same-named skill that is someone else's is reported and left out."""
+    owned: "list[str]" = []
+    if not shared_skills.is_dir():
+        return owned
+    for skill_dir in _overlay_skill_dirs(overlay_dir):
+        target = shared_skills / skill_dir.name
+        if not os.path.lexists(str(target)):
+            continue
+        if os.path.islink(str(target)):
+            mine = _resolves_to(target, skill_dir)
+        else:
+            mine = _paths_match(skill_dir, target)
+        if mine:
+            owned.append(skill_dir.name)
+        elif logger is not None:
+            logger.warning("kept skill %s: not this overlay's (edited or placed by hand)", skill_dir.name)
+    return owned
+
+
+def unpublish_skills(shared_skills: Path, names: "list[str]", *, logger=None) -> int:
+    """Remove ``names`` from ``shared_skills`` (see :func:`owned_overlay_skills`),
+    drop their published-copy records, then sweep broken syncs. Returns the
+    count removed."""
+    removed = 0
+    record = _load_record(shared_skills)
+    for name in names:
+        target = shared_skills / name
+        if not os.path.lexists(str(target)):
+            continue
+        try:
+            _remove(target)
+        except OSError as exc:
+            if logger is not None:
+                logger.warning("could not unpublish skill %s: %s", name, exc)
+            continue
+        record.pop(name, None)
+        removed += 1
+        if logger is not None:
+            logger.info("removed skill: %s", name)
+    if shared_skills.is_dir():
+        _save_record(shared_skills, record)
+    clean_broken_syncs(shared_skills, logger=logger)
+    _prune_empty(shared_skills)
+    return removed
+
+
 def remove_overlay_skills(overlay_dir: Path, shared_skills: Path, *, logger=None) -> int:
     """Unpublish only the skills *this* overlay published (matched to its source),
     then sweep broken syncs. Returns the count removed."""
