@@ -1146,6 +1146,9 @@ class PiAgent(Agent):
     # The append file: pi adds its whole content to the system prompt, which
     # is exactly what the assembled context is for.
     context_target = ".pi/APPEND_SYSTEM.md"
+    #: The project store's pointer block in :attr:`context_target`.
+    POINTER_BEGIN_MARKER = "<!-- dotagents:pointer:begin -->"
+    POINTER_END_MARKER = "<!-- dotagents:pointer:end -->"
     detect_env_vars = ["PI_CODING_AGENT"]
     harness_id = "pi"
     launch_command = "pi"
@@ -1169,32 +1172,48 @@ class PiAgent(Agent):
     def write_base_config(self, dest: Path, src: Path, base_agents_text: str, *, force: bool, dry_run: bool, logger) -> None:
         from dotagents._merge import BEGIN_MARKER, END_MARKER, merge_block
 
-        # The last mile for the user store: pi reads `<config dir>/AGENTS.md`
-        # in every session and has no include syntax, so that file gets a
-        # managed block POINTING at the store's AGENTS.md -- not a copy of it,
-        # which would reach a launched session twice (once from pi's own file,
-        # once as the context `launch` appends). pi reads a project's ROOT
-        # AGENTS.md, not `<project>/.agents/AGENTS.md`, so a project store's
-        # block reaches it through `launch pi` or `context --write-agent`.
-        if not self._user_scope(dest):
-            if logger:
-                logger.info(
-                    "pi: reads <project>/AGENTS.md, not the project store's; use `dotagents "
-                    "launch pi` or `context --write-agent --agents pi`"
-                )
-            return
-        store_agents = (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
-        entry = self._config_dir() / "AGENTS.md"
+        # The last mile: pi has no include syntax, so a managed block POINTING
+        # at the store's AGENTS.md -- not a copy of it, which would reach a
+        # launched session twice (once from pi's own file, once as the context
+        # `launch` appends). For the user store that block goes in
+        # `<config dir>/AGENTS.md`, which pi reads in every session. pi reads a
+        # project's ROOT AGENTS.md, never `<project>/.agents/AGENTS.md`, so a
+        # project store's pointer goes in `<project>/.pi/APPEND_SYSTEM.md`,
+        # which pi appends to its system prompt in that project.
+        store_agents = Path(dest).expanduser().resolve() / "AGENTS.md"
+        begin, end = BEGIN_MARKER, END_MARKER
+        if self._user_scope(dest):
+            entry = self._config_dir() / "AGENTS.md"
+            where, what = store_agents.as_posix(), "the global agent configuration"
+        else:
+            # Markers of its own: the same file carries `write_context`'s
+            # context block, whose text (the store's AGENTS.md) holds plain
+            # `dotagents:begin`/`end` lines a plain merge would take for ours.
+            begin, end = self.POINTER_BEGIN_MARKER, self.POINTER_END_MARKER
+            project = self._project_dir(dest)
+            entry = project / self.context_target
+            try:
+                # Relative to the project root (pi's cwd): no machine path in a
+                # file that may be committed.
+                where = store_agents.relative_to(project).as_posix()
+            except ValueError:
+                where = store_agents.as_posix()
+            what = "this project's agent configuration"
         pointer = (
             "%s\n# dotagents\n\n"
-            "Read `%s` before anything else: it is the global agent configuration "
+            "Read `%s` before anything else: it is %s "
             "`dotagents init` manages (the always-on rules and the routing to "
-            "on-demand files).\n%s\n" % (BEGIN_MARKER, store_agents, END_MARKER)
+            "on-demand files).\n%s\n" % (begin, where, what, end)
         )
         # pi's own file is the user's: block-merged even under `--force`,
         # like Claude's include, so their text around the block survives.
-        branch = merge_block(entry, pointer, dry_run=dry_run)
+        branch = merge_block(entry, pointer, dry_run=dry_run, begin_marker=begin, end_marker=end)
         if logger: logger.info("%s: %s (pointer to the store)", branch, entry)
+        if not self._user_scope(dest) and logger and _git_tracked_or_unignored(entry):
+            logger.warning(
+                "%s is not gitignored: its pointer names .agents/, which is never "
+                "committed -- keep the file out of commits (or add it to .gitignore)", entry,
+            )
 
     @staticmethod
     def _is_windows() -> bool:
