@@ -46,6 +46,22 @@ def _warn_once(message: str, *args: object) -> None:
 # sort before (0..499) or after (501..) the unprioritized default.
 DEFAULT_PRIORITY = 500
 
+#: Seconds an overlay's setup script may run before it is stopped, unless its
+#: manifest sets ``setup_timeout`` or the command passes ``--setup-timeout``.
+#: ``0`` (from either) means no limit.
+DEFAULT_SETUP_TIMEOUT = 300
+
+
+def _setup_timeout(value: object, name: str) -> "Optional[int]":
+    """A manifest ``setup_timeout``: a non-negative integer, else ``None``
+    (with a warning when it was set to something else)."""
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    _warn_once("overlay %s: ignoring setup_timeout %r (seconds, 0 = no limit)", name, value)
+    return None
+
 
 # --------------------------------------------------------------------------- #
 # Manifest text parsing (pure functions over TOML source; no overlay needed).
@@ -556,13 +572,14 @@ class Overlay:
 
     def read_manifest(self) -> "dict[str, object]":
         """Parse `overlay.toml`, returning name / description / routing / rules /
-        requires / priority.
+        requires / priority / setup_timeout (seconds, ``0`` = none; ``None``
+        when the manifest does not set it).
 
         A missing or unreadable manifest yields empty contributions -- an overlay
         is allowed to be just a directory of files."""
         empty: "dict[str, object]" = {
             "name": self.name, "description": "", "routing": [], "rules": [],
-            "requires": [], "priority": DEFAULT_PRIORITY,
+            "requires": [], "priority": DEFAULT_PRIORITY, "setup_timeout": None,
         }
         path = self.manifest_path
         if not path.is_file():
@@ -595,6 +612,7 @@ class Overlay:
             "requires": requires,
             "priority": priority if isinstance(priority, int) and not isinstance(priority, bool)
             else DEFAULT_PRIORITY,
+            "setup_timeout": _setup_timeout(doc.get("setup_timeout"), self.name),
         }
 
     @property
@@ -642,10 +660,19 @@ class Overlay:
                 return candidate
         return None
 
+    def setup_timeout(self, override: "Optional[int]" = None) -> int:
+        """Seconds the setup script may run: ``override`` (``--setup-timeout``),
+        else the manifest's ``setup_timeout``, else
+        :data:`DEFAULT_SETUP_TIMEOUT`. ``0`` means no limit."""
+        if override is not None:
+            return max(0, override)
+        manifest = self.read_manifest()["setup_timeout"]
+        return DEFAULT_SETUP_TIMEOUT if manifest is None else manifest  # type: ignore[return-value]
+
     def run_setup(
         self, *, agents_dir: Path, dry_run: bool, logger,
         scope_root: "Optional[Path]" = None, scope_level: "Optional[str]" = None,
-        base_env: "Optional[dict[str, str]]" = None,
+        base_env: "Optional[dict[str, str]]" = None, timeout: "Optional[int]" = None,
     ) -> "Optional[int]":
         """Run the overlay's idempotent ``setup`` script if it ships one.
 
@@ -671,6 +698,9 @@ class Overlay:
           (``scope_level``, when given) and ``AGENTS_OVERLAY_DIR`` = its own
           installed dir.
         * the script runs under the interpreter running dotagents.
+        * it is stopped after ``timeout`` seconds -- else the manifest's
+          ``setup_timeout``, else :data:`DEFAULT_SETUP_TIMEOUT`; ``0`` means no
+          limit -- and a stopped script is a failure (exit 124).
 
         A non-zero exit is returned so the caller can raise a clear error --
         never a silent skip."""
@@ -694,7 +724,15 @@ class Overlay:
         cmd = [sys.executable, str(script)]
 
         try:
-            res = subprocess.run(cmd, cwd=str(self.path), env=env)
+            res = subprocess.run(cmd, cwd=str(self.path), env=env,
+                                 timeout=self.setup_timeout(timeout) or None)
+        except subprocess.TimeoutExpired:
+            logger.error(
+                "setup for %s did not finish in %ds and was stopped (raise it with "
+                "setup_timeout in overlay.toml or --setup-timeout; 0 = no limit)",
+                self.name, self.setup_timeout(timeout),
+            )
+            return 124
         except OSError as exc:
             logger.error("setup for %s failed to start: %s", self.name, exc)
             return 1

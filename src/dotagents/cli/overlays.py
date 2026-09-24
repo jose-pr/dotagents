@@ -158,7 +158,8 @@ def _remove_tree(path: Path) -> None:
         shutil.rmtree(str(path), onerror=_retry)
 
 
-def _run_setup(scope, dest_dir: Path, name: str, *, no_setup, dry_run, logger, source_dir=None) -> int:
+def _run_setup(scope, dest_dir: Path, name: str, *, no_setup, dry_run, logger, source_dir=None,
+               timeout: "Optional[int]" = None) -> int:
     """Run an installed overlay's `setup` script, honoring `--no-setup`.
 
     The script sees the scope's assembled env (:func:`_session_env`: overlay
@@ -179,7 +180,7 @@ def _run_setup(scope, dest_dir: Path, name: str, *, no_setup, dry_run, logger, s
     rc = overlay.run_setup(
         agents_dir=scope.user_root, scope_root=scope.agents_root, scope_level=scope.level,
         dry_run=dry_run, logger=logger,
-        base_env=None if dry_run else _session_env(scope, logger),
+        base_env=None if dry_run else _session_env(scope, logger), timeout=timeout,
     )
     return rc or 0
 
@@ -278,7 +279,7 @@ def _log_install(logger, verb: str, name: str, result, dry_run: bool) -> None:
 
 
 def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: bool,
-                 dry_run: bool, logger) -> "list[str]":
+                 dry_run: bool, logger, setup_timeout: "Optional[int]" = None) -> "list[str]":
     """Install (or re-install) overlay ``name`` from ``src`` into the scope,
     publish its skills and run its setup. A FRESH install is copied into a
     staging dir that discovery ignores and moved into place whole, and is
@@ -325,7 +326,7 @@ def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: b
         if published:
             logger.info("published %d skill(s) from %s", published, name)
     rc = _run_setup(scope, dest, name, no_setup=no_setup, dry_run=dry_run,
-                    logger=logger, source_dir=src)
+                    logger=logger, source_dir=src, timeout=setup_timeout)
     if rc:
         if fresh and not dry_run:
             owned = _skills.owned_overlay_skills(dest, scope.shared_skills_dir)
@@ -429,6 +430,10 @@ class OverlayAdd(_RepoArgs):
     "Skip running an overlay's idempotent `setup` script after install."
     ("--no-setup",)
 
+    setup_timeout: Optional[int] = None
+    "Seconds a setup script may run (default: its manifest's setup_timeout, else 300; 0 = no limit)."
+    ("--setup-timeout",)
+
     no_requires: bool = False
     "Do not install the overlays each manifest's `requires` names."
     ("--no-requires",)
@@ -468,7 +473,7 @@ class OverlayAdd(_RepoArgs):
                 src, origin = located[name]
                 skills += _install_one(
                     scope, name, src, origin, copy=self.copy, no_setup=self.no_setup,
-                    dry_run=self.dry_run, logger=self._logger_,
+                    dry_run=self.dry_run, logger=self._logger_, setup_timeout=self.setup_timeout,
                 )
         finally:
             # Recompose the whole managed block from the pristine base over ALL
@@ -821,6 +826,10 @@ class OverlaySync(_RepoArgs):
     "Skip running each overlay's idempotent `setup` script after sync."
     ("--no-setup",)
 
+    setup_timeout: Optional[int] = None
+    "Seconds a setup script may run (default: its manifest's setup_timeout, else 300; 0 = no limit)."
+    ("--setup-timeout",)
+
     dry_run: bool = False
     "Show what would happen without touching anything."
     ("--dry-run",)
@@ -924,7 +933,7 @@ class OverlaySync(_RepoArgs):
                     )
                 rc = _run_setup(scope, dest_dir, name, no_setup=self.no_setup,
                                 dry_run=self.dry_run, logger=self._logger_,
-                                source_dir=overlay_src)
+                                source_dir=overlay_src, timeout=self.setup_timeout)
                 if rc:
                     self._logger_.error("setup for overlay %s failed (exit %d)", name, rc)
                     failures.append(name)
@@ -951,7 +960,7 @@ class OverlaySync(_RepoArgs):
                         continue
                     skills += _install_one(
                         scope, dep, src, origin, copy=self.copy, no_setup=self.no_setup,
-                        dry_run=self.dry_run, logger=self._logger_,
+                        dry_run=self.dry_run, logger=self._logger_, setup_timeout=self.setup_timeout,
                     )
         finally:
             # Recompose over ALL installed overlays in (priority, name) order
