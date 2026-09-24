@@ -144,7 +144,7 @@ not at all.
 
 Something special for some URLs (a login dance, a signed header, a token
 refresh, a stub), declared in the environment so an overlay's `env` file or a
-project's `local.env` can carry it, and matched on **the URL you ask for** —
+project's `.agents/local.env` can carry it, and matched on **the URL you ask for** —
 the origin's, never the proxy's or a prefix gateway's rewrite:
 
     NET_HOOKS_<KEY>=<regex>                 re.search against the requested URL
