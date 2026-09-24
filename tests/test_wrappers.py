@@ -61,7 +61,7 @@ def test_relative_resolves_from_the_wrapper_dir(tmp_path):
 
     sh = (scope / "bin" / "dotagents").read_text(encoding="utf-8")
     cmd = (scope / "bin" / "dotagents.cmd").read_text(encoding="utf-8")
-    assert '$(dirname "$0")' in sh
+    assert 'readlink -f "$0"' in sh and '"$d/' in sh  # symlink-safe
     assert "%~dp0" in cmd
     assert str(tmp_path) not in sh, "relative form must not embed the absolute path"
 

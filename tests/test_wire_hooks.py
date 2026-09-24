@@ -105,28 +105,26 @@ def test_session_start_persists_env_via_claude_env_file(tmp_path):
     ClaudeAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
     cmd = _commands(_hooks_of_settings(root)["SessionStart"])[0]
-    assert "dotagents env --diff --format export" in cmd
-    assert "dotagents context" in cmd
+    assert '"$d" env --diff --format export' in cmd
+    assert '"$d" context' in cmd
 
 
-def test_hook_prefixes_scope_bin_on_path():
+def test_hook_finds_dotagents_by_path_not_by_splicing_path():
     """The hook must find `dotagents` without a global install.
 
-    `init` populates `<scope>/bin/`; prefixing it here is what makes the hook
-    self-sufficient. Without it the hook is one `command not found` from silently
-    delivering nothing -- which is exactly what happened on the dev box.
+    `init` populates `<scope>/bin/`; the hook runs the project's wrapper, else
+    the store's, else whatever `dotagents` is on PATH. It invokes it by path:
+    splicing both bins onto PATH made `env --diff` see them as a change and
+    persist them into the session, so a later `cd` kept the first project's
+    bin ahead of everything.
     """
-    store_bin = "${AGENTS_HOME:-$HOME/.agents}/bin"
+    project = '"$PWD/.agents/bin/dotagents"'
+    store = '"${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"'
     for cmd in (ClaudeAgent.SESSION_START_COMMAND,):
-        assert ".agents/bin" in cmd
-        assert store_bin in cmd, "the store is $AGENTS_HOME when set, ~/.agents otherwise"
-        assert "$PATH" in cmd, "must PREPEND, not replace, the inherited PATH"
-        assert cmd.index(".agents/bin") < cmd.index(store_bin), (
-            "project scope should win over the user store"
-        )
-        # Absolute: `dotagents env` re-emits this PATH into the session, where a
-        # relative `.agents/bin` resolved against every later cwd.
-        assert '"$PWD/.agents/bin:' in cmd and 'PATH=".agents/bin' not in cmd
+        assert project in cmd and store in cmd
+        assert cmd.index(project) < cmd.index(store), "project scope wins over the user store"
+        assert "d=dotagents;" in cmd, "falls back to a dotagents on PATH"
+        assert "PATH=" not in cmd
 
 
 def test_env_hook_appends_and_is_guarded():
@@ -139,7 +137,7 @@ def test_env_hook_appends_and_is_guarded():
     assert '>> "$CLAUDE_ENV_FILE"' in cmd, "must append, never truncate"
     assert ">>" in cmd and not _has_truncating_redirect(cmd)
     assert '[ -n "$CLAUDE_ENV_FILE" ]' in cmd, "must guard against an unset var"
-    assert cmd.index("dotagents env") < cmd.index("dotagents context"), (
+    assert cmd.index('"$d" env') < cmd.index('"$d" context'), (
         "env must be written before context runs"
     )
 
@@ -299,12 +297,17 @@ class TestDualShellSessionHooks:
         """Both handlers fire on every session (hooks.md); on a Windows box that
         has BOTH Git Bash and PowerShell, both succeeded and the same context
         was injected twice (two identical 100 KB payloads, measured). The
-        PowerShell variant selects itself: `bash` absent, or it does nothing."""
+        PowerShell variant selects itself: no Git Bash, or it does nothing.
+        "No Git Bash" is decided the way Claude decides which shell runs hooks
+        (CLAUDE_CODE_GIT_BASH_PATH, the Git install dirs, git's own tree) --
+        not `Get-Command bash`, which finds the WSL launcher stub."""
         for cmd in (
             ClaudeAgent.SESSION_START_COMMAND_POWERSHELL,
             ClaudeAgent.CWD_CHANGED_COMMAND_POWERSHELL,
         ):
-            assert cmd.startswith("if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {")
+            assert cmd.startswith(ClaudeAgent._PS_NO_BASH)
+            assert "Get-Command bash" not in cmd
+            assert "CLAUDE_CODE_GIT_BASH_PATH" in cmd
             assert cmd.rstrip().endswith("}")
 
     def test_cwd_changed_repins_the_project_root(self):
@@ -608,14 +611,13 @@ class TestCodexPreToolUse:
         cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
         assert cmd.endswith("echo hi")
         assert "AGENTS_RUNTIME_SET" in cmd
-        assert "dotagents env --diff --format export" in cmd
+        assert '"$d" env --diff --format export' in cmd
 
     @pytest.mark.skipif(BASH is None, reason="needs a working bash")
     def test_rewritten_command_actually_runs_in_bash(self, tmp_path):
-        """Execute the prefix with a stub `dotagents` on the project bin: the
-        exported var must land and PATH must carry NO literal quote characters
-        (the old `\\"` inside `$(...)` were literal quotes, so PATH became
-        `".agents/bin:...:<last>"` and the project bin was never found)."""
+        """Execute the prefix with a stub `dotagents` in the project bin: the
+        project's wrapper is the one that runs, its export lands, and the
+        prefix leaves PATH as it found it."""
         import subprocess
         import sys
 
@@ -631,7 +633,7 @@ class TestCodexPreToolUse:
         cmd = json.loads(proc.stdout)["hookSpecificOutput"]["updatedInput"]["command"]
 
         # The stub stands in for `dotagents env --diff`: it reports the PATH it
-        # was spawned with (the prefix's own PATH= assignment) as an export.
+        # was spawned with as an export.
         project = tmp_path / "proj"
         stub_bin = project / ".agents" / "bin"
         stub_bin.mkdir(parents=True)
@@ -648,8 +650,7 @@ class TestCodexPreToolUse:
         value, path = run.stdout.split(":", 1)
         assert value == "yes", run.stdout + run.stderr
         assert '"' not in path, "PATH must not carry literal quote characters"
-        first = path.split(":", 1)[0]
-        assert first.startswith("/") and first.endswith("/.agents/bin"), path
+        assert tmp_path.name not in path, "the prefix does not splice the project bin onto PATH"
 
     def test_script_guard_skips_when_already_set(self, tmp_path):
         import subprocess

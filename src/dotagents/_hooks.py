@@ -29,6 +29,36 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+#: Our hooks' statusMessage is `STATUS_PREFIX + label`, so a foreign hook that
+#: happens to use the same generic label ("Loading agent context") is never
+#: taken for ours. The bare label an earlier release wrote is still ours when
+#: the hook's command runs dotagents, so those hooks converge to the new one.
+STATUS_PREFIX = "dotagents: "
+
+#: The hook keys dotagents manages; any other key a user added (a `timeout`,
+#: say) survives a refresh.
+_MANAGED_KEYS = frozenset({"type", "command", "shell", "commandWindows", "statusMessage"})
+
+
+def _labels(status_message: "Optional[str]") -> "tuple[str, ...]":
+    if not status_message:
+        return ()
+    bare = status_message[len(STATUS_PREFIX):] if status_message.startswith(STATUS_PREFIX) else status_message
+    return (STATUS_PREFIX + bare, bare)
+
+
+def _labelled_ours(hook: Any, status_message: "Optional[str]") -> bool:
+    """``hook`` carries our label: the namespaced one, or the bare one on a
+    command that runs dotagents (what an earlier release wrote)."""
+    if not isinstance(hook, dict) or not status_message:
+        return False
+    labels = _labels(status_message)
+    status = hook.get("statusMessage")
+    if status == labels[0]:
+        return True
+    return status == labels[1] and "dotagents" in str(hook.get("command", ""))
+
+
 def build_hook_entry(
     command: str,
     *,
@@ -53,7 +83,7 @@ def build_hook_entry(
     if command_windows:
         hook["commandWindows"] = command_windows
     if status_message:
-        hook["statusMessage"] = status_message
+        hook["statusMessage"] = _labels(status_message)[0]
     entry: "dict[str, Any]" = {}
     if matcher is not None:
         entry["matcher"] = matcher
@@ -72,10 +102,7 @@ def _has_status(entry: Any, status_message: str) -> bool:
     nested = entry.get("hooks")
     if not isinstance(nested, list):
         return False
-    return any(
-        isinstance(h, dict) and h.get("statusMessage") == status_message
-        for h in nested
-    )
+    return any(_labelled_ours(h, status_message) for h in nested)
 
 
 def _is_ours(entry: Any, command: str) -> bool:
@@ -113,12 +140,17 @@ def merge_hook(
       verbatim in that entry, ours moves to its own entry.
     * foreign entries -> preserved verbatim, untouched, in their original order.
     * malformed entries (bare strings, dicts without a ``hooks`` list, non-dicts)
-      -> dropped, flagged changed. Never raises: a user's hand-edited settings
-      file must not make ``init`` explode.
+      -> kept verbatim: they are the user's, and deleting them silently lost
+      whatever they were meant to be. Never raises: a user's hand-edited
+      settings file must not make ``init`` explode.
 
-    ``status_message`` doubles as our hook's IDENTITY: a hook carrying the same
-    status message is ours and gets replaced, so revising the command text
-    never leaves the previous version running beside the new one.
+    ``status_message`` doubles as our hook's IDENTITY, written namespaced
+    (:data:`STATUS_PREFIX`); a hook carrying that status message, or the bare
+    label an earlier release wrote on a command that runs dotagents, is ours
+    and gets refreshed, so revising the
+    command text never leaves the previous version running beside the new one.
+    A refresh rewrites only the keys dotagents manages: a key the user added to
+    our hook or its entry stays.
     """
     ours = build_hook_entry(
         command, matcher=matcher, status_message=status_message, shell=shell,
@@ -130,9 +162,18 @@ def merge_hook(
 
     def _mine(hook: Any) -> bool:
         return isinstance(hook, dict) and (
-            hook.get("command") == command
-            or bool(status_message and hook.get("statusMessage") == status_message)
+            hook.get("command") == command or _labelled_ours(hook, status_message)
         )
+
+    def _refreshed(entry: dict) -> dict:
+        old = next(h for h in entry["hooks"] if _mine(h))
+        hook = {k: v for k, v in old.items() if k not in _MANAGED_KEYS}
+        hook.update(ours["hooks"][0])
+        new = {k: v for k, v in entry.items() if k not in ("matcher", "hooks")}
+        if "matcher" in ours:
+            new["matcher"] = ours["matcher"]
+        new["hooks"] = [hook]
+        return new
 
     normalized: list = []
     changed = False
@@ -140,7 +181,7 @@ def merge_hook(
 
     for entry in existing:
         if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
-            changed = True  # malformed -- drop it
+            normalized.append(entry)  # malformed, but the user's: keep it
             continue
         inner = entry["hooks"]
         if not any(_mine(h) for h in inner):
@@ -164,10 +205,9 @@ def merge_hook(
         # would write, otherwise REPLACE it -- a changed `shell` / `matcher` /
         # `commandWindows` / status must land even when the command text is
         # unchanged.
-        if entry == ours:
-            normalized.append(entry)
-        else:
-            normalized.append(ours)
+        refreshed = _refreshed(entry)
+        normalized.append(refreshed)
+        if refreshed != entry:
             changed = True
 
     if not seen_ours:
@@ -191,10 +231,7 @@ def remove_hook(existing: Any, status_message: str) -> "tuple[list, bool]":
             kept_entries.append(entry)
             continue
         changed = True
-        remaining = [
-            h for h in entry["hooks"]
-            if not (isinstance(h, dict) and h.get("statusMessage") == status_message)
-        ]
+        remaining = [h for h in entry["hooks"] if not _labelled_ours(h, status_message)]
         if remaining:
             kept_entries.append(dict(entry, hooks=remaining))
     return kept_entries, changed

@@ -29,7 +29,8 @@ def test_build_entry_omits_absent_optionals():
 def test_build_entry_includes_matcher_and_status():
     entry = _hooks.build_hook_entry(CMD, matcher="startup", status_message="Loading")
     assert entry["matcher"] == "startup"
-    assert entry["hooks"][0]["statusMessage"] == "Loading"
+    # Namespaced, so a foreign hook with the same generic label is never ours.
+    assert entry["hooks"][0]["statusMessage"] == "dotagents: Loading"
 
 
 def test_absent_creates_entry():
@@ -75,12 +76,32 @@ def test_duplicates_of_our_command_collapse():
     ],
     ids=["string", "dict-without-hooks", "hooks-not-list", "none", "int"],
 )
-def test_malformed_entries_are_dropped_never_raise(malformed):
-    """A hand-edited settings file must not make `init` explode."""
+def test_malformed_entries_are_kept_never_raise(malformed):
+    """A hand-edited settings file must not make `init` explode -- and what
+    the user wrote there, well-formed or not, is theirs: kept, not deleted."""
     merged, changed = _hooks.merge_hook(malformed, CMD)
     assert changed is True
-    assert len(merged) == 1  # only ours survives
-    assert _hooks._is_ours(merged[0], CMD)
+    assert merged[:-1] == malformed
+    assert _hooks._is_ours(merged[-1], CMD)
+
+
+def test_a_foreign_hook_with_our_bare_label_is_left_alone():
+    foreign = {"hooks": [{"type": "command", "command": "their-own", "statusMessage": "Loading"}]}
+    merged, _ = _hooks.merge_hook([foreign], CMD, status_message="Loading")
+    assert merged[0] == foreign and _hooks._is_ours(merged[1], CMD)
+    kept, changed = _hooks.remove_hook([foreign], status_message="Loading")
+    assert kept == [foreign] and not changed
+
+
+def test_an_earlier_release_hook_converges_and_user_keys_survive():
+    legacy = {"hooks": [{"type": "command", "command": "dotagents context", "statusMessage": "Loading"}]}
+    merged, changed = _hooks.merge_hook([legacy], CMD, status_message="Loading")
+    assert changed and len(merged) == 1 and merged[0]["hooks"][0]["statusMessage"] == "dotagents: Loading"
+    ours = {"hooks": [{"type": "command", "command": "old", "statusMessage": "dotagents: Loading",
+                       "timeout": 30}]}
+    merged, changed = _hooks.merge_hook([ours], CMD, status_message="Loading")
+    assert changed and merged[0]["hooks"][0]["timeout"] == 30
+    assert merged[0]["hooks"][0]["command"] == CMD
 
 
 def test_non_list_existing_is_replaced():
@@ -144,13 +165,13 @@ def test_foreign_sibling_in_our_matcher_object_survives():
     status-message match used to drop the whole object, user's hook included."""
     mixed = {"hooks": [
         {"type": "command", "command": "echo mine"},
-        {"type": "command", "command": "OLD", "statusMessage": "Loading agent context"},
+        {"type": "command", "command": "OLD dotagents context", "statusMessage": "Loading agent context"},
     ]}
     merged, changed = _hooks.merge_hook([mixed], "NEW", status_message="Loading agent context")
     assert changed is True
     commands = [h["command"] for e in merged for h in e["hooks"]]
     assert "echo mine" in commands
-    assert "NEW" in commands and "OLD" not in commands
+    assert "NEW" in commands and "OLD dotagents context" not in commands
     # Idempotent from here on.
     again, changed_again = _hooks.merge_hook(merged, "NEW", status_message="Loading agent context")
     assert changed_again is False and again == merged

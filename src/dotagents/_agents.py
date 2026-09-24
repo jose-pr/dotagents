@@ -392,13 +392,23 @@ class ClaudeAgent(Agent):
     # session, and a relative `.agents/bin` there resolved against whatever
     # directory a later command ran in. `$PWD`, not `$CLAUDE_PROJECT_DIR`: that
     # is a `C:\...` path on Windows, and its colon would split a bash PATH.
-    _HOOK_PATH = 'PATH="$PWD/.agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH"'
+    #
+    # The wrapper is invoked BY PATH (project's, else the store's, else
+    # `dotagents` on PATH), never by splicing its dir into PATH: a Windows
+    # `C:/...` AGENTS_HOME split that PATH at the drive colon and the store's
+    # bin never got on it (a .pyz install then had no `dotagents` at all).
+    _HOOK_DOTAGENTS = (
+        'd="$PWD/.agents/bin/dotagents"; '
+        '[ -f "$d" ] || d="${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"; '
+        '[ -f "$d" ] || d=dotagents; '
+    )
     SESSION_START_COMMAND = (
-        'if [ -n "$CLAUDE_ENV_FILE" ]; then '
-        '%(path)s dotagents env --diff --format export >> "$CLAUDE_ENV_FILE"; '
+        _HOOK_DOTAGENTS
+        + 'if [ -n "$CLAUDE_ENV_FILE" ]; then '
+        '"$d" env --diff --format export >> "$CLAUDE_ENV_FILE"; '
         "fi; "
-        "%(path)s dotagents context"
-    ) % {"path": _HOOK_PATH}
+        '"$d" context'
+    )
     # On `cd` into another project: re-pin AGENTS_PROJECT_ROOT for the rest of
     # the session (the SessionStart pin is only-if-unset), then show that
     # project's root AGENTS.md. `pwd -W` is Git Bash's Windows-native form
@@ -419,8 +429,8 @@ class ClaudeAgent(Agent):
     # commands above would be fed to PowerShell and fail to parse. Hence a
     # SECOND handler per event with explicit `shell: "powershell"` and
     # PowerShell-native syntax. Every handler in a matched group runs, so the
-    # PowerShell variant SELECTS ITSELF: it runs only when `bash` is not on
-    # PATH, or a box with both would inject the context twice.
+    # PowerShell variant SELECTS ITSELF: it runs only when Claude Code would
+    # find no Git Bash, or a box with both would inject the context twice.
     #
     # The PowerShell variant is CONTEXT-ONLY: `$CLAUDE_ENV_FILE` only affects
     # subsequent Bash commands, whichever shell wrote it, and PowerShell tool
@@ -430,8 +440,19 @@ class ClaudeAgent(Agent):
     #
     # The store is `$env:AGENTS_HOME` when set, `$HOME\.agents` otherwise, and
     # the project's own `.agents\bin` wins when present -- the same resolution
-    # as the bash variant's PATH prefix.
-    _PS_NO_BASH = r'if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { '
+    # as the bash variant's.
+    # The gate mirrors Claude Code's own Git Bash detection (it never looks for
+    # `bash` on PATH): $CLAUDE_CODE_GIT_BASH_PATH, the Program Files installs,
+    # or `git` on PATH with `..\..\bin\bash.exe` beside it. `Get-Command bash`
+    # missed a default Git install (only `Git\cmd` on PATH) -- both handlers ran
+    # -- and found the WSL `bash.exe` stub on a box with no Git Bash.
+    _PS_NO_BASH = (
+        r'$gb = [bool]($env:CLAUDE_CODE_GIT_BASH_PATH -and (Test-Path $env:CLAUDE_CODE_GIT_BASH_PATH)); '
+        r'if (-not $gb) { $gb = (Test-Path "$env:ProgramFiles\Git\bin\bash.exe") -or (Test-Path "${env:ProgramFiles(x86)}\Git\bin\bash.exe") }; '
+        r'if (-not $gb) { $g = (Get-Command git -ErrorAction SilentlyContinue).Source; '
+        r'if ($g) { $gb = Test-Path (Join-Path (Split-Path (Split-Path $g)) "bin\bash.exe") } }; '
+        r'if (-not $gb) { '
+    )
     _PS_STORE = r'$(if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" })'
     # Falls back to `dotagents` on PATH (a pip install with an older store has
     # no `<store>\bin` wrapper) and does nothing when there is none at all.
@@ -466,6 +487,12 @@ class ClaudeAgent(Agent):
     # so the loader runs on EVERY call; the change set is all it needs. The
     # store is `$env:AGENTS_HOME` when set.
     #
+    # The loader CAPTURES `env`'s output (`| Invoke-Expression`), and PowerShell
+    # decodes captured native output with [Console]::OutputEncoding -- the OEM
+    # code page -- so a non-ASCII value arrived as mojibake; it switches to
+    # UTF-8 around the call. (Uncaptured output, as in the SessionStart
+    # handler, passes through as bytes and needs nothing.)
+    #
     # Every literal `\` below MUST be in a raw string (or doubled): a bare `\b`
     # in a normal Python string literal silently becomes a backspace (\x08),
     # corrupting the emitted `\.agents\bin\...` path invisibly.
@@ -473,7 +500,7 @@ class ClaudeAgent(Agent):
         r'$h = [Console]::In.ReadToEnd() | ConvertFrom-Json; '
         r'if ($h.tool_name -eq "PowerShell" -and -not $env:AGENTS_RUNTIME_SET -and $h.tool_input.command) { '
         r'$p = '
-        r"""'if (-not $env:AGENTS_RUNTIME_SET) { $env:AGENTS_RUNTIME_SET = "1"; $s = if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" }; $c = "$s\bin\dotagents.cmd"; if (-not (Test-Path $c)) { $c = (Get-Command dotagents -ErrorAction SilentlyContinue).Source }; if ($c) { & $c env --diff --format powershell 2>$null | Invoke-Expression } }; '; """
+        r"""'if (-not $env:AGENTS_RUNTIME_SET) { $env:AGENTS_RUNTIME_SET = "1"; $s = if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" }; $c = "$s\bin\dotagents.cmd"; if (-not (Test-Path $c)) { $c = (Get-Command dotagents -ErrorAction SilentlyContinue).Source }; if ($c) { $oe = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); try { & $c env --diff --format powershell 2>$null | Invoke-Expression } finally { [Console]::OutputEncoding = $oe } } }; '; """
         r'$u = $h.tool_input.PSObject.Copy(); '
         r'$u.command = $p + $h.tool_input.command; '
         r'@{hookSpecificOutput=@{hookEventName="PreToolUse";permissionDecision="allow";updatedInput=$u}} | ConvertTo-Json -Depth 10 -Compress '
@@ -638,9 +665,12 @@ class ClaudeAgent(Agent):
         """
         from dotagents import _hooks
 
+        # `matcher: "PowerShell"`: without it the hook spawned powershell.exe
+        # before EVERY tool call (Read, Edit, Grep, ...) just to exit.
         pretooluse, pt_hook_changed = _hooks.merge_hook(
             hooks.get("PreToolUse"),
             self.PRETOOLUSE_POWERSHELL_COMMAND,
+            matcher="PowerShell",
             status_message=self.PRETOOLUSE_STATUS,
             shell="powershell",
         )

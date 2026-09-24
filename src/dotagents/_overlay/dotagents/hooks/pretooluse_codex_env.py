@@ -68,16 +68,16 @@ def main() -> int:
     if not isinstance(original_command, str) or not original_command:
         return 0
 
-    # PATH prefix mirrors SESSION_START_COMMAND's own -- `<scope>/bin` may not
-    # be on PATH yet (that is part of what this loads), so `dotagents` is
-    # findable without a global install or a PATH edit by the user; the store
-    # is `$AGENTS_HOME` when set. Inside `"$( ... )"` the command substitution
-    # is parsed afresh, so the inner quotes must be plain `"`: a `\"` there is
-    # a LITERAL quote character that ends up inside PATH.
+    # Finds `dotagents` the way SESSION_START_COMMAND does: the project's
+    # wrapper, else the store's (`$AGENTS_HOME` when set), else PATH -- by
+    # path, never by splicing the bins onto PATH, which `env --diff` would
+    # then report as a change. Inside `"$( ... )"` the command substitution is
+    # parsed afresh, so the inner quotes are plain `"`.
     prefix = (
         'if [ -z "$AGENTS_RUNTIME_SET" ]; then export AGENTS_RUNTIME_SET=1; '
-        'eval "$(PATH="$PWD/.agents/bin:${AGENTS_HOME:-$HOME/.agents}/bin:$PATH" '
-        'dotagents env --diff --format export 2>/dev/null)"; fi; '
+        'd="$PWD/.agents/bin/dotagents"; [ -f "$d" ] || d="${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"; '
+        '[ -f "$d" ] || d=dotagents; '
+        'eval "$("$d" env --diff --format export 2>/dev/null)"; fi; '
     )
 
     updated_input = dict(tool_input)
