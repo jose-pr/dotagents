@@ -113,13 +113,13 @@ def test_reinit_keeps_the_installed_overlays_rules(tmp_path):
     assert (store / "AGENTS.md").read_text(encoding="utf-8") == after_add
 
 
-def test_routing_keeps_the_named_agent_line(tmp_path):
-    # The placeholder regex used to swallow the line after it.
+def test_routing_drops_only_the_placeholder_line(tmp_path):
+    # The placeholder regex used to swallow a neighbouring line.
     store = tmp_path / "user"
     _apply_base(BASE_ROOT, store, force=False, dry_run=False, logger=_log(), agents=["codex"])
     _add_tiny(store, tmp_path)
     text = (store / "AGENTS.md").read_text(encoding="utf-8")
-    assert "A named agent with its own" in text
+    assert "Read the matching file BEFORE such a task" in text
     assert "Nothing ships here by default" not in text
 
 
