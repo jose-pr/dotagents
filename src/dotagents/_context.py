@@ -216,6 +216,21 @@ def _inline_referenced_files(
 _BLOCK_SCALAR = re.compile(r'^[>|][+-]?[0-9]?[+-]?$')
 
 
+def _strip_frontmatter(text: str) -> str:
+    """``text`` without a leading ``---`` frontmatter block (closed by ``---``
+    or ``...``). An overlay's manifest is its ``overlay.toml``; metadata an
+    older ``CONTEXT.md`` still carries (``priority:``, ``scope:``,
+    ``dependencies:``) is not context, so it is never emitted. An unclosed
+    block is left alone -- it is not frontmatter."""
+    lines = text.lstrip("\ufeff").splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return text
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() in ("---", "..."):
+            return "".join(lines[i + 1:])
+    return text
+
+
 def _frontmatter(text: str) -> "dict[str, str]":
     """The top-level string keys of a leading ``---`` frontmatter block.
 
@@ -367,6 +382,8 @@ def _assemble(
             content = path.read_text(encoding="utf-8")
         except OSError:
             continue
+        if path.name == "CONTEXT.md":
+            content = _strip_frontmatter(content)
         source_paths.append(str(path))
         emitted.append(path)
         ref_sources.append((level, content, _source_search_roots(scope, level, path, root)))
