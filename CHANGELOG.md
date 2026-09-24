@@ -33,6 +33,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   until then every `findings` subcommand reads it with `--dir` (`dotagents
   findings list --dir <store>/dotagents/findings`).
 
+### Fixed
+
+- Re-running `init` on a store with overlays installed keeps their rules and
+  routing in `AGENTS.md`'s managed block; it used to rewrite the block from the
+  bare base until the next `overlays sync`.
+- `init --force` keeps the original of every file it replaces. Adapters that
+  write the same file in one run share one `install_backup/<timestamp>/`, a
+  backup is never overwritten, and a file outside the store is backed up under
+  `external/` at its own path instead of over a same-named one. pi's own
+  `AGENTS.md` is block-merged even under `--force`, like Claude's include.
+- Adding an overlay's routing no longer deletes the base block's line about a
+  named agent's `~/.agents/<agent>.md`.
+- The managed-block merge ignores marker lines inside fenced code (an example
+  of the markers in your notes no longer pairs with the real block), and finds a
+  block behind a UTF-8 byte-order mark instead of adding a second one.
+- A checkout's own top-level `dotagents/cmds/` is no longer a command source;
+  only the stores' `dotagents/cmds/` (and overlays' `cmds/`) are.
+- Codex's SessionStart hook runs `dotagents context --agents codex`; without the
+  flag it assembled Claude's context and gave Codex nothing. Re-run `dotagents
+  init --agents codex` to update the hook.
+- `tools/cloud-setup.sh` installs `dotagents-cli` by default; the `dotagents`
+  name it used is not this project on PyPI.
+
 ## [0.5.1] - 2026-09-12
 
 ### Added
