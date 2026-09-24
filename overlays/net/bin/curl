@@ -10,6 +10,20 @@ case $0 in
     */*) here=${0%/*} ;;
     *) here=. ;;
 esac
+# Git Bash (MSYS2) hands a Windows Python a PATH-like variable only after
+# converting a POSIX list (`/c/x:/c/y`); a drive path (`C:/x`, from a caller
+# that ran us by a Windows path) would stay unconverted and split at its colon.
+if [ -n "${MSYSTEM:-}" ]; then
+    case $here in
+        [A-Za-z]:/*) here="/${here%%:*}${here#?:}" ;;
+    esac
+fi
+# The overlay's lib/, then every overlay's ($AGENTS_PYTHONPATH), ahead of the
+# caller's PYTHONPATH: curl.py and anything it starts (a URL hook) import them
+# even outside a `dotagents env` session. Empty parts are left out -- an empty
+# PYTHONPATH entry means the current directory.
+PYTHONPATH="$here/../lib${AGENTS_PYTHONPATH:+:$AGENTS_PYTHONPATH}${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
 if [ -n "${AGENTS_PYTHON:-}" ] && [ -x "$AGENTS_PYTHON" ]; then
     exec "$AGENTS_PYTHON" "$here/curl.py" "$@"
 fi
