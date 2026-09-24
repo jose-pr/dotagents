@@ -66,8 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   gain a `path` key.
 - The base rule for a config miss ends at the findings queue: triage closes a
   finding with `dotagents findings done -g <name> -r "<resolution>"`, and the
-  resolution is the record. It no longer points at `dotagents/DECISIONS.md`.
-  An existing store picks the new wording up when its block is next rebuilt:
+  resolution is the record. It no longer points at `dotagents/DECISIONS.md`,
+  and it says where a finding that reports a fact rather than calling for a
+  rule goes: a `kb/` file routed from "Load on demand". An existing store picks the new wording up when its block is next rebuilt:
   `dotagents overlays sync` in a store with overlays installed, `dotagents
   init` in one without.
 - Existing stores keep the files an earlier `init` wrote. Delete
