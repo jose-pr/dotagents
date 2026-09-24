@@ -45,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   still resolve. A project's `.agents/` itself stays trusted, like a
   harness's own `.claude/settings.json`; the install guide now describes what
   runs from where.
+- A project `init` writes a minimal block into `<project>/.agents/AGENTS.md`
+  (a Startup line and empty sections for the project's overlays) instead of a
+  copy of the user store's rules, which every session then read twice. Existing
+  project blocks switch on the next `init` or `overlays add` / `remove` /
+  `sync` in that project. An `overlays add` into a store with no `AGENTS.md`
+  creates the block; it used to install the files and merge the routing nowhere.
 - On Windows, the Claude Code PowerShell-tool env loader is opt-in: `init
   --powershell-env-hook`. It returns `permissionDecision: "allow"`, the only
   documented way to rewrite a command without prompting on every call, so it

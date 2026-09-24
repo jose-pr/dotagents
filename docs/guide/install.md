@@ -15,7 +15,9 @@ is a marker-delimited **managed block**, so re-running `init` never clobbers any
 you added around it.
 
 **Scope**: project by default (`<cwd>/.agents`), or the user store with `-g`/`--global`
-(`~/.agents`). `--dest` overrides explicitly. `--bin-dir` additionally writes a
+(`~/.agents`). A project store's block is a minimal one — a Startup line and empty
+"Always-on rules" / "Load on demand" sections for its overlays — because every session
+already reads the user store's rules. `--dest` overrides explicitly. `--bin-dir` additionally writes a
 `dotagents` wrapper command onto your PATH.
 
 ```bash
