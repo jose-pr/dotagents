@@ -213,13 +213,12 @@ def test_a_cmd_wrapper_runs_an_interpreter_under_a_non_ascii_path(tmp_path, monk
     name or, where there is none, code page 65001 around the call."""
     if not short_names:
         monkeypatch.setattr(_wrappers, "_cmd_safe", lambda p: p)
-    # A venv launcher runs from anywhere that has a pyvenv.cfg one level up.
-    venv = Path(sys.prefix)
+    # A real venv under the non-ASCII path, whatever runs the suite (a venv
+    # here, a plain hosted interpreter in CI): its Scripts/python.exe is the
+    # interpreter the wrapper names.
     home = tmp_path / "Jos\u00e9 \u00e7a"
-    (home / "Scripts").mkdir(parents=True)
-    shutil.copy(sys.executable, home / "Scripts" / Path(sys.executable).name)
-    shutil.copy(venv / "pyvenv.cfg", home / "pyvenv.cfg")
-    python = str(home / "Scripts" / Path(sys.executable).name)
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(home)], check=True)
+    python = str(home / "Scripts" / "python.exe")
     pyz = tmp_path / "dotagents.pyz"
     pyz.write_text('import sys; print("RAN", sys.argv[1:])\n', encoding="utf-8")
     _wrappers.write_wrappers(tmp_path / "bin", pyz, python=python)
