@@ -38,6 +38,21 @@ def test_not_wired_by_default_and_an_old_one_is_removed(tmp_path):
     assert not _pretooluse(root), "default: an earlier release's loader is removed"
 
 
+@pytest.mark.parametrize("opted_in", [False, True])
+def test_the_wired_line_names_pretooluse_only_when_it_was_wired(tmp_path, caplog, opted_in):
+    import logging
+
+    dest, root = tmp_path / "agents", tmp_path / "claude"
+    dest.mkdir()
+    agent = ClaudeAgent()
+    agent.powershell_env_hook = opted_in
+    with caplog.at_level(logging.INFO, logger="t"):
+        agent.wire_hooks(dest, dry_run=False, logger=logging.getLogger("t"), config_root=root)
+    wired = [r.getMessage() for r in caplog.records if r.getMessage().startswith("wired ")]
+    assert len(wired) == 1, wired
+    assert ("PreToolUse" in wired[0]) is opted_in, wired[0]
+
+
 def test_the_opted_in_loader_auto_approves_and_says_so():
     # Pinned so the auto-approve cannot change silently: the flag's help and
     # the docs state it.

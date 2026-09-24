@@ -724,7 +724,9 @@ class ClaudeAgent(Agent):
             return
 
         settings["hooks"] = hooks
-        wired = "SessionStart + CwdChanged" + (" + PreToolUse" if windows else "")
+        wired = "SessionStart + CwdChanged" + (
+            " + PreToolUse" if windows and self.powershell_env_hook else ""
+        )
         if dry_run:
             if logger:
                 logger.info("would wire %s hooks: %s", wired, settings_path)
