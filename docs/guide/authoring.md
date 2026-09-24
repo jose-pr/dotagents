@@ -62,6 +62,23 @@ matters.
 (unless the scope already has them), and `overlays remove` refuse to remove one while
 yours needs it.
 
+## Libraries and launchers
+
+Put importable Python in `lib/`. Every Python a session starts sees every overlay's
+`lib/` on `PYTHONPATH` (`dotagents env` puts them there, highest precedence first,
+and lists them in `$AGENTS_PYTHONPATH`), so a skill script or another overlay can
+`import` your module. So can your setup script and your command modules, which
+dotagents starts with the libs in place whatever shell it runs from. A `lib/` module
+comes before site-packages and the standard library: do not reuse a package name you
+do not mean to replace.
+
+A `bin/` launcher can also be run outside a `dotagents env` session (from cmd.exe or
+a PowerShell prompt, say), so it sets `PYTHONPATH` itself before starting Python:
+its own `lib/`, then `$AGENTS_PYTHONPATH`, then the caller's, leaving empty parts
+out (an empty entry means the current directory). The net overlay's `bin/curl` and
+`bin/curl.cmd` are the pattern: POSIX sh with no external commands, and a `.cmd`
+that uses `setlocal` so the caller's cmd session is not changed.
+
 ## Setup scripts
 
 Ship an idempotent `setup.py` at the overlay root to run install-time wiring
@@ -71,7 +88,8 @@ dotagents, so it works on every platform). See the contract in
 
 - idempotent, check-then-act;
 - cwd is your installed overlay dir;
-- the environment carries the user store (`AGENTS_HOME`), the store you are installed
+- the environment is the scope's assembled `dotagents env` (every overlay's `lib/` on
+  `PYTHONPATH`, `bin/` on `PATH`), plus the user store (`AGENTS_HOME`), the store you are installed
   into (`AGENTS_SCOPE_ROOT`, with `AGENTS_SCOPE` = `user` / `project`) and your own
   installed dir (`AGENTS_OVERLAY_DIR`) — never hardcode a home path;
 - a non-zero exit fails the install loudly; confirm any irreversible action yourself.

@@ -167,9 +167,8 @@ dotagents overlays sync -g                                                   # r
 ## What `dotagents env` wires for every overlay
 
 Nothing in an overlay has to set up its own paths. For every installed overlay,
-`dotagents env` prepends `bin/` to `PATH`, lists an existing `lib/` in
-`AGENTS_PYTHONPATH` (which it puts on the `PYTHONPATH` of the `env.py` scripts it runs,
-never on the session's), and exports **`$<NAME>_OVERLAY_ROOT`** — the overlay's
+`dotagents env` prepends `bin/` to `PATH` and an existing `lib/` to `PYTHONPATH`
+(listing the libs in `AGENTS_PYTHONPATH` too), and exports **`$<NAME>_OVERLAY_ROOT`** — the overlay's
 installed directory (`NAME` is the overlay's name upper-cased, `-` → `_`:
 `private-sync` → `PRIVATE_SYNC_OVERLAY_ROOT`).
 That variable is how overlay content refers to itself and to other overlays: a
@@ -214,7 +213,7 @@ An overlay may ship an **idempotent** `setup.py` at its root — the recommended
 OS-agnostic form: it runs under the same Python that runs dotagents, so it works on
 every platform. After `add` / `sync` copies the overlay
 in, dotagents runs the script automatically. Reserve it for real install-time work:
-`PATH`, `AGENTS_PYTHONPATH` and `$<NAME>_OVERLAY_ROOT` are `dotagents env`'s job
+`PATH`, `PYTHONPATH` and `$<NAME>_OVERLAY_ROOT` are `dotagents env`'s job
 (above), and an overlay's own env vars belong in its `env.py`, not in a script that
 writes one into the store — none of the example overlays ship a setup script any more.
 Presence of a script is the opt-in; skip it with `--no-setup`. The author contract:

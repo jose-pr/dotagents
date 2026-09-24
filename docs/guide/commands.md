@@ -312,12 +312,14 @@ form and drop names that are not shell identifiers.
    and every subprocess can call an overlay's helpers by name. The order holds even
    when the calling shell already had some of them, and empty or relative inherited
    entries are dropped.
-4. **`AGENTS_PYTHONPATH`** — every level's `lib/` that exists, highest precedence
-   first (`os.pathsep`-joined). `env` puts these on the `PYTHONPATH` of the `env.py`
-   scripts it runs, so they can `import` an overlay's `lib/` module, but never on the
-   session's `PYTHONPATH`, where an overlay module would shadow a same-named installed
-   or standard-library module in every Python the agent runs. Opt in where you want
-   them: `PYTHONPATH="$AGENTS_PYTHONPATH"`.
+4. **`PYTHONPATH`** — every level's `lib/` that exists goes to the front, highest
+   precedence first, so every Python the session starts — a skill script, an
+   overlay's `bin/` launcher, an `env.py` — can `import` any overlay's `lib/`
+   module, including another overlay's. The same list is published as
+   `AGENTS_PYTHONPATH` (`os.pathsep`-joined), which is how `env` knows which
+   `PYTHONPATH` entries are its own: after a `cd` into another project, the first
+   project's libs leave. A `lib/` module comes before site-packages and the
+   standard library, so it must not reuse a name it does not mean to replace.
 5. **The env files** — first every level's `pre.env.py` / `pre.env` (and the project's
    `pre.local.env`), then every level's `env.py` / `env` (and the project's
    `local.env`), each evaluated against everything before it. A project root's own
@@ -411,7 +413,7 @@ What happens, in order:
 
 1. **Environment** — the same assembly as `dotagents env` for this scope (identity
    vars, `AGENTS_HOME` / `AGENTS_PROJECT_ROOT` / `AGENTS_PYTHON`, every
-   `<NAME>_OVERLAY_ROOT`, the `PATH` prepend and `AGENTS_PYTHONPATH`, the env-file
+   `<NAME>_OVERLAY_ROOT`, the `PATH` and `PYTHONPATH` prepends, the env-file
    chain) is applied to the `dotagents` process and handed to the child, so the
    harness and everything it spawns see it.
 2. **Context** — `dotagents context` for that agent (what its harness does not

@@ -85,9 +85,9 @@ python -m dotagents build-pyz --out dist/dotagents.pyz   # or build it (needs a 
 - `bin/` — put on `PATH` by `dotagents env`. `init` writes the `dotagents` wrappers
   into it: at the `.pyz` it runs from, or running `"<python>" -m dotagents` for a plain
   install.
-- `lib/` — Python modules for the store's `env.py`: `dotagents env` publishes every
-  level's `lib/` in `AGENTS_PYTHONPATH` and puts them on the `PYTHONPATH` of the
-  `env.py` scripts it runs, never on the session's (see
+- `lib/` — Python modules: `dotagents env` puts every level's `lib/` on the
+  session's `PYTHONPATH` (and lists them in `AGENTS_PYTHONPATH`), so skill scripts,
+  overlay launchers and `env.py` all import them (see
   [Commands → env](commands.md#env)).
 - `env.py`, `env`, `pre.env.py`, `pre.env` — the store's env layers; a project store
   also reads `local.env` / `pre.local.env` (see [Commands → env](commands.md#env)).

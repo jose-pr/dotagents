@@ -489,8 +489,8 @@ def _yaml_key(k: str) -> str:
 class Env(DotAgentsArgs):
     """Assemble the chained env (env files + env.py execution) under contract B.
 
-    Prepends every level's ``bin`` dir to ``PATH`` first and lists every
-    existing ``lib`` dir in ``AGENTS_PYTHONPATH``, then evaluates the ``pre.*``
+    Prepends every level's ``bin`` dir to ``PATH`` first and every existing
+    ``lib`` dir to ``PYTHONPATH`` (listing them in ``AGENTS_PYTHONPATH``), then evaluates the ``pre.*``
     tier and the main tier in precedence order (store by store -- system,
     user, project -- each store's overlays before the store itself), chaining
     each file over the accumulated env so later files win. ``.py`` files are

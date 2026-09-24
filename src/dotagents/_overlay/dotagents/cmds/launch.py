@@ -10,7 +10,7 @@ running session, done up front here):
 1. **Environment.** The full ``dotagents env`` assembly for this scope --
    identity vars (``AGENT``, ``AGENTS_HARNESS``, ...), ``AGENTS_HOME`` /
    ``AGENTS_PROJECT_ROOT`` / ``AGENTS_PYTHON``, one ``<NAME>_OVERLAY_ROOT``
-   per installed overlay, the PATH prepend and ``AGENTS_PYTHONPATH``, the env-file chain --
+   per installed overlay, the PATH and PYTHONPATH prepends, the env-file chain --
    is applied to this process and handed to the child, so the harness and
    everything it spawns see it; a variable a layer unset is removed from
    both. ``-g`` skips the project tiers (the same narrowed meaning as

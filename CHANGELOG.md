@@ -102,10 +102,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   junction before falling back to a copy.
 - `init --dry-run` reports what it would do ("would create …", "would refresh
   the block …"), including the wrapper scripts and the recorded base.
-- Overlay and store `lib/` directories are no longer added to the session's
-  `PYTHONPATH`, where they could shadow installed packages and the standard
-  library. They are published as `AGENTS_PYTHONPATH` for opt-in use and are on
-  the `PYTHONPATH` of `env.py` scripts only.
+- `dotagents env` also lists the overlay and store `lib/` directories it puts on
+  `PYTHONPATH` in `AGENTS_PYTHONPATH`, and after a `cd` into another project it
+  takes the previous project's libraries off `PYTHONPATH`.
+- Overlay setup scripts run with the scope's assembled `dotagents env` (every
+  overlay's `lib/` on `PYTHONPATH`, `bin/` on `PATH`), and command modules can
+  import any overlay's `lib/`, even when `dotagents` runs from a plain shell.
 - An `env.py` value must be a JSON string: `null` unsets the variable, and any
   other type is skipped with a warning naming the key. `dotagents env` emits
   unset variables where the format has a way to (`unset`, `set -e`,

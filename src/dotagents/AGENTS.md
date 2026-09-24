@@ -56,7 +56,8 @@ Command discovery, later source wins on a name: built-ins < bundled `findings` /
 overlays' `cmds/` then the store's `dotagents/cmds/` < `$AGENTS_CMDS_PATH` entries <
 `--cmdspath`. The project root's own `dotagents/cmds/` is never a source. A module
 whose import raises, or a command whose parser cannot be built, is skipped with a
-warning naming its file. Only module-level command classes register; `_*.py` files
+warning naming its file. Every existing overlay/store `lib` is appended to
+`sys.path` before the modules import, so a command imports them from any shell. Only module-level command classes register; `_*.py` files
 are skipped.
 
 ## `dotagents.cli`
@@ -213,9 +214,10 @@ returns the exit code.
     `requires` (valid names only, normalized, de-duplicated), `priority`; a missing
     or invalid manifest gives empty contributions.
   - `find_setup_script() -> Optional[Path]`.
-  - `run_setup(*, agents_dir, dry_run, logger, scope_root=None, scope_level=None) ->
-    Optional[int]` — runs `setup.py` under `sys.executable` with cwd = the overlay
-    dir and env `AGENTS_HOME=agents_dir`, `AGENTS_SCOPE_ROOT=scope_root or
+  - `run_setup(*, agents_dir, dry_run, logger, scope_root=None, scope_level=None,
+    base_env=None) -> Optional[int]` — runs `setup.py` under `sys.executable` with
+    cwd = the overlay dir and env `base_env` (default `os.environ`; `overlays` passes
+    the scope's assembled env) plus `AGENTS_HOME=agents_dir`, `AGENTS_SCOPE_ROOT=scope_root or
     agents_dir`, `AGENTS_SCOPE=scope_level` (when given), `AGENTS_OVERLAY_DIR`;
     returns its exit code, `None` when there is no script, `0` on `dry_run`.
   - `files() -> list[Path]` — every file to install: not the manifest, not the
@@ -304,7 +306,8 @@ a directory of overlays or a registry file (default: the root); for a **source**
 ## `dotagents._env`
 
 Assembly order (`get_environment`): identity (`stamp_identity`), then the roots,
-then `PATH`, then `AGENTS_PYTHONPATH`, then the env files, then the proxy model.
+then `PATH`, then `PYTHONPATH` / `AGENTS_PYTHONPATH`, then the env files, then the
+proxy model.
 
 - Roots: `AGENTS_HOME` and `AGENTS_PROJECT_ROOT` name the stores walked, absolute —
   an inherited value naming the same directory holds, another is replaced; in a
@@ -315,8 +318,10 @@ then `PATH`, then `AGENTS_PYTHONPATH`, then the env files, then the proxy model.
 - `PATH`: every level's `bin` (contract A, not project-root, missing dirs included)
   at the front in that order, whatever the caller's `PATH` held; empty and
   cwd-relative inherited entries are dropped.
-- `AGENTS_PYTHONPATH`: every existing level's `lib`, highest precedence first,
-  `os.pathsep`-joined; removed when there are none. Never added to `PYTHONPATH`.
+- `PYTHONPATH`: every existing level's `lib` at the front, highest precedence
+  first; the entries an inherited `AGENTS_PYTHONPATH` named (another scope's libs)
+  are removed first. `AGENTS_PYTHONPATH`: the same list, `os.pathsep`-joined;
+  removed when there are none.
 - Env files: all `pre.env.py` / `pre.env` (+ the project store's `pre.local.env`),
   then all `env.py` / `env` (+ `local.env`), contract-A order, regular files only,
   each evaluated against everything before it. The project root contributes none.
@@ -337,7 +342,7 @@ API:
 - `get_env_from_py(env_py, base_env, *, level="", global_scope=False, logger=None)
   -> EnvChanges` — runs `<interpreter(base_env)> env.py --level <level> --agent
   <level> [--global]` with `base_env` (plus OS bootstrap vars and
-  `PYTHONIOENCODING=utf-8`), `AGENTS_PYTHONPATH` prepended to its `PYTHONPATH`, in
+  `PYTHONIOENCODING=utf-8`), `AGENTS_PYTHONPATH` kept at the front of its `PYTHONPATH`, in
   the caller's cwd. Stdout: one JSON object, or one per line merged in order.
   Values must be strings; `null` → `removed`; other types, invalid keys (empty,
   `=`, NUL, non-UTF-8) and values with NUL or non-UTF-8 bytes are skipped with a
@@ -617,7 +622,7 @@ Read:
   `--repo`). `AGENTS_CMDS_PATH` — extra command dirs.
 - `AGENTS_HARNESS` — the running harness (registry name or harness id), for
   identity. `AGENTS_PYTHON` — the interpreter for `env.py`. `AGENTS_PYTHONPATH` —
-  put on each `env.py`'s `PYTHONPATH`.
+  the overlay/store `lib` dirs `env` put on `PYTHONPATH`, highest precedence first.
 - Harness config dirs: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`.
   Harness markers: `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `GEMINI_CLI`,
   `CODEX_SANDBOX*`, `CURSOR_AGENT`, `PI_CODING_AGENT`. Model vars: `ANTHROPIC_MODEL`,
