@@ -36,7 +36,7 @@ subcommand prints its help and exits 2.
 | `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` flagged) and what the repos offer. |
 | `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; manifest, setup, skills, file count, recorded source. |
 | `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
-| `env [-g] [--format F] [--diff]` | Print the assembled environment (`--diff`: only what differs from the caller's) in format `F`: `auto` (default: the calling shell), `export`/`posix`/`sh`/`bash`, `dotenv`/`env`, `powershell`/`pwsh`/`ps`, `cmd`/`bat`/`batch`, `fish`, `json`, `ini`, `yaml`. |
+| `env [-g] [--format F] [--diff] [--cache]` | Print the assembled environment (`--diff`: only what differs from the caller's; `--cache`: replay the previous output while `env_cache_key` holds, up to `ENV_CACHE_TTL`) in format `F`: `auto` (default: the calling shell), `export`/`posix`/`sh`/`bash`, `dotenv`/`env`, `powershell`/`pwsh`/`ps`, `cmd`/`bat`/`batch`, `fish`, `json`, `ini`, `yaml`. |
 | `launch [AGENT] [-g] [--command PROG] [--no-context] [--inline] [--write-agent] [--dry-run] [-- ARGS...]` | Run the agent's CLI with the env applied and the context handed over; the exit code is the harness's (`128+N` on signal N). |
 | `findings add\|list\|show\|done\|reopen\|remove\|index\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding, `done` moves it to `processed/` with a required resolution, `INDEX.md` regenerated on every change. |
 | `about [--json]` | `dotagents-cli <version>`, then `<distribution> <version>` per bundled (`.pyz`) or installed package. |
@@ -81,6 +81,11 @@ are skipped.
   `write_store_config(dest, values) -> Path`.
 - `store_base(dest, logger=None) -> Path` — the base recorded by `init --from`, else
   `BASE_ROOT` (also when the recorded one no longer resolves, with a warning).
+- `recorded_from(from_arg, logger=None) -> str` — how `--from` is recorded: a local
+  path made absolute, anything else with its credentials and query values removed
+  (said once when they were).
+- `CHECKOUT_BASE = "src/dotagents/_overlay"` — where `--from <dotagents checkout>`
+  finds the base.
 - `BASE_AGENTS_TEMPLATE = "dotagents/templates/AGENTS.md"`,
   `BASE_PROJECT_TEMPLATE = "dotagents/templates/PROJECT.md"`,
   `AGENTS_MD_PLACEHOLDER = "{{AGENTS_MD}}"`.
@@ -303,7 +308,8 @@ then `PATH`, then `AGENTS_PYTHONPATH`, then the env files, then the proxy model.
   `scope.overlays` (a value pinned to the user store's copy is re-pointed when a
   project copy shadows it).
 - `PATH`: every level's `bin` (contract A, not project-root, missing dirs included)
-  prepended.
+  at the front in that order, whatever the caller's `PATH` held; empty and
+  cwd-relative inherited entries are dropped.
 - `AGENTS_PYTHONPATH`: every existing level's `lib`, highest precedence first,
   `os.pathsep`-joined; removed when there are none. Never added to `PYTHONPATH`.
 - Env files: all `pre.env.py` / `pre.env` (+ the project store's `pre.local.env`),
@@ -348,6 +354,13 @@ API:
   `scope.overlays`), `resolve_env_files(scope) -> list[tuple[str, Path,
   Optional[Path]]]` (pre tier then main tier, as `Scope.paths` tuples).
 - `apply_proxy_model(osenv) -> dict[str, str]` — the proxy changes described above.
+- `ENV_CACHE_TTL = 300.0` (seconds). `env_cache_key(scope, base_env, *parts) -> str`
+  — a digest of what an assembly reads without running it: roots, cwd, interpreter,
+  package version, installed overlays, each env-file candidate's
+  existence/mtime/size, every file under an existing `lib`, the whole `base_env`,
+  and `parts` (format, mode). `read_env_cache(scope, key, *, now=None) ->
+  Optional[str]` (None when absent or older than the TTL); `write_env_cache(scope,
+  key, text) -> None` (owner-only, under `<user store>/.cache/env/`; never raises).
 - `FORMAT_ALIASES: dict[str, str]` (alias → canonical format), `KNOWN_FORMATS`
   (every accepted `--format`, `auto` included), `detect_shell_format() -> str`
   (from the parent-process chain; `"powershell"` on Windows / `"export"` elsewhere
@@ -391,6 +404,13 @@ API:
   - `loaded_paths(project_root) -> list[Path]` — resolved `harness_loads`.
   - `wire_hooks(dest, *, dry_run, logger, config_root=None) -> None` — merge the
     harness's hooks; `config_root` redirects its config dir. Base: nothing.
+  - `skills_wired(dest) -> bool` — the harness's config already carries dotagents'
+    wiring for the store `dest`, so `overlays add` / `sync` / `remove` keep its
+    skills current without `init`. Base: `False`.
+  - `link_skills(dest, *, dry_run, logger, config_root=None) -> None` — link
+    `<dest>/skills/<name>` into the harness's own skills dir and prune what a
+    removed skill left. Base: nothing; `ClaudeAgent` uses
+    `_skills.link_skills_into`.
   - `launch_context_args(context_file) -> Optional[list[str]]` — argv appending the
     context to the system prompt, or `None` (then `launch` uses `write_context`).
 - Adapters (`name`: harness id, `context_target`, `launch_command`, markers):
@@ -430,8 +450,11 @@ API:
     (`copilot`: `copilot`, `.github/copilot-instructions.md`, `copilot`, no marker)
     — no include, no hooks.
   - `PiAgent` (`pi`: `pi`, `.pi/APPEND_SYSTEM.md`, `pi`, `PI_CODING_AGENT`) — user
-    scope only: a managed block pointing at the store's `AGENTS.md` in
-    `<$PI_CODING_AGENT_DIR|~/.pi/agent>/AGENTS.md`; `launch_context_args` →
+    scope: a managed block pointing at the store's `AGENTS.md` in
+    `<$PI_CODING_AGENT_DIR|~/.pi/agent>/AGENTS.md`; project scope: a
+    `POINTER_BEGIN_MARKER` / `POINTER_END_MARKER` block pointing at
+    `.agents/AGENTS.md` in `<project>/.pi/APPEND_SYSTEM.md` (warned when git
+    does not ignore it); `launch_context_args` →
     `--append-system-prompt <text>` on POSIX, `None` on Windows.
 - `get_agent(name) -> Optional[Agent]` — a fresh adapter by registry name.
 - `get_all_agents() -> list[Agent]` — one of each, registry order (claude, gemini,
@@ -455,7 +478,9 @@ Marker lines (a marker counts only on a line of its own, outside fenced code):
   `CONTEXT_BEGIN_MARKER = "<!-- dotagents:context:begin -->"`,
   `CONTEXT_END_MARKER = "<!-- dotagents:context:end -->"`.
 - `find_block(text, begin_marker=BEGIN_MARKER, end_marker=END_MARKER) ->
-  Optional[tuple[int, int]]` — the block's span, markers included.
+  Optional[tuple[int, int]]` — the block's span, markers included. For any marker
+  pair but the context one, marker lines inside a `dotagents:context` block are
+  not the file's block.
 - `merge_block(target, block_source_text, *, force=False, dry_run=False,
   backup_root=None, begin_marker=..., end_marker=..., append=False) -> str` — returns
   `"created"`, `"block-inserted"` (prepended, or appended with `append`),
@@ -465,13 +490,15 @@ Marker lines (a marker counts only on a line of its own, outside fenced code):
   (whole file replaced; the original copied under `backup_root`, never over an
   earlier backup, `external/…` for a file outside the store). A begin marker with
   no end is refused (`SystemExit`). A UTF-8 BOM is read through and not written.
+  Every write is atomic and goes through a symlink to its target.
 - `remove_block(target, *, dry_run=False, begin_marker=..., end_marker=...) -> str`
   — `"removed"` or `"absent"`.
 - `merge_include_line(target, include_line, *, force=False, dry_run=False,
   backup_root=None) -> str` — an `@path` line in a managed block appended to a
   harness entry file; `"skipped (present)"` when the line is already anywhere in it.
 - `merge_context_block(target, context_text, *, dry_run=False) -> str` — the
-  `dotagents:context` block, appended after existing content.
+  `dotagents:context` block, appended after existing content; marker lines inside
+  `context_text` are dropped.
 - `timestamped_backup_root(dest) -> Path` — `<dest>/install_backup/<timestamp>`, one
   per store per process.
 
@@ -524,6 +551,19 @@ objects `{"matcher"?: str, "hooks": [{"type": "command", "command": str, ...}]}`
 - `remove_overlay_skills(overlay_dir, shared_skills, *, logger=None) -> int` —
   `owned_overlay_skills` + `unpublish_skills`.
 - `clean_broken_syncs(shared_skills, logger=None) -> None` — drop dangling symlinks.
+- `LINKED_RECORD = ".dotagents-linked.json"` — in an agent's own skills dir: the
+  names each store (keyed by a hash of its path) linked or copied there, with each
+  copy's digest.
+- `class LinkResult` — `linked`, `copied`, `removed`, `kept` (lists of names) and
+  `owned` (every name dotagents holds in the target afterwards).
+- `link_skills_into(shared_skills, target_dir, *, dry_run=False, logger=None) ->
+  LinkResult` — per skill: a symlink, else (Windows) a junction, else a copy; an
+  unedited copy is refreshed, a skill the store dropped is removed (a dangling link
+  too); someone else's entry, or a copy edited since, is kept with a warning.
+  Junctions are treated as links throughout and removed without touching their
+  target.
+- `linked_names(shared_skills, target_dir) -> list[str]` — the names the record
+  says `shared_skills` owns in `target_dir`.
 
 ## `dotagents._wrappers`
 
