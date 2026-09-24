@@ -51,9 +51,13 @@
 #   AGENTS_OVERLAYS_REPO     an overlay repo (a directory of overlays, a registry
 #                            file, or a git <repo>[@ref][#path]); set it to skip
 #                            the `repo` branch fetch in step 4 entirely
-#   DOTAGENTS_OVERLAYS_REMOTE / DOTAGENTS_OVERLAYS_REF
+#   AGENTS_OVERLAYS_REMOTE / AGENTS_OVERLAYS_REF
 #                            where to fetch the private-sync overlay from
-#                            (default: this repo, branch `repo`)
+#                            (default: this repo, branch `repo`). The old names
+#                            DOTAGENTS_OVERLAYS_REMOTE / DOTAGENTS_OVERLAYS_REF
+#                            are still read when the new ones are unset; they
+#                            were renamed because DOTAGENTS_* names are for
+#                            secrets, and a repo URL and a branch are not.
 
 AGENTS_DIR="${AGENTS_HOME:-$HOME/.agents}"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
@@ -298,8 +302,10 @@ dg_cli() {
 # at its overlays/ dir. AGENTS_OVERLAYS_REPO (or a pre-populated
 # <store>/overlays/private-sync) short-circuits the fetch entirely, for an
 # air-gapped or pinned setup.
-DOTAGENTS_OVERLAYS_REMOTE="${DOTAGENTS_OVERLAYS_REMOTE:-https://github.com/jose-pr/dotagents.git}"
-DOTAGENTS_OVERLAYS_REF="${DOTAGENTS_OVERLAYS_REF:-repo}"
+# AGENTS_* (non-secret, printable); the DOTAGENTS_* spellings are the old
+# names, still honoured as a fallback so an existing environment keeps working.
+_dg_ovl_remote="${AGENTS_OVERLAYS_REMOTE:-${DOTAGENTS_OVERLAYS_REMOTE:-https://github.com/jose-pr/dotagents.git}}"
+_dg_ovl_ref="${AGENTS_OVERLAYS_REF:-${DOTAGENTS_OVERLAYS_REF:-repo}}"
 
 _dg_have_link_project() {
     dg_cli --help 2>/dev/null | grep -q -- "link-project"
@@ -313,9 +319,9 @@ elif [ -n "${AGENTS_OVERLAYS_REPO:-}" ]; then
         || echo "dotagents: private-sync overlay install failed (AGENTS_OVERLAYS_REPO)"
 else
     _dg_ovl_tmp="$(mktemp -d 2>/dev/null || echo /tmp/dg-overlays.$$)"
-    echo "dotagents: fetching the example-overlays branch ($DOTAGENTS_OVERLAYS_REF) for private-sync"
-    if dg_git clone --quiet --depth 1 --branch "$DOTAGENTS_OVERLAYS_REF" \
-        "$DOTAGENTS_OVERLAYS_REMOTE" "$_dg_ovl_tmp/src" 2>/dev/null; then
+    echo "dotagents: fetching the example-overlays branch ($_dg_ovl_ref) for private-sync"
+    if dg_git clone --quiet --depth 1 --branch "$_dg_ovl_ref" \
+        "$_dg_ovl_remote" "$_dg_ovl_tmp/src" 2>/dev/null; then
         dg_cli overlays add private-sync --repo "$_dg_ovl_tmp/src/overlays" \
             --agents-dir "$AGENTS_DIR" -g \
             || echo "dotagents: private-sync overlay install failed"

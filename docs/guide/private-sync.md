@@ -77,5 +77,8 @@ The bootstrap authenticates (bypassing a hosted-runner `github.com` → proxy gi
 rewrite), clones/pulls the store, installs the CLI, links the project, and wires the
 hooks into `~/.claude/settings.json` — driven by `AGENTS_REMOTE` /
 `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL` environment variables (the token is
-never committed). The full walkthrough ships with the `private-sync` overlay
+never committed). `AGENTS_OVERLAYS_REMOTE` / `AGENTS_OVERLAYS_REF` choose where it
+fetches the `private-sync` overlay from (default: this repo's `repo` branch); the old
+`DOTAGENTS_OVERLAYS_REMOTE` / `DOTAGENTS_OVERLAYS_REF` names are still read when the
+new ones are unset. The full walkthrough ships with the `private-sync` overlay
 (`$PRIVATE_SYNC_OVERLAY_ROOT/kb/PRIVATE_SYNC.md`).
