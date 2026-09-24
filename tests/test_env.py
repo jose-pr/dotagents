@@ -27,20 +27,13 @@ tmp dirs only, no network.  Run from repo root: ``python -m pytest tests/``.
 """
 
 import os
-import shutil
 import sys
 from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(SRC))
-
-from dotagents import _env  # noqa: E402
-from dotagents._scope import Scope  # noqa: E402
-
-
-HAVE_BASH = shutil.which("bash") is not None
+from dotagents import _env
+from dotagents._scope import Scope
 
 
 # --------------------------------------------------------------------------
@@ -422,8 +415,7 @@ def test_py_nonzero_is_skipped_not_fatal(tree):
     assert "PATH" in env  # assembly still produced a result
 
 
-@pytest.mark.skipif(not HAVE_BASH, reason="plain .env sourcing needs bash")
-def test_plain_env_file_sourced(tree):
+def test_plain_env_file_sourced(tree, bash_on_path):
     agents_dir, project_root = tree
     (agents_dir / "env").write_text("export SOURCED=hello\n", encoding="utf-8")
     # `PATH="/usr/bin"` is deliberately NOT where bash necessarily lives on this

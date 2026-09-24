@@ -6,20 +6,12 @@ tmp dirs only, no network. Run from repo root: ``python -m pytest tests/``.
 """
 
 import os
-import shutil
-import sys
-from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(SRC))
-
-from dotagents import _env  # noqa: E402
-from dotagents._scope import Scope  # noqa: E402
-from dotagents import _scope  # noqa: E402
-
-HAVE_BASH = shutil.which("bash") is not None
+from dotagents import _env
+from dotagents._scope import Scope
+from dotagents import _scope
 
 
 def _py_emit(mapping):
@@ -87,32 +79,40 @@ def test_directory_named_env_is_not_an_env_file(roots):
 # and bash's own vars are never reported as the file's changes.
 # --------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAVE_BASH, reason="needs bash")
-def test_failed_source_contributes_nothing(roots, caplog):
+def test_failed_source_contributes_nothing(roots, caplog, bash_on_path):
     """A syntax error mid-file: the old `source F; env -0` list ran `env -0`
-    regardless, returned rc 0 and reported the assignments before the error."""
+    regardless, returned rc 0 and reported the assignments before the error.
+    The positive control first: the same bash sources a valid file, so the
+    failure below is the file's, not a bash that never ran."""
+    import logging
+
     agents_dir, project_root = roots
+    (agents_dir / "env").write_text("export BEFORE=1\n", encoding="utf-8")
+    assert _run(agents_dir, project_root).get("BEFORE") == "1"
+
     (agents_dir / "env").write_text(
         "export BEFORE=1\nif [ ; then\nexport AFTER=1\n", encoding="utf-8"
     )
-    import logging
-
     with caplog.at_level(logging.WARNING, logger="t"):
         env = _run(agents_dir, project_root, logger=logging.getLogger("t"))
     assert "BEFORE" not in env and "AFTER" not in env
     assert any("source failed" in r.getMessage() for r in caplog.records)
 
 
-@pytest.mark.skipif(not HAVE_BASH, reason="needs bash")
-def test_bash_own_vars_are_not_reported(roots):
-    """Git Bash from a minimal env adds PWD (as `/c/...`), SHLVL, MSYSTEM;
-    emitted into a PowerShell session they are simply wrong."""
-    agents_dir, project_root = roots
-    (agents_dir / "env").write_text("export ONLY=me\n", encoding="utf-8")
-    env = _run(agents_dir, project_root)
-    assert env["ONLY"] == "me"
-    for bash_own in ("PWD", "OLDPWD", "SHLVL", "MSYSTEM", "_"):
-        assert bash_own not in env
+@pytest.mark.xfail(
+    os.name == "nt", strict=True,
+    reason="open (review 2026-09-23 env-01): MSYS bash rewrites HOME/TEMP/PATH/... "
+           "on start, and the rewritten values come back as the file's changes",
+)
+def test_bash_own_vars_are_not_reported(tmp_path, bash_on_path):
+    """Git Bash from a minimal env adds PWD (as `/c/...`), SHLVL, MSYSTEM, and
+    MSYS rewrites path-like values on the way through; emitted into a
+    PowerShell session they are simply wrong. The file's change set is
+    exactly what the file exported -- nothing bash contributed."""
+    env_file = tmp_path / "env"
+    env_file.write_text("export ONLY=me\n", encoding="utf-8")
+    assert _env.get_env_from_file(env_file, base_env={"PATH": "/usr/bin"}) == {"ONLY": "me"}
+    assert _env.get_env_from_file(env_file, base_env=dict(os.environ)) == {"ONLY": "me"}
 
 
 def test_changed_env_survives_non_utf8_bytes():

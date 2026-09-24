@@ -11,18 +11,13 @@ Run from repo root: ``python -m pytest tests/``.
 import json
 import os
 import shutil
-import sys
-from pathlib import Path
 
 import pytest
 
 from _shell import BASH
 
-SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(SRC))
-
-from dotagents import _env  # noqa: E402
-from dotagents.cli.env import _format_env  # noqa: E402
+from dotagents import _env
+from dotagents.cli.env import _format_env
 
 
 # A sample env covering the tricky cases: a plain value, a value with a space, a
@@ -563,15 +558,19 @@ def test_powershell_and_cmd_keep_illegal_named_vars():
         assert "ProgramFiles(x86)" in out
 
 
+@pytest.mark.skipif(BASH is None, reason="needs a working bash")
 def test_export_output_actually_sources_in_real_bash(tmp_path):
-    """The end-to-end property that matters: the rendered output must be
-    syntactically valid POSIX shell, sourceable with no error."""
+    """The end-to-end property that matters: the rendered output must source
+    in bash with no error. Bash, not any POSIX sh: the format falls back to
+    bash's `$'...'` quoting for control characters, which a plain sh (dash)
+    does not understand -- it targets the bash that `$CLAUDE_ENV_FILE` and
+    the Codex hook source it in."""
     import subprocess
 
     script = tmp_path / "env.sh"
     script.write_text(_format_env(ILLEGAL_NAME_ENV, "export") + "\n", encoding="utf-8")
     proc = subprocess.run(
-        ["sh", "-c", ". %s && echo OK" % json.dumps(str(script))],
+        [BASH, "-c", '. "$1" && echo OK', "bash", str(script)],
         capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -600,7 +599,7 @@ def test_export_values_roundtrip_through_real_bash(tmp_path):
         "printf '%%s\\0' \"$%s\"" % k for k in sorted(ROUNDTRIP)
     )
     proc = subprocess.run(
-        [BASH, "-c", ". %s && %s" % (json.dumps(str(script)), probe)],
+        [BASH, "-c", '. "$1" && ' + probe, "bash", str(script)],
         capture_output=True, env={**os.environ, "LANG": "C.UTF-8"},
     )
     assert proc.returncode == 0, proc.stderr
