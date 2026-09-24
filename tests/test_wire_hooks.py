@@ -293,7 +293,7 @@ class TestDualShellSessionHooks:
         cmd = ClaudeAgent.SESSION_START_COMMAND_POWERSHELL
         assert "CLAUDE_ENV_FILE" not in cmd
         assert "dotagents.cmd" in cmd
-        assert cmd.strip().endswith("context }")
+        assert cmd.strip().endswith("& $d context } }")
 
     def test_powershell_variants_only_run_when_bash_is_absent(self, tmp_path):
         """Both handlers fire on every session (hooks.md); on a Windows box that
@@ -899,3 +899,20 @@ class TestAntigravityHooks:
         )
         assert proc.returncode == 0
         assert proc.stdout.strip() == ""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="PowerShell parser")
+def test_powershell_hook_commands_parse():
+    """The PowerShell variants are one-line strings built by concatenation; a
+    stray quote only shows up when PowerShell parses them. The inner loader
+    (single-quoted inside the PreToolUse command) is parsed on its own too."""
+    import subprocess
+
+    check = ("$e=$null;$null=[System.Management.Automation.Language.Parser]::"
+             "ParseInput($env:CODE,[ref]$null,[ref]$e);$e.Count")
+    inner = ClaudeAgent.PRETOOLUSE_POWERSHELL_COMMAND.split("$p = '", 1)[1].split("'; ", 1)[0]
+    for code in (ClaudeAgent.SESSION_START_COMMAND_POWERSHELL,
+                 ClaudeAgent.PRETOOLUSE_POWERSHELL_COMMAND, inner):
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", check],
+                             capture_output=True, text=True, env=dict(os.environ, CODE=code))
+        assert res.stdout.strip() == "0", (code, res.stdout, res.stderr)

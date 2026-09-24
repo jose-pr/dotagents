@@ -348,11 +348,14 @@ class ClaudeAgent(Agent):
     # as the bash variant's PATH prefix.
     _PS_NO_BASH = r'if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { '
     _PS_STORE = r'$(if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" })'
+    # Falls back to `dotagents` on PATH (a pip install with an older store has
+    # no `<store>\bin` wrapper) and does nothing when there is none at all.
     _PS_DOTAGENTS = (
         r'$d = if (Test-Path ".agents\bin\dotagents.cmd") { ".agents\bin\dotagents.cmd" } '
-        r'else { "' + _PS_STORE + r'\bin\dotagents.cmd" }'
+        r'elseif (Test-Path "' + _PS_STORE + r'\bin\dotagents.cmd") { "' + _PS_STORE + r'\bin\dotagents.cmd" } '
+        r'else { (Get-Command dotagents -ErrorAction SilentlyContinue).Source }'
     )
-    SESSION_START_COMMAND_POWERSHELL = _PS_NO_BASH + _PS_DOTAGENTS + r'; & $d context }'
+    SESSION_START_COMMAND_POWERSHELL = _PS_NO_BASH + _PS_DOTAGENTS + r'; if ($d) { & $d context } }'
     CWD_CHANGED_COMMAND_POWERSHELL = (
         _PS_NO_BASH + r'if (Test-Path AGENTS.md) { Get-Content AGENTS.md -Raw } }'
     )
@@ -385,7 +388,7 @@ class ClaudeAgent(Agent):
         r'$h = [Console]::In.ReadToEnd() | ConvertFrom-Json; '
         r'if ($h.tool_name -eq "PowerShell" -and -not $env:AGENTS_RUNTIME_SET -and $h.tool_input.command) { '
         r'$p = '
-        r"""'if (-not $env:AGENTS_RUNTIME_SET) { $env:AGENTS_RUNTIME_SET = "1"; $s = if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" }; & "$s\bin\dotagents.cmd" env --diff --format powershell 2>$null | Invoke-Expression }; '; """
+        r"""'if (-not $env:AGENTS_RUNTIME_SET) { $env:AGENTS_RUNTIME_SET = "1"; $s = if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" }; $c = "$s\bin\dotagents.cmd"; if (-not (Test-Path $c)) { $c = (Get-Command dotagents -ErrorAction SilentlyContinue).Source }; if ($c) { & $c env --diff --format powershell 2>$null | Invoke-Expression } }; '; """
         r'$u = $h.tool_input.PSObject.Copy(); '
         r'$u.command = $p + $h.tool_input.command; '
         r'@{hookSpecificOutput=@{hookEventName="PreToolUse";permissionDecision="allow";updatedInput=$u}} | ConvertTo-Json -Depth 10 -Compress '

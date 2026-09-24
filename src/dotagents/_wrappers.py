@@ -1,4 +1,5 @@
-"""Write `dotagents` / `dotagents.cmd` wrappers pointing at a built pyz."""
+"""Write `dotagents` / `dotagents.cmd` wrappers: at a built pyz, or at
+`python -m dotagents` for a plain install."""
 
 import os
 import stat
@@ -14,6 +15,40 @@ POSIX_TEMPLATE_REL = (
     '#!/bin/sh\nexec "{python}" "$(dirname "$0")/{pyz}" "$@"\n'
 )
 CMD_TEMPLATE_REL = '@echo off\r\n"{python}" "%~dp0{pyz}" %*\r\n'
+
+# Module mode: a plain (pip / editable) install has no pyz to point at, so the
+# wrapper runs the package through the interpreter that has it installed.
+POSIX_TEMPLATE_MODULE = '#!/bin/sh\nexec "{python}" -m dotagents "$@"\n'
+CMD_TEMPLATE_MODULE = '@echo off\r\n"{python}" -m dotagents %*\r\n'
+
+
+def wrapper_points_at_pyz(bin_dir: Path) -> bool:
+    """True if `bin_dir` holds a `dotagents` wrapper that runs a `.pyz`."""
+    for name in ("dotagents", "dotagents.cmd"):
+        try:
+            if ".pyz" in (Path(bin_dir) / name).read_text(encoding="utf-8"):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def write_module_wrappers(bin_dir: Path, python: "str | None" = None) -> "list[Path]":
+    """Write both wrapper forms into `bin_dir` running `"<python>" -m dotagents`
+    (``python`` defaults to ``sys.executable``, absolute -- see
+    :func:`write_wrappers`). What a plain install gets, so the hooks that call
+    `<store>/bin/dotagents[.cmd]` find a command there too."""
+    bin_dir = Path(bin_dir)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    python = python or sys.executable
+    sh_path, cmd_path = bin_dir / "dotagents", bin_dir / "dotagents.cmd"
+    with open(sh_path, "w", encoding="utf-8", newline="") as f:
+        f.write(POSIX_TEMPLATE_MODULE.format(python=Path(python).as_posix()))
+    if os.name != "nt":
+        sh_path.chmod(sh_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    with open(cmd_path, "w", encoding="utf-8", newline="") as f:
+        f.write(CMD_TEMPLATE_MODULE.format(python=str(python)))
+    return [sh_path, cmd_path]
 
 
 def write_wrappers(

@@ -22,7 +22,8 @@ class Init(DotAgentsArgs):
     Scope: **project** by default (``<cwd>/.agents``), or the **user** store with
     ``-g/--global`` (``~/.agents``). ``--dest`` overrides the resolved location.
     ``--bin-dir`` additionally writes ``dotagents`` wrapper scripts there so the
-    command is on your PATH (only meaningful when running from a built ``.pyz``).
+    command is on your PATH: at the ``.pyz`` when run from one, else running
+    ``"<this python>" -m dotagents``. ``<scope>/bin/`` always gets them.
     """
 
     _parsername_ = "init"
@@ -88,12 +89,17 @@ class Init(DotAgentsArgs):
                 self._logger_.info("recorded base: %s", write_store_config(dest, config))
 
         if not self.dry_run:
-            from dotagents._wrappers import check_path_warning, write_wrappers
+            from dotagents._wrappers import (
+                check_path_warning,
+                wrapper_points_at_pyz,
+                write_module_wrappers,
+                write_wrappers,
+            )
 
             pyz_path = Path(sys.argv[0]).resolve()
             if pyz_path.suffix != ".pyz":
-                # Running from a plain install (not a pyz): the wrappers point at
-                # `python -m dotagents` instead of a nonexistent pyz path.
+                # Running from a plain install (not a pyz): the wrappers run
+                # `"<this python>" -m dotagents` instead of a pyz path.
                 pyz_path = None
 
             # `<scope>/bin/` is always populated, with a path relative to the scope
@@ -107,13 +113,16 @@ class Init(DotAgentsArgs):
 
             for bin_dir, relative in targets:
                 if pyz_path is not None:
-                    for w in write_wrappers(bin_dir, pyz_path, relative=relative):
-                        self._logger_.info("wrapper: %s", w)
+                    written = write_wrappers(bin_dir, pyz_path, relative=relative)
                 else:
-                    self._logger_.info(
-                        "skipped wrapper install in %s: not running from a .pyz "
-                        "(use build-pyz first)", bin_dir,
-                    )
+                    if wrapper_points_at_pyz(bin_dir):
+                        self._logger_.warning(
+                            "replacing the .pyz wrappers in %s with ones running "
+                            "this install (%s -m dotagents)", bin_dir, sys.executable,
+                        )
+                    written = write_module_wrappers(bin_dir)
+                for w in written:
+                    self._logger_.info("wrapper: %s", w)
 
             if self.bin_dir is not None:
                 warning = check_path_warning(Path(self.bin_dir))

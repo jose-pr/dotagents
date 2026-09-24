@@ -125,3 +125,33 @@ def test_relative_falls_back_when_no_relative_path_exists(tmp_path, monkeypatch)
 
     sh = (tmp_path / "bin" / "dotagents").read_text(encoding="utf-8")
     assert pyz.as_posix() in sh, "must fall back to an absolute path, not crash"
+
+
+def test_module_wrappers_run_the_installed_package(tmp_path):
+    r"""A plain install has no pyz: `init` wrote no wrappers at all, and the
+    PowerShell hooks called a `<store>\bin\dotagents.cmd` that never existed."""
+    from dotagents._wrappers import write_module_wrappers
+
+    written = write_module_wrappers(tmp_path / "bin")
+    assert sorted(p.name for p in written) == ["dotagents", "dotagents.cmd"]
+    cmd = tmp_path / "bin" / "dotagents.cmd"
+    assert '-m dotagents %*' in cmd.read_text(encoding="utf-8")
+    assert '-m dotagents "$@"' in (tmp_path / "bin" / "dotagents").read_text(encoding="utf-8")
+    if os.name == "nt":
+        proc = subprocess.run([str(cmd), "about"], capture_output=True, text=True)
+        assert proc.returncode == 0 and "dotagents-cli" in proc.stdout, proc.stderr
+
+
+def test_a_plain_init_writes_module_wrappers_over_old_pyz_ones(tmp_path, monkeypatch, caplog):
+    from dotagents.cli.init import Init
+
+    store = tmp_path / "store"
+    write_wrappers(store / "bin", tmp_path / "old.pyz")
+    monkeypatch.setattr(sys, "argv", ["python -m dotagents"])
+    cmd = Init()
+    cmd.dest, cmd.from_, cmd.agents, cmd.no_hooks = store, None, ["codex"], True
+    cmd.dry_run, cmd.force, cmd.bin_dir = False, False, None
+    assert cmd() == 0
+    text = (store / "bin" / "dotagents.cmd").read_text(encoding="utf-8")
+    assert "-m dotagents" in text and ".pyz" not in text
+    assert "replacing the .pyz wrappers" in caplog.text
