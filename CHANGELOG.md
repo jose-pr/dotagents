@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - The package ships `py.typed` and declares `Typing :: Typed`; Python 3.14 is
   a supported version, and the project metadata links the issue tracker.
+- A `yaml` extra (`pip install 'dotagents-cli[yaml]'`) installs PyYAML for YAML
+  overlay-repo registries; the error for a YAML registry without it names the
+  extra.
+- `dotagents env --cache` reuses the previous output while the environment,
+  working directory, stores, overlays and env and lib files are unchanged, for
+  up to five minutes. The PowerShell and Codex env loaders use it, so a shell
+  command no longer re-runs every env file.
+- A project-scope `init` points pi at the project's `.agents/AGENTS.md`
+  through a managed block in `.pi/APPEND_SYSTEM.md`.
 
 ### Changed
 
@@ -82,6 +91,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Administrators, SYSTEM or TrustedInstaller. A system store that fails the
   check is skipped with a warning; a missing one no longer puts its `bin/` on
   `PATH`.
+- `overlays add`, `sync` and `remove` link new skills into Claude's skills
+  directory and remove the ones that are gone, when `init` has already wired
+  Claude for that store. On Windows, a skill is linked with a directory
+  junction before falling back to a copy.
+- `init --dry-run` reports what it would do ("would create …", "would refresh
+  the block …"), including the wrapper scripts and the recorded base.
+- Overlay and store `lib/` directories are no longer added to the session's
+  `PYTHONPATH`, where they could shadow installed packages and the standard
+  library. They are published as `AGENTS_PYTHONPATH` for opt-in use and are on
+  the `PYTHONPATH` of `env.py` scripts only.
+- An `env.py` value must be a JSON string: `null` unsets the variable, and any
+  other type is skipped with a warning naming the key. `dotagents env` emits
+  unset variables where the format has a way to (`unset`, `set -e`,
+  `$null`, `set "K="`, `null`).
+- `env.py` is run as `env.py --level <level>`; `--agent <level>` is still
+  passed for existing scripts.
+- In the Python API, `get_environment` and `get_diff` return an `EnvChanges`
+  (still a dict of the variables set) whose `removed` names the variables a
+  layer unset, and `get_env_from_py` no longer takes `project_root`; its
+  `level` and `global_scope` are keyword-only.
+- `dotagents env --format yaml` double-quotes every value; `ini` is written for
+  Python's configparser and `dotenv` for python-dotenv.
+- Each installed overlay keeps a record of the repo it came from and the files
+  it installed. `overlays sync` fetches it from that repo again, not from
+  whichever repo now offers the name first; `--repo` replaces the recorded
+  source.
+- `overlays sync` refreshes `overlay.toml`, reports files that differ from the
+  source as kept, removes files the source dropped when they are unmodified
+  (`--prune` for edited ones), backs up whatever `--overwrite` or `--prune`
+  replaces, and installs requirements added upstream.
+- `overlays remove` refuses an overlay another installed overlay requires,
+  unless `--force`. `overlays list` and `show` flag unmet requirements, and
+  `show` names the recorded source.
+- Overlay setup scripts get `AGENTS_HOME` set to the user store, plus
+  `AGENTS_SCOPE_ROOT` and `AGENTS_SCOPE` for the store they are installed into.
+- A dot in an overlay name normalizes to `-` like an underscore; names must end
+  in a letter or digit, and Windows device names are refused.
+- Overlays come only from `--repo`, the environment repos and the stores'
+  registries; the bundled-overlays source tier is gone.
+- Overlay manifests are read with `tomllib`/`tomli` whenever one is available.
+- The downloadable `dotagents.pyz` is compressed: about 0.46 MB instead of
+  1.4 MB.
+- `build-pyz` vendors only pure-Python wheels, resolved for Python 3.9, so the
+  pyz no longer depends on the machine that built it. An extra that needs
+  native modules (`sftp`) fails the build with a message saying so.
+- The package version is kept only in `dotagents.__version__`;
+  `pyproject.toml` reads it from there.
 
 ### Removed
 
@@ -277,6 +333,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   overlay that already carries a `.git` copy is removed cleanly.
 - `dotagents` with no subcommand logs its hint instead of raising when no
   parser has been built.
+- `dotagents env` puts the dotagents `bin` directories at the front of `PATH`
+  in their precedence order even when the calling shell already had some of
+  them, and drops empty and relative `PATH` entries, which resolved against
+  whatever directory a later command ran in.
+- `init --from` accepts the forms the docs list: a dotagents checkout, a
+  `file:`, `http(s):`, `sftp:`, `s3:` or `zip:` URI, and a git repository
+  (`repo[@ref][#path]`). Remote sources are fetched into the overlay cache,
+  failures are one-line errors instead of tracebacks, and the recorded base
+  never stores credentials from the URL.
+- Writing `settings.json` or `hooks.json` keeps a symlinked file a symlink and
+  updates its target, and keeps the file's permissions.
+- `init` accepts a `settings.json` saved with a UTF-8 byte-order mark, and a
+  corrupt settings file stops `init` before it writes anything instead of
+  leaving a half-initialised store.
+- On Windows, `dotagents launch` never runs a harness from the current
+  directory (a `claude.cmd` at a repository's root, say).
+- `dotagents launch` no longer passes the harness a variable an env layer
+  unset; `--dry-run` lists them on an `unset:` line.
+- A skill copied into Claude's skills directory is refreshed when the overlay's
+  skill changes (it was reported as a conflict and stayed stale), and removing
+  an overlay no longer leaves a dangling link or stale copy of its skills.
+- A project-scope `init` warns when skills it links into `.claude/skills/` are
+  not gitignored.
+- On Python 3.9 and 3.10, `tomli` is installed as a dependency and bundled in
+  the pyz, so overlay manifests and TOML registries are read by a real TOML
+  parser.
+- The pyz no longer ships pip's `bin/` launchers, which carried the builder's
+  interpreter path, and files `build-pyz` generates are LF on every OS.
+- Plain env files are sourced by Git's bash on Windows, not the WSL launcher,
+  which dropped them whenever WindowsApps came first on `PATH`.
+- Git Bash's own rewriting of `PATH`, `HOME`, `TEMP` and similar variables is
+  no longer reported as an env file's changes, and a `PATH` an env file
+  extends comes back in Windows form.
+- A malformed `env.py` (output that is not UTF-8, a key with `=`, a value with
+  NUL, or any exception) no longer crashes the whole env assembly.
+- `dotagents env --agents-dir` emits the store it actually walked as
+  `AGENTS_HOME`, and emitted roots are always absolute.
+- The export format uses plain POSIX single quotes for every value, including
+  ones with control characters.
+- `PATH`-shaped values are converted between Windows and POSIX form only on
+  Windows, so pwsh on Linux keeps its `PATH`.
+- Values in the yaml, ini and dotenv formats read back as given.
+- A login fish shell is detected on macOS.
+- On Windows, the system-store permission check works when dotagents runs from
+  PowerShell 7, and runs System32's PowerShell rather than one found in the
+  current directory.
+- A repo that cannot be loaded is an error instead of "overlay not found":
+  `sync` no longer skips with success, `add` no longer installs without a
+  dependency, and `list` warns per broken repo. A malformed or non-UTF-8
+  registry gives a clean error instead of a traceback.
+- Credentials in an http(s) registry URL no longer appear in a traceback; they
+  are sent as Basic auth and never forwarded on a redirect. URL query tokens
+  are masked in messages, cache directory names never contain credentials,
+  and cached git checkouts do not store them in `.git/config`.
+- The source cache under the user store is ignored by git, so a store kept in
+  git never records a cached checkout.
+- An `@` in a local path or non-git URL is kept; a `#` in a store path no
+  longer breaks registry loading; relative git entries and relative entries
+  of s3, github and zip registries resolve beside their registry; the
+  standard-library http fetch honours `#path`.
+- Manifest escapes, underscored integers and `[table]` sections are read
+  correctly; `requires` names and `rules` paths can no longer point outside
+  the overlay; an unreadable rules file is a warning instead of a crash that
+  blocked every later `add` and `sync`.
+- `overlays add` rolls back a new install whose setup fails and updates
+  `AGENTS.md` for what did install; `overlays remove` unpublishes skills only
+  after the overlay is deleted and always updates `AGENTS.md`.
 
 ## [0.5.1] - 2026-09-12
 
