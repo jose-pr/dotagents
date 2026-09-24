@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   command no longer re-runs every env file.
 - A project-scope `init` points pi at the project's `.agents/AGENTS.md`
   through a managed block in `.pi/APPEND_SYSTEM.md`.
+- `dotagents._resources` holds the bundled base overlay (`BASE_ROOT`), the
+  block template constants and `base_agents_text`; they are still importable
+  from `dotagents.cli._common`.
+- `Agent.include_entry` and `Agent.base_config_note` describe what `init`
+  writes for each harness.
 
 ### Changed
 
@@ -138,6 +143,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   native modules (`sftp`) fails the build with a message saying so.
 - The package version is kept only in `dotagents.__version__`;
   `pyproject.toml` reads it from there.
+- `overlays add`, `remove` and `show` without an overlay name are a usage
+  error (exit 2).
+- `tools/cloud-setup.sh` reads `AGENTS_OVERLAYS_REMOTE` and
+  `AGENTS_OVERLAYS_REF`; the old `DOTAGENTS_OVERLAYS_*` names still work when
+  the new ones are unset.
+- The findings index is rewritten atomically.
 
 ### Removed
 
@@ -154,6 +165,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the env from its `PreToolUse` hook, live. The next `init` that wires Codex's
   hooks removes a block an earlier release wrote and leaves the rest of the
   file alone.
+- `Overlay.apply_to` and `Overlay.merge_rules_into`; use
+  `recompose_overlay_block`.
+- `Scope.system_store` (use `Scope.system_root`) and `Scope.cmds_dir`.
+- `dotagents._scope.OverlaySource`; use `dotagents._sources.DirRepo`.
+- The `src`, `base_agents_text` and `force` parameters of
+  `Agent.write_base_config`, and the `force` parameter of
+  `Agent.write_context`.
+- The `dotagents.cli` re-exports of `AGENTS_DIR_ENV` and `BASE_ROOT`; import
+  them from `dotagents._scope` and `dotagents._resources`.
 
 ### Fixed
 
@@ -400,6 +420,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `overlays add` rolls back a new install whose setup fails and updates
   `AGENTS.md` for what did install; `overlays remove` unpublishes skills only
   after the overlay is deleted and always updates `AGENTS.md`.
+- `overlays add` and `overlays sync` refuse a source inside the store's own
+  `overlays/` directory, where a later `remove` would delete the only copy.
+- An `overlays` dry run says it would recompose or create `AGENTS.md` instead
+  of reporting it as done.
+- On Windows, `init` names the PowerShell `PreToolUse` hook only when
+  `--powershell-env-hook` wired it.
+- Overlay routing lands before the managed block's real end marker even when
+  the base template shows the marker inside a code fence.
 
 ## [0.5.1] - 2026-09-12
 
