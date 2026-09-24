@@ -136,7 +136,7 @@ class OverlayAdd(DotAgentsArgs):
     """Install overlay(s) by name into a scope, and publish their skills.
 
     Resolves each ``<name>`` against the source (``--repo``,
-    the env repos, the stores' registries, the bundled ``overlays/``), installs what
+    the env repos, the stores' registries), installs what
     its manifest ``requires`` first, copies it into
     ``<scope>/.agents/overlays/<name>/`` (discoverable), merges its D59
     routing/rules into the installed ``AGENTS.md`` managed block (additive), and
@@ -153,8 +153,8 @@ class OverlayAdd(DotAgentsArgs):
     repo: "list[str]" = []
     ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
      "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
-     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO, the stores' "
-     "dotagents.{json,toml,yaml} and the bundled overlays/. The first repo "
+     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
+     "dotagents.{json,toml,yaml}. The first repo "
      "offering a name wins.")
     ("--repo",)
 
@@ -332,8 +332,8 @@ class OverlayList(DotAgentsArgs):
     repo: "list[str]" = []
     ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
      "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
-     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO, the stores' "
-     "dotagents.{json,toml,yaml} and the bundled overlays/. The first repo "
+     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
+     "dotagents.{json,toml,yaml}. The first repo "
      "offering a name wins.")
     ("--repo",)
 
@@ -433,8 +433,8 @@ class OverlayShow(DotAgentsArgs):
     repo: "list[str]" = []
     ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
      "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
-     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO, the stores' "
-     "dotagents.{json,toml,yaml} and the bundled overlays/. The first repo "
+     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
+     "dotagents.{json,toml,yaml}. The first repo "
      "offering a name wins.")
     ("--repo",)
 
@@ -517,8 +517,8 @@ class OverlaySync(DotAgentsArgs):
     repo: "list[str]" = []
     ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
      "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
-     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO, the stores' "
-     "dotagents.{json,toml,yaml} and the bundled overlays/. The first repo "
+     "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
+     "dotagents.{json,toml,yaml}. The first repo "
      "offering a name wins.")
     ("--repo",)
 

@@ -186,8 +186,6 @@ def test_source_resolution_no_bundled_errors(tmp_path, monkeypatch):
     # every AGENTS_OVERLAYS_REPO* var), resolve_source must fail with a clear
     # "no overlay source" error, not silently pick nothing.
     monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "empty-store"))
-    if _scope.bundled_overlays_root() is not None:
-        pytest.skip("this build/checkout bundles overlays; default-source error N/A")
     with pytest.raises(SystemExit, match="no overlay source"):
         _scope.resolve_source(None)
 

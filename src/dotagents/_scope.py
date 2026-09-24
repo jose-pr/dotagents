@@ -551,47 +551,23 @@ def OverlaySource(root):  # noqa: N802 -- reads as a class at the call site
 
 
 
-def bundled_overlays_root() -> "Path | None":
-    """Locate the bundled example ``overlays/`` directory, ``.pyz``-safe.
-
-    Two homes, tried in order: the packaged copy (``importlib.resources`` under the
-    installed ``dotagents`` package -- extracted from a zipapp when needed, exactly
-    like ``cli._package_data_dir``), then a repo checkout's top-level ``overlays/``
-    (dev use, mirroring ``BuildPyz``'s ``parents[2]`` reach) or the ``repo``
-    branch checked out as the worktree ``./repo`` (its ``overlays/``). Returns
-    ``None`` if none exists -- a plain ``pip install`` that bundled no overlays.
-    """
-    # Prefer the shared resolver in cli so zipapp extraction is cached once.
-    try:
-        from dotagents.cli import _package_data_dir
-
-        packaged = _package_data_dir("_overlays_src")
-        if packaged is not None and packaged.is_dir():
-            return packaged
-    except Exception:
-        pass
-
-    checkout = Path(__file__).resolve().parents[2]
-    for candidate in (checkout / "overlays", checkout / "repo" / "overlays"):
-        if candidate.is_dir():
-            return candidate
-    return None
-
-
 def resolve_source(
     repos: "Optional[list[str]]" = None,
     *,
     scope: "Optional[Scope]" = None,
     logger=None,
+    allow_empty: bool = False,
 ):
     """Resolve where overlays come from: the repos in precedence order --
     ``repos`` (``--repo`` values), then ``$AGENTS_OVERLAYS_REPO_<KEY>`` by KEY,
     then ``$AGENTS_OVERLAYS_REPO``, then the project and user stores'
-    ``dotagents.{json,toml,yaml,yml}`` registries, then this build's bundled
-    ``overlays/`` -- the first repo offering a name wins. A repo is a directory of overlays, a registry file, or a git spec
+    ``dotagents.{json,toml,yaml,yml}`` registries -- the first repo offering a
+    name wins. A repo is a directory of overlays, a registry file, or a git spec
     (``<repo>[@ref][#path]``) that materializes to one; see
-    :mod:`dotagents._sources`. Callers use only ``available()`` /
-    ``overlay_dir()`` / ``root``. Raises when nothing at all is configured."""
+    :mod:`dotagents._sources`. No build bundles overlays: they live on the
+    ``repo`` branch and are named as a repo like any other. Callers use only
+    ``available()`` / ``overlay_dir()`` / ``root``. Raises when nothing at all
+    is configured, unless ``allow_empty``."""
     from dotagents import _sources
 
     user_root = Path(scope.user_root) if scope is not None else resolve_user_store(None)
@@ -600,6 +576,6 @@ def resolve_source(
         list(repos or []),
         cache_root=user_root / ".cache" / "overlays",
         stores=stores,
-        bundled=bundled_overlays_root(),
         logger=logger,
+        allow_empty=allow_empty,
     )

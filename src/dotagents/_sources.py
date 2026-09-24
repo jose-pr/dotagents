@@ -846,21 +846,18 @@ def resolve(
     *,
     cache_root: Path,
     stores: "list[Optional[Path]]",
-    bundled: "Optional[Path]",
     environ: "Optional[dict]" = None,
     logger: Any = None,
     allow_empty: bool = False,
 ) -> CompositeSource:
     """The source the commands use: ``specs`` (``--repo`` values), the env
-    repos, the stores' registry files, then the bundled directory. Raises when
+    repos, then the stores' registry files. Raises when
     there is nothing at all, unless ``allow_empty``: then an empty source
     answers every name with :class:`OverlayNotFound`."""
     environ = os.environ if environ is None else environ
     ordered: "list[Union[str, Spec]]" = list(specs or []) + env_repos(environ)
     # Paths the process found, not specs the user wrote: never re-parsed.
     ordered += [Spec("dir", str(p)) for p in registry_files(*stores)]
-    if bundled is not None:
-        ordered.append(Spec("dir", str(bundled)))
     if not ordered and not allow_empty:
         raise SourceError(NO_SOURCE_MESSAGE)
     return CompositeSource(ordered, SourceCache(cache_root, logger))

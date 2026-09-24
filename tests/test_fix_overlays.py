@@ -385,3 +385,18 @@ def test_the_source_cache_root_ignores_everything_in_it(tmp_path):
     assert ignore.is_file()
     assert "*" in ignore.read_text(encoding="utf-8").splitlines()
     assert b"\r" not in ignore.read_bytes()
+
+
+# --------------------------------------------------------------------------
+# overlays-23: no "bundled overlays" tier probing arbitrary directories
+# --------------------------------------------------------------------------
+
+def test_a_pyz_in_the_store_never_makes_the_store_its_own_source(tmp_path, monkeypatch):
+    """A .pyz kept at <store>/dotagents.pyz put the store's own overlays/ at
+    `__file__`'s parents[2]: installed overlays became the "bundled" source."""
+    store = tmp_path / "store"
+    _overlay(store / "overlays", "mine")
+    monkeypatch.setattr(_scope, "__file__", str(store / "dotagents.pyz" / "dotagents" / "_scope.py"))
+    scope = _scope.Scope("user", store)
+    with pytest.raises(SystemExit, match="no overlay source"):
+        _scope.resolve_source(None, scope=scope)

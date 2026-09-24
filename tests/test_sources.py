@@ -1,8 +1,8 @@
 """Overlay repos beyond one directory: specs (`<location>[@ref][#path]`), git
 checkouts, registries (JSON/TOML/YAML mapping names to specs, from a file, a
 URL or a git file), the repo precedence (--repo, then $AGENTS_OVERLAYS_REPO_<KEY>,
-$AGENTS_OVERLAYS_REPO, the project store's dotagents.*, the user store's, the
-bundled dir) and the lazy composite the overlay commands use.
+$AGENTS_OVERLAYS_REPO, the project store's dotagents.*, the user store's) and
+the lazy composite the overlay commands use.
 
 Git tests build real repositories in tmp_path with the `git` on PATH; they skip
 when there is none. No network.
@@ -342,7 +342,7 @@ def _repo_dir(tmp_path, who):
 
 
 def test_resolve_precedence(tmp_path, monkeypatch):
-    for who in ("repo", "repo2", "env", "envdefault", "proj", "user", "bundled"):
+    for who in ("repo", "repo2", "env", "envdefault", "proj", "user"):
         _repo_dir(tmp_path, who)
     _write(tmp_path / "env.json", json.dumps({"shared": str(tmp_path / "env" / "shared"), "only_env": str(tmp_path / "env" / "only_env")}))
     proj, user = tmp_path / "proj_store", tmp_path / "user_store"
@@ -353,15 +353,15 @@ def test_resolve_precedence(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTS_OVERLAYS_REPO", str(tmp_path / "envdefault"))
 
     def resolve(specs):
-        return _sources.resolve(specs, cache_root=tmp_path / "cache", stores=[proj, user], bundled=tmp_path / "bundled")
+        return _sources.resolve(specs, cache_root=tmp_path / "cache", stores=[proj, user])
 
     src = resolve([str(tmp_path / "repo"), str(tmp_path / "repo2")])
     assert isinstance(src, CompositeSource)
     assert src.overlay_dir("shared") == tmp_path / "repo" / "shared"
-    for who in ("repo", "repo2", "env", "envdefault", "proj", "user", "bundled"):
+    for who in ("repo", "repo2", "env", "envdefault", "proj", "user"):
         assert src.overlay_dir("only_" + who) == tmp_path / who / ("only_" + who), who
     names = src.available()
-    assert names == ["only_repo", "shared"] + ["only_" + w for w in ("repo2", "env", "envdefault", "proj", "user", "bundled")], (
+    assert names == ["only_repo", "shared"] + ["only_" + w for w in ("repo2", "env", "envdefault", "proj", "user")], (
         "the first repo's names (sorted) come first, then each later repo's new ones")
     assert resolve([]).overlay_dir("shared") == tmp_path / "env" / "shared"
     monkeypatch.delenv("AGENTS_OVERLAYS_REPO_X")
@@ -371,11 +371,12 @@ def test_resolve_precedence(tmp_path, monkeypatch):
     (proj / "dotagents.json").unlink()
     assert resolve([]).overlay_dir("shared") == tmp_path / "user" / "shared"
     (user / "dotagents.toml").unlink()
-    assert resolve([]).overlay_dir("shared") == tmp_path / "bundled" / "shared"
+    with pytest.raises(SystemExit, match="no overlay source"):  # no bundled tier behind them
+        resolve([])
     with pytest.raises(SystemExit, match="no overlay source"):
-        _sources.resolve([], cache_root=tmp_path / "cache", stores=[None, None], bundled=None)
+        _sources.resolve([], cache_root=tmp_path / "cache", stores=[None, None])
     with pytest.raises(SystemExit) as exc:
-        resolve([]).overlay_dir("nowhere")
+        resolve([str(tmp_path / "repo")]).overlay_dir("nowhere")
     assert "not found in source" in str(exc.value)
 
 
@@ -384,7 +385,7 @@ def test_repos_load_lazily_in_order(tmp_path, monkeypatch):
     has -- and a broken late repo does not break an early hit."""
     _repo_dir(tmp_path, "first")
     src = _sources.resolve([str(tmp_path / "first"), str(tmp_path / "does-not-exist")],
-                           cache_root=tmp_path / "cache", stores=[None, None], bundled=None)
+                           cache_root=tmp_path / "cache", stores=[None, None])
     assert src.overlay_dir("shared") == tmp_path / "first" / "shared"
     assert list(src._loaded) == [0]
     with pytest.raises(SystemExit):
