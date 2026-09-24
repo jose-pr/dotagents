@@ -53,7 +53,10 @@ Optional features/extras:
 
 This project follows [Semantic Versioning](https://semver.org/) and keeps a
 [`CHANGELOG.md`](CHANGELOG.md). Pushing a tag matching `v*` triggers the release
-workflow: test gate → build → publish → docs deploy.
+workflow: test gate → build (checking the tag names the version built) → a strict
+docs build as a gate → GitHub release → publish. The release workflow never deploys
+the docs site itself: for a final release its last job dispatches the docs workflow
+at the tag, which owns every Pages deploy.
 
 ## License
 
