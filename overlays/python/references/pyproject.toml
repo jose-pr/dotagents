@@ -29,7 +29,7 @@ dependencies = []
 [project.optional-dependencies]
 # EXECUTOR: one extra per optional integration, guarded in code by try/except ImportError.
 "<extra>" = ["<dependency>"]
-dev = ["build", "pytest"]
+dev = ["black", "build", "pytest"]
 docs = ["mkdocs", "mkdocs-material", "mkdocstrings[python]"]
 
 [project.urls]
@@ -42,9 +42,15 @@ Issues = "https://github.com/<gh_org>/<project_name>/issues"
 [tool.hatch.build.targets.sdist]
 exclude = ["/.*", "/benchmarks", "*.local.*", "CLAUDE*"]
 
+# Explicit, so it works whether or not the import name matches the
+# distribution name (hatchling only guesses the matching case).
 [tool.hatch.build.targets.wheel]
 packages = ["src/<package_name>"]
 exclude = ["*.local.*", "CLAUDE*"]
+
+# Formatting is black (kb/PYTHON.md); target the requires-python floor.
+[tool.black]
+target-version = ["py39"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
