@@ -20,7 +20,8 @@ Startup: annotate that you read `{{AGENTS_MD}}`.
   have an improvement idea, record it and move on — don't edit the config:
   `dotagents findings add -g "<one line>" -b "<what happened, evidence>"`. Read the
   active queue with `dotagents findings list -g` (project queue: drop `-g`). Triage
-  later settles each — change the config, or decide no change is needed — and
+  later settles each — change the config (a fact, not a ruling, goes into a
+  `kb/` file routed from "Load on demand"), or decide no change is needed — and
   closes it with `dotagents findings done -g <name> -r "<resolution>"` (moved,
   never deleted; the resolution is the record).
 - **This file**: everything between the `dotagents:begin`/`dotagents:end` markers is
