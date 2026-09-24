@@ -36,6 +36,7 @@ from dotagents import _env
 from dotagents._scope import Scope
 
 
+
 # --------------------------------------------------------------------------
 # Scope.paths overlay tier: presence-by-directory, no manifest required (D84).
 # --------------------------------------------------------------------------

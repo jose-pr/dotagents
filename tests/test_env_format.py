@@ -14,10 +14,12 @@ import shutil
 
 import pytest
 
-from _shell import BASH
-
 from dotagents import _env
 from dotagents.cli.env import _format_env
+
+# The package's own resolver: it rejects the WSL launcher, which a bare
+# `which` finds first in a Windows PowerShell.
+BASH = _env.find_bash()
 
 
 # A sample env covering the tricky cases: a plain value, a value with a space, a

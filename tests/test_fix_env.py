@@ -6,6 +6,7 @@ tmp dirs only, no network. Run from repo root: ``python -m pytest tests/``.
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -138,3 +139,44 @@ def test_a_layer_that_raises_is_skipped(roots, monkeypatch, caplog):
     assert env["AFTER"] == "ran"
     assert not any("secret-value" in r.getMessage() for r in caplog.records)
     assert any(str(agents_dir / "env.py") in r.getMessage() for r in caplog.records)
+
+
+# --------------------------------------------------------------------------
+# env-05: a real bash, never the WSL launcher.
+# --------------------------------------------------------------------------
+
+_WINDOWSAPPS = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WindowsApps"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the WSL launcher is a Windows trap")
+@pytest.mark.skipif(not (_WINDOWSAPPS / "bash.exe").is_file(), reason="no WindowsApps bash.exe")
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs Git for Windows")
+def test_windowsapps_bash_ahead_of_git_is_not_used(tmp_path, monkeypatch):
+    """`shutil.which('bash')` returned WindowsApps\\bash.exe whenever it came
+    before Git on PATH (the usual PowerShell case); it sources the file inside
+    WSL, where the Windows path does not exist, so every plain env file was
+    dropped."""
+    monkeypatch.setenv("PATH", os.pathsep.join([
+        str(_WINDOWSAPPS),
+        str(Path(shutil.which("git")).parent),
+        os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32"),
+    ]))
+    monkeypatch.setattr(_env, "_BASH_RESOLVED", [], raising=False)
+    env_file = tmp_path / "env"
+    env_file.write_text("export ONLY=me\n", encoding="utf-8")
+    changes = _env.get_env_from_file(env_file, base_env=dict(os.environ))
+    assert changes.get("ONLY") == "me"
+    bash = _env.find_bash()
+    assert os.path.normcase(str(_WINDOWSAPPS)) not in os.path.normcase(bash)
+
+
+def test_find_bash_warns_once_when_there_is_none(monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(_env, "_BASH_RESOLVED", [None])
+    monkeypatch.setattr(_env, "_BASH_WARNED", [])
+    log = logging.getLogger("t")
+    with caplog.at_level(logging.WARNING, logger="t"):
+        assert _env.find_bash(log) is None
+        assert _env.find_bash(log) is None
+    assert sum("no usable bash" in r.getMessage() for r in caplog.records) == 1

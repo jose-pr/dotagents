@@ -14,6 +14,7 @@ from dotagents._scope import Scope
 from dotagents import _scope
 
 
+
 def _py_emit(mapping):
     return "import json\nprint(json.dumps(%r))\n" % (mapping,)
 

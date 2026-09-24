@@ -467,6 +467,89 @@ def _parse_env_json(stdout: str) -> "dict[str, object]":
     return merged
 
 
+#: The resolved bash (``None`` = none found), once per process; see find_bash.
+_BASH_RESOLVED: "list[Optional[str]]" = []
+_BASH_WARNED: "list[bool]" = []
+
+
+def _windows_bash_candidates() -> "list[str]":
+    """Where a Windows bash that runs POSIX shell lives, most specific first:
+    beside the ``git`` on PATH (``<root>/cmd/git.exe``,
+    ``<root>/<mingw>/bin/git.exe``: ``<root>/bin/bash.exe`` then
+    ``<root>/usr/bin/bash.exe``), then the standard install dirs, then
+    whatever ``bash`` PATH names -- LAST, because on a stock Windows PATH that
+    is ``WindowsApps\\bash.exe`` (or System32's), the WSL launcher."""
+    candidates: "list[str]" = []
+    found = shutil.which("git", path=os.environ.get("PATH"))
+    if found:
+        here = Path(found).resolve().parent
+        for root in (here.parent, here.parent.parent, here.parent.parent.parent):
+            candidates += [str(root / "bin" / "bash.exe"), str(root / "usr" / "bin" / "bash.exe")]
+    dirs = [os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432")]
+    if os.environ.get("LOCALAPPDATA"):
+        dirs.append(os.path.join(os.environ["LOCALAPPDATA"], "Programs"))
+    for base in dirs:
+        if base:
+            candidates += [
+                os.path.join(base, "Git", "bin", "bash.exe"),
+                os.path.join(base, "Git", "usr", "bin", "bash.exe"),
+            ]
+    found = shutil.which("bash", path=os.environ.get("PATH"))
+    if found:
+        candidates.append(found)
+    return candidates
+
+
+def _is_windows_posix_bash(candidate: str) -> bool:
+    """True if ``candidate`` is an MSYS2 / Cygwin bash -- one that runs on
+    THIS filesystem. The WSL launcher also runs ``bash -c`` (and passes an
+    ``echo ok`` proof when a distro is installed), but inside Linux, where the
+    Windows path of an env file does not exist; its ``$OSTYPE`` is
+    ``linux-gnu``."""
+    try:
+        proc = subprocess.run(
+            [candidate, "-c", 'printf %s "$OSTYPE"'],
+            capture_output=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+    ostype = proc.stdout.decode("ascii", "replace").strip().lower()
+    return proc.returncode == 0 and ostype.startswith(("msys", "cygwin"))
+
+
+def find_bash(logger=None) -> "Optional[str]":
+    """The absolute path of a bash that can source a plain env file, or
+    ``None``. Resolved once per process against the REAL environment (not the
+    chain's accumulated PATH, which need not contain bash's install dir).
+
+    On POSIX it is ``bash`` on ``PATH``. On Windows a bare ``which`` is wrong
+    whenever ``WindowsApps`` precedes Git on PATH -- the usual case in a
+    PowerShell -- because that ``bash.exe`` is the WSL launcher; so Git's bash
+    beside ``git.exe`` and under the standard install dirs is tried first,
+    and every candidate must prove it is MSYS2 / Cygwin
+    (:func:`_is_windows_posix_bash`). Warns once when none is found."""
+    if not _BASH_RESOLVED:
+        if os.name == "nt":
+            seen: "set[str]" = set()
+            resolved = None
+            for cand in _windows_bash_candidates():
+                key = os.path.normcase(cand)
+                if key in seen or not os.path.isfile(cand):
+                    continue
+                seen.add(key)
+                if _is_windows_posix_bash(cand):
+                    resolved = cand
+                    break
+        else:
+            resolved = shutil.which("bash", path=os.environ.get("PATH"))
+        _BASH_RESOLVED.append(resolved)
+    bash = _BASH_RESOLVED[0]
+    if bash is None and logger and not _BASH_WARNED:
+        _BASH_WARNED.append(True)
+        logger.warning("no usable bash found: plain env files are skipped")
+    return bash
+
+
 def get_env_from_file(
     env_file: Path, base_env: "dict[str, str]", logger=None
 ) -> "dict[str, str]":
@@ -480,11 +563,9 @@ def get_env_from_file(
     """
     spawn = _spawn_env(base_env)
 
-    # Resolve `bash` against the REAL environment's PATH, not `spawn`'s: that is
-    # `base_env`, the chain's ACCUMULATED PATH (contract B step 1 prepends overlay
-    # bin dirs onto it), which need not contain bash's install location
-    # (`/usr/local/bin` on macOS, Git's `bin` on Windows).
-    bash = shutil.which("bash", path=os.environ.get("PATH")) or "bash"
+    bash = find_bash(logger)
+    if bash is None:
+        return {}
     try:
         proc = subprocess.run(
             # The path is bash's `$1`, never spliced into the script: a
