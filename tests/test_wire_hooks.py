@@ -332,7 +332,7 @@ class TestDualShellSessionHooks:
         assert proc.returncode == 0, proc.stderr
         assert "ROOT-AGENTS" in proc.stdout
         pinned = env_file.read_text(encoding="utf-8")
-        assert pinned.startswith("export AGENTS_PROJECT_ROOT='")
+        assert pinned.startswith("export AGENTS_PROJECT_ROOT=")  # %q-quoted
         assert tmp_path.name in pinned
 
     def test_idempotent_no_duplication_across_shell_variants(self, tmp_path):

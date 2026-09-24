@@ -322,9 +322,12 @@ class ClaudeAgent(Agent):
     # project's root AGENTS.md. `pwd -W` is Git Bash's Windows-native form
     # (`C:/...`) -- a `/c/...` MSYS path would be misread by the Windows Python
     # that runs `dotagents`; elsewhere `pwd -W` fails and plain `pwd` is used.
+    # `%q` quotes the path for the bash that sources the file: a `'` in a
+    # directory name used to leave an unterminated quote that broke every
+    # later source of $CLAUDE_ENV_FILE (and a crafted name ran commands).
     CWD_CHANGED_COMMAND = (
         'if [ -n "$CLAUDE_ENV_FILE" ] && [ -d .agents ]; then '
-        "printf \"export AGENTS_PROJECT_ROOT='%s'\\n\" \"$(pwd -W 2>/dev/null || pwd)\" "
+        "printf 'export AGENTS_PROJECT_ROOT=%q\\n' \"$(pwd -W 2>/dev/null || pwd)\" "
         '>> "$CLAUDE_ENV_FILE"; fi; '
         "[ -f AGENTS.md ] && cat AGENTS.md || true"
     )
