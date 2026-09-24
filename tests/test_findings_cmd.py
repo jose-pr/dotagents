@@ -177,6 +177,7 @@ def test_cmd_scope_default_project_and_global(findings_mod, tmp_path, monkeypatc
     home = tmp_path / "home"
     proj.mkdir(); home.mkdir()
     monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(proj))
+    monkeypatch.chdir(proj)  # a write honours the pin only from inside it
 
     assert _run(F.Add, description="Project finding") == 0
     assert (proj / ".agents" / "findings" / "project-finding.md").is_file()

@@ -20,8 +20,13 @@ class Init(DotAgentsArgs):
     That is the store's `AGENTS.md` managed block plus each harness's include
     and hooks -- never the opinionated overlays (those come from `overlays add`).
 
-    Scope: **project** by default (``<cwd>/.agents``), or the **user** store with
-    ``-g/--global`` (``~/.agents``). ``--dest`` overrides the resolved location.
+    Scope: **project** by default -- ``<root>/.agents``, where the root is a
+    pinned ``$AGENTS_PROJECT_ROOT`` / ``$CLAUDE_PROJECT_DIR`` while the current
+    directory is inside it, else the project the current directory is in (the
+    nearest ancestor with a ``.git`` or its own ``.agents``, else the current
+    directory; run from ``~`` it is the user store) -- or the **user** store
+    with ``-g/--global`` (``~/.agents``). ``--dest`` overrides the resolved
+    location.
     ``--bin-dir`` additionally writes ``dotagents`` wrapper scripts there so the
     command is on your PATH: at the ``.pyz`` when run from one, else running
     ``"<this python>" -m dotagents``. ``<scope>/bin/`` always gets them.

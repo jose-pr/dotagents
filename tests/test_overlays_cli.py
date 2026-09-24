@@ -282,6 +282,7 @@ def test_list_shows_both_scopes_unless_global(tmp_path, monkeypatch, capsys):
         (tmp_path / d).mkdir(parents=True)
     monkeypatch.setenv("AGENTS_HOME", str(store))
     monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(project))
+    monkeypatch.chdir(project)  # a write-scope command honours the pin only from inside it
 
     monkeypatch.setenv("AGENTS_SYSTEM_ROOT", str(tmp_path / "no-system-store"))
 

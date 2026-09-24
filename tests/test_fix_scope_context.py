@@ -115,11 +115,20 @@ def test_writing_outside_the_pinned_root_warns(tmp_path, monkeypatch, caplog):
         assert _scope.resolve_scope(False).agents_root == proj_a / ".agents"
     assert not [r for r in caplog.records if "outside the pinned" in r.getMessage()]
 
-    monkeypatch.chdir(proj_b)
+    # cwd outside the pin: the project the cwd is in, not the pinned one.
+    (proj_b / ".git").mkdir()
+    (proj_b / "sub").mkdir()
+    monkeypatch.chdir(proj_b / "sub")
     with caplog.at_level(logging.WARNING, logger="dotagents"):
-        _scope.resolve_scope(False)
+        assert _scope.resolve_scope(False).agents_root == proj_b / ".agents"
     warned = [r.getMessage() for r in caplog.records if "outside the pinned" in r.getMessage()]
     assert warned and str(proj_a) in warned[0] and "$AGENTS_PROJECT_ROOT" in warned[0]
+
+    # A fresh directory (no .git, no .agents) is its own project.
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    monkeypatch.chdir(fresh)
+    assert _scope.resolve_scope(False).agents_root == fresh / ".agents"
 
     # An explicit store is the target, so the pin is not worth a warning.
     caplog.clear()
@@ -311,3 +320,20 @@ def test_context_orders_overlays_like_the_managed_block(ctx):
     text = _gemini(scope)
     order = [text.index(m) for m in ("CTX-b-dir", "CTX-a-dir", "CTX-late", "STORE-RULES")]
     assert order == sorted(order)
+
+
+def test_discovery_reads_agents_dir_as_the_user_store_only_where_it_is_one():
+    """scope-04: `launch claude -- --agents-dir x` (the harness's argument) and
+    `findings list --agents-dir x` (a PROJECT store) both replaced the user
+    tier of command discovery."""
+    from dotagents import cli
+
+    read = cli._agents_dir_from_argv
+    assert read(["launch", "claude", "--", "--agents-dir", "zzz"]) is None
+    assert read(["findings", "list", "--agents-dir", "x/.agents"]) is None
+    assert read(["init", "--agents-dir=x/.agents"]) is None
+    assert read(["findings", "list", "-g", "--agents-dir", "x"]) == "x"
+    assert read(["-v", "context", "--agents-dir=x"]) == "x"
+    assert read(["env", "--agents-dir", "x"]) == "x"
+    # `env` here is --cmdspath's value, not the command.
+    assert read(["--cmdspath", "env", "init", "--agents-dir", "x"]) is None

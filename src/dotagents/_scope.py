@@ -300,10 +300,10 @@ def resolve_scope(
     Otherwise the scope is **project**: ``agents_dir`` if given (the store root
     override applies to either scope), else ``<project_root>/.agents`` where the
     root is an explicit ``project_root`` argument, else
-    :func:`install_project_root` (``$AGENTS_PROJECT_ROOT``, then
-    ``$CLAUDE_PROJECT_DIR``, then the current directory; a pin the current
-    directory is outside of is warned about). A project whose ``.agents`` is
-    the user store (the root is ``~``) is the user scope.
+    :func:`install_project_root` -- the pinned root (``$AGENTS_PROJECT_ROOT``,
+    then ``$CLAUDE_PROJECT_DIR``) while the current directory is inside it, and
+    the project the current directory is in once it has left it. A project whose
+    ``.agents`` is the user store (the root is ``~``) is the user scope.
     """
     if global_scope:
         return Scope("user", resolve_user_store(agents_dir))
@@ -469,30 +469,56 @@ def project_root_default() -> Path:
     return Path.cwd()
 
 
+def _project_containing(start: Path) -> Path:
+    """The nearest directory at or above ``start`` that is a project root -- one
+    holding a ``.git`` or a ``.agents`` of its own (the user or system store's
+    parent does not count: its ``.agents`` is a store every session shares) --
+    else ``start`` itself."""
+    shared = [resolve_user_store()]
+    system = system_root_default()
+    if system is not None:
+        shared.append(system)
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            return candidate
+        dot_agents = candidate / ".agents"
+        if dot_agents.is_dir() and not any(_same_path(dot_agents, s) for s in shared):
+            return candidate
+    return start
+
+
 def install_project_root() -> Path:
     """The project root the WRITING commands (``init``, ``overlays``,
-    ``findings``) target when none is passed explicitly:
-    :func:`project_root_default`.
+    ``findings``) target when none is passed explicitly.
 
-    A hooked session exports ``$AGENTS_PROJECT_ROOT`` once for its whole life,
-    so after ``cd ../other`` the pin still names the FIRST project and a write
-    lands there. That is reported: when the current directory is outside the
-    pinned root, a warning names the root being written and how to target the
-    current directory instead."""
-    root = project_root_default()
-    var = next(
-        (v for v in ("AGENTS_PROJECT_ROOT", *_HARNESS_PROJECT_ROOT_VARS) if os.environ.get(v)),
-        None,
-    )
-    if var is not None and not _is_within(Path.cwd(), root):
+    A pinned root (``$AGENTS_PROJECT_ROOT``, then the harness vars of
+    :data:`_HARNESS_PROJECT_ROOT_VARS`) is honoured only while the current
+    directory is inside it. A hooked session exports the pin once for its whole
+    life, so after ``cd ../other`` the pin still names the FIRST project; a
+    command that writes then targets where it runs -- the nearest ancestor of
+    the cwd with a ``.git`` or its own ``.agents``, else the cwd -- and says so
+    with a warning. With no pin, the cwd.
+
+    ``env`` / ``context`` keep :func:`project_root_default`, where the pin wins
+    regardless of the cwd: what they read must stay stable across the
+    subdirectories a session's commands run in."""
+    cwd = Path.cwd()
+    for var in ("AGENTS_PROJECT_ROOT", *_HARNESS_PROJECT_ROOT_VARS):
+        value = os.environ.get(var)
+        if not value:
+            continue
+        pinned = Path(value).expanduser()
+        if _is_within(cwd, pinned):
+            return pinned
+        found = _project_containing(cwd)
         import logging
 
         logging.getLogger("dotagents").warning(
             "the current directory is outside the pinned project root %s ($%s); "
-            "writing there. To target the current directory, run with $%s "
-            "unset or pass the destination explicitly.", root, var, var,
+            "using %s", pinned, var, found,
         )
-    return root
+        return found
+    return cwd
 
 
 def filter_names(names: "list[str]", pattern: "Optional[str]") -> "list[str]":

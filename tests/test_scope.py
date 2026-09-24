@@ -47,7 +47,9 @@ def test_project_root_defaults_to_cwd(tmp_path, monkeypatch):
 def test_agents_project_root_env_wins(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(tmp_path))
     assert project_root_default() == tmp_path
-    # ...and drives the project scope's .agents location.
+    # ...and drives the project scope's .agents location from inside it.
+    (tmp_path / "sub").mkdir()
+    monkeypatch.chdir(tmp_path / "sub")
     assert resolve_scope(False).agents_root == tmp_path / ".agents"
 
 
