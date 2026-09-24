@@ -3,10 +3,10 @@
 
 Codex has no env-persistence mechanism: its SessionStart hook can only add
 "plain text on stdout ... as extra developer context"
-(learn.chatgpt.com/docs/hooks), and the `shell_environment_policy.set`
-snapshot in config.toml (CodexAgent.write_env_block) is static, frozen at the
-last `dotagents init --agents codex`. This hook provides the live env the
-same way the Claude PowerShell one does: `PreToolUse` supports
+(learn.chatgpt.com/docs/hooks), and a `shell_environment_policy.set` snapshot
+in config.toml would be static and global (dotagents no longer writes one).
+This hook is the env: it works the same way the Claude PowerShell one does:
+`PreToolUse` supports
 `updatedInput.command` ("To rewrite a supported tool call without blocking"),
 the same mechanism and JSON shape as Claude Code's.
 

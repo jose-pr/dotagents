@@ -726,30 +726,13 @@ class CodexAgent(Agent):
     # execution-policy concern.
     PRETOOLUSE_HOOK_SCRIPT = "pretooluse_codex_env.py"
 
-    # Codex has no per-session env mechanism (no CLAUDE_ENV_FILE equivalent, no
-    # `.env` loading, no hook before config load), so the only way to give it
-    # our env is `shell_environment_policy.set` in config.toml: "explicit
-    # environment overrides injected into every subprocess".
-    #
-    # That is STATIC -- read once at startup. The values go stale when an
-    # overlay's env changes, and `dotagents init` is the refresh. `set` MERGES
-    # on top of whatever `inherit` admits, so writing only our keys leaves the
-    # user's environment alone.
-    #
-    # This is the user's main config, so the write is a marker-delimited
-    # managed block APPENDED to the end: a TOML `[table]` header captures every
-    # following key line, so prepending would swallow the user's top-level keys.
+    # Earlier releases wrote a static `[shell_environment_policy]` snapshot of
+    # the env into the user's config.toml between these markers. It pinned one
+    # project's paths into the global config and could produce invalid TOML;
+    # the PreToolUse hook below supplies the live env per command instead.
+    # `wire_hooks` removes a block an earlier `init` left behind.
     ENV_BLOCK_BEGIN = "# dotagents:begin"
     ENV_BLOCK_END = "# dotagents:end"
-
-    # PATH is excluded: a machine-specific absolute list that is wrong on any
-    # other machine and -- because `set` overrides per subprocess -- would
-    # REPLACE the inherited PATH of everything Codex spawns.
-    #
-    # Identity vars (AGENT/AGENTS_HARNESS/AGENTS_VENDOR) are KEPT: they are
-    # computed for *this adapter* (`get_environment(explicit=<name>)`), so
-    # Codex's config says AGENT=codex even when initialized from Claude.
-    ENV_BLOCK_SKIP = frozenset({"PATH"})
 
     def _config_root(self, config_root: "Optional[Path]" = None) -> Path:
         import os
@@ -759,58 +742,23 @@ class CodexAgent(Agent):
         # CODEX_HOME is Codex's own documented state-dir override.
         return Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
 
-    @staticmethod
-    def _toml_escape(value: str) -> str:
-        """Escape a TOML basic-string value (backslash first, then quote)."""
-        return value.replace("\\", "\\\\").replace('"', '\\"')
-
-    def write_env_block(
-        self,
-        env: "dict[str, str]",
-        *,
-        dry_run: bool,
-        logger,
-        config_root: "Optional[Path]" = None,
+    def remove_env_block(
+        self, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
     ) -> None:
-        """Write `env` into a managed `[shell_environment_policy]` block in
-        `config.toml`, so Codex injects those vars into every subprocess."""
-        from dotagents._merge import merge_block
+        """Remove the static env block an earlier ``init --agents codex``
+        wrote into ``config.toml``; the rest of the file is untouched."""
+        from dotagents._merge import remove_block
 
-        env = {k: v for k, v in env.items() if k not in self.ENV_BLOCK_SKIP}
-        if not env:
-            if logger:
-                logger.info("no env vars to write for codex")
-            return
-
-        root = self._config_root(config_root)
-        lines = [
-            self.ENV_BLOCK_BEGIN,
-            "# Managed by dotagents -- edits inside this block are overwritten by",
-            "# `dotagents init`. Values are a snapshot: re-run init after changing",
-            "# your env layers. Add your own settings OUTSIDE the markers.",
-            "[shell_environment_policy]",
-            "set = {%s}"
-            % ", ".join(
-                '%s = "%s"' % (key, self._toml_escape(env[key])) for key in sorted(env)
-            ),
-            self.ENV_BLOCK_END,
-        ]
-        block = "\n".join(lines) + "\n"
-
-        config_path = root / "config.toml"
-        if not dry_run:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-        branch = merge_block(
-            config_path,
-            block,
-            dry_run=dry_run,
-            begin_marker=self.ENV_BLOCK_BEGIN,
-            end_marker=self.ENV_BLOCK_END,
-            append=True,
+        config_path = self._config_root(config_root) / "config.toml"
+        branch = remove_block(
+            config_path, dry_run=dry_run,
+            begin_marker=self.ENV_BLOCK_BEGIN, end_marker=self.ENV_BLOCK_END,
         )
-        if logger:
-            verb = "would write" if dry_run else branch
-            logger.info("%s: %s (%d vars)", verb, config_path, len(env))
+        if branch == "removed" and logger:
+            logger.info(
+                "%s the old static env block from %s (the PreToolUse hook supplies the env)",
+                "would remove" if dry_run else "removed", config_path,
+            )
 
     def wire_hooks(
         self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
@@ -821,6 +769,7 @@ class CodexAgent(Agent):
 
         root = self._config_root(config_root)
 
+        self.remove_env_block(dry_run=dry_run, logger=logger, config_root=root)
         script_changed = self._deploy_pretooluse_script(root, dry_run=dry_run, logger=logger)
 
         hooks_path = root / "hooks.json"

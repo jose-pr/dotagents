@@ -215,6 +215,32 @@ def merge_block(
     return "block-inserted"
 
 
+def remove_block(
+    target: Path,
+    *,
+    dry_run: bool = False,
+    begin_marker: str = BEGIN_MARKER,
+    end_marker: str = END_MARKER,
+) -> str:
+    """Delete the managed block (markers included) from `target`, with the one
+    blank line `merge_block(append=True)` put before it. Everything else stays.
+    Returns "removed" or "absent" (no file, or no block in it)."""
+    if not target.exists():
+        return "absent"
+    existing = target.read_text(encoding="utf-8-sig")
+    span = find_block(existing, begin_marker, end_marker)
+    if span is None:
+        return "absent"
+    start, end = span
+    head, tail = existing[:start], existing[end:]
+    if tail.startswith("\n"):
+        tail = tail[1:]
+    if head.endswith("\n\n"):
+        head = head[:-1]
+    if not dry_run:
+        write_text_lf(target, head + tail)
+    return "removed"
+
 def merge_include_line(
     target: Path,
     include_line: str,

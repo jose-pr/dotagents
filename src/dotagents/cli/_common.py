@@ -287,31 +287,6 @@ def _installed_overlay_dirs(scope, source, *, adding=None, dry_run=False) -> "li
     return dirs
 
 
-def _resolved_env(dest: Path, logger, agent_name: str) -> "dict[str, str]":
-    """The env CHANGES dotagents contributes, for agents that need a static
-    snapshot rather than a per-session hook.
-
-    `agent_name` is passed as `explicit` so the identity vars describe the agent the
-    file is FOR, not whichever harness happens to be running `init` -- a snapshot
-    written from Claude must still say `AGENT=codex` inside Codex's own config.
-
-    Assembling this executes overlay `env.py` files, so a broken overlay must not
-    take `init` down with it -- failure degrades to an empty set with a warning.
-    """
-    from dotagents import _env, _scope
-
-    try:
-        return _env.get_environment(
-            _scope.Scope.of(agents_dir=Path(dest), project_root=_scope.project_root_default()),
-            base_env=dict(os.environ),
-            explicit=agent_name,
-            logger=logger,
-        )
-    except Exception as exc:  # noqa: BLE001 -- never let one overlay break init
-        logger.warning("could not assemble env for the static env block: %s", exc)
-        return {}
-
-
 def _apply_base(
     src: Path, dest: Path, force: bool, dry_run: bool, logger,
     agents: "list[str] | None" = None,
@@ -336,11 +311,6 @@ def _apply_base(
         base_agents_text(src, dest), Overlay.discover(Path(dest) / "overlays"), logger
     )
 
-    # True only when the caller named agents with `--agents`. Writes that touch an
-    # agent's own main config file are gated on this, so merely *running* under a
-    # harness never rewrites its config behind the user's back.
-    explicitly_requested = bool(agents)
-
     active_agents = []
     if agents:
         for name in agents:
@@ -362,17 +332,6 @@ def _apply_base(
         )
         if wire_hooks:
             agent.wire_hooks(dest, dry_run=dry_run, logger=logger)
-            # Agents with no per-session env mechanism (Codex) take a static
-            # snapshot of the resolved env instead. Only ever on an EXPLICIT
-            # `--agents <name>`: this edits the user's main config file with values
-            # that go stale, so it must be asked for, never triggered by
-            # auto-detection. Resolved lazily -- assembling it runs overlay `env.py`.
-            if explicitly_requested and hasattr(agent, "write_env_block"):
-                agent.write_env_block(
-                    _resolved_env(dest, logger, agent.name),
-                    dry_run=dry_run,
-                    logger=logger,
-                )
 
 
 def _resolve_from(from_arg: "str | None", default: Path) -> Path:

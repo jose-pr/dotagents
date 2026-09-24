@@ -651,154 +651,46 @@ class TestCodexPreToolUse:
         assert script.stat().st_mtime_ns == first_mtime, "unchanged script must not be rewritten"
 
 
-class TestCodexEnvBlock:
-    """Codex has no per-session env mechanism, so the env is a static managed
-    block in `config.toml` (`shell_environment_policy.set`), refreshed by `init`."""
+class TestCodexEnvBlockRemoval:
+    """Earlier releases wrote a static `[shell_environment_policy]` snapshot into
+    config.toml: one project's paths pinned into the global config, sometimes
+    invalid TOML. dotagents writes none now, and `wire_hooks` removes an old one."""
 
-    ENV = {"AGENTS_HOME": "/home/u/.agents", "AGENTS_PROJECT_ROOT": "/repo"}
+    OLD_BLOCK = (
+        "# dotagents:begin\n"
+        "# Managed by dotagents -- edits inside this block are overwritten by\n"
+        "[shell_environment_policy]\n"
+        'set = {AGENTS_HOME = "/home/u/.agents", AGENTS_PROJECT_ROOT = "/repo"}\n'
+        "# dotagents:end\n"
+    )
 
-    def test_writes_shell_environment_policy(self, tmp_path):
-        root = tmp_path / "codex"
-        CodexAgent().write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
-
-        text = (root / "config.toml").read_text(encoding="utf-8")
-        assert "[shell_environment_policy]" in text
-        assert 'AGENTS_HOME = "/home/u/.agents"' in text
-        assert "# dotagents:begin" in text and "# dotagents:end" in text
-
-    def test_appends_so_toml_tables_do_not_swallow_user_keys(self, tmp_path):
-        """The hazard that dictates append-not-prepend: a `[table]` header captures
-        every key line after it, so a prepended block would pull the user's
-        top-level keys into `[shell_environment_policy]`."""
-        root = tmp_path / "codex"
+    def test_removes_the_old_block_and_keeps_the_rest(self, tmp_path):
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
         root.mkdir()
         cfg = root / "config.toml"
-        cfg.write_text('model = "gpt-5"\napproval_policy = "on-request"\n', encoding="utf-8")
+        user = 'model = "gpt-5"\n\n[mcp_servers.docs]\ncommand = "docs-mcp"\n'
+        cfg.write_text(user + "\n" + self.OLD_BLOCK, encoding="utf-8")
 
-        CodexAgent().write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
+        CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
 
         text = cfg.read_text(encoding="utf-8")
-        assert text.index('model = "gpt-5"') < text.index("[shell_environment_policy]"), (
-            "user's top-level keys must precede our table header"
-        )
-        parsed = _toml_load(text)
-        assert parsed["model"] == "gpt-5", "user key must stay top-level, not be swallowed"
-        assert parsed["shell_environment_policy"]["set"]["AGENTS_HOME"] == "/home/u/.agents"
+        assert text == user
+        assert "shell_environment_policy" not in _toml_load(text)
 
-    def test_output_is_valid_toml(self, tmp_path):
-        root = tmp_path / "codex"
-        CodexAgent().write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
-        parsed = _toml_load((root / "config.toml").read_text(encoding="utf-8"))
-        assert parsed["shell_environment_policy"]["set"] == self.ENV
+    def test_never_writes_a_block(self, tmp_path):
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
+        CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
+        assert not (root / "config.toml").exists()
 
-    def test_values_with_quotes_and_backslashes_are_escaped(self, tmp_path):
-        """Windows paths are full of backslashes; an unescaped one is invalid TOML."""
-        root = tmp_path / "codex"
-        env = {"AGENTS_HOME": r"D:\workspace\.agents", "ODD": 'a"b'}
-        CodexAgent().write_env_block(env, dry_run=False, logger=None, config_root=root)
-        parsed = _toml_load((root / "config.toml").read_text(encoding="utf-8"))
-        assert parsed["shell_environment_policy"]["set"] == env
-
-    def test_refresh_replaces_block_and_is_idempotent(self, tmp_path):
-        root = tmp_path / "codex"
-        agent = CodexAgent()
-        agent.write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
-        agent.write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
-        text = (root / "config.toml").read_text(encoding="utf-8")
-        assert text.count("[shell_environment_policy]") == 1, "must refresh, not append twice"
-
-        agent.write_env_block({"AGENTS_HOME": "/new"}, dry_run=False, logger=None, config_root=root)
-        parsed = _toml_load((root / "config.toml").read_text(encoding="utf-8"))
-        assert parsed["shell_environment_policy"]["set"] == {"AGENTS_HOME": "/new"}
-
-    def test_preserves_user_content_outside_the_block(self, tmp_path):
-        root = tmp_path / "codex"
+    def test_dry_run_keeps_the_old_block(self, tmp_path):
+        dest, root = tmp_path / "agents", tmp_path / "codex"
+        dest.mkdir()
         root.mkdir()
-        cfg = root / "config.toml"
-        cfg.write_text('model = "gpt-5"\n\n[mcp_servers.docs]\ncommand = "docs-mcp"\n', encoding="utf-8")
-
-        agent = CodexAgent()
-        agent.write_env_block(self.ENV, dry_run=False, logger=None, config_root=root)
-        agent.write_env_block({"AGENTS_HOME": "/changed"}, dry_run=False, logger=None, config_root=root)
-
-        parsed = _toml_load(cfg.read_text(encoding="utf-8"))
-        assert parsed["model"] == "gpt-5"
-        assert parsed["mcp_servers"]["docs"]["command"] == "docs-mcp"
-
-    def test_keeps_identity_but_skips_path(self, tmp_path):
-        """Identity belongs in a per-agent file; PATH never does.
-
-        `set` overrides per subprocess, so a baked-in PATH would replace the
-        inherited one for everything Codex spawns (and is machine-specific).
-        """
-        root = tmp_path / "codex"
-        env = {
-            "AGENTS_HOME": "/home/u/.agents",
-            "AGENT": "codex",
-            "AGENTS_HARNESS": "codex",
-            "AGENTS_VENDOR": "openai",
-            "PATH": "/a:/b:/c",
-        }
-        CodexAgent().write_env_block(env, dry_run=False, logger=None, config_root=root)
-
-        written = _toml_load((root / "config.toml").read_text(encoding="utf-8"))["shell_environment_policy"]["set"]
-        assert written["AGENT"] == "codex"
-        assert written["AGENTS_VENDOR"] == "openai"
-        assert "PATH" not in written
-
-    def test_only_skipped_vars_writes_nothing(self, tmp_path):
-        root = tmp_path / "codex"
-        CodexAgent().write_env_block(
-            {"PATH": "/a:/b"}, dry_run=False, logger=None, config_root=root,
-        )
-        assert not (root / "config.toml").exists()
-
-    def test_identity_describes_codex_not_the_running_harness(self, tmp_path):
-        """The end-to-end property: initialized FROM Claude, Codex's config must
-        still say AGENT=codex. `_resolved_env` passes the adapter name as
-        `explicit`, so identity is computed for the target agent."""
-        from dotagents.cli._common import _resolved_env
-
-        env = _resolved_env(tmp_path / "agents", logging.getLogger("t"), "codex")
-        assert env.get("AGENT") == "codex"
-        assert env.get("AGENTS_VENDOR") == "openai"
-
-    def test_empty_env_writes_nothing(self, tmp_path):
-        root = tmp_path / "codex"
-        CodexAgent().write_env_block({}, dry_run=False, logger=None, config_root=root)
-        assert not (root / "config.toml").exists()
-
-    def test_dry_run_writes_nothing(self, tmp_path):
-        root = tmp_path / "codex"
-        CodexAgent().write_env_block(self.ENV, dry_run=True, logger=None, config_root=root)
-        assert not (root / "config.toml").exists()
-
-    def test_only_written_for_an_explicitly_named_agent(self, tmp_path, monkeypatch):
-        """This edits the user's main config with values that go stale, so it must
-        be asked for -- never triggered because Codex happened to be detected."""
-        from dotagents.cli import _common
-        from dotagents.cli._common import BASE_ROOT
-
-        # The real base overlay: its AGENTS.md is marker-wrapped, which
-        # `write_base_config` requires.
-        src, dest = BASE_ROOT, tmp_path / "agents"
-        codex_home = tmp_path / "codexhome"
-        monkeypatch.setenv("CODEX_HOME", str(codex_home))
-        # Pretend Codex is the running harness, so auto-detection would pick it up.
-        monkeypatch.setenv("CODEX_SANDBOX", "1")
-
-        _common._apply_base(
-            src, dest, False, False, logging.getLogger("t"), agents=None, wire_hooks=True,
-        )
-        assert not (codex_home / "config.toml").exists(), (
-            "auto-detection must not rewrite the user's config.toml"
-        )
-
-        _common._apply_base(
-            src, dest, False, False, logging.getLogger("t"),
-            agents=["codex"], wire_hooks=True,
-        )
-        assert (codex_home / "config.toml").is_file(), "--agents codex should write it"
+        (root / "config.toml").write_text(self.OLD_BLOCK, encoding="utf-8")
+        CodexAgent().wire_hooks(dest, dry_run=True, logger=None, config_root=root)
+        assert (root / "config.toml").read_text(encoding="utf-8") == self.OLD_BLOCK
 
 
 def test_unsupported_adapters_are_noops(tmp_path):
