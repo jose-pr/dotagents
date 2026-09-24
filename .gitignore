@@ -1,31 +1,36 @@
-# Private agent config. No trailing slash: `dotagents link-project` makes .agents
-# a symlink, which git treats as a file, so a directory-only `.agents/` would not
-# match it. This repo's decisions, findings and plans live INSIDE .agents/ and are
-# private like every other project's (D61, reversing D56); CHANGELOG.md cites no
-# D-numbers.
+# Root dotfiles and dot-directories are local state (venvs, caches, editor and
+# agent config); only the ones below are part of the repository.
+/.*
+!/.gitignore
+!/.gitattributes
+!/.github/
+
+# Private agent config, never committed. No trailing slash on .agents:
+# `dotagents link-project` makes it a symlink, which git treats as a file, so a
+# directory-only `.agents/` would not match it.
 .agents
-*.local.md
-CLAUDE.local.md
-.claude/
+*.local.*
+CLAUDE*
+.claude
 
 # Python
 __pycache__/
 *.py[cod]
 *.egg-info/
-src/*.egg-info/
+build/
+dist/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.hypothesis/
 .tox/
-.coverage
+.coverage*
 htmlcov/
-
-# dotagents CLI package build artifacts (release artifacts, not committed)
-dist/
-*.pyz
 .venv/
-.venv-test/
 .pyvenv/
+
+# Release artifacts built locally (dist/dotagents.pyz and friends)
+*.pyz
 
 # MkDocs build output
 site/
@@ -38,6 +43,7 @@ Thumbs.db
 _staging/
 
 # The `repo` branch (the example overlays, under overlays/<name>), checked out
-# here as a worktree/clone for local editing (D77: split off main).
+# here as a worktree or clone for local editing.
 repo/
 overlays/
+overlays-src/

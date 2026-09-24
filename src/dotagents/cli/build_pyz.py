@@ -1,7 +1,8 @@
 """`dotagents build-pyz` -- vendor deps and package a self-contained pyz."""
 
-import re
+import fnmatch
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,22 @@ from duho import Cmd, LoggingArgs
 #: regex, not a TOML parser (tomllib is 3.11+, this repo's floor is 3.9, and a
 #: single quoted scalar under a known table header doesn't need one).
 _PYPROJECT_VERSION_RE = re.compile(r'(?m)^version\s*=\s*"([^"]+)"')
+
+#: Names never copied into the .pyz: caches, plus the private files the wheel
+#: and sdist exclude too (pyproject.toml) -- `*.local.*` is the unshared
+#: per-machine override convention and `CLAUDE*` is agent config. Matched
+#: case-sensitively, so `CLAUDE*` cannot catch a module named `claude*.py` on a
+#: case-insensitive filesystem (`shutil.ignore_patterns` folds case on Windows).
+_UNSHIPPED_PATTERNS = ("__pycache__", "*.pyc", "*.local.*", "CLAUDE*")
+
+
+def _ignore_unshipped(_directory: str, names: "list[str]") -> "set[str]":
+    """``shutil.copytree`` ignore callback for :data:`_UNSHIPPED_PATTERNS`."""
+    return {
+        name
+        for name in names
+        if any(fnmatch.fnmatchcase(name, pattern) for pattern in _UNSHIPPED_PATTERNS)
+    }
 
 
 def _dist_info_name_version(dist_info: Path) -> "dict[str, str]":
@@ -114,11 +131,7 @@ class BuildPyz(LoggingArgs, Cmd):
                 return rc
 
             dotagents_pkg_dest = stage / "dotagents"
-            shutil.copytree(
-                dotagents_pkg_src,
-                dotagents_pkg_dest,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
+            shutil.copytree(dotagents_pkg_src, dotagents_pkg_dest, ignore=_ignore_unshipped)
 
             # `dotagents.__version__` is a second, independently-maintained copy
             # of pyproject.toml's `version` and can lag it. Read pyproject.toml

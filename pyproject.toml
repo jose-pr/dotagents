@@ -39,7 +39,7 @@ uri = ["pathlib_next[uri]"]
 http = ["pathlib_next[http]"]
 sftp = ["pathlib_next[sftp]"]
 s3 = ["pathlib_next[s3]"]
-dev = ["pytest", "pathlib_next[http]"]
+dev = ["build", "hatchling", "pytest", "pathlib_next[http]"]
 docs = [
     "mkdocs>=1.5",
     "mkdocs-material>=9.5",
@@ -54,8 +54,12 @@ Homepage = "https://github.com/jose-pr/dotagents/"
 Repository = "https://github.com/jose-pr/dotagents"
 Documentation = "https://jose-pr.github.io/dotagents/"
 
+# Private files never ship, even when present in the tree: `*.local.*` is the
+# unshared per-machine override convention and `CLAUDE*` is agent config. Hatchling
+# also honours .gitignore, which lists both; these excludes hold without it.
 [tool.hatch.build.targets.sdist]
-exclude = ["/.*", "/dist", "/.venv-test"]
+exclude = ["/.*", "/dist", "*.local.*", "CLAUDE*"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dotagents"]
+exclude = ["*.local.*", "CLAUDE*"]
