@@ -136,10 +136,10 @@ can read it without the source. Full docs: https://jose-pr.github.io/dotagents/
   `lib` onto PYTHONPATH the same way (`get_lib_paths`; not part of contract B), so
   an `env.py` and every subprocess can import an overlay's `lib/`; then two tiers
   (`pre.env*` then `env*`), later-overrides-earlier. Identity seeded before the
-  chain; proxy vars applied after. The project-root level
-  resolves only `pre.local.env` / `local.env` — a checkout's own top-level
-  `env.py` / `env` is never executed or sourced (that would be code execution
-  from any cloned repo at session start); only regular files count (a venv
+  chain; proxy vars applied after. The project-root level resolves nothing —
+  a checkout's own top-level `env.py` / `env` / `local.env` is never executed
+  or sourced (that would be code a cloned repo runs at session start; a user's
+  local overrides go in `<project>/.agents/local.env`); only regular files count (a venv
   dir named `env` is not an env file); a plain file whose `source` fails
   contributes nothing (`source F || exit 1`, so the failure is visible); bash's
   own `PWD`/`OLDPWD`/`SHLVL`/`MSYSTEM*` are never reported as a file's changes.

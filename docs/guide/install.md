@@ -66,6 +66,24 @@ python dist/dotagents.pyz init --bin-dir ~/.local/bin    # lay down base + comma
 - `dotagents/cmds/` — only if you create it: your own command modules (see
   [Authoring → Custom commands](authoring.md#custom-commands)).
 
+## What runs, and from where
+
+`dotagents env` and the command discovery run code from every store the session
+walks: each store's `env.py` and env files, its `bin/` and `lib/` on `PATH` /
+`PYTHONPATH`, its `dotagents/cmds/*.py`, and the same from its installed overlays. The
+hooks `init` wires run them at session start.
+
+- **The user store** is yours.
+- **A project's `.agents/`** is trusted the way a harness trusts a repo's own
+  `.claude/settings.json`: opening a session in a repository trusts it. Do not start
+  sessions in repositories you do not trust.
+- **The project root outside `.agents/`** contributes no code: a checkout's own
+  `env.py`, `env`, `local.env` or `dotagents/cmds/` never runs. Keep your local
+  overrides in `<project>/.agents/local.env`.
+- **The system store** (`/etc/agents` on POSIX, or `$AGENTS_SYSTEM_ROOT`; no default on
+  Windows) counts only when it exists and only administrators can write it; otherwise
+  it is skipped with a warning.
+
 ## Wiring your agent runner
 
 `init` wires Claude Code plus any harness it is running inside (detected from its

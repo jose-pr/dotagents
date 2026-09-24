@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   until then every `findings` subcommand reads it with `--dir` (`dotagents
   findings list --dir <store>/dotagents/findings`).
 
+- A project's root no longer contributes env files: a checkout's top-level
+  `local.env` / `pre.local.env` were bash-sourced at every session start, so a
+  repository that committed one ran its commands in your session. Move your
+  local overrides to `<project>/.agents/local.env` (and `pre.local.env`), which
+  still resolve. A project's `.agents/` itself stays trusted, like a
+  harness's own `.claude/settings.json`; the install guide now describes what
+  runs from where.
 - The system store is walked only when it exists and only administrators can
   write it: on POSIX `/etc/agents` (or `$AGENTS_SYSTEM_ROOT`) must be
   root-owned and not group- or world-writable; on Windows there is no default
@@ -65,6 +72,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   block behind a UTF-8 byte-order mark instead of adding a second one.
 - A checkout's own top-level `dotagents/cmds/` is no longer a command source;
   only the stores' `dotagents/cmds/` (and overlays' `cmds/`) are.
+- The Claude and Codex hooks put the project's `.agents/bin` on `PATH` as an
+  absolute path. The relative `.agents/bin` they used was re-emitted into the
+  session's `PATH` by `dotagents env`, where it resolved against whatever
+  directory a later command ran in. Re-run `dotagents init` to update the hooks.
 - Codex's SessionStart hook runs `dotagents context --agents codex`; without the
   flag it assembled Claude's context and gave Codex nothing. Re-run `dotagents
   init --agents codex` to update the hook.
