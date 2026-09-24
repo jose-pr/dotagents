@@ -8,6 +8,7 @@ first so a hooked shell cannot leak the real checkout into a test.
 """
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -97,3 +98,31 @@ def test_a_store_that_appears_twice_is_walked_once(tmp_path):
     user = tmp_path / "u"
     scope = Scope("project", system, user_root=user, system_root=system)
     assert scope.stores == [system, user]
+
+
+# --------------------------------------------------------------------------
+# scope-context-03: a pin the cwd has left is reported by the writing commands
+# --------------------------------------------------------------------------
+
+def test_writing_outside_the_pinned_root_warns(tmp_path, monkeypatch, caplog):
+    proj_a, proj_b = tmp_path / "projA", tmp_path / "projB"
+    (proj_a / "sub").mkdir(parents=True)
+    proj_b.mkdir()
+    monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(proj_a))
+
+    monkeypatch.chdir(proj_a / "sub")
+    with caplog.at_level(logging.WARNING, logger="dotagents"):
+        assert _scope.resolve_scope(False).agents_root == proj_a / ".agents"
+    assert not [r for r in caplog.records if "outside the pinned" in r.getMessage()]
+
+    monkeypatch.chdir(proj_b)
+    with caplog.at_level(logging.WARNING, logger="dotagents"):
+        _scope.resolve_scope(False)
+    warned = [r.getMessage() for r in caplog.records if "outside the pinned" in r.getMessage()]
+    assert warned and str(proj_a) in warned[0] and "$AGENTS_PROJECT_ROOT" in warned[0]
+
+    # An explicit store is the target, so the pin is not worth a warning.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="dotagents"):
+        _scope.resolve_scope(False, agents_dir=proj_b / ".agents")
+    assert not [r for r in caplog.records if "outside the pinned" in r.getMessage()]

@@ -58,6 +58,14 @@ def _same_path(a: "str | os.PathLike[str]", b: "str | os.PathLike[str]") -> bool
     return _path_key(a) == _path_key(b)
 
 
+def _is_within(path: "str | os.PathLike[str]", root: "str | os.PathLike[str]") -> bool:
+    """Whether ``path`` is ``root`` or somewhere beneath it."""
+    key, root_key = _path_key(path), _path_key(root)
+    if key == root_key:
+        return True
+    return key.startswith(root_key.rstrip(os.sep) + os.sep)
+
+
 class Scope:
     """Where a session's config lives -- the one object every walk takes.
 
@@ -291,19 +299,19 @@ def resolve_scope(
     installs into it rather than into the literal home dir).
     Otherwise the scope is **project**: ``agents_dir`` if given (the store root
     override applies to either scope), else ``<project_root>/.agents`` where the
-    root is (in precedence order) an explicit ``project_root`` argument, else
-    ``$AGENTS_PROJECT_ROOT`` if set, else the current directory.
-    ``$AGENTS_PROJECT_ROOT`` lets a harness (or ``dotagents env``) pin the project
-    root once so every command agrees on it regardless of the cwd a subprocess
-    happens to run in; ``<root>/.agents/`` is where this project's overlays live.
-    A project whose ``.agents`` is the user store (the root is ``~``) is the
-    user scope.
+    root is an explicit ``project_root`` argument, else
+    :func:`install_project_root` (``$AGENTS_PROJECT_ROOT``, then
+    ``$CLAUDE_PROJECT_DIR``, then the current directory; a pin the current
+    directory is outside of is warned about). A project whose ``.agents`` is
+    the user store (the root is ``~``) is the user scope.
     """
     if global_scope:
         return Scope("user", resolve_user_store(agents_dir))
-    proj = Path(project_root).expanduser() if project_root else project_root_default()
     if agents_dir:
+        # An explicit store is the write target; the pin only names the root.
+        proj = Path(project_root).expanduser() if project_root else project_root_default()
         return Scope("project", Path(agents_dir).expanduser(), project_root=proj)
+    proj = Path(project_root).expanduser() if project_root else install_project_root()
     return Scope("project", proj / ".agents", project_root=proj)
 
 
@@ -459,6 +467,32 @@ def project_root_default() -> Path:
         if value:
             return Path(value).expanduser()
     return Path.cwd()
+
+
+def install_project_root() -> Path:
+    """The project root the WRITING commands (``init``, ``overlays``,
+    ``findings``) target when none is passed explicitly:
+    :func:`project_root_default`.
+
+    A hooked session exports ``$AGENTS_PROJECT_ROOT`` once for its whole life,
+    so after ``cd ../other`` the pin still names the FIRST project and a write
+    lands there. That is reported: when the current directory is outside the
+    pinned root, a warning names the root being written and how to target the
+    current directory instead."""
+    root = project_root_default()
+    var = next(
+        (v for v in ("AGENTS_PROJECT_ROOT", *_HARNESS_PROJECT_ROOT_VARS) if os.environ.get(v)),
+        None,
+    )
+    if var is not None and not _is_within(Path.cwd(), root):
+        import logging
+
+        logging.getLogger("dotagents").warning(
+            "the current directory is outside the pinned project root %s ($%s); "
+            "writing there. To target the current directory, run with $%s "
+            "unset or pass the destination explicitly.", root, var, var,
+        )
+    return root
 
 
 def filter_names(names: "list[str]", pattern: "Optional[str]") -> "list[str]":
