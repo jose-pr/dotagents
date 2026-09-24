@@ -243,6 +243,41 @@ def test_a_corrupt_settings_file_stops_init_before_anything_is_written(content):
 
 
 # --------------------------------------------------------------------------- #
+# --dry-run says "would"
+# --------------------------------------------------------------------------- #
+
+
+def test_dry_run_logs_what_would_happen(tmp_path, caplog):
+    dest = Path.home() / ".agents"
+    bin_dir = tmp_path / "mybin"
+    with caplog.at_level(logging.INFO):
+        assert _main([
+            "init", "-g", "--agents", "claude,pi", "--no-hooks",
+            "--dry-run", "--bin-dir", str(bin_dir), "--from", str(_base(tmp_path / "b")),
+        ]) == 0
+    messages = [r.getMessage() for r in caplog.records]
+    assert "would create: AGENTS.md" in messages
+    assert any(m.startswith("would create: ") and m.endswith("(include)") for m in messages)
+    assert any(m.startswith("would create: ") and "(pointer to the store)" in m for m in messages)
+    assert not any(m.startswith(("created:", "block-inserted:", "block-refreshed:")) for m in messages)
+    for d in (dest / "bin", bin_dir):
+        assert "would write wrappers: %s, %s" % (d / "dotagents", d / "dotagents.cmd") in messages
+    assert "would record base: %s" % (dest / STORE_CONFIG) in messages
+    assert not bin_dir.exists() and not any(Path.home().iterdir())
+
+
+def test_dry_run_refresh_says_would_refresh(tmp_path, caplog):
+    dest = tmp_path / "store"
+    assert _init(dest) == 0
+    text = (dest / "AGENTS.md").read_text(encoding="utf-8")
+    (dest / "AGENTS.md").write_text(text.replace("## Load on demand", "## Load on demand\nSTALE"), encoding="utf-8")
+    with caplog.at_level(logging.INFO):
+        assert _init(dest, "--dry-run") == 0
+    assert "would refresh the block: AGENTS.md" in [r.getMessage() for r in caplog.records]
+    assert "STALE" in (dest / "AGENTS.md").read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
 # overlays: the setup helper that set AGENTS_HOME to the scope store is gone
 # --------------------------------------------------------------------------- #
 

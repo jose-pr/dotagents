@@ -425,6 +425,9 @@ def _apply_base(
         for agent in active_agents:
             agent.wire_hooks(dest, dry_run=True, logger=_QUIET)
 
+    if dry_run:
+        logger = _DryRunLog(logger)
+
     # The store's AGENTS.md is written HERE, once, whatever agents are
     # selected: `context` and `overlays` depend on it. Adapters only add their
     # harness's last mile to it (an include, a pointer).
@@ -452,6 +455,35 @@ class _Quiet(object):
 
 
 _QUIET = _Quiet()
+
+#: What a dry run says for each `_merge` result ("created" read as done).
+_DRY_RUN_BRANCH = {
+    "created": "would create",
+    "block-inserted": "would insert the block",
+    "block-refreshed": "would refresh the block",
+    "removed": "would remove",
+    "replaced (--force)": "would replace (--force)",
+    "replaced (--force, backed up)": "would replace (--force, with a backup)",
+}
+
+
+class _DryRunLog(object):
+    """``logger`` for a dry run: a ``"%s: ..."`` record whose first argument
+    is a `_merge` result (the form `init` and every adapter log a write in)
+    says what WOULD happen instead of reading as done. Anything else passes
+    through unchanged."""
+
+    def __init__(self, logger):
+        self._logger = logger
+
+    def __getattr__(self, name):
+        return getattr(self._logger, name)
+
+    def info(self, msg, *args, **kwargs):
+        if args and isinstance(msg, str) and msg.startswith("%s: ") and args[0] in _DRY_RUN_BRANCH:
+            args = (_DRY_RUN_BRANCH[args[0]],) + tuple(args[1:])
+        kwargs["stacklevel"] = kwargs.get("stacklevel", 1) + 1  # the caller's line, not this one
+        self._logger.info(msg, *args, **kwargs)
 
 
 #: Where a dotagents checkout keeps its base overlay, relative to the checkout root.

@@ -6,6 +6,7 @@ from typing import Optional
 
 from dotagents.cli._common import (
     BASE_ROOT,
+    STORE_CONFIG,
     DotAgentsArgs,
     _apply_base,
     _resolve_from,
@@ -107,13 +108,24 @@ class Init(DotAgentsArgs):
             project_root=project_root,
         )
 
-        if self.from_ is not None and not self.dry_run:
+        if self.from_ is not None:
             recorded = recorded_from(self.from_, self._logger_)
             if config.get("base") != recorded:
-                config["base"] = recorded
-                self._logger_.info("recorded base: %s", write_store_config(dest, config))
+                if self.dry_run:
+                    self._logger_.info("would record base: %s", dest / STORE_CONFIG)
+                else:
+                    config["base"] = recorded
+                    self._logger_.info("recorded base: %s", write_store_config(dest, config))
 
-        if not self.dry_run:
+        if self.dry_run:
+            # Say where the wrappers would go; nothing else about them is
+            # decided until a real run (the .pyz or `python -m` form).
+            bin_dirs = [dest / "bin"] + ([Path(self.bin_dir)] if self.bin_dir is not None else [])
+            for bin_dir in bin_dirs:
+                self._logger_.info(
+                    "would write wrappers: %s, %s", bin_dir / "dotagents", bin_dir / "dotagents.cmd"
+                )
+        else:
             from dotagents._wrappers import (
                 check_path_warning,
                 wrapper_points_at_pyz,
