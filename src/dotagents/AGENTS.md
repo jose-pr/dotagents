@@ -26,7 +26,7 @@ Terms used throughout:
 `dotagents --help` / `<command> --help` list every flag. Umbrella options:
 `--cmdspath DIR` (repeatable), `--loglevel`, `-v` / `-q`. An umbrella run with no
 subcommand (`dotagents`, `dotagents overlays`, `dotagents findings`) prints its usage
-and an error naming the missing command, and exits 2.
+and an error saying a command is required, and exits 2.
 
 | Command | Contract |
 | --- | --- |

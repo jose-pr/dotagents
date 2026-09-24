@@ -69,12 +69,13 @@ def test_help_lists_the_declared_flags(argv, capsys):
 
 @pytest.mark.parametrize("argv", [(), ("overlays",), ("findings",)], ids=repr)
 def test_an_umbrella_without_a_subcommand_is_a_usage_error(argv, capsys):
-    # What the API header promises: usage plus an error naming the missing
-    # command, on stderr, and exit 2 (argparse requires the subcommand).
+    # What the API header promises: usage plus an error, on stderr, and exit 2
+    # (argparse requires the subcommand). The argument's name is duho's to
+    # choose, so it is not pinned here.
     assert _main(argv) == 2
     err = capsys.readouterr().err
     assert err.startswith("usage: dotagents"), err[:200]
-    assert "required: command" in err
+    assert "error: the following arguments are required" in err
 
 
 # --------------------------------------------------------------------------
