@@ -67,8 +67,11 @@ from dotagents.cli import DotAgentsArgs, _no_subcommand, _write_stdout
 FINDINGS_DIRNAME = "findings"
 PROCESSED_DIRNAME = "processed"
 INDEX_NAME = "INDEX.md"
-#: Top-level markdown files that are never findings.
-_NOT_FINDINGS = {INDEX_NAME, "README.md"}
+#: Top-level markdown files that are never findings, lowercased: compared
+#: case-insensitively, since on NTFS / APFS `index.md` IS `INDEX.md`.
+_NOT_FINDINGS = {INDEX_NAME.lower(), "readme.md"}
+#: Slugs `add` refuses: their file would be one of `_NOT_FINDINGS`.
+_RESERVED_SLUGS = {name[:-3] for name in _NOT_FINDINGS}
 #: Frontmatter keys, in the order they are written.
 _META_KEYS = ("name", "description", "status", "created", "processed")
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
@@ -243,7 +246,7 @@ class FindingsStore:
             return []
         out = []
         for p in sorted(directory.glob("*.md")):
-            if p.name in _NOT_FINDINGS or p.name.startswith("_"):
+            if p.name.lower() in _NOT_FINDINGS or p.name.startswith("_"):
                 continue
             try:
                 out.append(Finding.load(p))
@@ -288,6 +291,11 @@ class FindingsStore:
         slug = slugify(name or description)
         if not slug:
             raise SystemExit("error: %r yields no usable file name; pass --name" % (name or description))
+        if slug in _RESERVED_SLUGS:
+            raise SystemExit(
+                "error: %r is reserved (its file would be the queue's %s.md); pass "
+                "another --name" % (slug, slug.upper())
+            )
         path = self.root / (slug + ".md")
         # By file AND by frontmatter name: `get` matches the frontmatter `name`
         # first, so a hand note `foo.md` carrying `name: bar` would otherwise be
@@ -316,11 +324,12 @@ class FindingsStore:
         finding = self.require(name)
         if not finding.is_active:
             raise SystemExit("error: finding %r is already processed (%s)" % (finding.name, finding.path))
+        dest = self.processed_dir / finding.path.name
+        self._refuse_to_overwrite(finding, dest)
         today = _today()
         finding.meta["status"] = "processed"
         finding.meta["processed"] = today
         finding.body = finding.body.rstrip("\r\n") + "\n\n## Resolution (%s)\n\n%s\n" % (today, resolution)
-        dest = self.processed_dir / finding.path.name
         finding.save()  # rewrite in place first (frontmatter may be new)
         dest.parent.mkdir(parents=True, exist_ok=True)
         finding.path.replace(dest)
@@ -334,17 +343,36 @@ class FindingsStore:
         finding = self.require(name)
         if finding.is_active:
             raise SystemExit("error: finding %r is already active (%s)" % (finding.name, finding.path))
+        dest = self.root / finding.path.name
+        self._refuse_to_overwrite(finding, dest)
         finding.meta["status"] = "active"
         finding.meta.pop("processed", None)
-        dest = self.root / finding.path.name
         finding.save()
         finding.path.replace(dest)
         finding.path = dest
         self.write_index()
         return finding
 
+    @staticmethod
+    def _refuse_to_overwrite(finding: Finding, dest: Path) -> None:
+        """A move never replaces another file: a hand-written or merged
+        finding can share a stem with one already on the other side."""
+        if dest.exists():
+            raise SystemExit(
+                "error: cannot move %r: %s already exists (rename one of the two "
+                "files, then retry)" % (finding.name, dest)
+            )
+
     def remove(self, name: str) -> Path:
+        """Delete an ACTIVE finding. A processed one carries its resolution and
+        is never deleted: `reopen` it first if it really was a mistake."""
         finding = self.require(name)
+        if not finding.is_active:
+            raise SystemExit(
+                "error: finding %r is processed (%s); processed findings are kept. "
+                "`reopen` it first if it was recorded by mistake"
+                % (finding.name, finding.path)
+            )
         path = finding.path
         path.unlink()
         self.write_index()
@@ -450,7 +478,7 @@ class Findings(LoggingArgs, Cli):
             body = _read_text_arg(self.body, self.body_file) or ""
             finding = self.store().add(self.description, name=self.name, body=body)
             self._logger_.info("added finding %s", finding.name)
-            print(finding.path)
+            _write_stdout("%s\n" % (finding.path,))
             return 0
 
     class List(_Base):
@@ -544,7 +572,7 @@ class Findings(LoggingArgs, Cli):
             resolution = _read_text_arg(self.resolution, self.resolution_file) or ""
             finding = self.store().done(self.name, resolution)
             self._logger_.info("processed finding %s", finding.name)
-            print(finding.path)
+            _write_stdout("%s\n" % (finding.path,))
             return 0
 
     class Reopen(_Base):
@@ -559,14 +587,15 @@ class Findings(LoggingArgs, Cli):
         def __call__(self) -> int:
             finding = self.store().reopen(self.name)
             self._logger_.info("reopened finding %s", finding.name)
-            print(finding.path)
+            _write_stdout("%s\n" % (finding.path,))
             return 0
 
     class Remove(_Base):
         """Delete a finding recorded by mistake (prefer `done` for a real one).
 
         The queue discipline is move-never-delete; this is the exception for a
-        finding that should never have been recorded."""
+        finding that should never have been recorded. Only an active finding:
+        a processed one keeps its resolution (`reopen` it first)."""
 
         _parsername_ = "remove"
 
@@ -577,7 +606,7 @@ class Findings(LoggingArgs, Cli):
         def __call__(self) -> int:
             path = self.store().remove(self.name)
             self._logger_.info("removed %s", path)
-            print(path)
+            _write_stdout("%s\n" % (path,))
             return 0
 
     class Index(_Base):
@@ -586,7 +615,7 @@ class Findings(LoggingArgs, Cli):
         _parsername_ = "index"
 
         def __call__(self) -> int:
-            print(self.store().write_index())
+            _write_stdout("%s\n" % (self.store().write_index(),))
             return 0
 
     class PathCmd(_Base):
@@ -595,7 +624,7 @@ class Findings(LoggingArgs, Cli):
         _parsername_ = "path"
 
         def __call__(self) -> int:
-            print(self.store().root)
+            _write_stdout("%s\n" % (self.store().root,))
             return 0
 
     _subcommands_ = [Add, List, Show, Done, Reopen, Remove, Index, PathCmd]

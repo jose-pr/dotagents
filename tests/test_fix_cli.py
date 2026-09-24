@@ -327,3 +327,72 @@ def test_a_non_utf8_body_file_is_a_clean_error(findings_mod, tmp_path):
     body.write_bytes(b"caf\xe9\n")
     with pytest.raises(SystemExit, match="not UTF-8"):
         _run(F.Add, description="x", body_file=body, dir=tmp_path / "q")
+
+
+# --------------------------------------------------------------------------- #
+# findings: names, moves, removal, output
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("kwargs", [{"description": "Index"}, {"description": "x", "name": "README"}])
+def test_reserved_slugs_are_refused(findings_mod, tmp_path, kwargs):
+    d = tmp_path / "q"
+    with pytest.raises(SystemExit, match="reserved"):
+        _run(findings_mod.Findings.Add, dir=d, **kwargs)
+    assert not d.exists() or not any(d.iterdir())
+
+
+def test_index_and_readme_are_never_findings_in_any_case(findings_mod, tmp_path):
+    d = tmp_path / "q"
+    d.mkdir()
+    (d / "readme.md").write_text("# About this queue\n", encoding="utf-8")
+    (d / "real.md").write_text("# A real one\n", encoding="utf-8")
+    assert [f.name for f in findings_mod.FindingsStore(d).active()] == ["real"]
+
+
+def test_done_never_overwrites_a_processed_record(findings_mod, tmp_path):
+    d = tmp_path / "q"
+    (d / "processed").mkdir(parents=True)
+    old = d / "processed" / "dup.md"
+    old.write_text("---\nname: dup\nstatus: processed\n---\n\n## Resolution\n\nkept\n",
+                   encoding="utf-8")
+    (d / "dup.md").write_text("# a hand-written note reusing the stem\n", encoding="utf-8")
+    before_old, before_new = old.read_bytes(), (d / "dup.md").read_bytes()
+
+    with pytest.raises(SystemExit, match="already exists"):
+        findings_mod.FindingsStore(d).done("dup", "resolved")
+    assert old.read_bytes() == before_old
+    assert (d / "dup.md").read_bytes() == before_new
+
+
+def test_reopen_never_overwrites_an_active_finding(findings_mod, tmp_path):
+    d = tmp_path / "q"
+    (d / "processed").mkdir(parents=True)
+    (d / "processed" / "y.md").write_text(
+        "---\nname: yy\nstatus: processed\n---\n\nold\n", encoding="utf-8"
+    )
+    active = d / "y.md"
+    active.write_text("---\nname: other\nstatus: active\n---\n\nnew\n", encoding="utf-8")
+    before = active.read_bytes()
+
+    with pytest.raises(SystemExit, match="already exists"):
+        findings_mod.FindingsStore(d).reopen("yy")
+    assert active.read_bytes() == before
+    assert (d / "processed" / "y.md").is_file()
+
+
+def test_remove_refuses_a_processed_finding(findings_mod, tmp_path):
+    store = findings_mod.FindingsStore(tmp_path / "q")
+    store.add("to be processed", name="p")
+    store.done("p", "resolved")
+    with pytest.raises(SystemExit, match="reopen"):
+        store.remove("p")
+    assert (tmp_path / "q" / "processed" / "p.md").is_file()
+
+
+def test_paths_print_as_utf8_on_a_legacy_console(findings_mod, tmp_path, monkeypatch):
+    raw = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="cp1252"))
+    d = tmp_path / "q\u2192"
+    assert _run(findings_mod.Findings.Add, description="arrow dir", dir=d) == 0
+    assert raw.getvalue().decode("utf-8").strip() == str(d / "arrow-dir.md")
