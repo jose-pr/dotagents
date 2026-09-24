@@ -1,15 +1,16 @@
 """`dotagents about` -- what this dotagents is: the CLI's version and every
 package bundled with it.
 
-    dotagents-cli 0.5.0
-    duho 0.5.0
-    pathlib_next 0.9.0
+    dotagents-cli <version>
+    duho <version>
+    pathlib_next <version>
 
 One package per line, `<distribution> <version>`, the CLI first. From a
 built ``.pyz`` the list is what ``build-pyz`` vendored (recorded in
 ``dotagents/_bundle.json`` at build time, since the zipapp carries no
-``dist-info``); from a plain install it is the dependencies actually present
-(``duho``, ``pathlib_next``, and the ``uri`` extra's packages when installed).
+``dist-info``); from a plain install it is whichever of
+:data:`RUNTIME_PACKAGES` is installed -- a fixed set, so a package outside it
+(a client the ``sftp`` or ``s3`` extra pulls in) is not listed.
 ``--json`` adds where it runs from and the Python.
 """
 

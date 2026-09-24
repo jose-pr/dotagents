@@ -1,7 +1,8 @@
 """Overlay support: the :class:`Overlay` type, plus the multi-overlay recompose.
 
-An overlay is a directory (optionally carrying an `overlay.toml` manifest) whose
-files install to the same relative path in the destination. Everything that
+An overlay is a directory (optionally carrying an `overlay.toml` manifest) that
+installs as a unit into `<store>/overlays/<name>/`, its files keeping their
+relative paths inside that directory. Everything that
 depends only on ONE overlay -- its name rules, its manifest, its setup script,
 its files, what it contributes to the managed `AGENTS.md` block -- is a method or
 property of :class:`Overlay`. Manifest keys:
@@ -213,7 +214,7 @@ def _parse_string_array(text: str, key: str) -> "list[str]":
     TOML source.
 
     The fallback when neither `tomllib` nor `tomli` is importable (the Python
-    3.9 floor has no `tomllib`, D13). Handles `"..."` (escapes decoded),
+    3.9 floor has no `tomllib`). Handles `"..."` (escapes decoded),
     `'...'`, and the multi-line
     `\"\"\"...\"\"\"` / `'''...'''` -- one or many per array, with the closing
     `]` on the same line or on its own (indented or not)."""
@@ -503,7 +504,7 @@ class Overlay:
         overlay as long as its name passes :meth:`is_valid_name` (so ``.git``/
         ``__pycache__``/dotfiles are skipped). ``is_dir()`` follows symlinks, so a
         symlink-to-dir counts. Empty if ``root`` is absent. This is the ONE
-        discovery rule (D84): :meth:`installed` folds it over several stores,
+        discovery rule: :meth:`installed` folds it over several stores,
         and the ``overlays`` command's ``add``/``remove``/``sync`` use it directly
         for the single scope they install into. ``store`` is stamped on each
         result (see :attr:`store`)."""
@@ -610,7 +611,7 @@ class Overlay:
 
     @property
     def sort_key(self) -> "tuple[int, str, str]":
-        """The `(priority, name)` merge-order key (D68).
+        """The `(priority, name)` merge-order key.
 
         Lower `priority` (default `DEFAULT_PRIORITY`, 500) sorts earlier; a
         numerically higher-priority overlay therefore lands *later* in the merged
@@ -625,7 +626,7 @@ class Overlay:
     def sort_by_priority(
         cls, overlays: "Iterable[Overlay | str | os.PathLike[str]]"
     ) -> "list[Overlay]":
-        """`overlays` (instances or dirs) sorted by `(priority, name)` (D68).
+        """`overlays` (instances or dirs) sorted by `(priority, name)`.
 
         Deterministic regardless of the caller's order (`add` passes invocation
         order, `sync` discovery order): a high-priority overlay's lines must
@@ -663,7 +664,7 @@ class Overlay:
 
         * **cwd** = the installed overlay dir, so the script sees its own files.
         * **env** carries ``AGENTS_HOME`` = ``agents_dir``, the USER store
-          (D58) -- what the variable means everywhere else, so a ``dotagents``
+          -- what the variable means everywhere else, so a ``dotagents``
           call the script makes resolves the same stores -- plus
           ``AGENTS_SCOPE_ROOT`` = the store the overlay is installed into
           (``scope_root``; the user store for a ``-g`` install, the project's
@@ -964,7 +965,7 @@ class Overlay:
         return result
 
     def merge_rules_into(self, agents_md: Path, dry_run: bool, logger) -> bool:
-        """Fold this overlay's D59 routing + rules into an already-installed
+        """Fold this overlay's routing + rules into an already-installed
         AGENTS.md's managed block, in place (additive).
 
         Extracts the current block (between the dotagents markers), runs the
@@ -1018,7 +1019,7 @@ def recompose_overlay_block(
     logger,
 ) -> bool:
     """Rebuild AGENTS.md's managed block from the *pristine* base over ALL installed
-    overlays in `(priority, name)` order (D68), in place.
+    overlays in `(priority, name)` order, in place.
 
     `base_block` is the base overlay's managed block (no overlay content),
     `overlays` is every installed overlay in the scope (instances or dirs), and

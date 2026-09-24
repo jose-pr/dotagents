@@ -10,7 +10,7 @@ running session, done up front here):
 1. **Environment.** The full ``dotagents env`` assembly for this scope --
    identity vars (``AGENT``, ``AGENTS_HARNESS``, ...), ``AGENTS_HOME`` /
    ``AGENTS_PROJECT_ROOT`` / ``AGENTS_PYTHON``, one ``<NAME>_OVERLAY_ROOT``
-   per installed overlay, the PATH / PYTHONPATH prepends, the env-file chain --
+   per installed overlay, the PATH prepend and ``AGENTS_PYTHONPATH``, the env-file chain --
    is applied to this process and handed to the child, so the harness and
    everything it spawns see it; a variable a layer unset is removed from
    both. ``-g`` skips the project tiers (the same narrowed meaning as
@@ -170,6 +170,12 @@ class Launch(DotAgentsArgs):
     global_scope: bool = False
     "Skip the project tiers: the user store only (as `env` / `context`)."
     ("--global", "-g")
+
+    # Restated from `DotAgentsArgs` for its help only (same flag and default):
+    # here the store is always the user store, as for `env` / `context`.
+    agents_dir: Optional[Path] = None
+    "User store root override (default: $AGENTS_HOME, else ~/.agents)."
+    ("--agents-dir",)
 
     agent: Optional[str] = None
     (

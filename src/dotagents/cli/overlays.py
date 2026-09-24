@@ -34,7 +34,7 @@ def _redacted(spec) -> str:
 
 def _validated_names(raw_names, what: str) -> "list[str]":
     """Validate + normalize every requested name up front with the shared
-    overlay-name rule (D84): `add My_Overlay` and `add my-overlay` resolve the
+    overlay-name rule: `add My_Overlay` and `add my-overlay` resolve the
     same overlay, and a bad name (`.git`, `README.md`, `2fast`, a level name) is
     rejected before anything is touched."""
     from dotagents._overlays import Overlay
@@ -197,7 +197,7 @@ def _backup_root(scope, name: str) -> Path:
 def _recompose(scope, logger, *, dry_run: bool, extra: "Optional[list[Path]]" = None,
                without: "frozenset[str]" = frozenset()) -> None:
     """Rebuild the managed block from the pristine base over every overlay
-    installed in the scope's own store, in (priority, name) order (D68).
+    installed in the scope's own store, in (priority, name) order.
 
     ``extra`` stands in for overlays a `--dry-run` add did not copy;
     ``without`` (normalized names) drops overlays a `--dry-run` remove did
@@ -358,7 +358,7 @@ class OverlayAdd(DotAgentsArgs):
     the env repos, the stores' registries), installs what
     its manifest ``requires`` first, copies it into
     ``<scope>/.agents/overlays/<name>/`` (discoverable) with a record of the
-    repo it came from, merges its D59 routing/rules into the installed
+    repo it came from, merges its routing and rules into the installed
     ``AGENTS.md`` managed block, and publishes its ``skills/`` from the
     INSTALLED copy into the shared ``<scope>/.agents/skills/``, linking them
     into each agent's own skills dir that ``init`` already wired for the
@@ -375,7 +375,7 @@ class OverlayAdd(DotAgentsArgs):
 
     repo: "list[str]" = []
     ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
-     "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
+     "mapping names to sources, or a git `<repo>[@ref][#path]`; consulted before "
      "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
      "dotagents.{json,toml,yaml}. The first repo offering a name wins.")
     ("--repo",)
@@ -566,7 +566,7 @@ class OverlayList(DotAgentsArgs):
 
     repo: "list[str]" = []
     ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
-     "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
+     "mapping names to sources, or a git `<repo>[@ref][#path]`; consulted before "
      "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
      "dotagents.{json,toml,yaml}. The first repo offering a name wins.")
     ("--repo",)
@@ -674,7 +674,7 @@ class OverlayShow(DotAgentsArgs):
 
     repo: "list[str]" = []
     ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
-     "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
+     "mapping names to sources, or a git `<repo>[@ref][#path]`; consulted before "
      "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
      "dotagents.{json,toml,yaml}. The first repo offering a name wins.")
     ("--repo",)
@@ -777,7 +777,7 @@ class OverlaySync(DotAgentsArgs):
 
     repo: "list[str]" = []
     ("Overlay repo (repeatable): a directory of overlays, a JSON/TOML/YAML registry "
-     "mapping names to sources, or a git <repo>[@ref][#path]; consulted before "
+     "mapping names to sources, or a git `<repo>[@ref][#path]`; consulted before "
      "$AGENTS_OVERLAYS_REPO_<KEY>, $AGENTS_OVERLAYS_REPO and the stores' "
      "dotagents.{json,toml,yaml}. The first repo offering a name wins. Given, it "
      "replaces each overlay's recorded source.")

@@ -1,4 +1,4 @@
-"""Managed-block merge for `init`'s AGENTS.md/CLAUDE.md.
+"""Managed-block merge for `init`'s AGENTS.md and the harnesses' own entry files.
 
 `init` must never clobber a user-customized AGENTS.md. Content owned by dotagents
 is delimited by literal marker lines and treated as a block *within* the file:

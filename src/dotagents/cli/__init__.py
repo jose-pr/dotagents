@@ -1,10 +1,10 @@
 """dotagents CLI: init / context / env / overlays / build-pyz / about built-in
-subcommands, plus command modules discovered from `cmds` directories (D76/D84).
+subcommands, plus command modules discovered from `cmds` directories.
 
 The bundled command modules live in `_overlay/dotagents/cmds/` (`findings`,
 `launch`) and are discovered from the package; `init` copies nothing from that
 dir. A `.py` command module a user places in `<scope>/dotagents/cmds/` (a dir
-they create for it) is discovered like any other (D84).
+they create for it) is discovered like any other.
 
 The per-command classes live in sibling modules (`cli/init.py`, `cli/overlays.py`,
 ...); this package base holds the shared helpers (in `cli/_common.py`, re-exported
@@ -145,7 +145,7 @@ _COMMAND_MODULES = _command_modules([Dotagents, *_BUILTIN_COMMANDS])
 
 
 def _bundled_cmds_dir() -> "Path | None":
-    """The bundled command-module dir, `<package>/_overlay/dotagents/cmds` (D76).
+    """The bundled command-module dir, `<package>/_overlay/dotagents/cmds`.
 
     Ships `findings.py` (the per-scope findings queue) and `launch.py` (start
     a harness with the env and context applied). It is always a discovery
@@ -340,17 +340,18 @@ def _cmds_dirs(argv=None) -> "list[Path]":
 
     The per-level name-dict maps overlay levels to `<overlay-root>/cmds` and every
     other level (system/user/project) to `<agents_root>/dotagents/cmds` (the
-    `Scope.cmds_dir` layout, D76). `Scope.paths` returns them in Contract-A
+    `Scope.cmds_dir` layout). `Scope.paths` returns them in Contract-A
     precedence: per store (system, user, project), each store's overlays' `cmds`
     first and then the store's own `dotagents/cmds`. Discovery layers later
     sources over earlier ones (see `_discover_dir`), so a project cmd overrides a
     user cmd overrides an overlay cmd of the same name -- the intended precedence
     (an overlay may SHIP a command; a user/project can still override it).
 
-    The store location is configurable (D58/D79): the user scope resolves through
+    The store location is configurable: the user scope resolves through
     `resolve_user_store()` (`$AGENTS_HOME`, default
     `~/.agents`) -- the same resolver `env`/`context` use, so every user-store
-    reader agrees; the project scope is `<cwd>/.agents`.
+    reader agrees; the project is `project_root_default()` (the pinned root, else
+    the cwd), with no `<project>/dotagents/cmds` tier outside `.agents`.
     `include_missing=True`: every level's cmds dir is offered and the caller's
     `_discover_dir` skips the ones that don't exist."""
     from dotagents import _scope

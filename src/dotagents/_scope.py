@@ -10,12 +10,10 @@ only wires args) to match ``_overlays.py`` / ``_skills.py``:
   **discovered** by their presence under ``overlays/``.
 
 * **Source** -- *where an overlay to install comes from*. ``resolve_source`` returns
-  the repos in precedence order (``--repo``, the env repos, the stores'
-  ``dotagents.*`` registries, the bundled ``overlays/`` -- resolved
-  ``.pyz``-safe via ``importlib.resources``, mirroring ``cli._package_data_dir``);
-  a repo is a directory of overlays, a registry file, or a git spec, and the
-  first offering a name wins. The command classes only use the returned
-  object's ``available`` / ``overlay_dir`` / ``root`` -- see ``dotagents._sources``.
+  the repos in precedence order (``--repo``, the env repos, the project and
+  user stores' ``dotagents.*`` registries; no build bundles overlays); a repo
+  is a directory of overlays, a registry file, or a git spec, and the first
+  offering a name wins. See ``dotagents._sources`` for the returned object.
 
 The ``system`` store (``Scope.system_root``: ``/etc/agents`` on POSIX, or
 ``$AGENTS_SYSTEM_ROOT``; only when administrators alone can write it) is walked by the Contract-A resolver (``Scope.paths``)
@@ -282,7 +280,7 @@ class Scope:
 
     @property
     def cmds_dir(self) -> Path:
-        """Directory of discovered command modules for this scope (D76):
+        """Directory of discovered command modules for this scope:
         ``<agents_root>/dotagents/cmds``, a seam alongside ``overlays``/``skills``.
 
         ``init`` never creates it -- the dir exists once a user adds a command
@@ -416,8 +414,8 @@ def system_root_default() -> "Optional[Path]":
 
     ``$AGENTS_SYSTEM_ROOT`` when set (it must be an absolute path), else
     ``/etc/agents`` on POSIX and nothing on Windows -- there ``/etc/agents`` is
-    drive-relative (``\\etc\\agents``), and any local account can create it
-    (D93). A root that does not exist is ``None`` too, so nothing of it (a
+    drive-relative (``\\etc\\agents``), and any local account can create it.
+    A root that does not exist is ``None`` too, so nothing of it (a
     ``bin/`` on PATH included) is walked. A root that a non-administrator can
     write is skipped with a warning: its ``env.py`` and ``cmds/`` would run in
     every user's session. Resolved once per process and value."""
@@ -454,7 +452,7 @@ AGENTS_DIR_ENV = "AGENTS_HOME"
 
 def resolve_user_store(agents_dir: "str | os.PathLike | None" = None) -> Path:
     """The USER store root, in precedence order: an explicit ``agents_dir``
-    (``--agents-dir``) -> ``$AGENTS_HOME`` -> ``~/.agents`` (D58/D79).
+    (``--agents-dir``) -> ``$AGENTS_HOME`` -> ``~/.agents``.
 
     :func:`resolve_scope` defaults its ``-g`` store through this; ``env`` and
     ``context`` -- whose Contract-A walk takes the user store as ``agents_dir``

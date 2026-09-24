@@ -14,7 +14,7 @@ from dotagents.cli._common import (  # noqa: F401  (_write_stdout re-exported fo
 class Context(DotAgentsArgs):
     """Assemble the effective context for agents.
 
-    Roots (both configurable, never hardcoded -- D58/D79/D80): the user store is
+    Roots (both configurable, never hardcoded): the user store is
     ``--agents-dir`` -> ``$AGENTS_HOME`` ->
     ``~/.agents`` (:func:`~dotagents.cli._common.resolve_user_store`), and the
     project root is ``$AGENTS_PROJECT_ROOT`` -> ``$CLAUDE_PROJECT_DIR`` -> the cwd
@@ -60,8 +60,9 @@ class Context(DotAgentsArgs):
     (
         "Merge the context into each agent's own instruction file under the "
         "project root (Claude .claude/CLAUDE.md, Codex AGENTS.md, Gemini "
-        "GEMINI.md, Cursor .cursorrules, Copilot .github/copilot-instructions.md) "
-        "as a managed block, instead of printing it."
+        "GEMINI.md, Cursor .cursor/rules/dotagents.mdc, Copilot "
+        ".github/copilot-instructions.md, pi .pi/APPEND_SYSTEM.md, Antigravity "
+        ".agents/rules/dotagents.md) as a managed block, instead of printing it."
     )
     ("--write-agent",)
 

@@ -489,12 +489,15 @@ def _yaml_key(k: str) -> str:
 class Env(DotAgentsArgs):
     """Assemble the chained env (env files + env.py execution) under contract B.
 
-    Prepends overlay/level ``bin`` dirs to ``PATH`` first, then evaluates the
-    ``pre.*`` tier and the main tier in precedence order (overlays -> user ->
-    project -> project-root), chaining each file over the accumulated env so
-    later files win. ``.py`` files are EXECUTED and emit JSON env changes; plain
-    files are sourced. Standardized ``AGENTS_*``/``AGENT`` identity vars and the
-    ``AGENTS_PROXY`` model are wired in.
+    Prepends every level's ``bin`` dir to ``PATH`` first and lists every
+    existing ``lib`` dir in ``AGENTS_PYTHONPATH``, then evaluates the ``pre.*``
+    tier and the main tier in precedence order (store by store -- system,
+    user, project -- each store's overlays before the store itself), chaining
+    each file over the accumulated env so later files win. ``.py`` files are
+    EXECUTED and emit JSON env changes; plain files are sourced by bash. A
+    project root's own files outside ``.agents/`` never run. Standardized
+    ``AGENTS_*``/``AGENT`` identity vars and the ``AGENTS_PROXY`` model are
+    wired in.
 
     ``--diff`` emits only the vars that differ from the current environment (what
     a SessionStart hook injects); the default emits the full assembled env merged
@@ -520,7 +523,7 @@ class Env(DotAgentsArgs):
     doubled percent signs collapse back, and a ``!name!`` in a value is not
     expanded.
 
-    Roots (both configurable, never hardcoded -- D58/D79/D80): the user store is
+    Roots (both configurable, never hardcoded): the user store is
     ``--agents-dir`` -> ``$AGENTS_HOME`` ->
     ``~/.agents`` (:func:`~dotagents.cli._common.resolve_user_store`), and the
     project root is ``$AGENTS_PROJECT_ROOT`` -> ``$CLAUDE_PROJECT_DIR`` -> the cwd

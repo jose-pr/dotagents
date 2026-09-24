@@ -257,8 +257,8 @@ def _compose_block(base_text: str, overlays, logger) -> str:
     """Fold each overlay's `rules`/`routing` contributions into the base block.
 
     Rules append to "Always-on rules" and routing to "Load on demand", after the
-    base's own -- the base carries the mechanism (D57) and should read first. The
-    overlays fold in **`(priority, name)` order** (D68), NOT the caller's list
+    base's own -- the base carries the mechanism and should read first. The
+    overlays fold in **`(priority, name)` order**, NOT the caller's list
     order: lower `priority` (default `DEFAULT_PRIORITY`, 500) sorts earlier, so a
     numerically higher-priority overlay lands *last* and wins on conflict -- the
     same convention `_context.py` uses. `name` is the tiebreaker, so the block is
@@ -334,7 +334,7 @@ def _no_subcommand(cmd, hint: str) -> int:
 
 
 def _installed_overlay_dirs(scope, source, *, adding=None, dry_run=False) -> "list[Path]":
-    """The overlay dirs to recompose the managed block over (D68).
+    """The overlay dirs to recompose the managed block over.
 
     Every overlay installed in `scope` contributes to the block, so the recompose is
     a pure function of *which* overlays are present -- not of add-invocation order.
