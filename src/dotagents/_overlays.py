@@ -18,12 +18,26 @@ stays a module function.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
+
+_log = logging.getLogger("dotagents")
+_warned: "set[str]" = set()
+
+
+def _warn_once(message: str, *args: object) -> None:
+    """Log a warning once per process: manifests are re-read many times per
+    command (priority, sort key, compose), and one problem is one line."""
+    text = message % args if args else message
+    if text not in _warned:
+        _warned.add(text)
+        _log.warning("%s", text)
+
 
 # Default merge priority for an overlay that declares none. Lower sorts
 # earlier. 500 leaves generous headroom on both sides for overlays that want to
@@ -33,7 +47,89 @@ DEFAULT_PRIORITY = 500
 
 # --------------------------------------------------------------------------- #
 # Manifest text parsing (pure functions over TOML source; no overlay needed).
+#
+# `tomllib` (3.11+) or `tomli` reads the manifest whenever one is importable;
+# the small hand reader below is the fallback for a 3.9/3.10 interpreter with
+# neither, and covers what a manifest uses: top-level strings, arrays of
+# strings and an integer, with TOML's escapes.
 # --------------------------------------------------------------------------- #
+
+
+def _toml_module() -> "Any":
+    """``tomllib`` / ``tomli`` when importable, else ``None`` (seam for tests)."""
+    try:
+        import tomllib  # type: ignore[import-not-found]
+
+        return tomllib
+    except ImportError:
+        pass
+    try:
+        import tomli  # type: ignore[import-not-found]
+
+        return tomli
+    except ImportError:
+        return None
+
+
+_ESCAPES = {"b": "\b", "t": "\t", "n": "\n", "f": "\f", "r": "\r", '"': '"', "\\": "\\", "e": "\x1b"}
+
+
+def _unescape(text: str) -> str:
+    """Decode a TOML basic string's escapes (``\\"``, ``\\\\``, ``\\n``, ``\\uXXXX``...)."""
+
+    def one(m: "re.Match[str]") -> str:
+        esc = m.group(1)
+        if esc[0] in "uU":
+            try:
+                return chr(int(esc[1:], 16))
+            except ValueError:
+                return m.group(0)
+        return _ESCAPES.get(esc, m.group(0))
+
+    return re.sub(r"\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)", one, text)
+
+
+def _top_level(text: str) -> str:
+    """The (comment-stripped) text before the first ``[table]`` header, so a
+    ``key =`` inside a table is never read as a top-level key. Quote- and
+    bracket-aware: a ``[`` inside a string or an array does not count."""
+    i, n, depth = 0, len(text), 0
+    quote: "Optional[str]" = None
+    line_start = True
+    while i < n:
+        c = text[i]
+        if quote:
+            if text.startswith(quote, i):
+                i += len(quote)
+                quote = None
+            elif c == "\\" and quote in ('"', '"""') and i + 1 < n:
+                i += 2
+            else:
+                i += 1
+            continue
+        if c == "\n":
+            line_start = True
+            i += 1
+            continue
+        if line_start and c in " \t":
+            i += 1
+            continue
+        if line_start and c == "[" and depth == 0:
+            return text[:i]
+        line_start = False
+        if text.startswith('"""', i) or text.startswith("'''", i):
+            quote = text[i : i + 3]
+            i += 3
+        elif c in ('"', "'"):
+            quote = c
+            i += 1
+        else:
+            if c == "[":
+                depth += 1
+            elif c == "]":
+                depth = max(0, depth - 1)
+            i += 1
+    return text
 
 
 def _strip_comments(text: str) -> str:
@@ -115,39 +211,88 @@ def _parse_string_array(text: str, key: str) -> "list[str]":
     """Read a top-level `key = [...]` array of strings from (comment-stripped)
     TOML source.
 
-    A deliberately small reader rather than a TOML dependency: the Python 3.9
-    floor has no `tomllib` (D13). Handles `"..."`, `'...'`, and the multi-line
+    The fallback when neither `tomllib` nor `tomli` is importable (the Python
+    3.9 floor has no `tomllib`, D13). Handles `"..."` (escapes decoded),
+    `'...'`, and the multi-line
     `\"\"\"...\"\"\"` / `'''...'''` -- one or many per array, with the closing
     `]` on the same line or on its own (indented or not)."""
     body = _array_body(text, key)
     if body is None:
         return []
-    # Triple-quoted first so its content is not re-matched as single-quoted.
-    items = re.findall(r'"""(.*?)"""|\'\'\'(.*?)\'\'\'', body, re.DOTALL)
-    items = [a or b for a, b in items]
-    remainder = re.sub(r'""".*?"""|\'\'\'.*?\'\'\'', "", body, flags=re.DOTALL)
-    items += [a or b for a, b in re.findall(r'"([^"\n]*)"|\'([^\'\n]*)\'', remainder)]
+    # One pass, in order: triple-quoted forms first so their content is never
+    # re-matched as single-quoted; basic strings decode their escapes.
+    pattern = re.compile(
+        r'"""((?:[^\\]|\\.)*?)"""|\'\'\'(.*?)\'\'\'|"((?:[^"\\\n]|\\.)*)"|\'([^\'\n]*)\'',
+        re.DOTALL,
+    )
+    items = []
+    for basic_ml, literal_ml, basic, literal in pattern.findall(body):
+        if basic_ml or basic:
+            items.append(_unescape(basic_ml or basic))
+        else:
+            items.append(literal_ml or literal)
     return [s.strip("\n") for s in items if s.strip()]
 
 
 def _parse_string(text: str, key: str) -> "Optional[str]":
     """A top-level single-line `key = "..."` / `key = '...'` string, or None."""
-    m = re.search(r"""(?m)^%s\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)')\s*$""" % re.escape(key), text)
+    m = re.search(
+        r"""(?m)^%s\s*=\s*(?:"((?:[^"\\\n]|\\.)*)"|'([^'\n]*)')\s*$""" % re.escape(key), text
+    )
     if m is None:
         return None
-    return m.group(1) if m.group(1) is not None else m.group(2)
+    return _unescape(m.group(1)) if m.group(1) is not None else m.group(2)
 
 
 def _parse_priority(text: str) -> int:
     """Read a top-level `priority = <int>` from (comment-stripped) TOML source.
     Missing/unparseable -> DEFAULT_PRIORITY."""
-    m = re.search(r"(?m)^priority\s*=\s*(-?\d+)\s*$", text)
+    m = re.search(r"(?m)^priority\s*=\s*([+-]?\d(?:_?\d)*)\s*$", text)
     if m is None:
         return DEFAULT_PRIORITY
     try:
-        return int(m.group(1))
+        return int(m.group(1).replace("_", ""))
     except ValueError:
         return DEFAULT_PRIORITY
+
+
+def _hand_parse(text: str) -> "dict[str, object]":
+    """The fallback reader's view of a manifest, as the keys ``tomllib`` would
+    give (absent keys omitted)."""
+    raw = _top_level(_strip_comments(text))
+    doc: "dict[str, object]" = {
+        "routing": _parse_string_array(raw, "routing"),
+        "rules": _parse_string_array(raw, "rules"),
+        "requires": _parse_string_array(raw, "requires"),
+        "priority": _parse_priority(raw),
+    }
+    for key in ("name", "description"):
+        value = _parse_string(raw, key)
+        if value is not None:
+            doc[key] = value
+    return doc
+
+
+def parse_manifest_text(text: str, origin: str = "overlay.toml") -> "Optional[dict[str, object]]":
+    """The manifest document: ``tomllib``/``tomli`` when importable, else the
+    hand reader. ``None`` (and a warning naming ``origin``) when it is not
+    valid TOML."""
+    toml = _toml_module()
+    if toml is None:
+        return _hand_parse(text)
+    try:
+        return toml.loads(text)
+    except ValueError as exc:  # TOMLDecodeError is a ValueError
+        _warn_once("%s is not valid TOML (%s); ignoring it", origin, exc)
+        return None
+
+
+def _string_list(value: object) -> "list[str]":
+    """The string items of an array (anything else dropped), multi-line
+    strings trimmed of their surrounding newlines, blanks dropped."""
+    if not isinstance(value, list):
+        return []
+    return [v.strip("\n") for v in value if isinstance(v, str) and v.strip()]
 
 
 def _same_content(a: Path, b: Path) -> bool:
@@ -361,18 +506,33 @@ class Overlay:
         if not path.is_file():
             return empty
         try:
-            raw = _strip_comments(path.read_text(encoding="utf-8"))
-        except OSError:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            _warn_once("cannot read %s (%s); ignoring it", path, exc)
             return empty
+        doc = parse_manifest_text(text, str(path))
+        if doc is None:
+            return empty
+        name, description, priority = doc.get("name"), doc.get("description"), doc.get("priority")
+        # `requires` names become install paths (`<scope>/overlays/<name>`):
+        # only a valid overlay name may pass, so `../x` or a level name can
+        # never escape `overlays/` or leave an orphan the commands cannot see.
+        requires: "list[str]" = []
+        for raw in _string_list(doc.get("requires")):
+            if not self.is_valid_name(raw):
+                _warn_once("overlay %s: ignoring invalid requires entry %r", self.name, raw)
+                continue
+            dep = self.normalize_name(raw)
+            if dep not in requires:
+                requires.append(dep)
         return {
-            "name": _parse_string(raw, "name") or self.name,
-            "description": _parse_string(raw, "description") or "",
-            "routing": _parse_string_array(raw, "routing"),
-            "rules": _parse_string_array(raw, "rules"),
-            "requires": [
-                self.normalize_name(r) for r in _parse_string_array(raw, "requires")
-            ],
-            "priority": _parse_priority(raw),
+            "name": name if isinstance(name, str) and name else self.name,
+            "description": description if isinstance(description, str) else "",
+            "routing": _string_list(doc.get("routing")),
+            "rules": _string_list(doc.get("rules")),
+            "requires": requires,
+            "priority": priority if isinstance(priority, int) and not isinstance(priority, bool)
+            else DEFAULT_PRIORITY,
         }
 
     @property
@@ -504,12 +664,31 @@ class Overlay:
         base config landing."""
         blocks: "list[str]" = []
         warnings: "list[str]" = []
+        try:
+            root = self.path.resolve()
+        except OSError:
+            root = self.path
         for rel in rel_paths:
             src = self.path / rel
+            # Contained: an absolute path or one that resolves outside the
+            # overlay would merge bullets from any file into AGENTS.md.
+            try:
+                inside = not os.path.isabs(rel) and not rel.startswith(("/", "\\")) and (
+                    src.resolve() == root or root in src.resolve().parents
+                )
+            except OSError:
+                inside = False
+            if not inside:
+                warnings.append("rules file outside the overlay: %s" % rel)
+                continue
             if not src.is_file():
                 warnings.append("rules file not found: %s" % rel)
                 continue
-            text = src.read_text(encoding="utf-8")
+            try:
+                text = src.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                warnings.append("rules file unreadable: %s (%s)" % (rel, exc))
+                continue
             # Everything from the first bullet up to the first `## ` heading after it.
             start = re.search(r"(?m)^- \*\*", text)
             if start is None:

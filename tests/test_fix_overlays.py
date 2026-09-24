@@ -400,3 +400,89 @@ def test_a_pyz_in_the_store_never_makes_the_store_its_own_source(tmp_path, monke
     scope = _scope.Scope("user", store)
     with pytest.raises(SystemExit, match="no overlay source"):
         _scope.resolve_source(None, scope=scope)
+
+
+# --------------------------------------------------------------------------
+# overlays-13: the manifest is read as TOML
+# --------------------------------------------------------------------------
+
+@pytest.fixture(params=["toml", "hand"])
+def reader(request, monkeypatch):
+    """Run a manifest test under tomllib/tomli AND under the hand fallback."""
+    toml_module = getattr(_overlays, "_toml_module", lambda: None)
+    if request.param == "toml":
+        if toml_module() is None:
+            pytest.skip("neither tomllib nor tomli is importable")
+    else:
+        monkeypatch.setattr(_overlays, "_toml_module", lambda: None, raising=False)
+    return request.param
+
+
+def test_manifest_escapes_underscored_ints_and_tables(tmp_path, reader):
+    ov = tmp_path / "demo"
+    ov.mkdir()
+    (ov / "overlay.toml").write_text(
+        'name = "demo"\n'
+        'description = "say \\"hi\\""\n'
+        'routing = ["- Run \\"dotagents env\\" first -> x", \'- Path C:\\tools -> y\', "- Tab\\there -> z"]\n'
+        "priority = 1_000\n"
+        "[nested]\n"
+        'rules = ["nested.md"]\n'
+        'name = "not-the-name"\n',
+        encoding="utf-8",
+    )
+    manifest = Overlay(ov).read_manifest()
+    assert manifest["routing"] == ['- Run "dotagents env" first -> x', "- Path C:\\tools -> y", "- Tab\there -> z"]
+    assert manifest["description"] == 'say "hi"'
+    assert manifest["name"] == "demo"
+    assert manifest["rules"] == []  # a key inside [nested] is not a top-level key
+    assert manifest["priority"] == 1000
+
+
+def test_an_invalid_manifest_is_a_warning_and_an_empty_manifest(tmp_path, caplog):
+    if _overlays._toml_module() is None:
+        pytest.skip("neither tomllib nor tomli is importable")
+    ov = tmp_path / "broken"
+    ov.mkdir()
+    (ov / "overlay.toml").write_text('routing = ["unterminated\n', encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        manifest = Overlay(ov).read_manifest()
+    assert manifest["routing"] == [] and manifest["name"] == "broken"
+    assert any("not valid TOML" in r.getMessage() for r in caplog.records)
+
+
+# --------------------------------------------------------------------------
+# overlays-05: requires / rules cannot escape the overlay or overlays/
+# --------------------------------------------------------------------------
+
+def test_invalid_requires_entries_are_dropped(tmp_path, reader):
+    ov = _overlay(tmp_path, "top", requires=["../escape", "user", "ok", "Ok"])
+    assert Overlay(ov).read_manifest()["requires"] == ["ok"]
+
+
+def test_a_requires_path_never_installs_outside_overlays(world):
+    src, store = world
+    _overlay(src, "top", requires=["../escape"])
+    _overlay(src / "..", "escape", files=[("kb/E.md", "e\n")])  # what `../escape` would find
+    assert _add(src, store, "top") == 0
+    assert not (store / "escape").exists()
+    assert sorted(p.name for p in (store / "overlays").iterdir()) == ["top"]
+
+
+def test_rules_outside_the_overlay_are_not_merged(world, tmp_path):
+    src, store = world
+    (tmp_path / "secret.md").write_text("- **Secret**: from outside\n", encoding="utf-8")
+    _overlay(src, "top", rules=["../../secret.md", str(tmp_path / "secret.md")])
+    assert _add(src, store, "top") == 0
+    assert "Secret" not in (store / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_a_non_utf8_rules_file_is_a_warning_not_a_wedge(world):
+    """overlays-11: one bad rules file crashed every later add/sync."""
+    src, store = world
+    bad = _overlay(src, "bad", rules=["rules.md"])
+    (bad / "rules.md").write_bytes(b"- **Bad**: \xff\xfe\n")
+    _overlay(src, "good", routing=["- GOOD-ROUTE -> x"])
+    assert _add(src, store, "bad") == 0
+    assert _add(src, store, "good") == 0
+    assert "GOOD-ROUTE" in (store / "AGENTS.md").read_text(encoding="utf-8")

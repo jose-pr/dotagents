@@ -427,14 +427,16 @@ def test_manifest_reader_handles_comments_indentation_and_quotes(tmp_path):
         '    "r1.md",\n'
         "    'r2.md',\n"
         "  ]\n"
-        'requires = ["""multi\nline"""]\n',
+        'requires = ["""multi\nline""", """\nnet\n"""]\n',
         encoding="utf-8",
     )
     m = _overlays.Overlay(ov).read_manifest()
     assert m["priority"] == 5
     assert m["routing"] == ["a #not-a-comment"], "a trailing comment must not swallow the next array"
     assert m["rules"] == ["r1.md", "r2.md"]
-    assert m["requires"] == ["multi\nline"]
+    # Multi-line strings are read (surrounding newlines trimmed); `multi\nline`
+    # is not a valid overlay name, so it is dropped from `requires`.
+    assert m["requires"] == ["net"]
 
 
 def test_compose_block_explains_overlay_root_vars_once(tmp_path):
