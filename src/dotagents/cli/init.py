@@ -43,7 +43,7 @@ class Init(DotAgentsArgs):
     from_: Optional[str] = None
     (
         "Base overlay to use instead of the bundled one: a directory or dotagents "
-        "checkout, a file:/http(s):/sftp:/s3:/zip: URI, or a git repo[@ref][#path]. "
+        "checkout, a file:/http(s):/sftp:/s3:/zip: URI, or a git `<repo>[@ref][#path]`. "
         "Recorded, so later runs reuse it."
     )
     ("--from",)
