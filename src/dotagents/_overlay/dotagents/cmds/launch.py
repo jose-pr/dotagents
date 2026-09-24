@@ -28,7 +28,8 @@ running session, done up front here):
    files the sources reference.
 3. **The harness.** ``Agent.launch_command`` (``claude``, ``codex``,
    ``gemini``, ``cursor-agent``, ``copilot``, ``pi``), resolved on the PATH from step
-   1 -- so a harness an overlay's ``bin/`` provides is found -- or
+   1 -- so a harness an overlay's ``bin/`` provides is found; never in the
+   current directory, which Windows would otherwise search first -- or
    ``--command`` for a program under another name. Everything after the first
    literal ``--`` is passed through untouched (duho's ``_passthrough_``
    convention), after the flags dotagents adds, so yours win where the
@@ -101,6 +102,37 @@ def _refuse_cmd_exe_metachars(exe: str, args: "list[str]") -> None:
                 "executable (e.g. node and its script)."
                 % (exe, arg, " ".join(repr(c) for c in bad))
             )
+
+
+def _which(program: str, path: "Optional[str]", pathext: "Optional[str]" = None) -> "Optional[str]":
+    """``program`` resolved on ``path`` -- the PATH ONLY, never the current
+    directory.
+
+    ``shutil.which(program, path=...)`` on Windows before Python 3.12 searches
+    the current directory first even when ``path`` is given, so a ``claude.cmd``
+    at the root of the repository being worked on ran instead of the real
+    harness, with the user's full environment. On Windows the PATH entries are
+    walked here, each against ``PATHEXT``, skipping empty, ``.`` and other
+    relative entries (all of them name the current directory or a directory
+    under it). A ``program`` with a directory part is the caller's explicit
+    choice and goes to ``shutil.which`` as is; POSIX has no implicit current
+    directory and uses ``shutil.which`` too."""
+    if os.name != "nt" or os.path.dirname(program):
+        return shutil.which(program, path=path)
+    exts = [e for e in (pathext or ".COM;.EXE;.BAT;.CMD").split(os.pathsep) if e]
+    if os.path.splitext(program)[1].lower() in (e.lower() for e in exts):
+        names = [program]
+    else:
+        names = [program + ext for ext in exts]
+    for entry in (path or "").split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if not entry or not os.path.isabs(entry):
+            continue
+        for name in names:
+            candidate = os.path.join(entry, name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+    return None
 
 
 def _git_tracks(root: Path, rel: str) -> bool:
@@ -212,7 +244,7 @@ class Launch(DotAgentsArgs):
                 "error: %s has no command-line harness dotagents knows how to start; "
                 "pass --command <program>" % agent.name
             )
-        exe = shutil.which(program, path=env.get("PATH"))
+        exe = _which(program, env.get("PATH"), env.get("PATHEXT"))
         if exe is None:
             if not self.dry_run:
                 raise SystemExit(

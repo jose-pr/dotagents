@@ -278,6 +278,80 @@ def test_dry_run_refresh_says_would_refresh(tmp_path, caplog):
 
 
 # --------------------------------------------------------------------------- #
+# launch
+# --------------------------------------------------------------------------- #
+
+LAUNCH_PATH = ROOT / "src" / "dotagents" / "_overlay" / "dotagents" / "cmds" / "launch.py"
+
+
+@pytest.fixture()
+def launch_mod(monkeypatch, tmp_path):
+    saved = dict(os.environ)
+    store = tmp_path / "store"
+    store.mkdir()
+    monkeypatch.setenv("AGENTS_HOME", str(store))
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    spec = importlib.util.spec_from_file_location("test_fix_init_launch", LAUNCH_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    try:
+        spec.loader.exec_module(mod)
+        yield mod
+    finally:
+        sys.modules.pop(spec.name, None)
+        os.environ.clear()
+        os.environ.update(saved)
+
+
+def _launch(mod, monkeypatch, **kwargs):
+    calls = []
+    monkeypatch.setattr(mod, "_spawn", lambda argv, env: calls.append((list(argv), dict(env))) or 0)
+    cmd = mod.Launch()
+    cmd._passthrough_ = []
+    for k, v in kwargs.items():
+        setattr(cmd, k, v)
+    assert cmd() == 0
+    (call,) = calls
+    return call
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the implicit current-directory search is Windows-only")
+@pytest.mark.parametrize("path_has_dot", [False, True])
+def test_launch_never_runs_a_harness_planted_in_the_current_directory(
+    launch_mod, monkeypatch, tmp_path, path_has_dot
+):
+    """Windows Python < 3.12 `shutil.which(path=...)` searched the cwd first,
+    so a repo's own `claude.cmd` ran with the user's environment -- even
+    under `-g`. A `.` PATH entry is the same hole, spelled out."""
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    real = fakebin / "claude.cmd"
+    real.write_text("@echo REAL\r\n")
+    (tmp_path / "project" / "claude.cmd").write_text("@echo PLANTED\r\n")
+    (tmp_path / "project" / "claude.exe").write_bytes(b"MZ")
+    path = os.pathsep.join([".", str(fakebin)] if path_has_dot else [str(fakebin)])
+    monkeypatch.setenv("PATH", path)
+
+    argv, _env = _launch(launch_mod, monkeypatch, agent="claude", no_context=True, global_scope=True)
+
+    assert Path(argv[0]).resolve() == real.resolve()
+
+
+def test_which_skips_relative_entries_and_honours_pathext(launch_mod, tmp_path, monkeypatch):
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    name = "tool.exe" if os.name == "nt" else "tool"
+    exe = fakebin / name
+    exe.write_bytes(b"MZ" if os.name == "nt" else b"#!/bin/sh\n")
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+    found = launch_mod._which("tool", os.pathsep.join(["", str(fakebin)]), ".EXE")
+    assert found is not None and Path(found).resolve() == exe.resolve()
+    assert launch_mod._which("no-such-tool-xyz", str(fakebin), ".EXE") is None
+
+
+# --------------------------------------------------------------------------- #
 # overlays: the setup helper that set AGENTS_HOME to the scope store is gone
 # --------------------------------------------------------------------------- #
 
