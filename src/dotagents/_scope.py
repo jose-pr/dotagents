@@ -43,6 +43,21 @@ from dotagents._overlays import Overlay
 LEVEL_NAMES = frozenset({"default", "overlay", "system", "user", "project", "project-root"})
 
 
+def _path_key(path: "str | os.PathLike[str]") -> str:
+    """A comparison key for ``path``: resolved (symlinks, ``..``) where the
+    filesystem allows, case-folded where the platform is case-insensitive."""
+    try:
+        resolved = str(Path(path).expanduser().resolve())
+    except (OSError, RuntimeError):
+        resolved = os.path.abspath(str(path))
+    return os.path.normcase(resolved)
+
+
+def _same_path(a: "str | os.PathLike[str]", b: "str | os.PathLike[str]") -> bool:
+    """Whether ``a`` and ``b`` name the same directory."""
+    return _path_key(a) == _path_key(b)
+
+
 class Scope:
     """Where a session's config lives -- the one object every walk takes.
 
@@ -59,6 +74,11 @@ class Scope:
 
     The ``overlays/`` and ``skills/`` subdirs beneath ``agents_root`` are the
     discover-and-publish surfaces of THIS scope (``Overlay.discover(scope.overlay_root)``).
+
+    A project whose ``.agents`` is the user store (the project root is ``~``)
+    is constructed as the user scope, keeping ``project_root`` for the
+    project-root level, so the store is walked once; :attr:`stores` also drops
+    any directory that appears twice.
     """
 
     def __init__(
@@ -82,12 +102,24 @@ class Scope:
         )
         if level == "user":
             self.user_root = self.agents_root
-            self.project_root: "Optional[Path]" = None
+            #: Set on a user scope only when a project's store turned out to BE
+            #: the user store (below): the project-root level is still walked.
+            self.project_root: "Optional[Path]" = (
+                Path(project_root) if project_root else None
+            )
         else:
             self.user_root = Path(user_root) if user_root else resolve_user_store()
             self.project_root = (
                 Path(project_root) if project_root else self.agents_root.parent
             )
+            if _same_path(self.agents_root, self.user_root):
+                # A project rooted at the user store's parent (a session started
+                # in ~): its `.agents` IS the user store. Walking it as a second,
+                # "project" store ran every env.py twice and emitted every
+                # AGENTS.md / CONTEXT.md twice; it is the user scope, keeping
+                # the project root for the project-root level.
+                self.level = "user"
+                self.agents_root = self.user_root
 
     @classmethod
     def of(
@@ -126,10 +158,16 @@ class Scope:
     def stores(self) -> "list[Path]":
         """The stores in play, in precedence order: the system store (when
         there is one), the user store, then (in a project scope) the project's."""
-        stores = [self.system_root] if self.system_root is not None else []
-        stores.append(self.user_root)
+        candidates = [self.system_root] if self.system_root is not None else []
+        candidates.append(self.user_root)
         if not self.global_scope:
-            stores.append(self.agents_root)
+            candidates.append(self.agents_root)
+        # The same directory twice (a project whose `.agents` is the system
+        # store) is walked once, at its first -- broader -- level.
+        stores: "list[Path]" = []
+        for store in candidates:
+            if not any(_same_path(store, kept) for kept in stores):
+                stores.append(store)
         return stores
 
     def store_level(self, store: "str | os.PathLike[str]") -> str:
@@ -165,7 +203,8 @@ class Scope:
         2. user-store overlays, then user (:attr:`user_root`)
         3. project overlays (``<project_root>/.agents/overlays/<name>/``), then
            project (``<project_root>/.agents``) -- a project scope only
-        4. project-root (:attr:`project_root`) -- a project scope only
+        4. project-root (:attr:`project_root`) -- whenever there is one: a
+           project scope, or the user scope a project rooted at ``~`` becomes
 
         An overlay installed in more than one store under the same name is one
         overlay, the later store's: it SHADOWS the earlier copies entirely
@@ -199,8 +238,8 @@ class Scope:
                 if overlay.store == store:
                     add(overlay.path, overlay.name, root=overlay.path, is_overlay=True)
             add(store, self.store_level(store))
-        if not self.global_scope:
-            add(self.project_root, "project-root")  # type: ignore[arg-type]
+        if self.project_root is not None:
+            add(self.project_root, "project-root")
 
         if include_missing:
             return found
@@ -257,6 +296,8 @@ def resolve_scope(
     ``$AGENTS_PROJECT_ROOT`` lets a harness (or ``dotagents env``) pin the project
     root once so every command agrees on it regardless of the cwd a subprocess
     happens to run in; ``<root>/.agents/`` is where this project's overlays live.
+    A project whose ``.agents`` is the user store (the root is ``~``) is the
+    user scope.
     """
     if global_scope:
         return Scope("user", resolve_user_store(agents_dir))
