@@ -12,22 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The package ships `py.typed` and declares `Typing :: Typed`; Python 3.14 is
   a supported version, and the project metadata links the issue tracker.
 
-### Removed
-
-- `init` writes no `dotagents/` directory into a store: the base config is the
-  `AGENTS.md` managed block, plus the Claude include and the agents' hooks.
-  Gone are `dotagents/DECISIONS.md` (the per-install design log),
-  `dotagents/README.md`, `dotagents/AGENTS.md`, and the empty
-  `dotagents/cmds/` with its README. A scope's `dotagents/cmds/` is still where
-  your own command modules go; create it when you add your first one (the
-  docs' authoring guide shows how).
-- `init --agents codex` no longer writes a static `[shell_environment_policy]`
-  snapshot into `~/.codex/config.toml`: it pinned the project `init` ran from
-  into Codex's global config and could leave the file unparseable. Codex gets
-  the env from its `PreToolUse` hook, live. The next `init` that wires Codex's
-  hooks removes a block an earlier release wrote and leaves the rest of the
-  file alone.
-
 ### Changed
 
 - The license metadata is the SPDX expression `MIT` (PEP 639). Building from
@@ -98,6 +82,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Administrators, SYSTEM or TrustedInstaller. A system store that fails the
   check is skipped with a warning; a missing one no longer puts its `bin/` on
   `PATH`.
+
+### Removed
+
+- `init` writes no `dotagents/` directory into a store: the base config is the
+  `AGENTS.md` managed block, plus the Claude include and the agents' hooks.
+  Gone are `dotagents/DECISIONS.md` (the per-install design log),
+  `dotagents/README.md`, `dotagents/AGENTS.md`, and the empty
+  `dotagents/cmds/` with its README. A scope's `dotagents/cmds/` is still where
+  your own command modules go; create it when you add your first one (the
+  docs' authoring guide shows how).
+- `init --agents codex` no longer writes a static `[shell_environment_policy]`
+  snapshot into `~/.codex/config.toml`: it pinned the project `init` ran from
+  into Codex's global config and could leave the file unparseable. Codex gets
+  the env from its `PreToolUse` hook, live. The next `init` that wires Codex's
+  hooks removes a block an earlier release wrote and leaves the rest of the
+  file alone.
 
 ### Fixed
 
@@ -402,23 +402,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.4.0] - 2026-09-09
 
-### Security
-
-- `env --format export` (the form the SessionStart hook writes into
-  `$CLAUDE_ENV_FILE`) now single-quotes every value (`'` → `'\''`, control
-  characters via bash's `$'...'`). Values were JSON-quoted, i.e. inside DOUBLE
-  quotes, so `$(...)`, backticks and `$VAR` in any env value were executed or
-  expanded when the file was sourced, while `\n` and non-ASCII (`\u00e9`)
-  arrived as literal escape text.
-- The env chain no longer executes or sources a project's own top-level
-  `env.py` / `env`: only `<project>/.agents/*` and the user-local
-  `local.env` / `pre.local.env` run at the project levels. Every session start
-  ran the chain, so opening a session in a cloned repository with a top-level
-  `env.py` was code execution from that checkout.
-
 ### Added
 
-- feat: **`dotagents findings`** — a per-scope findings queue, shipped as the
+- **`dotagents findings`** — a per-scope findings queue, shipped as the
   one bundled command module (`_overlay/dotagents/cmds/findings.py`). A
   finding is one markdown file shaped like an agent memory (frontmatter
   `name`/`description`/`status`/`created` for the index line, details in the
@@ -432,13 +418,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   mutating command rewrites it), `path` prints the queue's location.
   Hand-written notes without a frontmatter are listed too and gain one when
   first rewritten. Files are written LF-only on every platform.
-- chore: `init` no longer copies bundled command modules (`*.py`) from the
-  package's `dotagents/cmds/` into the store — only the README. The bundled
-  dir is always a discovery source, so a copy added nothing, and being
-  create-if-absent it would have pinned the first-installed version of
-  `findings` and shadowed every later one. A same-named module dropped into a
-  scope's `dotagents/cmds/` still overrides the bundled one.
-- feat: `env` prepends every level's existing **`lib/`** dir to `PYTHONPATH`,
+- `env` prepends every level's existing **`lib/`** dir to `PYTHONPATH`,
   the way it already prepends every level's `bin/` to `PATH` — overlays first,
   then the store, then the project's `.agents/`, never the project root — and
   does so before the env-file chain, so an `env.py` (and every subprocess that
@@ -446,7 +426,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   exist are added, and `PYTHONPATH` is untouched when there are none. The
   formatter already converts any `*PATH` variable between Windows and POSIX
   forms, so `PYTHONPATH` gets the same treatment as `PATH`.
-- feat: `env` emits one **`<NAME>_OVERLAY_ROOT`** per installed overlay (the
+- `env` emits one **`<NAME>_OVERLAY_ROOT`** per installed overlay (the
   overlay's install dir), seeded before the env-file chain like the two scope
   roots and, like them, only if unset. `NAME` is the overlay's directory name
   upper-cased with every non-alphanumeric character turned into `_`
@@ -513,7 +493,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   working with `--dir ~/.agents/dotagents/findings`, or move it once:
   `mv ~/.agents/dotagents/findings ~/.agents/findings`. Re-run `dotagents init`
   to refresh the managed block.
-- refactor: `dotagents._overlays` is now built around an **`Overlay`** class —
+- `dotagents._overlays` is now built around an **`Overlay`** class —
   one overlay is one directory, and everything that depends on a single
   overlay is a method or property on it: `.path` / `.name` / `.normalized_name`
   / `.root_var` / `.is_valid` / `.manifest_path`, `.read_manifest()` /
@@ -533,35 +513,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   function (it works over a set of overlays) and now accepts `Overlay`
   instances or directories. `_overlays` is a private module, so no public
   version signal.
-
-- fix: an `env.py` may now print its changes as one JSON object **per line**,
-  merged in order (a later line wins), as well as a single object. Each
-  overlay's `setup.py` appends its own managed block to the store's `env.py`
-  and each block prints its own object, so a store with two such overlays
-  (e.g. `net` + `private-sync`) emitted two lines — and the single-object
-  reader rejected the whole output, silently dropping both overlays' vars. A
-  line that is not a JSON object still voids the whole script's contribution,
-  so a half-applied change set is impossible.
-- fix: `init --agents codex` run from a session whose environment already
-  carried dotagents' identity vars (which its own env-loader hook exports —
-  `AGENT=claude-code` and friends in every command a Claude session runs)
-  wrote a Codex env block with no identity at all: the identity stamp never
-  overrides a value already present, so every key counted as "already set",
-  to Claude's values. When the agent is named explicitly the identity is now
-  that agent's, overriding the base env; without an explicit agent a pinned
-  value is respected as before.
-- fix: the built `.pyz` lost the help text of the umbrella's own `--cmdspath`
-  flag (every subcommand's help survived). The zipapp source-repoint shim
-  covered each `dotagents.cli.<x>` command module but not the `dotagents.cli`
-  package itself, and it resolved a package's source as `cli.py` instead of
-  `cli/__init__.py`, so the umbrella kept its zip-internal `__file__` and duho
-  fell back to a bare flag. Both fixed; the top-level help in a `.pyz` now
-  matches a plain install.
-- fix: `context`'s `<NAME_OVERLAY_ROOT>` placeholder now also maps `.` (and any
-  other non-alphanumeric character) in an overlay name to `_`, not only `-` —
-  the name has to be a legal shell variable to be emitted by `env`, and the
-  placeholder follows the same rule. Overlays whose names contain only letters,
-  digits, `_` and `-` are unaffected.
+- `init` no longer copies bundled command modules (`*.py`) from the
+  package's `dotagents/cmds/` into the store — only the README. The bundled
+  dir is always a discovery source, so a copy added nothing, and being
+  create-if-absent it would have pinned the first-installed version of
+  `findings` and shadowed every later one. A same-named module dropped into a
+  scope's `dotagents/cmds/` still overrides the bundled one.
 
 ### Fixed
 
@@ -732,12 +689,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   bad source path names whether it came from `--source` or the env var.
 - `findings list` / `show` write UTF-8 bytes, so a description with a
   non-Latin-1 character no longer raises on a cp1252 console.
+- An `env.py` may now print its changes as one JSON object **per line**,
+  merged in order (a later line wins), as well as a single object. Each
+  overlay's `setup.py` appends its own managed block to the store's `env.py`
+  and each block prints its own object, so a store with two such overlays
+  (e.g. `net` + `private-sync`) emitted two lines — and the single-object
+  reader rejected the whole output, silently dropping both overlays' vars. A
+  line that is not a JSON object still voids the whole script's contribution,
+  so a half-applied change set is impossible.
+- `init --agents codex` run from a session whose environment already
+  carried dotagents' identity vars (which its own env-loader hook exports —
+  `AGENT=claude-code` and friends in every command a Claude session runs)
+  wrote a Codex env block with no identity at all: the identity stamp never
+  overrides a value already present, so every key counted as "already set",
+  to Claude's values. When the agent is named explicitly the identity is now
+  that agent's, overriding the base env; without an explicit agent a pinned
+  value is respected as before.
+- The built `.pyz` lost the help text of the umbrella's own `--cmdspath`
+  flag (every subcommand's help survived). The zipapp source-repoint shim
+  covered each `dotagents.cli.<x>` command module but not the `dotagents.cli`
+  package itself, and it resolved a package's source as `cli.py` instead of
+  `cli/__init__.py`, so the umbrella kept its zip-internal `__file__` and duho
+  fell back to a bare flag. Both fixed; the top-level help in a `.pyz` now
+  matches a plain install.
+- `context`'s `<NAME_OVERLAY_ROOT>` placeholder now also maps `.` (and any
+  other non-alphanumeric character) in an overlay name to `_`, not only `-` —
+  the name has to be a legal shell variable to be emitted by `env`, and the
+  placeholder follows the same rule. Overlays whose names contain only letters,
+  digits, `_` and `-` are unaffected.
+
+### Security
+
+- `env --format export` (the form the SessionStart hook writes into
+  `$CLAUDE_ENV_FILE`) now single-quotes every value (`'` → `'\''`, control
+  characters via bash's `$'...'`). Values were JSON-quoted, i.e. inside DOUBLE
+  quotes, so `$(...)`, backticks and `$VAR` in any env value were executed or
+  expanded when the file was sourced, while `\n` and non-ASCII (`\u00e9`)
+  arrived as literal escape text.
+- The env chain no longer executes or sources a project's own top-level
+  `env.py` / `env`: only `<project>/.agents/*` and the user-local
+  `local.env` / `pre.local.env` run at the project levels. Every session start
+  ran the chain, so opening a session in a cloned repository with a top-level
+  `env.py` was code execution from that checkout.
 
 ## [0.3.4] - 2026-08-16
 
 ### Changed
 
-- chore: raise the dependency floors and scope them to a minor series —
+- Raise the dependency floors and scope them to a minor series —
   `duho>=0.5.0,<0.6` (was `>=0.4.0`) and `pathlib_next>=0.9.0,<0.10` (was
   `>=0.8.0`). Both are pre-1.0, where a minor bump is the signal that the
   documented API broke, so the ceiling is what keeps the next one from arriving
@@ -751,7 +750,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   way. Exercised end to end against duho 0.5.4 / pathlib_next 0.9.2 on Python
   3.9 and 3.14. The `[uri]`/`[http]`/`[sftp]`/`[s3]` extras stay unversioned
   passthroughs to `pathlib_next`'s own extras.
-- chore: `build-pyz`'s vendored pins moved with those floors — the `.pyz` now
+- `build-pyz`'s vendored pins moved with those floors — the `.pyz` now
   bundles duho 0.5.0 and pathlib_next 0.9.0 (was 0.4.0 / 0.8.0), the minimum the
   package claims to support rather than the latest patch. These pins are a
   second copy of the dependency versions and had drifted a full minor series
@@ -763,7 +762,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- feat: `env` and `context` gained **`--agents-dir`** (from the shared
+- `env` and `context` gained **`--agents-dir`** (from the shared
   `DotAgentsArgs` base) to override the store for one run. Their `-g/--global`
   keeps its existing, narrower meaning here — *skip the project-level files* —
   and now says so in `--help`.
@@ -784,7 +783,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- docs: a cluster of "docs say X, tree does Y" corrections — `tools/audit.py`
+- A cluster of "docs say X, tree does Y" corrections — `tools/audit.py`
   no longer claims to ship as a bundled `audit` command module (it is repo CI
   tooling and there is no `dotagents audit`) and its `--root` help names the
   real default; `install.py`'s usage line drops the removed `install` and the
@@ -794,14 +793,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   package-data dirs (`_overlay` / `_overlays_src`, never a `skeleton/`); and
   `_merge._extract_block`'s docstring now says it returns the block *including*
   its marker lines, which is what it has always done and what callers rely on.
-- fix: **`stamp_identity` no longer pretends to emit `AGENTS_AGENT`.** The line
+- **`stamp_identity` no longer pretends to emit `AGENTS_AGENT`.** The line
   sourced the value from `$AGENTS_AGENT` and only assigned when that same key
   was unset, so it could never emit anything — while the docstring and the
   shipped API header both advertised the var. Line removed; the API header's
   "emitted by the identity/env layer" list now drops both `AGENTS_AGENT` and
   `AGENTS_CODE_SESSION_ID` (the latter was deliberately never emitted) and says
   so explicitly, so nothing branches on a var that never arrives.
-- fix: **`dotagents env` and `dotagents context` now resolve their roots instead
+- **`dotagents env` and `dotagents context` now resolve their roots instead
   of hardcoding them.** Both took `Path.cwd()` as the project root and
   `~/.agents` as the user store, so `$AGENTS_PROJECT_ROOT` (or the agent-native
   `$CLAUDE_PROJECT_DIR`) and `$AGENTS_HOME` were ignored by the two commands
@@ -818,7 +817,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- feat: **`AntigravityAgent`** — context injection for Google's Antigravity
+- **`AntigravityAgent`** — context injection for Google's Antigravity
   CLI/IDE (a separate product from Gemini CLI, despite sharing the `~/.gemini/`
   namespace for some files). Antigravity's hooks have no `SessionStart`
   equivalent — only `PreToolUse`/`PostToolUse`/`PreInvocation`/`PostInvocation`/
@@ -826,12 +825,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   one-shot context load instead of resending it every model turn. Wires into
   `~/.gemini/config/hooks.json`. No detection marker exists for Antigravity, so
   it's explicit-`--agents antigravity`-only, never auto-detected.
-- feat: **Codex gets a `PreToolUse` env hook**, closing the one gap Codex had
+- **Codex gets a `PreToolUse` env hook**, closing the one gap Codex had
   versus Claude: Codex has no per-session env-persistence mechanism at any hook
   event, so a deployed script prepends a guarded env-loader to every `Bash` tool
   call via `updatedInput.command` — the same rewrite mechanism Claude's own
   `PreToolUse` hook uses, confirmed directly against Codex's docs.
-- feat: **`init` wires a PowerShell `PreToolUse` env hook on Windows**, closing
+- **`init` wires a PowerShell `PreToolUse` env hook on Windows**, closing
   a real gap: `$CLAUDE_ENV_FILE` only reaches Claude's *Bash* tool
   (`$env:CLAUDE_ENV_FILE` is empty inside a live PowerShell tool call, confirmed
   directly) — a fresh PowerShell tool call gets none of the SessionStart env.
@@ -839,13 +838,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   shipped as an inline command string (never a `.ps1` file — a script file is
   subject to PowerShell's execution policy, and dotagents has no code-signing
   certificate; the inline form runs even under `Restricted`).
-- feat: **`SessionStart`/`CwdChanged` now register two handlers each** — a
+- **`SessionStart`/`CwdChanged` now register two handlers each** — a
   bash-syntax one and an explicit `shell: "powershell"` one — because Claude's
   own hooks.md says the shell "defaults to bash, or to powershell on Windows
   when Git Bash isn't installed": bash syntax fed to `powershell -Command` on
   such a machine is a hard parse error, silently losing both env and context for
   the whole session.
-- feat: **`DotAgentsArgs`** (`dotagents.cli`, re-exported for overlay-shipped
+- **`DotAgentsArgs`** (`dotagents.cli`, re-exported for overlay-shipped
   commands) — one shared `-g/--global` + `--agents-dir` base class. `init` and
   all four `overlays` subcommands now inherit it instead of independently
   redeclaring the same fields, so scope resolution can't silently drift between
@@ -854,7 +853,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- fix: **`dotagents env --format powershell`/`cmd` left an already-POSIX `PATH`
+- **`dotagents env --format powershell`/`cmd` left an already-POSIX `PATH`
   unconverted**, the mirror of the export/dotenv/fish fix below going the other
   direction. Found live: run from a genuine Windows PowerShell terminal whose
   own inherited `PATH` already held WSL/MSYS-mount-style entries
@@ -867,25 +866,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   output into a live PowerShell session and watching `git.exe` fail to
   resolve before the second fix. A WSL-only segment with no Windows equivalent
   (`/usr/bin`) is dropped rather than mangled into a broken relative path.
-- fix: **the built `.pyz` degraded `-g` on any discovered command inheriting a
+- **the built `.pyz` degraded `-g` on any discovered command inheriting a
   dotagents-defined base class** (first hit by `DotAgentsArgs` above) — duho's
   AST introspection walks the full MRO for a command's flags, but the zipapp
   source-repoint shim only ever covered built-in command modules, not a base
   class's own module (`dotagents.cli._common`). `--global` degraded to the
   name-derived `--global-scope` and `-g` vanished silently. Fixed, with new CI
   coverage asserting the exact short flag survives a real built pyz.
-- fix: **`harness_loads` relative entries matched by bare filename, not full
+- **`harness_loads` relative entries matched by bare filename, not full
   path** — a relative entry like Codex's `"AGENTS.md"` wrongly suppressed ANY
   file sharing that basename anywhere on disk, including the unrelated
   `~/.agents/AGENTS.md` user-store file Codex's harness never reads.
   `dotagents context --agents codex` emitted an empty `sources: []` even with
   real content present. Now resolved against `project_root` and compared by
   full path, like the absolute (`~/`, `/`) forms already were.
-- fix: `dotagents context --format json` crashed with `UnicodeEncodeError` on
+- `dotagents context --format json` crashed with `UnicodeEncodeError` on
   any character outside Latin-1 (a bare `print()` encoding with the console's
   codepage) — the same class of bug already fixed for the markdown path, just
   never covered for JSON.
-- fix: PowerShell format uses `${env:NAME}` (curly-brace form), not the bare
+- PowerShell format uses `${env:NAME}` (curly-brace form), not the bare
   `$env:NAME` sigil — a handful of real Windows env vars have parens in their
   names (`ProgramFiles(x86)`), and `$env:FOO(X86) = ...` is a PowerShell parse
   error; the curly-brace form is valid for every name.
@@ -894,7 +893,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- fix: **`dotagents env --format export`/`dotenv`/`fish` now emit a POSIX PATH on
+- **`dotagents env --format export`/`dotenv`/`fish` now emit a POSIX PATH on
   Windows**, instead of the OS-native `C:\...;C:\...` form. This is the exact
   command the Claude `SessionStart` hook appends into `$CLAUDE_ENV_FILE`, which
   Claude sources before *every* subsequent Bash tool call in the session — an
@@ -908,7 +907,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   these formats — `export FOO(X86)=...` is a bash syntax error, not a bad value,
   and aborts sourcing the rest of the file. `powershell`/`cmd`/`json`/`ini`/`yaml`
   are unaffected.
-- fix: a UNC PATH segment (`\\server\share\...`) no longer collapses to a single
+- A UNC PATH segment (`\\server\share\...`) no longer collapses to a single
   leading slash (`/server/share/...`) during the POSIX conversion above — MSYS
   requires the double-slash UNC root (`//server/share/...`) to resolve it.
 
@@ -916,29 +915,9 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
 
 ## [0.3.0] - 2026-07-24
 
-### Changed
-
-- **BREAKING** — `dotagents link` / `dotagents sync` are gone from the CLI. They are
-  the private-sync workflow's commands, not dotagents' core, so they moved — together
-  with the logic behind them (`src/dotagents/_link.py`) — into the opt-in
-  **`private-sync` overlay**, and were renamed to say what they act on:
-
-      dotagents link-project .            # was: dotagents link .
-      dotagents sync-project -m "msg"     # was: dotagents sync -m "msg"
-
-  Install the overlay to get them back: `dotagents overlays add private-sync --source
-  <overlays-checkout>`. A plain dotagents now ships no private-sync workflow at all;
-  its whole command surface is `init` / `build-pyz` / `context` / `env` / `overlays`,
-  and everything else is discovered from an overlay or from your own `cmds/` modules.
-  `tools/cloud-setup.sh` installs the overlay before linking, so the cloud bootstrap
-  is unaffected.
-- The bundled `dotagents/cmds/` directory now ships no command module of its own, but
-  `init` still creates it: it is the documented drop-in point for your own commands
-  (a `README.md` beside it explains the shape and the precedence rules).
-
 ### Added
 
-- feat: `init` wires agent hooks and links the shared skills dir, for each active
+- `init` wires agent hooks and links the shared skills dir, for each active
   agent with a published hook schema (today: Claude and Codex). `--no-hooks` skips it.
 
   **Claude** (`~/.claude/settings.json`) gets `SessionStart`, which appends
@@ -973,14 +952,13 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   mile for overlay-published skills — publishing only helps if the agent reads that
   directory. Symlink where the OS permits, copy otherwise (a copy is a snapshot;
   re-run `init` to refresh).
-
-- feat: the personal leak scanner (then in `tools/`) now also scans commit messages (current branch history)
+- The personal leak scanner (then in `tools/`) now also scans commit messages (current branch history)
   for agent-session trailers/URLs — a `Claude-Session:` trailer or `claude.ai/code/session`
   link — and exits 1 on any hit. The trailer is auto-added by the agent harness and
   exposes a session id in public history if it slips through; the pre-existing tracked-file
   scan didn't cover commit messages. `flows/REPO.md` release discipline documents the check
   and the `git filter-branch --msg-filter` remediation for one that already landed.
-- feat: `tools/cloud-setup.sh` step 5 wires `hooks/settings.snippet.json` into the
+- `tools/cloud-setup.sh` step 5 wires `hooks/settings.snippet.json` into the
   user-level `~/.claude/settings.json` (idempotent JSON merge, preserves existing
   settings/hooks). A fresh cloud container has no settings file and nothing else
   created one, so the SessionStart pull/link and Stop sync-back hooks never ran —
@@ -988,9 +966,35 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   `kb/PRIVATE_SYNC.md` documents the auto-wiring (manual merge still applies on
   local machines).
 
+### Changed
+
+- **BREAKING** — `dotagents link` / `dotagents sync` are gone from the CLI. They are
+  the private-sync workflow's commands, not dotagents' core, so they moved — together
+  with the logic behind them (`src/dotagents/_link.py`) — into the opt-in
+  **`private-sync` overlay**, and were renamed to say what they act on:
+
+      dotagents link-project .            # was: dotagents link .
+      dotagents sync-project -m "msg"     # was: dotagents sync -m "msg"
+
+  Install the overlay to get them back: `dotagents overlays add private-sync --source
+  <overlays-checkout>`. A plain dotagents now ships no private-sync workflow at all;
+  its whole command surface is `init` / `build-pyz` / `context` / `env` / `overlays`,
+  and everything else is discovered from an overlay or from your own `cmds/` modules.
+  `tools/cloud-setup.sh` installs the overlay before linking, so the cloud bootstrap
+  is unaffected.
+- The bundled `dotagents/cmds/` directory now ships no command module of its own, but
+  `init` still creates it: it is the documented drop-in point for your own commands
+  (a `README.md` beside it explains the shape and the precedence rules).
+- Move the cloud bootstrap from `overlays/private-sync/hooks/cloud-setup.sh` to
+  top-level `tools/cloud-setup.sh` (public, required tooling) so a fresh cloud container
+  can fetch-and-run it from the public repo instead of pasting its contents — the web
+  environment setup-script field becomes a one-liner
+  (`curl -fsSL …/tools/cloud-setup.sh | sh`) that stays current on every container start.
+  Docs (README, `kb/PRIVATE_SYNC.md`) updated to the download bootstrap.
+
 ### Fixed
 
-- fix: `dotagents link`/`sync` never adopt or copy back a `<project>/.agents` that is
+- `dotagents link`/`sync` never adopt or copy back a `<project>/.agents` that is
   itself a git checkout (`.git` present — dir, or file for worktrees). A hosted-runner
   session that lists the agents repo as a *source* gets it cloned to
   `<project>/.agents` by the harness; first-link adoption then moved that entire
@@ -1000,8 +1004,7 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   swallow, with `overwrite=True`). Both paths now log a skip and leave the checkout in
   place; `link --force` keeps an escape hatch that backs the checkout up to
   `.agents.bak*` (git state intact) and links the store.
-
-- fix: `dotagents sync` now authenticates the private repo directly against github.com
+- `dotagents sync` now authenticates the private repo directly against github.com
   when `DOTAGENTS_AGENTS_TOKEN` is set — and on a hosted runner that rewrites github
   traffic to a scoped in-session proxy, bypasses the rewrite — so a **standalone**
   `dotagents sync` no longer 403s. Previously only the private-sync Stop hook worked
@@ -1011,7 +1014,7 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   an isolated `GIT_CONFIG_GLOBAL` (identity + CA bundle preserved) that skips the rewrite
   when one is active. The token is still read from the environment at auth time and never
   written to `.git/config`.
-- fix: `tools/cloud-setup.sh` no longer lets a single container-start clone failure
+- `tools/cloud-setup.sh` no longer lets a single container-start clone failure
   permanently disable the environment. The clone often loses a race with egress/proxy
   readiness; previously it `exit 0`'d on the first failure, skipping the hook-wiring
   step — so the SessionStart hook (which can itself re-clone) was never registered and
@@ -1019,7 +1022,7 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   still fails the script persists a copy of itself and wires a SessionStart **recovery
   hook** that re-runs the bootstrap next session (egress is up by then); the first
   successful run merges the private-sync hooks and removes the recovery hook.
-- fix: `tools/cloud-setup.sh` also wires that recovery hook when
+- `tools/cloud-setup.sh` also wires that recovery hook when
   `DOTAGENTS_AGENTS_REMOTE` is **unset at setup time**, not only on clone failure.
   Hosted runners often expose the remote/token secrets to session processes but not
   to the setup-script phase, so the first bootstrap had no remote to clone and its
@@ -1030,50 +1033,27 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   — clones and self-removes the hook. A genuinely remote-less environment just re-skips
   each session (idempotent; the hook never duplicates). (Durable fix is still
   to expose the secrets to the Setup Script phase so the first container succeeds.)
-- fix: `.gitignore` templates and `dotagents link` now use a slashless `.agents`
+- `.gitignore` templates and `dotagents link` now use a slashless `.agents`
   instead of `.agents/`. `link` creates `.agents` as a *symlink*, which git treats
   as a file, so the directory-only `.agents/` pattern never actually ignored it —
   the link showed up as untracked in every project. `_gitignore_excludes_agents`
   is now symlink-aware (a bare `.agents/` no longer counts as excluding a symlinked
   link, so the WARN fires), and the reference template, REPO.md guidance, and the
   starter `_overlay/AGENTS.md` Leakage rule all recommend `.agents`.
-- docs: recommend `curl … -o file && sh file` over `curl … | sh` for the setup-script
+- Recommend `curl … -o file && sh file` over `curl … | sh` for the setup-script
   field (README, `kb/PRIVATE_SYNC.md`, `tools/cloud-setup.sh` header). With a pipe the
   field's exit code is `sh`'s (0 on empty stdin), so a failed fetch at container start
   is silently reported as success; `&&` propagates the fetch failure to the setup log.
-
-### Changed
-
-- refactor: move the cloud bootstrap from `overlays/private-sync/hooks/cloud-setup.sh` to
-  top-level `tools/cloud-setup.sh` (public, required tooling) so a fresh cloud container
-  can fetch-and-run it from the public repo instead of pasting its contents — the web
-  environment setup-script field becomes a one-liner
-  (`curl -fsSL …/tools/cloud-setup.sh | sh`) that stays current on every container start.
-  Docs (README, `kb/PRIVATE_SYNC.md`) updated to the download bootstrap.
-- fix: `tools/cloud-setup.sh` prints `starting`/`done` banners (so a setup-script log
+- `tools/cloud-setup.sh` prints `starting`/`done` banners (so a setup-script log
   proves whether it executed — a blank log means the field never invoked it, a config
   issue) and `mkdir -p "$HOME"` before `git config --global` (which fails if HOME isn't
   created yet in some setup contexts).
 
 ## [0.2.0] - 2026-07-19
 
-### Changed
-
-- chore: migrate the CLI to `duho>=0.3.3` (was `>=0.1.1`). duho's Plan-13 `Args`/`Cmd`
-  split means commands are now `class X(LoggingArgs, Cmd)` with a `__call__` entrypoint
-  (was a bare `LoggingArgs` with `__run__`) and the umbrella root is
-  `class Dotagents(LoggingArgs, Cli)`. Field declarations (annotation + help string +
-  flags tuple) are unchanged. Bumped the `build-pyz` vendored `duho` default to 0.3.3.
-- fix: restore full flag/help fidelity in the built `dotagents.pyz` under duho 0.3.3.
-  duho discovers each field's flags + help by AST-parsing its module source, and inside
-  a zipapp the zip-internal `__file__` isn't readable — degrading `--from` to `--from-`,
-  the `link` positional to `--path`, and dropping help text. `cli.main` now repoints the
-  affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
-  before dispatch; a no-op for a plain install.
-
 ### Added
 
-- feat: private-agents git sync — `dotagents link` symlinks a project's `.agents` to a
+- Private-agents git sync — `dotagents link` symlinks a project's `.agents` to a
   per-project store under the global `~/.agents/projects/<name>` (basename-keyed, so a
   local and a cloud checkout converge on the same store), adopting an existing real
   `.agents/` into an empty store on the first link; `--copy` mirrors it as a real dir
@@ -1084,7 +1064,7 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   keeps per-user config and every project's private `.agents` in one private repo while
   the public project repos track none of it (the Leakage rule already `.gitignore`s
   `.agents/`).
-- feat: `overlays/private-sync/` overlay — `kb/PRIVATE_SYNC.md` (the model, commands,
+- `overlays/private-sync/` overlay — `kb/PRIVATE_SYNC.md` (the model, commands,
   first-time + cloud setup, auth, gotchas) plus `hooks/private-sync-{start,stop}.sh`
   (SessionStart clone/pull + link, Stop sync-back) and a `settings.snippet.json` for
   `~/.claude/settings.json`, so cloud sessions link and sync automatically. Cloud auth is
@@ -1097,7 +1077,7 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   `~/.agents` exists) that clones/pulls the repo, installs the CLI, and links the project
   — for the web environment's setup-script field, solving the first-clone chicken-and-egg
   the SessionStart hook can't.
-- feat: installable `dotagents` CLI package (`src/dotagents/`, built on `duho` for
+- Installable `dotagents` CLI package (`src/dotagents/`, built on `duho` for
   the argument surface and `pathlib_next` for copy/URI handling) exposing `init`
   (lay down the neutral base overlay), `install` (base plus opt-in overlays via
   repeatable `--overlays <path>`, copied additively), `audit` (wraps
@@ -1117,3 +1097,31 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   the installer, CI, repo-development directives, and the tracked, sanitized
   `.agents/` design log (index + per-decision files) + plans. `audit_config.py` has
   `--repo-hygiene` (scans tracked files for personal/machine-specific leftovers).
+
+### Changed
+
+- Migrate the CLI to `duho>=0.3.3` (was `>=0.1.1`). duho's Plan-13 `Args`/`Cmd`
+  split means commands are now `class X(LoggingArgs, Cmd)` with a `__call__` entrypoint
+  (was a bare `LoggingArgs` with `__run__`) and the umbrella root is
+  `class Dotagents(LoggingArgs, Cli)`. Field declarations (annotation + help string +
+  flags tuple) are unchanged. Bumped the `build-pyz` vendored `duho` default to 0.3.3.
+
+### Fixed
+
+- Restore full flag/help fidelity in the built `dotagents.pyz` under duho 0.3.3.
+  duho discovers each field's flags + help by AST-parsing its module source, and inside
+  a zipapp the zip-internal `__file__` isn't readable — degrading `--from` to `--from-`,
+  the `link` positional to `--path`, and dropping help text. `cli.main` now repoints the
+  affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
+  before dispatch; a no-op for a plain install.
+
+[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/jose-pr/dotagents/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/jose-pr/dotagents/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/jose-pr/dotagents/compare/v0.3.4...v0.4.0
+[0.3.4]: https://github.com/jose-pr/dotagents/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/jose-pr/dotagents/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/jose-pr/dotagents/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/jose-pr/dotagents/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/jose-pr/dotagents/compare/55a01b3f6a149f9375794442e1311c7d9d43d4f7...v0.3.0
+[0.2.0]: https://github.com/jose-pr/dotagents/tree/55a01b3f6a149f9375794442e1311c7d9d43d4f7
