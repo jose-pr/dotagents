@@ -25,6 +25,7 @@ the ``.pyz``.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -32,8 +33,18 @@ from typing import Any, Optional
 #: Our hooks' statusMessage is `STATUS_PREFIX + label`, so a foreign hook that
 #: happens to use the same generic label ("Loading agent context") is never
 #: taken for ours. The bare label an earlier release wrote is still ours when
-#: the hook's command runs dotagents, so those hooks converge to the new one.
+#: the hook's command is recognisably dotagents' (:data:`_LEGACY_COMMAND`), so
+#: those hooks converge to the new one instead of running beside it.
 STATUS_PREFIX = "dotagents: "
+
+#: What every command an earlier release wrote contains: `dotagents` itself
+#: (SessionStart, the PowerShell loader), the project pin or `AGENTS.md`
+#: (CwdChanged, which never names dotagents), or one of the deployed hook
+#: scripts (Codex, Antigravity: `python3 ".../pretooluse_codex_env.py"`).
+_LEGACY_COMMAND = re.compile(
+    r"dotagents|AGENTS_PROJECT_ROOT|AGENTS\.md"
+    r"|(?:sessionstart_codex_context|pretooluse_codex_env|preinvocation_antigravity_context)\.py"
+)
 
 #: The hook keys dotagents manages; any other key a user added (a `timeout`,
 #: say) survives a refresh.
@@ -56,7 +67,7 @@ def _labelled_ours(hook: Any, status_message: "Optional[str]") -> bool:
     status = hook.get("statusMessage")
     if status == labels[0]:
         return True
-    return status == labels[1] and "dotagents" in str(hook.get("command", ""))
+    return status == labels[1] and bool(_LEGACY_COMMAND.search(str(hook.get("command", ""))))
 
 
 def build_hook_entry(

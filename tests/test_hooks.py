@@ -191,3 +191,38 @@ def test_status_match_does_not_touch_a_foreign_hook():
     commands = [h["command"] for e in merged for h in e["hooks"]]
     assert "mine" in commands
     assert CMD in commands
+
+
+# The exact commands 0.5.x wrote. CwdChanged never named dotagents, and the
+# Codex loader names only its script, so recognising a legacy hook by
+# "dotagents" in its command left them in place beside the new ones.
+_CWD_051 = (
+    'if [ -n "$CLAUDE_ENV_FILE" ] && [ -d .agents ]; then printf "export '
+    "AGENTS_PROJECT_ROOT='%s'\\n\" \"$(pwd -W 2>/dev/null || pwd)\" >> \"$CLAUDE_ENV_FILE\"; "
+    'fi; [ -f AGENTS.md ] && cat AGENTS.md || true'
+)
+_CWD_051_PS = (
+    "if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { if (Test-Path AGENTS.md) "
+    "{ Get-Content AGENTS.md -Raw } }"
+)
+_CODEX_051 = 'python3 "/home/u/.codex/hooks/pretooluse_codex_env.py"'
+
+
+@pytest.mark.parametrize("old, label", [
+    (_CWD_051, "Checking for AGENTS.md"),
+    (_CWD_051_PS, "Checking for AGENTS.md (PowerShell)"),
+    (_CODEX_051, "Loading agent env"),
+])
+def test_every_hook_an_earlier_release_wrote_converges(old, label):
+    legacy = {"hooks": [{"type": "command", "command": old, "statusMessage": label}]}
+    merged, changed = _hooks.merge_hook([legacy], "NEW", status_message=label)
+    assert changed and len(merged) == 1, merged
+    assert merged[0]["hooks"][0]["command"] == "NEW"
+    assert merged[0]["hooks"][0]["statusMessage"] == "dotagents: " + label
+
+
+def test_a_foreign_hook_with_our_bare_label_and_unrelated_command_stays():
+    foreign = {"hooks": [{"type": "command", "command": "notify-send hi",
+                          "statusMessage": "Checking for AGENTS.md"}]}
+    merged, _ = _hooks.merge_hook([foreign], "NEW", status_message="Checking for AGENTS.md")
+    assert merged[0] == foreign and len(merged) == 2
