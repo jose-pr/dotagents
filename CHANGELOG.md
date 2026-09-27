@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-27
+
+### Fixed
+
+- Re-running `init` after an upgrade from 0.5.x replaces the `CwdChanged` hooks
+  and Codex's `PreToolUse` hook that release wrote, instead of adding the new
+  ones beside them (every `cd` ran both, and the old one still wrote the
+  unquoted project path). A hook an earlier release wrote is recognised by its
+  label and a command that runs dotagents, reads `AGENTS.md` or
+  `AGENTS_PROJECT_ROOT`, or runs one of dotagents' hook scripts.
+
 ## [0.6.0] - 2026-09-25
 
 ### Added
@@ -1280,7 +1291,8 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
   before dispatch; a no-op for a plain install.
 
-[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/jose-pr/dotagents/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/jose-pr/dotagents/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/jose-pr/dotagents/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/jose-pr/dotagents/compare/v0.4.0...v0.5.0
