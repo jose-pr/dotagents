@@ -35,7 +35,7 @@ classifiers = [
 # `build-pyz` vendors the floor of each of these (src/dotagents/cli/build_pyz.py);
 # raise a floor and move its pin there in the same change.
 dependencies = [
-    "duho>=0.5.0,<0.6",
+    "duho>=0.6.0,<0.7",
     "pathlib_next>=0.9.0,<0.10",
     # overlay.toml manifests and TOML registries; tomllib is stdlib from 3.11.
     'tomli>=1.1.0; python_version < "3.11"',

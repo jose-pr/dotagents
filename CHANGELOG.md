@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The `duho` floor moves to `>=0.6.0,<0.7` (from `>=0.5.0,<0.6`); the vendored
+  `.pyz` pin (`build-pyz --duho-version`) moves with it, per the repo's own
+  rule that the two must always agree. No other source change was needed.
+
 ## [0.6.1] - 2026-09-27
 
 ### Fixed
