@@ -217,9 +217,15 @@ def _discover_modules(directory: Path) -> "list":
     not an Exception. A command that imports but cannot build its parser is
     skipped the same way (`_buildable`). Falls back to duho's own
     per-directory unit, with a warning, if a duho release moves these
-    helpers."""
+    helpers.
+
+    Uses duho's PUBLIC `import_from_path` (duho >= 0.6.0) for the file
+    import; `_commands_in_module` has no public counterpart yet, so it stays
+    a private import (see `duho.discovery.import_from_path`'s own docstring:
+    it is the public counterpart of the `_unique_module_name` +
+    `_import_from_path` pair this module used to call directly)."""
     try:
-        from duho.discovery import _commands_in_module, _import_from_path, _unique_module_name
+        from duho.discovery import _commands_in_module, import_from_path
     except ImportError:  # pragma: no cover -- a later duho without these internals
         from duho.discovery import discover_commands
 
@@ -234,7 +240,7 @@ def _discover_modules(directory: Path) -> "list":
         if file.name.startswith("_"):
             continue
         try:
-            module = _import_from_path(_unique_module_name("duho._discovered." + file.stem), file)
+            module = import_from_path("duho._discovered." + file.stem, file)
             found = _commands_in_module(module, stem=file.stem)
         except (Exception, SystemExit) as exc:  # noqa: BLE001 -- see docstring
             _LOGGER.warning("skipping command module %s: %s", file, _describe(exc))

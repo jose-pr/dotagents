@@ -220,10 +220,13 @@ def test_moved_duho_internals_are_reported_not_silent(monkeypatch, tmp_path, cap
     real_import = builtins.__import__
 
     def renamed(name, globals=None, locals=None, fromlist=(), level=0):
-        # What a duho release that renamed its private helpers looks like to
-        # `from duho.discovery import _import_from_path, ...` -- and only to it.
-        if name == "duho.discovery" and "_import_from_path" in (fromlist or ()):
-            raise ImportError("cannot import name '_import_from_path'")
+        # What a duho release that renamed its remaining private helper looks
+        # like to `from duho.discovery import _commands_in_module, ...` --
+        # and only to it. `import_from_path` is duho's public counterpart
+        # (duho >= 0.6.0) and stays importable; `_commands_in_module` has no
+        # public counterpart yet, so it is the one still exposed to this risk.
+        if name == "duho.discovery" and "_commands_in_module" in (fromlist or ()):
+            raise ImportError("cannot import name '_commands_in_module'")
         return real_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", renamed)
