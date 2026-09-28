@@ -539,6 +539,15 @@ class Env(DotAgentsArgs):
 
     _parsername_ = "env"
 
+    # Opt out of the MCP tool surface (duho >= 0.6.0): this command's whole
+    # point is to print resolved, possibly secret values (see the class
+    # docstring's "Output is sensitive" note) -- exactly what an MCP client
+    # should never be handed as a callable tool. `_mcp_ = False` on a
+    # non-root command class hides it (and any subtree) from `tools/list`
+    # and refuses `tools/call` the same way an unknown name would; the CLI
+    # itself is unaffected.
+    _mcp_ = False
+
     format: str = "auto"
     (
         "Output format. Default 'auto' detects the calling shell. Shell forms: "

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- With the `duho` floor bump, every `dotagents` invocation now checks
+  `DOTAGENTS_MCP=stdio` and serves its full command tree as an MCP server
+  over stdio when set. `env` opts itself out of that tool surface
+  (`_mcp_ = False`): its whole point is printing resolved, possibly secret
+  values, which should never be a callable MCP tool. Every other command is
+  unaffected, and `env` still works normally on the CLI.
+
 ### Changed
 
 - The `duho` floor moves to `>=0.6.0,<0.7` (from `>=0.5.0,<0.6`); the vendored
