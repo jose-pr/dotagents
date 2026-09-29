@@ -108,6 +108,10 @@ The package's own data; library code, importing nothing from `dotagents.cli`.
   store at `dest`: the project template for a project store when the base has one,
   else the user template, else `<src>/AGENTS.md`; `{{AGENTS_MD}}` rendered as the
   absolute POSIX path of `<dest>/AGENTS.md`.
+- `pyz_archive() -> str | None` — the `.pyz` this dotagents is imported from (the
+  ancestor of the module's `__file__` that is a file), or `None` for a plain
+  install. The archive also holds the vendored duho and pathlib_next; `env`
+  exports it as `AGENTS_PYLIB`.
 
 ## Commands — `dotagents.cli.init`, `dotagents.cli.overlays`, `dotagents.cli.context`, `dotagents.cli.env`, `dotagents.cli.path`, `dotagents.cli.about`, `dotagents.cli.build_pyz`
 
@@ -322,7 +326,11 @@ proxy model.
   user-scope walk `AGENTS_PROJECT_ROOT` is set only when unset. Only when unset:
   `AGENTS_PYTHON` (`sys.executable`) and one `<NAME>_OVERLAY_ROOT` per
   `scope.overlays` (a value pinned to the user store's copy is re-pointed when a
-  project copy shadows it).
+  project copy shadows it). `AGENTS_PYLIB` (`_env.PYLIB_VAR`): the `.pyz` when
+  dotagents runs from one (`_resources.pyz_archive()`), else not set — where its
+  own libraries (duho, pathlib_next) import from by zipimport for an overlay
+  built on them. Never added to `PYTHONPATH`: a consumer appends it to
+  `sys.path` when its import fails.
 - `PATH`: every level's `bin` (contract A, not project-root, missing dirs included)
   at the front in that order, whatever the caller's `PATH` held; empty and
   cwd-relative inherited entries are dropped.
@@ -631,6 +639,8 @@ Read:
 - `AGENTS_HARNESS` — the running harness (registry name or harness id), for
   identity. `AGENTS_PYTHON` — the interpreter for `env.py`. `AGENTS_PYTHONPATH` —
   the overlay/store `lib` dirs `env` put on `PYTHONPATH`, highest precedence first.
+  `AGENTS_PYLIB` — the `.pyz` dotagents runs from (duho and pathlib_next import
+  from it), unset for an installed dotagents.
 - Harness config dirs: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`.
   Harness markers: `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `GEMINI_CLI`,
   `CODEX_SANDBOX*`, `CURSOR_AGENT`, `PI_CODING_AGENT`. Model vars: `ANTHROPIC_MODEL`,
@@ -644,7 +654,7 @@ Read:
 
 Emitted by `env` (and applied by `launch`): `AGENTS_HARNESS`, `AGENTS_VENDOR`,
 `AGENT`, `AGENTS_MODEL`, `AGENTS_HOME`, `AGENTS_PROJECT_ROOT`, `AGENTS_PYTHON`,
-`<NAME>_OVERLAY_ROOT`, `PATH`, `AGENTS_PYTHONPATH`, `AGENTS_PROXY` and the mirrored
+`AGENTS_PYLIB` (from a `.pyz` only), `<NAME>_OVERLAY_ROOT`, `PATH`, `AGENTS_PYTHONPATH`, `AGENTS_PROXY` and the mirrored
 proxy vars, plus whatever the env files set. `AGENTS_AGENT` is never emitted.
 `launch` also exports `AGENTS_CONTEXT_FILE`.
 

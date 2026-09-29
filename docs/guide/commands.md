@@ -307,7 +307,12 @@ form and drop names that are not shell identifiers.
    overlay, where `NAME` is the overlay's name upper-cased with `-` turned into `_`
    (`my-ov` → `MY_OV_OVERLAY_ROOT`). That is the same name `context` expands as a
    `<NAME_OVERLAY_ROOT>` placeholder, so an env file and a context file refer to an
-   overlay's install dir by one name.
+   overlay's install dir by one name. When `dotagents` runs from a `.pyz`,
+   `AGENTS_PYLIB` names that archive: the libraries it bundles (duho,
+   pathlib_next) import from it, so an overlay built on them appends it to
+   `sys.path` when its own import fails. An installed `dotagents` sets nothing,
+   since those libraries are already in `AGENTS_PYTHON`'s site-packages. It is
+   never put on `PYTHONPATH`, where it would shadow a project's own copy.
 3. **`PATH`** — every level's `bin/` (each store's overlays, then the store) goes
    to the front in that order, including ones that do not exist yet, so an `env.py`
    and every subprocess can call an overlay's helpers by name. The order holds even

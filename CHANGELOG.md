@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- When `dotagents` runs from a `.pyz`, `env` exports `AGENTS_PYLIB`, the path
+  of that archive. The libraries it bundles (duho, pathlib_next) import from
+  it, so an overlay built on duho works even when the interpreter in
+  `AGENTS_PYTHON` has no duho installed. An installed `dotagents` sets nothing:
+  its libraries are already importable from `AGENTS_PYTHON`. The archive is
+  never put on `PYTHONPATH`, where it would shadow a project's own copy; a
+  consumer adds it to `sys.path` itself when its import fails.
+
 ## [0.6.2] - 2026-09-28
 
 ### Added
