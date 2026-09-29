@@ -13,8 +13,9 @@ from httplib import proxy as agent_proxy
 from httplib.retry import retry_after
 
 from .body import FORM_CONTENT_TYPE
+from .download import EXIT_FILESIZE
 from .connection import MAX_RETRY_SLEEP
-from .errors import (EXIT_CONNECT, EXIT_HTTP, EXIT_REDIRECTS, EXIT_RESOLVE, EXIT_SSL, EXIT_TIMEOUT,
+from .errors import (EXIT_CONNECT, EXIT_HTTP, EXIT_REDIRECTS, EXIT_RESOLVE, EXIT_SSL, EXIT_SSL_CONNECT, EXIT_TIMEOUT,
                      EXIT_WRITE, LocalError, Retry)
 from .request import has_header
 from .redirects import CurlRedirectHandler
@@ -110,10 +111,17 @@ def build_opener(args, plan, context, transfer, removed):
     NO_PROXY and, on Windows, the registry's bypass list -- and silently go
     direct where we decided to proxy. ``AgentProxyHandler`` applies the plan
     per hop instead."""
-    handlers = [urllib.request.HTTPSHandler(context=context), urllib.request.ProxyHandler({})]
+    handlers = args.connection_handlers(context) or [urllib.request.HTTPSHandler(context=context)]
+    handlers.append(urllib.request.ProxyHandler({}))
     if plan is not None:
         handlers.append(AgentProxyHandler(plan))
     handlers.append(RequestLog(transfer))
+    creds = args.credentials() if args.digest else None
+    if creds is not None:
+        # --digest: urllib answers the server's challenge; nothing is sent up front.
+        passwords = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+        passwords.add_password(None, transfer.target, creds[0], creds[1])
+        handlers.append(urllib.request.HTTPDigestAuthHandler(passwords))
     if args.location:
         redirects = CurlRedirectHandler(args, plan)  # curl's rules for what each hop carries
         if args.max_redirs is not None and args.max_redirs >= 0:
@@ -142,15 +150,18 @@ def fail(args, transfer, code, message):
 
 def transport_error(args, reason, transfer, may_retry):
     """A failure before any response: curl's exit code -- 6 could not
-    resolve, 28 timed out, 60 certificate, else 7 could not connect -- or
+    resolve, 28 timed out, 35 a failed TLS handshake, 60 a certificate that
+    does not verify, else 7 could not connect -- or
     :class:`Retry` when ``--retry`` covers it."""
     text = str(reason)
     if isinstance(reason, socket.gaierror):
         code, what = EXIT_RESOLVE, 'Could not resolve host'
     elif isinstance(reason, (socket.timeout, TimeoutError)) or 'timed out' in text:
         code, what = EXIT_TIMEOUT, 'Operation timed out'
-    elif isinstance(reason, ssl.SSLError):
+    elif isinstance(reason, ssl.SSLCertVerificationError):
         code, what = EXIT_SSL, 'SSL certificate problem'
+    elif isinstance(reason, ssl.SSLError):
+        code, what = EXIT_SSL_CONNECT, 'SSL connect error'
     else:
         code, what = EXIT_CONNECT, 'Failed to connect'
     why = args.retry_reason_for_error(code, reason)
@@ -170,6 +181,10 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
         status = resp.getcode()
         reason = getattr(resp, 'reason', '') or ''
         header_items = list(resp.headers.items())
+        if not args.head and args.too_big(header_items):
+            resp.close()
+            transfer.status, transfer.header_items = status, header_items
+            return fail(args, transfer, EXIT_FILESIZE, 'Maximum file size exceeded')
         content = b'' if args.head else resp.read()
     except urllib.error.HTTPError as exc:
         # An HTTP status is a response, not a transport error: curl prints it
@@ -195,6 +210,8 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
         return transport_error(args, exc, transfer, may_retry)
     transfer.status, transfer.header_items = status, header_items
     transfer.size_download = len(content)  # as it came over the wire, before --compressed
+    if args.too_big(header_items, len(content)):
+        return fail(args, transfer, EXIT_FILESIZE, 'Maximum file size exceeded')
     why = args.retry_reason_for_status(status)
     if may_retry and why:
         raise Retry(why, after=retry_after(header_items))
@@ -206,7 +223,15 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
         content = decode_body(content, header_items)
     header_bytes = format_response_headers(status, reason, header_items)
     try:
+        outcome = args.download_outcome(status, header_items)
+    except LocalError as exc:
+        return fail(args, transfer, exc.code, str(exc))
+    try:
         args.write_header_dump(header_bytes)
+        if outcome == 'skip':
+            # A 304, an unmet -z, a finished resume: no body, no file.
+            transfer.size_download = 0
+            return 0
         if args.fails_on(status):
             # -f: no body; --fail-with-body: the body, then the same exit 22.
             if args.fail_with_body:
@@ -215,6 +240,7 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
                 transfer.size_download = 0
             return fail(args, transfer, EXIT_HTTP, 'The requested URL returned error: %s' % status)
         args.emit_output(header_bytes, content)
+        args.finish_download(header_items)
     except OSError as exc:
         # -o / -D not writable, or stdout closed under us: curl's (23).
         return fail(args, transfer, EXIT_WRITE, 'Failure writing output to destination: %s' % exc)
@@ -235,12 +261,12 @@ def run(args):
     tokens = args.write_out_tokens()  # an unsupported -w variable fails before anything is sent
     url = args.target_url()
     typed = args.url or args.url_positional
-    headers, removed = args.request_headers()
     body = args.build_body()
     form = args.build_form()
 
     transfer = Transfer(typed, url, 'GET', None)
     try:
+        headers, removed = args.request_headers()  # may read a netrc: exit 26
         url, upload = args.build_upload(url)
         if args.get:
             url, body = args.query_url(url, body), None
@@ -260,6 +286,8 @@ def run(args):
         plan = agent_proxy.plan(proxy=args.proxy, noproxy=args.noproxy, proxy_user=args.proxy_user)
         transfer = Transfer(typed, url, method, plan)
         args.output_target(url)
+        if args.prepare_download(headers):
+            return 0  # --skip-existing: the file is there
         context = args.ssl_context()
     except LocalError as exc:
         rc = fail(args, transfer, exc.code, str(exc))
@@ -279,6 +307,16 @@ def run(args):
                   file=sys.stderr)
 
     timeout = args.request_timeout()
+    with args.resolution():
+        rc, transfer = _attempts(args, typed, url, method, plan, context, removed, data, headers, timeout)
+    args.cleanup_after(rc)
+    args.report(tokens, transfer, rc)
+    return rc
+
+
+def _attempts(args, typed, url, method, plan, context, removed, data, headers, timeout):
+    """The transfer, again after each transient failure ``--retry`` covers:
+    ``(exit code, the last attempt's Transfer)``."""
     retries = max(args.retry or 0, 0)
     first = time.monotonic()
     backoff = 1.0
@@ -301,5 +339,4 @@ def run(args):
             sleep(wait)
             retries -= 1
             backoff = min(backoff * 2, MAX_RETRY_SLEEP)
-    args.report(tokens, transfer, rc)
-    return rc
+    return rc, transfer

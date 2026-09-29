@@ -6,49 +6,42 @@ real curl runs the command."""
 import argparse
 from typing import List, Optional
 
-from ._duho import NS, Arg
+from ._duho import NS, Arg, duho
 from .args import Group
 
 _HIDDEN = NS(help=argparse.SUPPRESS)
 
 #: The fields below; a set one is refused.
 UNSUPPORTED_ARGS = [
-    'any', 'append', 'cert_status', 'ciphers', 'config', 'continue_at', 'crlf',
-    'crlfile', 'data_ascii', 'delegation', 'digest', 'disable_eprt',
-    'disable_epsv', 'dns_interface', 'dns_ipv4_addr', 'dns_ipv6_addr',
-    'dns_servers', 'doh_url', 'egd_file', 'engine', 'expect100_timeout',
-    'fail_early', 'false_start', 'ftp_account', 'ftp_alternative_to_user',
-    'ftp_create_dirs', 'ftp_method', 'ftp_pasv', 'ftp_skip_pasv_ip',
-    'ftp_ssl_ccc_mode', 'ftp_ssl_ccc', 'ftp_ssl_control',
+    'any', 'append', 'cert_status', 'config', 'crlf', 'crlfile', 'delegation',
+    'disable_eprt', 'disable_epsv', 'dns_interface', 'dns_ipv4_addr',
+    'dns_ipv6_addr', 'dns_servers', 'doh_url', 'egd_file', 'engine',
+    'expect100_timeout', 'fail_early', 'false_start', 'ftp_account',
+    'ftp_alternative_to_user', 'ftp_create_dirs', 'ftp_method', 'ftp_pasv',
+    'ftp_skip_pasv_ip', 'ftp_ssl_ccc_mode', 'ftp_ssl_ccc', 'ftp_ssl_control',
     'happy_eyeballs_timeout_ms', 'haproxy_protocol', 'hostpubmd5', 'http1_0',
     'http2_prior_knowledge', 'http2', 'http3', 'ignore_content_length',
-    'interface', 'ip_resolve', 'ipv4', 'ipv6', 'junk_session_cookies',
-    'keepalive_time', 'krb', 'libcurl', 'limit_rate', 'list_only',
-    'local_port', 'login_options', 'mail_auth', 'mail_from',
-    'mail_rcpt_allowfails', 'mail_rcpt', 'max_filesize', 'metalink',
-    'negotiate', 'netrc_file', 'netrc_optional', 'netrc', 'next', 'no_alpn',
-    'no_keepalive', 'no_npn', 'no_progress_bar', 'no_sessionid', 'ntlm_wb',
-    'ntlm', 'parallel_immediate', 'parallel_max', 'parallel', 'path_as_is',
-    'pinnedpubkey', 'preproxy', 'proto_default', 'proto_redir', 'proto',
-    'proxy_anyauth', 'proxy_basic', 'proxy_cacert', 'proxy_capath',
-    'proxy_cert_type', 'proxy_cert', 'proxy_ciphers', 'proxy_crlfile',
-    'proxy_digest', 'proxy_header', 'proxy_insecure', 'proxy_key_type',
-    'proxy_key', 'proxy_negotiate', 'proxy_ntlm', 'proxy_pass',
-    'proxy_pinnedpubkey', 'proxy_service_name', 'proxy_ssl_allow_beast',
-    'proxy_ssl_auto_client_cert', 'proxy_tls13_ciphers', 'proxy_tlsauthtype',
-    'proxy_tlspassword', 'proxy_tlsuser', 'proxy_tlsv1', 'proxytunnel',
-    'pubkey', 'quote', 'random_file', 'raw', 'remote_header_name',
-    'remote_time', 'request_target', 'resolve', 'sasl_authzid', 'sasl_ir',
-    'service_name', 'show_headers', 'socks4', 'socks4a', 'socks5_basic',
-    'socks5_gssapi_nec', 'socks5_gssapi_service', 'socks5_gssapi',
-    'socks5_hostname', 'socks5', 'speed_limit', 'speed_time',
-    'ssl_allow_beast', 'ssl_auto_client_cert', 'ssl_no_revoke', 'ssl_reqd',
-    'ssl_revoke_best_effort', 'ssl', 'sslv2', 'sslv3', 'stderr',
-    'styled_output', 'suppress_connect_headers', 'tcp_fastopen', 'tcp_nodelay',
-    'telnet_option', 'tftp_blksize', 'tftp_no_options', 'time_cond', 'tls_max',
-    'tls13_ciphers', 'tlsauthtype', 'tlspassword', 'tlsuser', 'tlsv1_0',
-    'tlsv1_1', 'tlsv1_2', 'tlsv1_3', 'tlsv1', 'tr_encoding', 'trace_ascii',
-    'trace_time', 'trace', 'unix_socket', 'use_ascii', 'variable', 'vsock',
+    'interface', 'ip_resolve', 'junk_session_cookies', 'krb', 'libcurl',
+    'limit_rate', 'list_only', 'local_port', 'login_options', 'mail_auth',
+    'mail_from', 'mail_rcpt_allowfails', 'mail_rcpt', 'metalink', 'negotiate',
+    'next', 'no_progress_bar', 'ntlm_wb', 'ntlm', 'parallel_immediate',
+    'parallel_max', 'parallel', 'path_as_is', 'pinnedpubkey', 'preproxy',
+    'proto_default', 'proto_redir', 'proto', 'proxy_anyauth', 'proxy_basic',
+    'proxy_cacert', 'proxy_capath', 'proxy_cert_type', 'proxy_cert',
+    'proxy_ciphers', 'proxy_crlfile', 'proxy_digest', 'proxy_header',
+    'proxy_insecure', 'proxy_key_type', 'proxy_key', 'proxy_negotiate',
+    'proxy_ntlm', 'proxy_pass', 'proxy_pinnedpubkey', 'proxy_service_name',
+    'proxy_ssl_allow_beast', 'proxy_ssl_auto_client_cert',
+    'proxy_tls13_ciphers', 'proxy_tlsauthtype', 'proxy_tlspassword',
+    'proxy_tlsuser', 'proxy_tlsv1', 'proxytunnel', 'pubkey', 'quote',
+    'random_file', 'raw', 'request_target', 'sasl_authzid', 'sasl_ir',
+    'service_name', 'socks4', 'socks4a', 'socks5_basic', 'socks5_gssapi_nec',
+    'socks5_gssapi_service', 'socks5_gssapi', 'socks5_hostname', 'socks5',
+    'speed_limit', 'speed_time', 'ssl_allow_beast', 'ssl_auto_client_cert',
+    'ssl_reqd', 'ssl', 'sslv2', 'sslv3', 'suppress_connect_headers',
+    'tcp_fastopen', 'telnet_option', 'tftp_blksize', 'tftp_no_options',
+    'tls13_ciphers', 'tlsauthtype', 'tlspassword', 'tlsuser', 'tr_encoding',
+    'trace_ascii', 'trace_time', 'trace', 'use_ascii', 'variable', 'vsock',
     'xattr',
 ]
 
@@ -60,19 +53,15 @@ class UnsupportedArgs(Group):
     ('--any',)
 
     append: Arg[bool, _HIDDEN] = False
-    ('--append',)
+    ('-a', '--append',)
 
     cert_status: Arg[bool, _HIDDEN] = False
     ('--cert-status',)
 
-    ciphers: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='CIPHERS')] = None
-    ('--ciphers',)
 
     config: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='CONFIG')] = None
-    ('--config',)
+    ('-K', '--config',)
 
-    continue_at: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='OFFSET')] = None
-    ('--continue-at',)
 
     crlf: Arg[bool, _HIDDEN] = False
     ('--crlf',)
@@ -80,14 +69,10 @@ class UnsupportedArgs(Group):
     crlfile: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
     ('--crlfile',)
 
-    data_ascii: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='DATA')] = None
-    ('--data-ascii',)
 
     delegation: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='LEVEL')] = None
     ('--delegation',)
 
-    digest: Arg[bool, _HIDDEN] = False
-    ('--digest',)
 
     disable_eprt: Arg[bool, _HIDDEN] = False
     ('--disable-eprt',)
@@ -162,7 +147,7 @@ class UnsupportedArgs(Group):
     ('--hostpubmd5',)
 
     http1_0: Arg[bool, _HIDDEN] = False
-    ('--http1.0',)
+    ('-0', '--http1.0',)
 
     http2_prior_knowledge: Arg[bool, _HIDDEN] = False
     ('--http2-prior-knowledge',)
@@ -182,17 +167,11 @@ class UnsupportedArgs(Group):
     ip_resolve: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='RESOLVE')] = None
     ('--ip-resolve',)
 
-    ipv4: Arg[bool, _HIDDEN] = False
-    ('--ipv4',)
 
-    ipv6: Arg[bool, _HIDDEN] = False
-    ('--ipv6',)
 
     junk_session_cookies: Arg[bool, _HIDDEN] = False
-    ('--junk-session-cookies',)
+    ('-j', '--junk-session-cookies',)
 
-    keepalive_time: Arg[Optional[int], _HIDDEN] = None
-    ('--keepalive-time',)
 
     krb: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='LEVEL')] = None
     ('--krb',)
@@ -204,7 +183,7 @@ class UnsupportedArgs(Group):
     ('--limit-rate',)
 
     list_only: Arg[bool, _HIDDEN] = False
-    ('--list-only',)
+    ('-l', '--list-only',)
 
     local_port: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='RANGE')] = None
     ('--local-port',)
@@ -225,8 +204,6 @@ class UnsupportedArgs(Group):
     mail_rcpt: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='RCPT')] = None
     ('--mail-rcpt',)
 
-    max_filesize: Arg[Optional[int], _HIDDEN] = None
-    ('--max-filesize',)
 
     metalink: Arg[bool, _HIDDEN] = False
     ('--metalink',)
@@ -234,32 +211,18 @@ class UnsupportedArgs(Group):
     negotiate: Arg[bool, _HIDDEN] = False
     ('--negotiate',)
 
-    netrc_file: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
-    ('--netrc-file',)
 
-    netrc_optional: Arg[bool, _HIDDEN] = False
-    ('--netrc-optional',)
 
-    netrc: Arg[bool, _HIDDEN] = False
-    ('-n', '--netrc')
 
     next: Arg[bool, _HIDDEN] = False
-    ('--next',)
+    ('-:', '--next',)
 
-    no_alpn: Arg[bool, _HIDDEN] = False
-    ('--no-alpn',)
 
-    no_keepalive: Arg[bool, _HIDDEN] = False
-    ('--no-keepalive',)
 
-    no_npn: Arg[bool, _HIDDEN] = False
-    ('--no-npn',)
 
     no_progress_bar: Arg[bool, _HIDDEN] = False
     ('--no-progress-bar',)
 
-    no_sessionid: Arg[bool, _HIDDEN] = False
-    ('--no-sessionid',)
 
     ntlm_wb: Arg[bool, _HIDDEN] = False
     ('--ntlm-wb',)
@@ -274,7 +237,7 @@ class UnsupportedArgs(Group):
     ('--parallel-max',)
 
     parallel: Arg[bool, _HIDDEN] = False
-    ('--parallel',)
+    ('-Z', '--parallel',)
 
     path_as_is: Arg[bool, _HIDDEN] = False
     ('--path-as-is',)
@@ -373,7 +336,7 @@ class UnsupportedArgs(Group):
     ('--proxy-tlsv1',)
 
     proxytunnel: Arg[bool, _HIDDEN] = False
-    ('--proxytunnel',)
+    ('-p', '--proxytunnel',)
 
     pubkey: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='KEY')] = None
     ('--pubkey',)
@@ -387,17 +350,11 @@ class UnsupportedArgs(Group):
     raw: Arg[bool, _HIDDEN] = False
     ('--raw',)
 
-    remote_header_name: Arg[bool, _HIDDEN] = False
-    ('--remote-header-name',)
 
-    remote_time: Arg[bool, _HIDDEN] = False
-    ('--remote-time',)
 
     request_target: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PATH')] = None
     ('--request-target',)
 
-    resolve: Arg[Optional[List[str]], _HIDDEN] = None
-    ('--resolve',)
 
     sasl_authzid: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='IDENTITY')] = None
     ('--sasl-authzid',)
@@ -408,8 +365,6 @@ class UnsupportedArgs(Group):
     service_name: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='NAME')] = None
     ('--service-name',)
 
-    show_headers: Arg[bool, _HIDDEN] = False
-    ('--show-headers',)
 
     socks4: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='HOST[:PORT]')] = None
     ('--socks4',)
@@ -436,10 +391,10 @@ class UnsupportedArgs(Group):
     ('--socks5',)
 
     speed_limit: Arg[Optional[int], _HIDDEN] = None
-    ('--speed-limit',)
+    ('-Y', '--speed-limit',)
 
     speed_time: Arg[Optional[int], _HIDDEN] = None
-    ('--speed-time',)
+    ('-y', '--speed-time',)
 
     ssl_allow_beast: Arg[bool, _HIDDEN] = False
     ('--ssl-allow-beast',)
@@ -447,29 +402,21 @@ class UnsupportedArgs(Group):
     ssl_auto_client_cert: Arg[bool, _HIDDEN] = False
     ('--ssl-auto-client-cert',)
 
-    ssl_no_revoke: Arg[bool, _HIDDEN] = False
-    ('--ssl-no-revoke',)
 
     ssl_reqd: Arg[bool, _HIDDEN] = False
     ('--ssl-reqd',)
 
-    ssl_revoke_best_effort: Arg[bool, _HIDDEN] = False
-    ('--ssl-revoke-best-effort',)
 
     ssl: Arg[bool, _HIDDEN] = False
     ('--ssl',)
 
     sslv2: Arg[bool, _HIDDEN] = False
-    ('--sslv2',)
+    ('-2', '--sslv2',)
 
     sslv3: Arg[bool, _HIDDEN] = False
-    ('--sslv3',)
+    ('-3', '--sslv3',)
 
-    stderr: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
-    ('--stderr',)
 
-    styled_output: Arg[bool, _HIDDEN] = False
-    ('--styled-output',)
 
     suppress_connect_headers: Arg[bool, _HIDDEN] = False
     ('--suppress-connect-headers',)
@@ -477,11 +424,9 @@ class UnsupportedArgs(Group):
     tcp_fastopen: Arg[bool, _HIDDEN] = False
     ('--tcp-fastopen',)
 
-    tcp_nodelay: Arg[bool, _HIDDEN] = False
-    ('--tcp-nodelay',)
 
     telnet_option: Arg[Optional[List[str]], _HIDDEN] = None
-    ('--telnet-option',)
+    ('-t', '--telnet-option',)
 
     tftp_blksize: Arg[Optional[int], _HIDDEN] = None
     ('--tftp-blksize',)
@@ -489,11 +434,7 @@ class UnsupportedArgs(Group):
     tftp_no_options: Arg[bool, _HIDDEN] = False
     ('--tftp-no-options',)
 
-    time_cond: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='TIME')] = None
-    ('--time-cond',)
 
-    tls_max: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='VERSION')] = None
-    ('--tls-max',)
 
     tls13_ciphers: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='CIPHERS')] = None
     ('--tls13-ciphers',)
@@ -507,20 +448,10 @@ class UnsupportedArgs(Group):
     tlsuser: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='USER')] = None
     ('--tlsuser',)
 
-    tlsv1_0: Arg[bool, _HIDDEN] = False
-    ('--tlsv1.0',)
 
-    tlsv1_1: Arg[bool, _HIDDEN] = False
-    ('--tlsv1.1',)
 
-    tlsv1_2: Arg[bool, _HIDDEN] = False
-    ('--tlsv1.2',)
 
-    tlsv1_3: Arg[bool, _HIDDEN] = False
-    ('--tlsv1.3',)
 
-    tlsv1: Arg[bool, _HIDDEN] = False
-    ('--tlsv1',)
 
     tr_encoding: Arg[bool, _HIDDEN] = False
     ('--tr-encoding',)
@@ -534,11 +465,9 @@ class UnsupportedArgs(Group):
     trace: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
     ('--trace',)
 
-    unix_socket: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PATH')] = None
-    ('--unix-socket',)
 
     use_ascii: Arg[bool, _HIDDEN] = False
-    ('--use-ascii',)
+    ('-B', '--use-ascii',)
 
     variable: Arg[Optional[List[str]], _HIDDEN] = None
     ('--variable',)
@@ -550,6 +479,8 @@ class UnsupportedArgs(Group):
     ('--xattr',)
 
     def _check(self):
-        unsupported = ['--%s' % name.replace('_', '-') for name in UNSUPPORTED_ARGS if getattr(self, name, None)]
+        # The flag as curl spells it (--http1.0, not a name derived from the field).
+        spelled = {a.dest: max(a.option_strings, key=len) for a in duho.parser(type(self))._actions if a.option_strings}
+        unsupported = [spelled.get(name, '--' + name) for name in UNSUPPORTED_ARGS if getattr(self, name, None)]
         if unsupported:
             raise NotImplementedError('Unsupported options: %s' % ', '.join(unsupported))

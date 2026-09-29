@@ -23,9 +23,10 @@ def run_fallback(argv):
     (an unsupported flag), ``ValueError`` (a conflict, a bad proxy
     configuration), ``SystemExit`` (a usage error, ``--help``)."""
     from ._duho import duho
+    from .argv import attach_values
     from .options import CurlCmd
 
-    rc = duho.parse(CurlCmd, list(argv))()
+    rc = duho.parse(CurlCmd, attach_values(argv))()
     return 0 if rc is None else rc
 
 

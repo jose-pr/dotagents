@@ -1,6 +1,5 @@
 """Request options: the URL and its query, the method, and the headers --
 the ones options imply, then ``-H`` on top."""
-import base64
 from typing import List, Optional
 
 from ._duho import NS, Arg
@@ -74,18 +73,6 @@ class RequestArgs(Group):
     "Referer header"
     ("-e", "--referer")
 
-    user: Arg[Optional[str], NS(metavar='USER[:PASS]')] = None
-    "Server user and password (Basic)"
-    ("-u", "--user")
-
-    basic: bool = False
-    "Use HTTP Basic for -u (the default; a no-op)"
-    ("--basic",)
-
-    oauth2_bearer: Arg[Optional[str], NS(metavar='TOKEN')] = None
-    "Send Authorization: Bearer TOKEN"
-    ("--oauth2-bearer",)
-
     range: Arg[Optional[str], NS(metavar='RANGE')] = None
     "Ask for a byte range (Range: bytes=RANGE)"
     ("-r", "--range")
@@ -101,7 +88,7 @@ class RequestArgs(Group):
         url = self.url or self.url_positional
         if not url:
             self.usage_error('URL is required')
-        url = default_scheme(url)
+        url = self.remember_auth_url(default_scheme(url))  # user:pw@ -> credentials
         scheme = url.split('://', 1)[0].lower()
         if scheme not in SCHEMES:
             raise NotImplementedError('Unsupported protocol: %s' % scheme)
@@ -122,17 +109,14 @@ class RequestArgs(Group):
 
     def request_headers(self):
         """``(headers, removed)``. The implied headers first -- User-Agent,
-        -u's Basic or --oauth2-bearer's Bearer ``Authorization``, -e's
+        the ``Authorization`` the auth options imply (``AuthArgs``), -e's
         Referer, --compressed's Accept-Encoding, -r's Range, the body's
         (``--json``) -- then ``-H`` on top: ``Name: v`` sets, ``Name:`` removes
         the header (a default included), ``Name;`` sends it empty."""
         headers = {'User-Agent': self.user_agent or USER_AGENT}
-        if self.user:
-            user, _, password = self.user.partition(':')
-            token = base64.b64encode(('%s:%s' % (user, password)).encode('utf-8')).decode('ascii')
-            headers['Authorization'] = 'Basic ' + token
-        if self.oauth2_bearer:
-            headers['Authorization'] = 'Bearer ' + self.oauth2_bearer
+        authorization = self.authorization()
+        if authorization:
+            headers['Authorization'] = authorization
         if self.referer:
             headers['Referer'] = self.referer
         if self.compressed:

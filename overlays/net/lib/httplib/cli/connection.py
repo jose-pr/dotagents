@@ -2,13 +2,14 @@
 the protocol no-ops (``-g``, ``--http1.1``, ``-q``)."""
 import errno
 import socket
-from typing import Optional
+from typing import List, Optional
 
 from httplib.retry import TRANSIENT_STATUSES
 
 from ._duho import NS, Arg
 from .args import Group
 from .errors import EXIT_CONNECT, EXIT_TIMEOUT
+from .netconn import resolving, unix_socket_handlers
 
 #: curl's longest backoff between retries, in seconds.
 MAX_RETRY_SLEEP = 600
@@ -91,6 +92,38 @@ class ConnectionArgs(Group):
     "Retry on any error (with -f, an HTTP error status too)"
     ("--retry-all-errors",)
 
+    ipv4: bool = False
+    "Resolve names to IPv4 addresses only"
+    ("-4", "--ipv4")
+
+    ipv6: bool = False
+    "Resolve names to IPv6 addresses only"
+    ("-6", "--ipv6")
+
+    resolve: Arg[Optional[List[str]], NS(metavar='HOST:PORT:ADDR[,ADDR]')] = None
+    "Resolve HOST:PORT to these addresses (the Host header and TLS name stay HOST)"
+    ("--resolve",)
+
+    connect_to: Arg[Optional[List[str]], NS(metavar='HOST1:PORT1:HOST2:PORT2')] = None
+    "Connect to HOST2:PORT2 for requests to HOST1:PORT1 (empty parts: any / unchanged)"
+    ("--connect-to",)
+
+    unix_socket: Arg[Optional[str], NS(metavar='PATH')] = None
+    "Connect through this Unix domain socket instead of the network"
+    ("--unix-socket",)
+
+    no_keepalive: bool = False
+    "No TCP keepalive (a no-op: each transfer is one connection)"
+    ("--no-keepalive",)
+
+    keepalive_time: Arg[Optional[int], NS(metavar='SECONDS')] = None
+    "TCP keepalive interval (a no-op)"
+    ("--keepalive-time",)
+
+    tcp_nodelay: bool = False
+    "TCP_NODELAY (a no-op)"
+    ("--tcp-nodelay",)
+
     # No-ops: the fallback reads no config file, never globs, and speaks HTTP/1.1.
     disable: bool = False
     "Skip the curl config file (a no-op: the fallback reads none)"
@@ -103,6 +136,16 @@ class ConnectionArgs(Group):
     http1_1: bool = False
     "Use HTTP/1.1 (a no-op: it always does)"
     ("--http1.1",)
+
+    def resolution(self):
+        """The name-resolution override (-4 / -6 / --resolve / --connect-to)
+        for the length of the transfer."""
+        family = socket.AF_INET if self.ipv4 else socket.AF_INET6 if self.ipv6 else 0
+        return resolving(family, self.resolve or (), self.connect_to or ())
+
+    def connection_handlers(self, context):
+        """urllib handlers replacing the TCP ones (--unix-socket), or []."""
+        return unix_socket_handlers(self.unix_socket, context) if self.unix_socket else []
 
     def request_timeout(self):
         """One timeout, as urllib has one: -m wins, then --connect-timeout,

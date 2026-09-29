@@ -11,6 +11,55 @@ _STEERING = {
 }
 
 
+def _takes_value():
+    """``{option string: takes a value?}`` from the command's own parser."""
+    table = {}
+    for action in build_parser()._actions:
+        for opt in action.option_strings:
+            table[opt] = action.nargs != 0 and not isinstance(
+                action, (argparse._StoreTrueAction, argparse._StoreFalseAction, argparse._CountAction))
+    return table
+
+
+def attach_values(argv):
+    """``argv`` with every option value that starts with ``-`` attached to
+    its option (``--opt=VALUE``, ``-oVALUE``): curl takes the next argument as
+    the value whatever it looks like (``-z -DATE``, ``-d -1``, ``-H -x``),
+    argparse refuses one that looks like a flag."""
+    takes = _takes_value()
+    out, args, i = [], list(argv), 0
+    while i < len(args):
+        arg = args[i]
+        i += 1
+        if arg == '--':
+            out.extend(args[i - 1:])
+            break
+        nxt = args[i] if i < len(args) else None
+        dashed = nxt is not None and nxt.startswith('-') and nxt != '-'
+        if arg.startswith('--'):
+            if '=' not in arg and takes.get(arg) and dashed:
+                out.append('%s=%s' % (arg, nxt))
+                i += 1
+            else:
+                out.append(arg)
+        elif arg.startswith('-') and len(arg) > 1:
+            # A short cluster (-sz) ends at its first value-taking option;
+            # only a bare one at the end takes the next argument.
+            ends_bare = False
+            for j in range(1, len(arg)):
+                if takes.get('-' + arg[j]):
+                    ends_bare = j == len(arg) - 1
+                    break
+            if ends_bare and dashed:
+                out.append(arg + nxt)
+                i += 1
+            else:
+                out.append(arg)
+        else:
+            out.append(arg)
+    return out
+
+
 def walk_argv(argv):
     """``(seen, positionals)``: the ``_STEERING`` options as the caller wrote
     them (``None`` each when absent) and the positional arguments. argv is

@@ -1,5 +1,6 @@
 """Output options: where the body and headers go, how loud the fallback is,
 and what an HTTP error status does (``-f`` / ``--fail-with-body``)."""
+import contextlib
 import os
 import sys
 import urllib.parse
@@ -49,7 +50,7 @@ class OutputArgs(Group):
 
     include: bool = False
     "Include response headers in output"
-    ("-i", "--include")
+    ("-i", "--include", "--show-headers")
 
     head: bool = False
     "Fetch headers only"
@@ -87,6 +88,29 @@ class OutputArgs(Group):
     no_progress_meter: bool = False
     "No progress meter (a no-op: none is shown)"
     ("--no-progress-meter",)
+
+    styled_output: bool = False
+    "Styled header output (a no-op: none is styled)"
+    ("--styled-output",)
+
+    stderr: Arg[Optional[str], NS(metavar='FILE')] = None
+    "Write what goes to stderr to FILE instead (- for stdout)"
+    ("--stderr",)
+
+    @contextlib.contextmanager
+    def stderr_redirected(self):
+        """``--stderr``: stderr goes to the file (or stdout) for the run."""
+        if not self.stderr:
+            yield
+            return
+        target = sys.stdout if self.stderr == '-' else open(self.stderr, 'w', encoding='utf-8')
+        saved, sys.stderr = sys.stderr, target
+        try:
+            yield
+        finally:
+            sys.stderr = saved
+            if target is not sys.stdout:
+                target.close()
 
     def _check(self):
         if self.fail and self.fail_with_body:
@@ -134,7 +158,9 @@ class OutputArgs(Group):
 
     def emit_output(self, header_bytes, content):
         if self.body_target:
-            with open(output_path(self.body_target), 'wb') as handle:
+            # 'ab': a 206 answering a resume (-C) continues the file.
+            mode = 'ab' if getattr(self, 'append_output', False) else 'wb'
+            with open(output_path(self.body_target), mode) as handle:
                 if self.include or self.head:
                     handle.write(header_bytes)
                 handle.write(content)

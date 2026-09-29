@@ -54,7 +54,7 @@ class BodyArgs(Group):
 
     data: Arg[Optional[List[str]], NS(action=_InOrder)] = None
     "HTTP POST data (repeatable, joined with &; @file, @- for stdin)"
-    ("-d", "--data")
+    ("-d", "--data", "--data-ascii")
 
     data_raw: Arg[Optional[List[str]], NS(action=_InOrder)] = None
     "HTTP POST data without @file expansion"

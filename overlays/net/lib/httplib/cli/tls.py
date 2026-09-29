@@ -11,6 +11,10 @@ from ._duho import NS, Arg
 from .args import Group
 from .errors import EXIT_CACERT, EXIT_CLIENT_CERT, LocalError
 
+EXIT_CIPHER = 59
+#: --tls-max values -> the highest version allowed.
+TLS_MAX = {'1.0': 'TLSv1', '1.1': 'TLSv1_1', '1.2': 'TLSv1_2', '1.3': 'TLSv1_3', 'default': None}
+
 
 def split_cert(value):
     """curl's ``--cert <file[:password]>``: the first ``:`` starts the
@@ -40,15 +44,18 @@ def _pem_only(option, value):
 CA_BUNDLE_VAR = 'CURL_CA_BUNDLE'
 
 
-def build_ssl_context(insecure, cacert=None, capath=None, cert=None, key=None, passphrase=None):
+def build_ssl_context(insecure, cacert=None, capath=None, cert=None, key=None, passphrase=None,
+                      min_version=None, max_version=None, ciphers=None):
     """An SSL context. The server is verified against ``cacert`` / ``capath``
     when given, else ``$CURL_CA_BUNDLE`` (both replace the trust store, as in
     curl), else the OS trust store -- ``httplib.tls``, the store the requests
     session verifies against too; ``insecure`` (-k) verifies nothing.
     ``cert`` (``file[:password]``, may hold the key) / ``key`` /
-    ``passphrase`` present a client certificate. A file that cannot be used
+    ``passphrase`` present a client certificate. ``min_version`` /
+    ``max_version`` (``ssl.TLSVersion``) bound the protocol; ``ciphers`` is
+    an OpenSSL cipher list (TLS 1.2 and below). A file that cannot be used
     raises :class:`LocalError`: 77 for the CA side, 58 for the client
-    certificate."""
+    certificate; 59 is an unusable cipher list."""
     if not (cacert or capath):
         cacert = os.environ.get(CA_BUNDLE_VAR) or None
     if insecure:
@@ -65,6 +72,15 @@ def build_ssl_context(insecure, cacert=None, capath=None, cert=None, key=None, p
                 cacert or 'none', capath or 'none', exc))
     else:
         ctx = new_os_context()
+    if min_version is not None:
+        ctx.minimum_version = min_version
+    if max_version is not None:
+        ctx.maximum_version = max_version
+    if ciphers:
+        try:
+            ctx.set_ciphers(ciphers)
+        except ssl.SSLError as exc:
+            raise LocalError(EXIT_CIPHER, 'failed setting cipher list: %s (%s)' % (ciphers, exc))
     if cert:
         certfile, password = split_cert(cert)
         if passphrase is not None:
@@ -112,10 +128,83 @@ class TLSArgs(Group):
     "Passphrase for the private key"
     ("--pass",)
 
+    tlsv1: bool = False
+    "TLS 1.0 or later"
+    ("-1", "--tlsv1")
+
+    tlsv1_0: bool = False
+    "TLS 1.0 or later"
+    ("--tlsv1.0",)
+
+    tlsv1_1: bool = False
+    "TLS 1.1 or later"
+    ("--tlsv1.1",)
+
+    tlsv1_2: bool = False
+    "TLS 1.2 or later"
+    ("--tlsv1.2",)
+
+    tlsv1_3: bool = False
+    "TLS 1.3 or later"
+    ("--tlsv1.3",)
+
+    tls_max: Arg[Optional[str], NS(metavar='VERSION')] = None
+    "Highest TLS version: 1.0, 1.1, 1.2, 1.3 or default"
+    ("--tls-max",)
+
+    ciphers: Arg[Optional[str], NS(metavar='LIST')] = None
+    "OpenSSL cipher list (TLS 1.2 and below)"
+    ("--ciphers",)
+
+    # No-ops, each true of this client: no revocation checks or session
+    # reuse, no ALPN/NPN offered, and the OS trust store is its default.
+    ssl_no_revoke: bool = False
+    "Skip certificate revocation checks (a no-op: none are made)"
+    ("--ssl-no-revoke",)
+
+    ssl_revoke_best_effort: bool = False
+    "Ignore revocation-check failures (a no-op: none are made)"
+    ("--ssl-revoke-best-effort",)
+
+    ca_native: bool = False
+    "Use the OS certificate store (a no-op: the default)"
+    ("--ca-native",)
+
+    proxy_ca_native: bool = False
+    "Use the OS certificate store for the proxy (a no-op)"
+    ("--proxy-ca-native",)
+
+    no_sessionid: bool = False
+    "No TLS session reuse (a no-op: none is done)"
+    ("--no-sessionid",)
+
+    no_alpn: bool = False
+    "No ALPN (a no-op: none is offered)"
+    ("--no-alpn",)
+
+    no_npn: bool = False
+    "No NPN (a no-op: none is offered)"
+    ("--no-npn",)
+
     def _check(self):
         _pem_only('--cert-type', self.cert_type)
         _pem_only('--key-type', self.key_type)
+        if self.tls_max is not None and self.tls_max not in TLS_MAX:
+            raise ValueError('--tls-max: expected one of %s, got %r' % (', '.join(TLS_MAX), self.tls_max))
+
+    def tls_versions(self):
+        """``(minimum, maximum)`` as ``ssl.TLSVersion`` (``None``: the default)."""
+        floor = None
+        for flag, name in ((self.tlsv1_3, 'TLSv1_3'), (self.tlsv1_2, 'TLSv1_2'), (self.tlsv1_1, 'TLSv1_1'),
+                           (self.tlsv1_0 or self.tlsv1, 'TLSv1')):
+            if flag:
+                floor = getattr(ssl.TLSVersion, name)
+                break
+        top = TLS_MAX.get(self.tls_max) if self.tls_max else None
+        return floor, getattr(ssl.TLSVersion, top) if top else None
 
     def ssl_context(self):
+        floor, top = self.tls_versions()
         return build_ssl_context(self.insecure, cacert=self.cacert, capath=self.capath,
-                                 cert=self.cert, key=self.key, passphrase=self.pass_)
+                                 cert=self.cert, key=self.key, passphrase=self.pass_,
+                                 min_version=floor, max_version=top, ciphers=self.ciphers)

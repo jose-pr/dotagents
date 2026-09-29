@@ -124,7 +124,7 @@ def test_no_field_is_shadowed_by_a_method():
 def test_the_groups_compose_in_order():
     """The refused flags are checked first; the help reads request, body, output..."""
     groups = [k.__name__ for k in CurlCmd.__mro__ if isinstance(k, type) and issubclass(k, Group) and k not in (Group, CurlCmd)]
-    assert groups[0] == "UnsupportedArgs" and groups[-3:] == ["BodyArgs", "RequestArgs", "ShimArgs"]
+    assert groups[0] == "UnsupportedArgs" and groups[-4:] == ["BodyArgs", "AuthArgs", "RequestArgs", "ShimArgs"]
     lines = [ln.strip() for ln in build_parser().format_help().splitlines()]
     # "-X METHOD, --request METHOD" before 3.13, "-X, --request METHOD" after.
     where = [next(i for i, ln in enumerate(lines) if ln.startswith(flag + " ") or ln.startswith(flag + ","))

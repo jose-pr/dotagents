@@ -3,9 +3,11 @@ group is adding a base here; a flag lives in the group whose behaviour it
 drives."""
 from ._duho import duho
 from .args import Group
+from .auth import AuthArgs
 from .body import BodyArgs
 from .connection import ConnectionArgs
 from .cookies import CookieArgs
+from .download import DownloadArgs
 from .output import OutputArgs
 from .request import RequestArgs
 from .tls import TLSArgs
@@ -21,8 +23,8 @@ class ShimArgs(Group):
     ("-V", "--version")
 
 
-class CurlCmd(UnsupportedArgs, CookieArgs, ConnectionArgs, TLSArgs, WriteOutArgs, OutputArgs, BodyArgs,
-              RequestArgs, ShimArgs, duho.Cmd):
+class CurlCmd(UnsupportedArgs, CookieArgs, ConnectionArgs, TLSArgs, WriteOutArgs, DownloadArgs, OutputArgs, BodyArgs,
+              AuthArgs, RequestArgs, ShimArgs, duho.Cmd):
     """Pure Python curl-like tool: the net overlay's curl fallback (httplib.cli).
 
     duho lists the fields from the last-listed group up, so the help reads
@@ -35,7 +37,8 @@ class CurlCmd(UnsupportedArgs, CookieArgs, ConnectionArgs, TLSArgs, WriteOutArgs
     def __call__(self):
         from .transfer import run
 
-        return run(self)
+        with self.stderr_redirected():
+            return run(self)
 
 
 def build_parser():
