@@ -53,21 +53,52 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
 - **`-q` / `--disable`** must be curl's FIRST argument to skip `.curlrc`, so
   the shim keeps a leading one first when it adds the proxy options.
 - Supported (`curl -h` lists them): request `-X -G --url --url-query -H -A -e
-  -u --basic --oauth2-bearer -r --compressed`; body `-d --data-raw
+  -r --compressed`; auth `-u --basic --digest --oauth2-bearer -n --netrc-file
+  --netrc-optional` and `user:pw@` in the URL; body `-d --data-ascii --data-raw
   --data-binary --data-urlencode --json -F --form-string -T`; output `-o -O
-  --remote-name-all --output-dir --create-dirs -D -i -I -s -S -v -f
-  --fail-with-body -w`; TLS `-k --cacert --capath -E/--cert --cert-type --key
-  --key-type --pass`; connection `-x -U --noproxy -L --max-redirs -m
-  --connect-timeout --timeout --retry --retry-delay --retry-max-time
+  --remote-name-all --output-dir --create-dirs -D -i --show-headers -I -s -S -v
+  -f --fail-with-body -w --stderr`; downloads `-C -J -R -z --etag-save
+  --etag-compare --no-clobber --skip-existing --remove-on-error --max-filesize`;
+  TLS `-k --cacert --capath -E/--cert --cert-type --key --key-type --pass
+  -1/--tlsv1 --tlsv1.0 --tlsv1.1 --tlsv1.2 --tlsv1.3 --tls-max --ciphers`;
+  connection `-x -U --noproxy -L --max-redirs --location-trusted --post301
+  --post302 --post303 -m --connect-timeout --timeout -4 -6 --resolve
+  --connect-to --unix-socket --retry --retry-delay --retry-max-time
   --retry-connrefused --retry-all-errors`; cookies `-b -c`; and the no-ops `-q -g
-  --http1.1 -N -# --no-progress-meter` (no config file is read, no URL globbed,
-  no progress shown). A URL with no scheme is `http://`, as in curl. With
-  curl's meaning where it matters:
+  --http1.1 -N -# --no-progress-meter --styled-output --no-keepalive
+  --keepalive-time --tcp-nodelay --ssl-no-revoke --ssl-revoke-best-effort
+  --ca-native --proxy-ca-native --no-alpn --no-npn --no-sessionid`, each true of
+  this client (no config file read, no URL globbed, no progress shown, no
+  keepalive, revocation check, session reuse or ALPN). A URL with no scheme is
+  `http://`, as in curl; an option value may start with `-` (`-z -DATE`, `-d
+  -1`), as in curl. With curl's meaning where it matters:
+  - **`-L` follows as curl does**: credentials (`Authorization` from `-u`,
+    `--oauth2-bearer` or `-H`; `Cookie` from `-H` or a `-b` string) go to the
+    next hop only while scheme, host and port stay the same, unless
+    `--location-trusted`; a `-b` file's cookies are re-chosen per hop; 301/302
+    turn a POST into a GET (`--post301`/`--post302` keep it), 303 anything but
+    HEAD, 307/308 keep method and body, and `-X` stays forced.
+  - **Credentials**: `-u` wins, then `user:pw@` in the URL, then the netrc entry
+    for the host (`default` if none matches) with `-n`/`--netrc-optional`;
+    `--digest` answers the server's challenge. `-n` without a netrc is exit 26.
+  - **Downloads**: `-C -` resumes from the file's size (a server ignoring the
+    range is exit 33, a 416 means already complete); `-J` takes the
+    `Content-Disposition` name without its directories and never overwrites
+    (exit 23); `-R` sets the mtime from `Last-Modified`; `-z DATE|FILE` (`-z
+    -DATE`: unmodified since) and `--etag-compare` make the request conditional,
+    and an unmet condition or a 304 writes no file; `--no-clobber` writes
+    `name.1`..`name.100`; `--max-filesize` over the limit is exit 63 with nothing
+    written.
+  - **Connections**: `-4`/`-6`, `--resolve HOST:PORT:ADDR` and `--connect-to
+    HOST1:PORT1:HOST2:PORT2` steer only name resolution, so the `Host` header,
+    TLS name and certificate check stay the URL's; `--unix-socket PATH` needs a
+    Python with `AF_UNIX` (not Windows CPython), else it is refused.
   - **Exit codes are curl's.** An HTTP status is a response, printed and exit 0
     (a 404, a 302 without `-L`); `-f` makes a 4xx/5xx exit 22 with no body,
     `--fail-with-body` the same exit with the body. Transport failures: 6 could
-    not resolve, 7 could not connect, 28 timed out, 60 certificate; 23 when
-    `-o`/`-D`/`-O` cannot be written, 26 when `-T` cannot be read, 58 a client
+    not resolve, 7 could not connect, 28 timed out, 35 a failed TLS handshake,
+    60 a certificate that does not verify, 59 an unusable `--ciphers` list; 23
+    when `-o`/`-D`/`-O` cannot be written, 26 when `-T` cannot be read, 58 a client
     certificate that cannot be loaded, 77 a CA bundle/path that cannot; an
     unsupported flag, a conflicting pair (`-d` with `-F`, `-f` with
     `--fail-with-body`) or a bad proxy configuration is exit 2 (`curl: (2) …`,
