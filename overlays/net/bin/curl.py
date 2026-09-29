@@ -10,9 +10,11 @@ Behavior:
      where curl is absent.
   2. **Pure-stdlib fallback** when curl is not on PATH: a small ``urllib``-based
      implementation covering the common flag surface (``-X -d -H -o -s -i -I -L
-     -k -A -x -U --noproxy -b`` etc.). It uses the agent proxy the same way
-     ``httplib`` does (``AGENTS_PROXY`` then the global vars; credentials from
-     the URL or ``AGENTS_PROXY_AUTH``; ``NO_PROXY`` bypass). CA verification
+     -k -A -x -U --noproxy -b -w -q`` etc.; ``-w`` reports the variables in
+     ``WRITE_OUT_VARIABLES``, ``-q`` is a no-op as no config file is read).
+     It uses the agent proxy the same way ``httplib`` does (``AGENTS_PROXY``
+     then the global vars; credentials from the URL or ``AGENTS_PROXY_AUTH``;
+     ``NO_PROXY`` bypass). CA verification
      resolves through the net overlay's ``certifi`` shim (OS trust store).
 
 The large ``UNSUPPORTED_ARGS`` set is parsed and **explicitly rejected** with
@@ -22,6 +24,7 @@ flag it does not actually honor. Python 3.9+, no third-party dependency.
 import argparse
 import base64
 import gzip
+import json
 import os
 import shutil
 import socket
@@ -90,7 +93,7 @@ UNSUPPORTED_ARGS = [
     'tlsuser', 'tlsv1_0', 'tlsv1_1', 'tlsv1_2', 'tlsv1_3', 'tlsv1',
     'tr_encoding', 'trace_ascii', 'trace_time', 'trace', 'unix_socket',
     'upload_file', 'url_query', 'use_ascii', 'variable',
-    'vsock', 'write_out', 'xattr',
+    'vsock', 'xattr',
 ]
 
 #: ``NET_CURL=0`` / ``n`` / ``no`` / ``false`` / ``off``: run the real curl
@@ -147,6 +150,10 @@ def build_parser():
     parser.add_argument('-e', '--referer', metavar='URL', help='Referer header')
     parser.add_argument('--compressed', action='store_true', help='Ask for a compressed response and decode it')
     parser.add_argument('--max-redirs', dest='max_redirs', type=int, help='Maximum number of redirects to follow with -L')
+    parser.add_argument('-w', '--write-out', dest='write_out', metavar='FORMAT',
+                        help='Write FORMAT to stdout after the transfer (@file / @- read it); see WRITE_OUT_VARIABLES')
+    parser.add_argument('-q', '--disable', dest='disable', action='store_true',
+                        help='Skip the curl config file (a no-op: the fallback reads none)')
     parser.add_argument('-V', '--version', action='store_true', help='Show the shim version')
     parser.add_argument('-h', '--help', action='store_true', help='Show this help message and exit')
     # Recognized-but-unsupported flags: parsed so we can reject them explicitly
@@ -344,7 +351,6 @@ def build_parser():
     parser.add_argument('--use-ascii', dest='use_ascii', action='store_true')
     parser.add_argument('--variable', action='append')
     parser.add_argument('--vsock', action='store_true')
-    parser.add_argument('-w', '--write-out', dest='write_out', metavar='FORMAT')
     parser.add_argument('--xattr', action='store_true')
     return parser
 
@@ -490,6 +496,13 @@ def format_response_headers(status, reason, header_items):
     return ('%s\r\n%s\r\n' % (status_line, header_text)).encode('utf-8')
 
 
+def _output_path(path):
+    """A ``-o`` / ``-D`` target: ``/dev/null`` is the null device on every
+    platform -- Windows has no such path (its name is ``NUL``), and
+    ``-o /dev/null -w '%{http_code}'`` is the usual status probe."""
+    return os.devnull if path == '/dev/null' else path
+
+
 def write_header_dump(args, header_bytes):
     if not args.dump_header:
         return
@@ -497,13 +510,13 @@ def write_header_dump(args, header_bytes):
         sys.stdout.buffer.write(header_bytes)
         sys.stdout.buffer.flush()
         return
-    with open(args.dump_header, 'wb') as handle:
+    with open(_output_path(args.dump_header), 'wb') as handle:
         handle.write(header_bytes)
 
 
 def emit_output(args, header_bytes, content):
     if args.output:
-        with open(args.output, 'wb') as handle:
+        with open(_output_path(args.output), 'wb') as handle:
             if args.include or args.head:
                 handle.write(header_bytes)
             handle.write(content)
@@ -883,7 +896,11 @@ def maybe_run_system_curl(argv):
     except ValueError as exc:
         print('curl: ignoring the agent proxy: %s' % exc, file=sys.stderr)
         extra = []
-    result = subprocess.run([curl_path, *extra, *argv])
+    # curl skips its config file only when -q / --disable is its FIRST
+    # argument (any "-q..." cluster, e.g. -qs); anywhere else it is ignored,
+    # so the injected proxy options go after it.
+    lead = argv[:1] if argv and (argv[0].startswith('-q') or argv[0] == '--disable') else []
+    result = subprocess.run([curl_path, *lead, *extra, *argv[len(lead):]])
     return result.returncode
 
 
@@ -923,6 +940,215 @@ class _AgentProxyHandler(urllib.request.BaseHandler):
     https_request = _apply
 
 
+#: The ``--write-out`` variables the fallback reports, with curl's meaning and
+#: format. Any other ``%{name}`` (``time_connect``, ``remote_ip``, ``json``...)
+#: or an ``%output{file}`` is refused before the request, like an unsupported flag.
+WRITE_OUT_VARIABLES = frozenset([
+    'content_type', 'errormsg', 'exitcode', 'filename_effective', 'header_json',
+    'http_code', 'http_version', 'method', 'num_headers', 'num_redirects',
+    'redirect_url', 'response_code', 'scheme', 'size_download', 'size_upload',
+    'time_starttransfer', 'time_total', 'url', 'url_effective', 'urlnum',
+])
+#: ``%{stdout}`` / ``%{stderr}`` switch the stream; after ``%{onerror}`` the
+#: rest is written only when the transfer failed.
+_WRITE_OUT_CONTROL = ('stdout', 'stderr', 'onerror')
+_WRITE_OUT_ESCAPES = {'n': '\n', 'r': '\r', 't': '\t'}
+#: http.client's response version -> curl's ``%{http_version}``.
+_HTTP_VERSIONS = {10: '1', 11: '1.1'}
+
+
+def parse_write_out(fmt):
+    """``-w FORMAT`` as ``(kind, value)`` tokens -- ``text``, ``var``,
+    ``header`` (``%header{name}``) and ``control`` -- read the way curl reads
+    it: ``%%`` is ``%``; ``\\n``, ``\\r``, ``\\t`` are escapes; any other
+    ``%x`` or ``\\x``, and an unclosed ``%{``, is written as it stands.
+    ``@file`` / ``@-`` read the format from a file / stdin. A variable the
+    fallback cannot report raises ``NotImplementedError``, before anything
+    is sent."""
+    if fmt.startswith('@'):
+        source = fmt[1:]
+        try:
+            fmt = sys.stdin.read() if source == '-' else Path(source).read_text(encoding='utf-8')
+        except OSError as exc:
+            raise ValueError('--write-out: cannot read %s: %s' % (source, exc))
+    tokens, text, i = [], [], 0
+
+    def take(kind, value):
+        if text:
+            tokens.append(('text', ''.join(text)))
+            del text[:]
+        tokens.append((kind, value))
+
+    while i < len(fmt):
+        char, nxt = fmt[i], fmt[i + 1:i + 2]
+        if char == '\\' and nxt:
+            text.append(_WRITE_OUT_ESCAPES.get(nxt, char + nxt))
+            i += 2
+        elif char != '%' or not nxt:
+            text.append(char)
+            i += 1
+        elif nxt == '%':
+            text.append('%')
+            i += 2
+        else:
+            opener = next((o for o in ('{', 'header{', 'output{') if fmt.startswith(o, i + 1)), None)
+            start = i + 1 + len(opener or '')
+            end = fmt.find('}', start) if opener else -1
+            if opener is None:
+                text.append(char + nxt)  # not a variable: written as it stands
+                i += 2
+            elif end < 0:
+                text.append(fmt[i:start])  # an unclosed %{ is written, the rest read on
+                i = start
+            else:
+                name, i = fmt[start:end], end + 1
+                if opener == 'header{':
+                    take('header', name)
+                elif opener == '{' and name in _WRITE_OUT_CONTROL:
+                    take('control', name)
+                elif opener == '{' and name in WRITE_OUT_VARIABLES:
+                    take('var', name)
+                else:
+                    raise NotImplementedError('Unsupported --write-out variable: %%%s%s}' % (opener, name))
+    if text:
+        tokens.append(('text', ''.join(text)))
+    return tokens
+
+
+class _Transfer(object):
+    """What one fallback transfer did, recorded as it goes so ``--write-out``
+    can report it however the transfer ends."""
+
+    def __init__(self, url):
+        self.url = url or ''     # as the caller typed it: %{url}
+        self.started = time.monotonic()
+        self.first_byte = None   # when the final response's headers arrived
+        self.version = None      # http.client's: 10, 11
+        self.status = 0
+        self.header_items = []
+        self.size_download = 0
+        self.errormsg = ''
+        self.sent = []           # (url, method, body size): every request, redirects included
+
+    def responded(self, response):
+        self.first_byte = time.monotonic()
+        self.version = getattr(response, 'version', None)
+
+
+class _RequestLog(urllib.request.BaseHandler):
+    """Records every request the opener sends -- the first and each redirect
+    hop -- into a :class:`_Transfer`, before a prefix gateway rewrites it."""
+
+    handler_order = 80  # before _AgentProxyHandler (90)
+
+    def __init__(self, transfer):
+        self.transfer = transfer
+
+    def _record(self, req):
+        data = req.data
+        size = len(data) if isinstance(data, (bytes, bytearray)) else 0
+        self.transfer.sent.append((req.full_url, req.get_method(), size))
+        return req
+
+    http_request = _record
+    https_request = _record
+
+
+def _first_header(header_items, name):
+    """The first value of header ``name`` (any case), or ``''``."""
+    name = name.lower()
+    return next((v for k, v in header_items if k.lower() == name), '')
+
+
+def _header_json(header_items):
+    """curl's ``%{header_json}``: lower-cased names in first-seen order, each
+    with all its values, one name per line."""
+    grouped = {}
+    for name, value in header_items:
+        grouped.setdefault(name.lower(), []).append(value)
+    return '{%s\n}' % ',\n'.join(
+        '%s:%s' % (json.dumps(name, ensure_ascii=False), json.dumps(values, ensure_ascii=False, separators=(',', ':')))
+        for name, values in grouped.items())
+
+
+def _caller_url(url, plan):
+    """``url`` as the caller would name it: a prefix gateway's
+    ``<proxy><endpoint>`` stripped, an empty path written ``/`` (curl's
+    ``url_effective``)."""
+    if plan is not None and plan.endpoint is not None:
+        base = agent_proxy.prefix_url('', plan.proxy, plan.endpoint)
+        if url.startswith(base):
+            url = url[len(base):]
+    parts = urllib.parse.urlsplit(url)
+    return url if parts.path else urllib.parse.urlunsplit(parts._replace(path='/'))
+
+
+def write_out_values(args, transfer, exitcode, plan, url):
+    """Every ``WRITE_OUT_VARIABLES`` value for a finished transfer, formatted
+    as curl formats it: a 3-digit code (``000`` when nothing answered),
+    6-decimal seconds, the LAST request's URL, method and body size."""
+    total = time.monotonic() - transfer.started
+    sent_url, method, upload = transfer.sent[-1] if transfer.sent else (url, args.request, 0)
+    effective = _caller_url(sent_url, plan)
+    headers = transfer.header_items
+    location = _first_header(headers, 'location')
+    redirect = urllib.parse.urljoin(effective, location) if location and 300 <= transfer.status < 400 else ''
+    # curl reports the whole elapsed time as start-transfer when nothing answered.
+    first_byte = total if transfer.first_byte is None else transfer.first_byte - transfer.started
+    return {
+        'content_type': _first_header(headers, 'content-type'),
+        'errormsg': transfer.errormsg,
+        'exitcode': str(exitcode),
+        'filename_effective': args.output or '',
+        'header_json': _header_json(headers),
+        'http_code': '%03d' % transfer.status,
+        'http_version': _HTTP_VERSIONS.get(transfer.version, '1.1' if transfer.status else '0'),
+        'method': method,
+        'num_headers': str(len(headers)),
+        'num_redirects': str(max(len(transfer.sent) - 1, 0)),
+        'redirect_url': redirect,
+        'response_code': '%03d' % transfer.status,
+        'scheme': urllib.parse.urlsplit(effective).scheme.lower(),
+        'size_download': str(transfer.size_download),
+        'size_upload': str(upload),
+        'time_starttransfer': '%.6f' % first_byte,
+        'time_total': '%.6f' % total,
+        'url': transfer.url,
+        'url_effective': effective,
+        'urlnum': '0',
+    }
+
+
+def _write_stream(name, text):
+    """``text`` to stdout or stderr as UTF-8, after whatever is already buffered."""
+    stream = sys.stderr if name == 'stderr' else sys.stdout
+    stream.flush()
+    raw = getattr(stream, 'buffer', None)
+    if raw is None:
+        stream.write(text)
+    else:
+        raw.write(text.encode('utf-8'))
+        raw.flush()
+
+
+def emit_write_out(tokens, values, header_items, exitcode):
+    """Write the parsed ``-w`` format: to stdout until ``%{stderr}`` switches
+    it, and nothing after ``%{onerror}`` when the transfer succeeded."""
+    stream = 'stdout'
+    for kind, value in tokens:
+        if kind == 'control':
+            if value != 'onerror':
+                stream = value
+            elif exitcode == 0:
+                return
+            continue
+        if kind == 'header':
+            value = _first_header(header_items, value)
+        elif kind == 'var':
+            value = values[value]
+        _write_stream(stream, value)
+
+
 def run_fallback(argv):
     """Pure-stdlib (urllib) curl-ish fallback. No third-party dependency."""
     parser = build_parser()
@@ -934,6 +1160,7 @@ def run_fallback(argv):
         print(SHIM_VERSION)
         return 0
     check_not_implemented(args)
+    write_out = parse_write_out(args.write_out) if args.write_out else None
     url = resolve_url(args, parser)
     headers, removed = prepare_headers(args, parser)
     data = prepare_data(args, parser)
@@ -974,6 +1201,8 @@ def run_fallback(argv):
     ]
     if plan is not None:
         handlers.append(_AgentProxyHandler(plan))
+    transfer = _Transfer(args.url or args.url_positional)
+    handlers.append(_RequestLog(transfer))
     if args.location:
         redirects = urllib.request.HTTPRedirectHandler()
         if args.max_redirs is not None and args.max_redirs >= 0:
@@ -990,8 +1219,21 @@ def run_fallback(argv):
         opener.addheaders = [(k, v) for k, v in opener.addheaders if k.lower() != name]
 
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    rc = _exchange(args, opener, req, timeout, url, transfer)
+    if write_out is not None:
+        # Written whatever the outcome, as curl does: `000` and the exit code
+        # after a transport failure, the status after -f's exit 22.
+        emit_write_out(write_out, write_out_values(args, transfer, rc, plan, url), transfer.header_items, rc)
+    return rc
+
+
+def _exchange(args, opener, req, timeout, url, transfer):
+    """Send ``req``, write what curl writes and return curl's exit code;
+    ``transfer`` records the outcome for ``--write-out``."""
+    transfer.started = time.monotonic()
     try:
         resp = opener.open(req, timeout=timeout)
+        transfer.responded(resp)
         status = resp.getcode()
         reason = getattr(resp, 'reason', '') or ''
         header_items = list(resp.headers.items())
@@ -999,23 +1241,25 @@ def run_fallback(argv):
     except urllib.error.HTTPError as exc:
         # An HTTP status is a response, not a transport error: curl prints it
         # and exits 0 -- unless -f, which is exit 22 and no body.
+        transfer.responded(getattr(exc, 'fp', None))
         status = exc.code
         reason = getattr(exc, 'reason', '') or ''
+        header_items = list(exc.headers.items()) if exc.headers else []
+        transfer.status, transfer.header_items = status, header_items
         if args.location and 'infinite loop' in str(reason):
             # urllib's redirect handler gave up (--max-redirs, or a loop):
             # curl's "(47) Maximum (N) redirects followed".
-            if should_print_error(args):
-                limit = args.max_redirs if args.max_redirs is not None else urllib.request.HTTPRedirectHandler.max_redirections
-                print('curl: (47) Maximum (%d) redirects followed' % limit, file=sys.stderr)
-            return EXIT_REDIRECTS
-        header_items = list(exc.headers.items()) if exc.headers else []
+            limit = args.max_redirs if args.max_redirs is not None else urllib.request.HTTPRedirectHandler.max_redirections
+            return _fail(args, transfer, EXIT_REDIRECTS, 'Maximum (%d) redirects followed' % limit)
         content = b'' if args.head else (exc.read() or b'')
     except NotImplementedError:
         raise
     except urllib.error.URLError as exc:
-        return _transport_error(args, exc.reason)
+        return _transport_error(args, exc.reason, transfer)
     except (socket.timeout, TimeoutError, OSError, ssl.SSLError) as exc:
-        return _transport_error(args, exc)
+        return _transport_error(args, exc, transfer)
+    transfer.status, transfer.header_items = status, header_items
+    transfer.size_download = len(content)  # as it came over the wire, before --compressed
 
     if args.verbose and not args.silent:
         print('Response status: %s' % status, file=sys.stderr)
@@ -1024,21 +1268,33 @@ def run_fallback(argv):
     if args.compressed and not args.head:
         content = _decode_body(content, header_items)
     header_bytes = format_response_headers(status, reason, header_items)
-    write_header_dump(args, header_bytes)
-    if args.fail and status >= 400:
-        # curl -f: no body, "curl: (22) The requested URL returned error: 404".
-        if should_print_error(args):
-            print('curl: (22) The requested URL returned error: %s' % status, file=sys.stderr)
-        return 22
-    emit_output(args, header_bytes, content)
+    try:
+        write_header_dump(args, header_bytes)
+        if args.fail and status >= 400:
+            # curl -f: no body, "curl: (22) The requested URL returned error: 404".
+            transfer.size_download = 0
+            return _fail(args, transfer, 22, 'The requested URL returned error: %s' % status)
+        emit_output(args, header_bytes, content)
+    except OSError as exc:
+        # -o / -D not writable, or stdout closed under us: curl's (23).
+        return _fail(args, transfer, EXIT_WRITE, 'Failure writing output to destination: %s' % exc)
     return 0
 
 
-#: curl's exit codes for the transport failures the fallback can tell apart.
-EXIT_RESOLVE, EXIT_CONNECT, EXIT_TIMEOUT, EXIT_REDIRECTS, EXIT_SSL = 6, 7, 28, 47, 60
+#: curl's exit codes for the failures the fallback can tell apart.
+EXIT_RESOLVE, EXIT_CONNECT, EXIT_WRITE, EXIT_TIMEOUT, EXIT_REDIRECTS, EXIT_SSL = 6, 7, 23, 28, 47, 60
 
 
-def _transport_error(args, reason):
+def _fail(args, transfer, code, message):
+    """curl's one line, ``curl: (N) message`` (unless -s without -S); the
+    message is ``%{errormsg}``. Returns ``code``."""
+    transfer.errormsg = message
+    if should_print_error(args):
+        print('curl: (%d) %s' % (code, message), file=sys.stderr)
+    return code
+
+
+def _transport_error(args, reason, transfer):
     """Print curl's one-line form and return its exit code: 6 (could not
     resolve), 28 (timed out), 60 (certificate), else 7 (could not connect)."""
     text = str(reason)
@@ -1050,9 +1306,7 @@ def _transport_error(args, reason):
         code, what = EXIT_SSL, 'SSL certificate problem'
     else:
         code, what = EXIT_CONNECT, 'Failed to connect'
-    if should_print_error(args):
-        print('curl: (%d) %s: %s' % (code, what, text), file=sys.stderr)
-    return code
+    return _fail(args, transfer, code, '%s: %s' % (what, text))
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
