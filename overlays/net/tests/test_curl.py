@@ -164,6 +164,8 @@ def test_unsupported_flag_is_refused_out_loud(monkeypatch, capsysbinary):
 # 4. certifi shim reachable from the shim's lib/ (SSL context path).
 # --------------------------------------------------------------------------
 def test_ssl_context_insecure(monkeypatch):
-    ctx = curl._ssl_context(insecure=True)
+    from httplib.cli.tls import build_ssl_context
+
+    ctx = build_ssl_context(insecure=True)
     import ssl
     assert ctx.verify_mode == ssl.CERT_NONE

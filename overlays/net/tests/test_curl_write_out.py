@@ -109,7 +109,9 @@ def test_filename_effective_and_urlnum(origin, tmp_path, monkeypatch, capsysbina
 
 
 def test_every_declared_variable_has_a_value(origin, monkeypatch, capsysbinary):
-    fmt = "".join("%%{%s}" % name for name in sorted(curl.WRITE_OUT_VARIABLES))
+    from httplib.cli.writeout import WRITE_OUT_VARIABLES
+
+    fmt = "".join("%%{%s}" % name for name in sorted(WRITE_OUT_VARIABLES))
     rc, out = _w(monkeypatch, capsysbinary, fmt, origin + "/x")
     assert rc == 0 and b"%{" not in out.out
 

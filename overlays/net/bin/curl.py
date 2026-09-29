@@ -1,100 +1,34 @@
-"""A drop-in ``curl`` shim.
+"""A drop-in ``curl``, run by bin/curl (POSIX sh) and bin/curl.cmd (Windows).
 
-Behavior:
-  1. **Try the real system ``curl`` first** (``shutil.which("curl")``). If present,
-     exec it with the original argv and return its exit code -- real curl, with
-     ONE addition: when ``AGENTS_PROXY`` is set and the caller does not steer the
-     proxy (``-x``/``--proxy*``/``--noproxy``/``-U``), ``--proxy`` (and
-     ``--proxy-user`` for its credentials) is prepended -- real curl reads only the
-     global proxy vars, never the agent proxy. This shim otherwise only matters
-     where curl is absent.
-  2. **Pure-stdlib fallback** when curl is not on PATH: a small ``urllib``-based
-     implementation covering the common flag surface (``-X -d -H -o -s -i -I -L
-     -k -A -x -U --noproxy -b -w -q`` etc.; ``-w`` reports the variables in
-     ``WRITE_OUT_VARIABLES``, ``-q`` is a no-op as no config file is read).
-     It uses the agent proxy the same way ``httplib`` does (``AGENTS_PROXY``
-     then the global vars; credentials from the URL or ``AGENTS_PROXY_AUTH``;
-     ``NO_PROXY`` bypass). CA verification
-     resolves through the net overlay's ``certifi`` shim (OS trust store).
+  1. **The real curl, when one is on PATH** (never this shim). Run with the
+     caller's argv and its exit code returned -- with ONE addition: when
+     ``AGENTS_PROXY`` is set and the caller does not steer the proxy
+     (``-x``/``--proxy*``/``--noproxy``/``-U``), ``--proxy`` and its
+     credential are added, since real curl reads only the global proxy vars.
+     A leading ``-q`` stays first. ``NET_CURL=0`` runs it exactly as typed.
+  2. **Else the net overlay's fallback**, ``httplib.cli`` (``python -m
+     httplib``): the common curl surface over the standard library and duho.
+     So is a request through a ``prefix`` gateway, which curl cannot express.
 
-The large ``UNSUPPORTED_ARGS`` set is parsed and **explicitly rejected** with
-``NotImplementedError`` -- the shim must never silently do the wrong thing for a
-flag it does not actually honor. Python 3.9+, no third-party dependency.
+A ``NET_HOOKS_<KEY>_CURL`` wrapper runs in place of both for the URLs it
+matches. Python 3.9+; the real-curl path needs duho only when the agent proxy
+or a URL hook is in play (to read argv the way curl does).
 """
-import argparse
-import base64
-import gzip
-import json
 import os
 import shutil
-import socket
-import ssl
 import subprocess
 import sys
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
-# The overlay ships lib/ as a sibling of bin/. Put it on sys.path so the bundled
-# `certifi` shim (and httplib, if a caller wants it) resolves.
+# The overlay ships lib/ as a sibling of bin/: httplib (and certifi) live there.
 LIB_DIR = Path(__file__).resolve().parents[1] / "lib"
 if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
 from httplib import hooks as net_hooks  # noqa: E402  (pure stdlib; via LIB_DIR)
 from httplib import proxy as agent_proxy  # noqa: E402  (pure stdlib; via LIB_DIR)
-
-USER_AGENT = "Python-curl/1.0"
-
-UNSUPPORTED_ARGS = [
-    'any', 'append', 'basic', 'cert_status', 'cert', 'ciphers',
-    'config', 'continue_at', 'create_dirs', 'crlf',
-    'crlfile', 'data_ascii', 'data_urlencode', 'delegation',
-    'digest', 'disable_eprt', 'disable_epsv', 'dns_interface', 'dns_ipv4_addr',
-    'dns_ipv6_addr', 'dns_servers', 'doh_url', 'egd_file', 'engine',
-    'expect100_timeout', 'fail_early', 'false_start', 'form_string',
-    'form', 'ftp_account', 'ftp_alternative_to_user', 'ftp_create_dirs',
-    'ftp_method', 'ftp_pasv', 'ftp_skip_pasv_ip', 'ftp_ssl_ccc_mode',
-    'ftp_ssl_ccc', 'ftp_ssl_control', 'get', 'globoff',
-    'happy_eyeballs_timeout_ms', 'haproxy_protocol', 'hostpubmd5', 'http1_0',
-    'http1_1', 'http2_prior_knowledge', 'http2', 'http3',
-    'ignore_content_length', 'interface', 'ip_resolve', 'ipv4', 'ipv6',
-    'junk_session_cookies', 'keepalive_time', 'key_type', 'key', 'krb',
-    'libcurl', 'limit_rate', 'list_only', 'local_port', 'location_trusted',
-    'login_options', 'mail_auth', 'mail_from', 'mail_rcpt_allowfails',
-    'mail_rcpt', 'max_filesize', 'metalink',
-    'negotiate', 'netrc_file', 'netrc_optional', 'netrc', 'next', 'no_alpn',
-    'no_buffer', 'no_keepalive', 'no_npn', 'no_progress_bar', 'no_sessionid',
-    'ntlm_wb', 'ntlm', 'oauth2_bearer', 'output_dir',
-    'parallel_immediate', 'parallel_max', 'parallel', 'pass_', 'path_as_is',
-    'pinnedpubkey', 'post301', 'post302', 'post303', 'preproxy',
-    'progress_bar', 'proto_default', 'proto_redir', 'proto', 'proxy_anyauth',
-    'proxy_basic', 'proxy_cacert', 'proxy_capath', 'proxy_cert_type',
-    'proxy_cert', 'proxy_ciphers', 'proxy_crlfile', 'proxy_digest',
-    'proxy_header', 'proxy_insecure', 'proxy_key_type', 'proxy_key',
-    'proxy_negotiate', 'proxy_ntlm', 'proxy_pass', 'proxy_pinnedpubkey',
-    'proxy_service_name', 'proxy_ssl_allow_beast',
-    'proxy_ssl_auto_client_cert', 'proxy_tls13_ciphers', 'proxy_tlsauthtype',
-    'proxy_tlspassword', 'proxy_tlsuser', 'proxy_tlsv1',
-    'proxytunnel', 'pubkey', 'quote', 'random_file', 'range', 'raw',
-    'remote_header_name', 'remote_name_all', 'remote_name',
-    'remote_time', 'request_target', 'resolve', 'retry_connrefused',
-    'retry_delay', 'retry_max_time', 'retry', 'sasl_authzid', 'sasl_ir',
-    'service_name', 'show_headers', 'socks4', 'socks4a',
-    'socks5_basic', 'socks5_gssapi_nec', 'socks5_gssapi_service',
-    'socks5_gssapi', 'socks5_hostname', 'socks5', 'speed_limit', 'speed_time',
-    'ssl_allow_beast', 'ssl_auto_client_cert', 'ssl_no_revoke', 'ssl_reqd',
-    'ssl_revoke_best_effort', 'ssl', 'sslv2', 'sslv3', 'stderr',
-    'styled_output', 'suppress_connect_headers', 'tcp_fastopen',
-    'tcp_nodelay', 'telnet_option', 'tftp_blksize', 'tftp_no_options',
-    'time_cond', 'tls_max', 'tls13_ciphers', 'tlsauthtype', 'tlspassword',
-    'tlsuser', 'tlsv1_0', 'tlsv1_1', 'tlsv1_2', 'tlsv1_3', 'tlsv1',
-    'tr_encoding', 'trace_ascii', 'trace_time', 'trace', 'unix_socket',
-    'upload_file', 'url_query', 'use_ascii', 'variable',
-    'vsock', 'xattr',
-]
+from httplib.cli import main as fallback_main  # noqa: E402  (imports duho only when run)
+from httplib.cli import run_fallback  # noqa: E402,F401  (re-exported for callers and tests)
 
 #: ``NET_CURL=0`` / ``n`` / ``no`` / ``false`` / ``off``: run the real curl
 #: exactly as typed -- no agent proxy, no hooks, no fallback. Anything else
@@ -107,748 +41,19 @@ def shim_enabled():
     return (os.environ.get(SHIM_ENV) or '').strip().lower() not in _OFF
 
 
-#: The shim's own version line (``-V``); real curl answers when it is present.
-SHIM_VERSION = 'curl 0.0.0-dotagents-shim (python %d.%d, urllib) -- the net overlay fallback' % sys.version_info[:2]
+def caller_steering(argv):
+    """``(proxy, noproxy, proxy_user)`` as the caller wrote them (see
+    ``httplib.cli.argv``)."""
+    from httplib.cli.argv import caller_steering as steering
 
-
-def check_not_implemented(args):
-    unsupported = []
-    for arg in UNSUPPORTED_ARGS:
-        if getattr(args, arg, None):
-            unsupported.append("--%s" % arg.replace('_', '-'))
-    if unsupported:
-        raise NotImplementedError("Unsupported options: %s" % ', '.join(unsupported))
-
-
-def build_parser():
-    parser = argparse.ArgumentParser(description='Pure Python curl-like tool.', add_help=False)
-    parser.add_argument('url_positional', nargs='?', help='URL to fetch (positional)')
-    parser.add_argument('--url', help='URL to fetch (option)')
-    parser.add_argument('-X', '--request', default='GET', help='Specify request method')
-    parser.add_argument('-d', '--data', action='append', help='HTTP POST data (repeatable, joined with &; @file, @- for stdin)')
-    parser.add_argument('--data-raw', dest='data_raw', action='append', help='HTTP POST data without @file expansion')
-    parser.add_argument('--data-binary', dest='data_binary', action='append', help='HTTP POST data as is (@file, @- for stdin)')
-    parser.add_argument('-H', '--header', action='append', help='Custom header')
-    parser.add_argument('-o', '--output', help='Output file')
-    parser.add_argument('-s', '--silent', action='store_true', help='Silent mode')
-    parser.add_argument('-S', '--show-error', dest='show_error_supported', action='store_true', help='Show errors even when silent')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose mode')
-    parser.add_argument('-i', '--include', action='store_true', help='Include response headers in output')
-    parser.add_argument('-I', '--head', action='store_true', help='Fetch headers only')
-    parser.add_argument('-D', '--dump-header', help='Write response headers to file (or - for stdout)')
-    parser.add_argument('-b', '--cookie', help='Cookie string or file to read cookies from')
-    parser.add_argument('-c', '--cookie-jar', help='Write cookies to this file after operation')
-    parser.add_argument('-x', '--proxy', help='Use proxy')
-    parser.add_argument('-k', '--insecure', action='store_true', help='Allow insecure server connections')
-    parser.add_argument('-A', '--user-agent', dest='user_agent', help='Set User-Agent')
-    parser.add_argument('-L', '--location', action='store_true', help='Follow redirects')
-    parser.add_argument('--timeout', type=float, default=30, help='Request timeout in seconds')
-    parser.add_argument('-m', '--max-time', dest='max_time', type=float, help='Maximum time in seconds for the whole request')
-    parser.add_argument('--connect-timeout', dest='connect_timeout', type=float, help='Connect timeout in seconds')
-    parser.add_argument('-f', '--fail', action='store_true', help='Fail silently (exit 22, no body) on HTTP errors')
-    parser.add_argument('-u', '--user', metavar='USER[:PASS]', help='Server user and password (Basic)')
-    parser.add_argument('-e', '--referer', metavar='URL', help='Referer header')
-    parser.add_argument('--compressed', action='store_true', help='Ask for a compressed response and decode it')
-    parser.add_argument('--max-redirs', dest='max_redirs', type=int, help='Maximum number of redirects to follow with -L')
-    parser.add_argument('-w', '--write-out', dest='write_out', metavar='FORMAT',
-                        help='Write FORMAT to stdout after the transfer (@file / @- read it); see WRITE_OUT_VARIABLES')
-    parser.add_argument('-q', '--disable', dest='disable', action='store_true',
-                        help='Skip the curl config file (a no-op: the fallback reads none)')
-    parser.add_argument('-V', '--version', action='store_true', help='Show the shim version')
-    parser.add_argument('-h', '--help', action='store_true', help='Show this help message and exit')
-    # Recognized-but-unsupported flags: parsed so we can reject them explicitly
-    # (NotImplementedError) rather than mis-handle them.
-    parser.add_argument('--any', action='store_true')
-    parser.add_argument('--append', action='store_true')
-    parser.add_argument('--basic', action='store_true')
-    parser.add_argument('--cert-status', dest='cert_status', action='store_true')
-    parser.add_argument('--cert', metavar='CERT')
-    parser.add_argument('--ciphers', metavar='CIPHERS')
-    parser.add_argument('--config', metavar='CONFIG')
-    parser.add_argument('--continue-at', dest='continue_at', metavar='OFFSET')
-    parser.add_argument('--create-dirs', dest='create_dirs', action='store_true')
-    parser.add_argument('--crlf', action='store_true')
-    parser.add_argument('--crlfile', metavar='FILE')
-    parser.add_argument('--data-ascii', dest='data_ascii', metavar='DATA')
-    parser.add_argument('--data-urlencode', dest='data_urlencode', metavar='DATA')
-    parser.add_argument('--delegation', metavar='LEVEL')
-    parser.add_argument('--digest', action='store_true')
-    parser.add_argument('--disable-eprt', dest='disable_eprt', action='store_true')
-    parser.add_argument('--disable-epsv', dest='disable_epsv', action='store_true')
-    parser.add_argument('--dns-interface', dest='dns_interface', metavar='INTERFACE')
-    parser.add_argument('--dns-ipv4-addr', dest='dns_ipv4_addr', metavar='ADDRESS')
-    parser.add_argument('--dns-ipv6-addr', dest='dns_ipv6_addr', metavar='ADDRESS')
-    parser.add_argument('--dns-servers', dest='dns_servers', metavar='ADDRESSES')
-    parser.add_argument('--doh-url', dest='doh_url', metavar='URL')
-    parser.add_argument('--egd-file', dest='egd_file', metavar='FILE')
-    parser.add_argument('--engine', metavar='ENGINE')
-    parser.add_argument('--expect100-timeout', dest='expect100_timeout', type=float)
-    parser.add_argument('--fail-early', dest='fail_early', action='store_true')
-    parser.add_argument('--false-start', dest='false_start', action='store_true')
-    parser.add_argument('--form-string', dest='form_string', metavar='STRING')
-    parser.add_argument('-F', '--form', metavar='NAME=CONTENT')
-    parser.add_argument('--ftp-account', dest='ftp_account', metavar='DATA')
-    parser.add_argument('--ftp-alternative-to-user', dest='ftp_alternative_to_user', metavar='COMMAND')
-    parser.add_argument('--ftp-create-dirs', dest='ftp_create_dirs', action='store_true')
-    parser.add_argument('--ftp-method', dest='ftp_method', metavar='METHOD')
-    parser.add_argument('--ftp-pasv', dest='ftp_pasv', action='store_true')
-    parser.add_argument('--ftp-skip-pasv-ip', dest='ftp_skip_pasv_ip', action='store_true')
-    parser.add_argument('--ftp-ssl-ccc-mode', dest='ftp_ssl_ccc_mode', metavar='MODE')
-    parser.add_argument('--ftp-ssl-ccc', dest='ftp_ssl_ccc', action='store_true')
-    parser.add_argument('--ftp-ssl-control', dest='ftp_ssl_control', action='store_true')
-    parser.add_argument('-G', '--get', action='store_true')
-    parser.add_argument('--globoff', action='store_true')
-    parser.add_argument('--happy-eyeballs-timeout-ms', dest='happy_eyeballs_timeout_ms', type=int)
-    parser.add_argument('--haproxy-protocol', dest='haproxy_protocol', action='store_true')
-    parser.add_argument('--hostpubmd5', metavar='MD5')
-    parser.add_argument('--http1.0', dest='http1_0', action='store_true')
-    parser.add_argument('--http1.1', dest='http1_1', action='store_true')
-    parser.add_argument('--http2-prior-knowledge', dest='http2_prior_knowledge', action='store_true')
-    parser.add_argument('--http2', action='store_true')
-    parser.add_argument('--http3', action='store_true')
-    parser.add_argument('--ignore-content-length', dest='ignore_content_length', action='store_true')
-    parser.add_argument('--interface', metavar='INTERFACE')
-    parser.add_argument('--ip-resolve', dest='ip_resolve', metavar='RESOLVE')
-    parser.add_argument('--ipv4', action='store_true')
-    parser.add_argument('--ipv6', action='store_true')
-    parser.add_argument('--junk-session-cookies', dest='junk_session_cookies', action='store_true')
-    parser.add_argument('--keepalive-time', dest='keepalive_time', type=int)
-    parser.add_argument('--key-type', dest='key_type', metavar='TYPE')
-    parser.add_argument('--key', metavar='KEY')
-    parser.add_argument('--krb', metavar='LEVEL')
-    parser.add_argument('--libcurl', metavar='FILE')
-    parser.add_argument('--limit-rate', dest='limit_rate', metavar='RATE')
-    parser.add_argument('--list-only', dest='list_only', action='store_true')
-    parser.add_argument('--local-port', dest='local_port', metavar='RANGE')
-    parser.add_argument('--location-trusted', dest='location_trusted', action='store_true')
-    parser.add_argument('--login-options', dest='login_options', metavar='OPTIONS')
-    parser.add_argument('--mail-auth', dest='mail_auth', metavar='AUTH')
-    parser.add_argument('--mail-from', dest='mail_from', metavar='FROM')
-    parser.add_argument('--mail-rcpt-allowfails', dest='mail_rcpt_allowfails', action='store_true')
-    parser.add_argument('--mail-rcpt', dest='mail_rcpt', metavar='RCPT')
-    parser.add_argument('--max-filesize', dest='max_filesize', type=int)
-    parser.add_argument('--metalink', action='store_true')
-    parser.add_argument('--negotiate', action='store_true')
-    parser.add_argument('--netrc-file', dest='netrc_file', metavar='FILE')
-    parser.add_argument('--netrc-optional', dest='netrc_optional', action='store_true')
-    parser.add_argument('-n', '--netrc', action='store_true')
-    parser.add_argument('--next', action='store_true')
-    parser.add_argument('--no-alpn', dest='no_alpn', action='store_true')
-    parser.add_argument('--no-buffer', dest='no_buffer', action='store_true')
-    parser.add_argument('--no-keepalive', dest='no_keepalive', action='store_true')
-    parser.add_argument('--no-npn', dest='no_npn', action='store_true')
-    parser.add_argument('--no-progress-bar', dest='no_progress_bar', action='store_true')
-    parser.add_argument('--no-sessionid', dest='no_sessionid', action='store_true')
-    parser.add_argument('--noproxy', metavar='HOSTS')
-    parser.add_argument('--ntlm-wb', dest='ntlm_wb', action='store_true')
-    parser.add_argument('--ntlm', action='store_true')
-    parser.add_argument('--oauth2-bearer', dest='oauth2_bearer', metavar='TOKEN')
-    parser.add_argument('--output-dir', dest='output_dir', metavar='DIR')
-    parser.add_argument('--parallel-immediate', dest='parallel_immediate', action='store_true')
-    parser.add_argument('--parallel-max', dest='parallel_max', type=int)
-    parser.add_argument('--parallel', action='store_true')
-    parser.add_argument('--pass', dest='pass_', metavar='PASS')
-    parser.add_argument('--path-as-is', dest='path_as_is', action='store_true')
-    parser.add_argument('--pinnedpubkey', dest='pinnedpubkey', metavar='HASHES')
-    parser.add_argument('--post301', action='store_true')
-    parser.add_argument('--post302', action='store_true')
-    parser.add_argument('--post303', action='store_true')
-    parser.add_argument('--preproxy', metavar='PROXY')
-    parser.add_argument('--progress-bar', dest='progress_bar', action='store_true')
-    parser.add_argument('--proto-default', dest='proto_default', metavar='PROTO')
-    parser.add_argument('--proto-redir', dest='proto_redir', metavar='PROTOCOLS')
-    parser.add_argument('--proto', metavar='PROTOCOLS')
-    parser.add_argument('--proxy-anyauth', dest='proxy_anyauth', action='store_true')
-    parser.add_argument('--proxy-basic', dest='proxy_basic', action='store_true')
-    parser.add_argument('--proxy-cacert', dest='proxy_cacert', metavar='FILE')
-    parser.add_argument('--proxy-capath', dest='proxy_capath', metavar='DIR')
-    parser.add_argument('--proxy-cert-type', dest='proxy_cert_type', metavar='TYPE')
-    parser.add_argument('--proxy-cert', dest='proxy_cert', metavar='CERT')
-    parser.add_argument('--proxy-ciphers', dest='proxy_ciphers', metavar='LIST')
-    parser.add_argument('--proxy-crlfile', dest='proxy_crlfile', metavar='FILE')
-    parser.add_argument('--proxy-digest', dest='proxy_digest', action='store_true')
-    parser.add_argument('--proxy-header', dest='proxy_header', action='append')
-    parser.add_argument('--proxy-insecure', dest='proxy_insecure', action='store_true')
-    parser.add_argument('--proxy-key-type', dest='proxy_key_type', metavar='TYPE')
-    parser.add_argument('--proxy-key', dest='proxy_key', metavar='KEY')
-    parser.add_argument('--proxy-negotiate', dest='proxy_negotiate', action='store_true')
-    parser.add_argument('--proxy-ntlm', dest='proxy_ntlm', action='store_true')
-    parser.add_argument('--proxy-pass', dest='proxy_pass', metavar='PASS')
-    parser.add_argument('--proxy-pinnedpubkey', dest='proxy_pinnedpubkey', metavar='HASHES')
-    parser.add_argument('--proxy-service-name', dest='proxy_service_name', metavar='NAME')
-    parser.add_argument('--proxy-ssl-allow-beast', dest='proxy_ssl_allow_beast', action='store_true')
-    parser.add_argument('--proxy-ssl-auto-client-cert', dest='proxy_ssl_auto_client_cert', action='store_true')
-    parser.add_argument('--proxy-tls13-ciphers', dest='proxy_tls13_ciphers', metavar='CIPHERS')
-    parser.add_argument('--proxy-tlsauthtype', dest='proxy_tlsauthtype', metavar='TYPE')
-    parser.add_argument('--proxy-tlspassword', dest='proxy_tlspassword', metavar='STRING')
-    parser.add_argument('--proxy-tlsuser', dest='proxy_tlsuser', metavar='USER')
-    parser.add_argument('--proxy-tlsv1', dest='proxy_tlsv1', action='store_true')
-    parser.add_argument('-U', '--proxy-user', dest='proxy_user', metavar='USER[:PASS]')
-    parser.add_argument('--proxytunnel', action='store_true')
-    parser.add_argument('--pubkey', metavar='KEY')
-    parser.add_argument('-Q', '--quote', action='append')
-    parser.add_argument('--random-file', dest='random_file', metavar='FILE')
-    parser.add_argument('-r', '--range', metavar='RANGE')
-    parser.add_argument('--raw', action='store_true')
-    parser.add_argument('--remote-header-name', dest='remote_header_name', action='store_true')
-    parser.add_argument('--remote-name-all', dest='remote_name_all', action='store_true')
-    parser.add_argument('-O', '--remote-name', dest='remote_name', action='store_true')
-    parser.add_argument('--remote-time', dest='remote_time', action='store_true')
-    parser.add_argument('--request-target', dest='request_target', metavar='PATH')
-    parser.add_argument('--resolve', action='append')
-    parser.add_argument('--retry-connrefused', dest='retry_connrefused', action='store_true')
-    parser.add_argument('--retry-delay', dest='retry_delay', type=int)
-    parser.add_argument('--retry-max-time', dest='retry_max_time', type=int)
-    parser.add_argument('--retry', type=int)
-    parser.add_argument('--sasl-authzid', dest='sasl_authzid', metavar='IDENTITY')
-    parser.add_argument('--sasl-ir', dest='sasl_ir', action='store_true')
-    parser.add_argument('--service-name', dest='service_name', metavar='NAME')
-    parser.add_argument('--show-headers', dest='show_headers', action='store_true')
-    parser.add_argument('--socks4', metavar='HOST[:PORT]')
-    parser.add_argument('--socks4a', metavar='HOST[:PORT]')
-    parser.add_argument('--socks5-basic', dest='socks5_basic', action='store_true')
-    parser.add_argument('--socks5-gssapi-nec', dest='socks5_gssapi_nec', action='store_true')
-    parser.add_argument('--socks5-gssapi-service', dest='socks5_gssapi_service', metavar='NAME')
-    parser.add_argument('--socks5-gssapi', dest='socks5_gssapi', action='store_true')
-    parser.add_argument('--socks5-hostname', dest='socks5_hostname', metavar='HOST[:PORT]')
-    parser.add_argument('--socks5', metavar='HOST[:PORT]')
-    parser.add_argument('--speed-limit', dest='speed_limit', type=int)
-    parser.add_argument('--speed-time', dest='speed_time', type=int)
-    parser.add_argument('--ssl-allow-beast', dest='ssl_allow_beast', action='store_true')
-    parser.add_argument('--ssl-auto-client-cert', dest='ssl_auto_client_cert', action='store_true')
-    parser.add_argument('--ssl-no-revoke', dest='ssl_no_revoke', action='store_true')
-    parser.add_argument('--ssl-reqd', dest='ssl_reqd', action='store_true')
-    parser.add_argument('--ssl-revoke-best-effort', dest='ssl_revoke_best_effort', action='store_true')
-    parser.add_argument('--ssl', action='store_true')
-    parser.add_argument('--sslv2', action='store_true')
-    parser.add_argument('--sslv3', action='store_true')
-    parser.add_argument('--stderr', metavar='FILE')
-    parser.add_argument('--styled-output', dest='styled_output', action='store_true')
-    parser.add_argument('--suppress-connect-headers', dest='suppress_connect_headers', action='store_true')
-    parser.add_argument('--tcp-fastopen', dest='tcp_fastopen', action='store_true')
-    parser.add_argument('--tcp-nodelay', dest='tcp_nodelay', action='store_true')
-    parser.add_argument('--telnet-option', dest='telnet_option', action='append')
-    parser.add_argument('--tftp-blksize', dest='tftp_blksize', type=int)
-    parser.add_argument('--tftp-no-options', dest='tftp_no_options', action='store_true')
-    parser.add_argument('--time-cond', dest='time_cond', metavar='TIME')
-    parser.add_argument('--tls-max', dest='tls_max', metavar='VERSION')
-    parser.add_argument('--tls13-ciphers', dest='tls13_ciphers', metavar='CIPHERS')
-    parser.add_argument('--tlsauthtype', metavar='TYPE')
-    parser.add_argument('--tlspassword', metavar='STRING')
-    parser.add_argument('--tlsuser', metavar='USER')
-    parser.add_argument('--tlsv1.0', dest='tlsv1_0', action='store_true')
-    parser.add_argument('--tlsv1.1', dest='tlsv1_1', action='store_true')
-    parser.add_argument('--tlsv1.2', dest='tlsv1_2', action='store_true')
-    parser.add_argument('--tlsv1.3', dest='tlsv1_3', action='store_true')
-    parser.add_argument('--tlsv1', action='store_true')
-    parser.add_argument('--tr-encoding', dest='tr_encoding', action='store_true')
-    parser.add_argument('--trace-ascii', dest='trace_ascii', metavar='FILE')
-    parser.add_argument('--trace-time', dest='trace_time', action='store_true')
-    parser.add_argument('--trace', metavar='FILE')
-    parser.add_argument('--unix-socket', dest='unix_socket', metavar='PATH')
-    parser.add_argument('-T', '--upload-file', dest='upload_file', metavar='FILE')
-    parser.add_argument('--url-query', dest='url_query', action='append')
-    parser.add_argument('--use-ascii', dest='use_ascii', action='store_true')
-    parser.add_argument('--variable', action='append')
-    parser.add_argument('--vsock', action='store_true')
-    parser.add_argument('--xattr', action='store_true')
-    return parser
-
-
-def resolve_url(args, parser):
-    url = args.url or args.url_positional
-    if not url:
-        parser.error('URL is required')
-    if not url.startswith(('http://', 'https://')):
-        url = 'https://' + url
-    return url
-
-
-def _set_header(headers, key, value):
-    """Set ``key`` case-insensitively (one entry per name, the caller's case)."""
-    for existing in list(headers):
-        if existing.lower() == key.lower():
-            del headers[existing]
-    headers[key] = value
-
-
-def prepare_headers(args, parser):
-    """curl's ``-H`` forms: ``Name: value`` sets; ``Name:`` (no value) removes
-    the header, a default included; ``Name;`` sends it with an empty value.
-    ``-u`` adds Basic ``Authorization``, ``-e`` ``Referer``, ``--compressed``
-    ``Accept-Encoding: gzip, deflate`` (the body is decoded on the way out)."""
-    headers = {'User-Agent': args.user_agent or USER_AGENT}
-    if args.user:
-        user, _, password = args.user.partition(':')
-        token = base64.b64encode(('%s:%s' % (user, password)).encode('utf-8')).decode('ascii')
-        headers['Authorization'] = 'Basic ' + token
-    if args.referer:
-        headers['Referer'] = args.referer
-    if args.compressed:
-        headers['Accept-Encoding'] = 'gzip, deflate'
-    removed = set()
-    for header in args.header or []:
-        if ':' in header:
-            key, value = header.split(':', 1)
-            key, value = key.strip(), value.strip()
-            if not value:
-                _set_header(headers, key, None)
-                del headers[key]
-                removed.add(key.lower())
-                continue
-        elif header.endswith(';') and header[:-1].strip():
-            key, value = header[:-1].strip(), ''
-        else:
-            parser.error('Invalid header: %s' % header)
-        removed.discard(key.lower())
-        _set_header(headers, key, value)
-    return headers, removed
-
-
-def _data_part(value, parser, *, expand):
-    """One ``-d`` value as bytes: ``@-`` is stdin and ``@file`` a file when
-    ``expand`` (``-d``/``--data-binary``; ``-d`` also strips CR/LF from a file
-    the way curl does), the text otherwise (``--data-raw``)."""
-    if expand and value.startswith('@'):
-        source = value[1:]
-        if source == '-':
-            return sys.stdin.buffer.read()
-        if not os.path.exists(source):
-            parser.error('Data file not found: %s' % source)
-        with open(source, 'rb') as handle:
-            return handle.read()
-    return value.encode('utf-8')
-
-
-def prepare_data(args, parser):
-    """The request body, or ``None``: every ``-d`` / ``--data-binary`` /
-    ``--data-raw`` value, in that order, joined with ``&`` as curl does. A
-    body turns a default ``GET`` into ``POST``."""
-    parts = []
-    for value in args.data or []:
-        part = _data_part(value, parser, expand=True)
-        if value.startswith('@'):
-            part = part.replace(b'\r', b'').replace(b'\n', b'')
-        parts.append(part)
-    for value in args.data_binary or []:
-        parts.append(_data_part(value, parser, expand=True))
-    for value in args.data_raw or []:
-        parts.append(_data_part(value, parser, expand=False))
-    if not parts:
-        return None
-    if args.request == 'GET':
-        args.request = 'POST'
-    return b'&'.join(parts)
-
-
-FORM_CONTENT_TYPE = 'application/x-www-form-urlencoded'
-
-
-def _decode_body(content, header_items):
-    """``--compressed``: the body decoded per ``Content-Encoding`` (gzip,
-    deflate -- zlib-wrapped or raw); anything else is returned as it came."""
-    import zlib
-
-    encoding = ''
-    for name, value in header_items:
-        if name.lower() == 'content-encoding':
-            encoding = value.strip().lower()
-    try:
-        if encoding == 'gzip' or encoding == 'x-gzip':
-            return gzip.decompress(content)
-        if encoding == 'deflate':
-            try:
-                return zlib.decompress(content)
-            except zlib.error:
-                return zlib.decompress(content, -zlib.MAX_WBITS)
-    except (OSError, EOFError, zlib.error):
-        pass
-    return content
-
-
-def _ssl_context(insecure):
-    """Build an SSL context. Verification uses the OS trust store via the net
-    overlay's ``certifi`` shim (``where()``); ``-k/--insecure`` disables it."""
-    if insecure:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        return ctx
-    cafile = None
-    try:
-        import certifi  # the overlay's OS-trust-store shim (lib/certifi)
-        cafile = certifi.where()
-    except Exception:
-        cafile = None
-    if cafile and os.path.isfile(cafile):
-        return ssl.create_default_context(cafile=cafile)
-    return ssl.create_default_context()
-
-
-def format_status_line(status, reason):
-    line = ('HTTP/1.1 %s %s' % (status, reason or '')).rstrip()
-    return line
-
-
-def format_response_headers(status, reason, header_items):
-    status_line = format_status_line(status, reason)
-    header_text = ''.join('%s: %s\r\n' % (k, v) for k, v in header_items)
-    return ('%s\r\n%s\r\n' % (status_line, header_text)).encode('utf-8')
-
-
-def _output_path(path):
-    """A ``-o`` / ``-D`` target: ``/dev/null`` is the null device on every
-    platform -- Windows has no such path (its name is ``NUL``), and
-    ``-o /dev/null -w '%{http_code}'`` is the usual status probe."""
-    return os.devnull if path == '/dev/null' else path
-
-
-def write_header_dump(args, header_bytes):
-    if not args.dump_header:
-        return
-    if args.dump_header == '-':
-        sys.stdout.buffer.write(header_bytes)
-        sys.stdout.buffer.flush()
-        return
-    with open(_output_path(args.dump_header), 'wb') as handle:
-        handle.write(header_bytes)
-
-
-def emit_output(args, header_bytes, content):
-    if args.output:
-        with open(_output_path(args.output), 'wb') as handle:
-            if args.include or args.head:
-                handle.write(header_bytes)
-            handle.write(content)
-        if not args.silent:
-            print('Output written to %s' % args.output, file=sys.stderr)
-        return
-    if args.include or args.head:
-        sys.stdout.buffer.write(header_bytes)
-    if not args.head:
-        sys.stdout.buffer.write(content)
-    sys.stdout.buffer.flush()
-
-
-def should_print_error(args):
-    return (not args.silent) or args.show_error_supported
-
-
-def _write_cookie_jar(path, url, header_items, loaded_from=None):
-    """``-c``: write the response's cookies in Netscape format -- the domain
-    defaults to the host of the URL the CALLER asked for, never a gateway's
-    (under a prefix gateway the wire URL is the gateway's) -- on top of what a
-    ``-b <file>`` read, a later cookie replacing an earlier one of the same
-    domain, path and name, ``Max-Age=0`` removing it. The final response's
-    headers only: urllib does not hand back the intermediate hops' cookies."""
-    from http.cookies import SimpleCookie
-
-    host = urllib.parse.urlsplit(url).hostname or ''
-    rows = {}
-    for row in _read_netscape(loaded_from) if loaded_from else []:
-        rows[(row[0], row[2], row[5])] = row
-    for name, value in header_items:
-        if name.lower() != 'set-cookie':
-            continue
-        parsed = SimpleCookie()
-        try:
-            parsed.load(value)
-        except Exception:
-            continue
-        for morsel in parsed.values():
-            domain = morsel['domain'] or host
-            cpath = morsel['path'] or '/'
-            key = (domain, cpath, morsel.key)
-            expires = _cookie_expiry(morsel)
-            if expires is not None and expires <= int(time.time()) or not morsel.value:
-                rows.pop(key, None)
-                continue
-            domain_field = ('#HttpOnly_' if morsel['httponly'] else '') + domain
-            rows[key] = [
-                domain_field, 'TRUE' if domain.startswith('.') else 'FALSE', cpath,
-                'TRUE' if morsel['secure'] else 'FALSE', str(expires or 0), morsel.key, morsel.value,
-            ]
-    lines = ['# Netscape HTTP Cookie File'] + ['\t'.join(row) for row in rows.values()]
-    Path(path).write_text('\n'.join(lines) + '\n', encoding='utf-8')
-
-
-def _cookie_expiry(morsel):
-    """The cookie's expiry as a unix time: ``Max-Age`` (seconds from now)
-    wins over ``Expires`` (an HTTP date); ``None`` for a session cookie or
-    an unparseable value."""
-    if morsel['max-age']:
-        try:
-            return int(time.time()) + int(morsel['max-age'])
-        except ValueError:
-            return None
-    if morsel['expires']:
-        from email.utils import parsedate_to_datetime
-
-        try:
-            return int(parsedate_to_datetime(morsel['expires']).timestamp())
-        except (TypeError, ValueError, OverflowError):
-            return None
-    return None
-
-
-def _read_netscape(path):
-    """The rows of a Netscape cookie file (7 fields each, the ``#HttpOnly_``
-    domain prefix kept on the domain field), or ``[]``."""
-    if not path or not os.path.exists(path):
-        return []
-    rows = []
-    for line in Path(path).read_text(encoding='utf-8', errors='ignore').splitlines():
-        line = line.strip()
-        if not line or (line.startswith('#') and not line.startswith('#HttpOnly_')):
-            continue
-        parts = line.split('\t')
-        if len(parts) >= 7:
-            rows.append(parts[:7])
-    return rows
-
-
-def _cookie_matches(row, url):
-    """Does a jar row apply to ``url``, as curl decides: domain (a leading
-    dot or the ``TRUE`` flag covers subdomains, otherwise the host itself),
-    path prefix, ``Secure`` only over https, and not expired."""
-    parts = urllib.parse.urlsplit(url)
-    host = (parts.hostname or '').lower()
-    domain_field, flag, cpath, secure, expires = row[0], row[1], row[2] or '/', row[3], row[4]
-    domain = domain_field[len('#HttpOnly_'):] if domain_field.startswith('#HttpOnly_') else domain_field
-    domain = domain.lower()
-    bare = domain.lstrip('.')
-    if domain.startswith('.') or flag.upper() == 'TRUE':
-        if not (host == bare or host.endswith('.' + bare)):
-            return False
-    elif host != bare:
-        return False
-    if not (parts.path or '/').startswith(cpath):
-        return False
-    if secure.upper() == 'TRUE' and parts.scheme != 'https':
-        return False
-    if expires.isdigit() and int(expires) and int(expires) <= int(time.time()):
-        return False
-    return True
-
-
-def _load_cookie_header(args, url):
-    """The ``Cookie:`` value from ``-b``: a string (``a=b; c=d``) as given, or
-    the rows of a Netscape file that apply to ``url`` (domain, path, Secure,
-    expiry -- a jar with several hosts never leaks one host's cookies to
-    another), ``#HttpOnly_`` rows included."""
-    if not args.cookie:
-        return None
-    if os.path.exists(args.cookie):
-        pairs = ['%s=%s' % (row[5], row[6]) for row in _read_netscape(args.cookie) if _cookie_matches(row, url)]
-        return '; '.join(pairs) if pairs else None
-    return args.cookie
-
-
-class _ProxyPlan(object):
-    """One proxy decision for the fallback, applied per hop.
-
-    ``proxy`` -- the proxy URL without userinfo, or ``None`` for direct;
-    ``authorization`` -- the proxy credential (the header value), or ``None``;
-    ``auth_header`` -- the header it rides in (``AGENTS_PROXY_AUTH_HEADER``,
-    default ``Proxy-Authorization``);
-    ``endpoint`` -- ``None`` for a ``connect`` proxy, the ``/endpoint`` of a
-    prefix gateway; ``no_proxy`` -- the bypass list in force (curl's
-    ``--noproxy`` REPLACES ``NO_PROXY``), re-checked for every hop's host.
-    """
-
-    __slots__ = ('proxy', 'authorization', 'endpoint', 'no_proxy', 'auth_header')
-
-    def __init__(self, proxy, authorization, endpoint, no_proxy, auth_header=None):
-        self.proxy = proxy
-        self.authorization = authorization
-        self.endpoint = endpoint
-        self.no_proxy = no_proxy
-        self.auth_header = auth_header or agent_proxy.DEFAULT_AUTH_HEADER
-
-    def bypasses(self, url):
-        return agent_proxy.should_bypass(url, no_proxy=self.no_proxy)
-
-
-_STEERING = {
-    'proxy': ('-x', '--proxy'), 'noproxy': ('--noproxy',), 'proxy_user': ('-U', '--proxy-user'),
-    'url': ('--url',),
-}
-
-
-def _walk_argv(argv):
-    """``(seen, positionals)``: the ``_STEERING`` options as the caller wrote
-    them (``None`` each when absent) and the positional arguments. argv is
-    walked the way curl reads it, using the shim's own parser only as the
-    table of which options take a value: combined short flags (``-sx URL``,
-    ``-Uu:p``) and option VALUES that merely look like flags (``-d
-    '--proxy=x'``, ``-H --noproxy``) are handled; an unknown ``--opt`` is
-    assumed to take no value. (argparse itself refuses a value that starts
-    with ``-``, so it cannot be the parser here.)"""
-    takes_value, wanted = {}, {}
-    for action in build_parser()._actions:
-        for opt in action.option_strings:
-            takes_value[opt] = action.nargs != 0 and not isinstance(
-                action, (argparse._StoreTrueAction, argparse._StoreFalseAction, argparse._CountAction))
-            for key, names in _STEERING.items():
-                if opt in names:
-                    wanted[opt] = key
-    seen = {key: None for key in _STEERING}
-    positionals = []
-    args = list(argv)
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        i += 1
-        if arg == '--':
-            positionals.extend(args[i:])
-            break
-        if arg.startswith('--'):
-            name, has_eq, value = arg.partition('=')
-            if not has_eq and takes_value.get(name):
-                value = args[i] if i < len(args) else ''
-                i += 1
-            if name in wanted:
-                seen[wanted[name]] = value if takes_value.get(name) else True
-        elif arg.startswith('-') and len(arg) > 1:
-            j = 1
-            while j < len(arg):
-                short = '-' + arg[j]
-                j += 1
-                if takes_value.get(short):
-                    value = arg[j:]
-                    if not value:
-                        value = args[i] if i < len(args) else ''
-                        i += 1
-                    if short in wanted:
-                        seen[wanted[short]] = value
-                    break
-                if short in wanted:
-                    seen[wanted[short]] = True
-        else:
-            positionals.append(arg)
-    return seen, positionals
-
-
-def _caller_steering(argv):
-    """``(proxy, noproxy, proxy_user)`` as the caller wrote them, or ``None`` each."""
-    seen, _positionals = _walk_argv(argv)
-    return seen['proxy'], seen['noproxy'], seen['proxy_user']
+    return steering(argv)
 
 
 def requested_url(argv):
-    """The URL the caller asked for (``--url`` or the first positional, the
-    scheme defaulted the way the shim does), or ``None``. Never the proxy's."""
-    seen, positionals = _walk_argv(argv)
-    url = seen['url'] if isinstance(seen['url'], str) and seen['url'] else (positionals[0] if positionals else None)
-    if not url:
-        return None
-    return url if url.startswith(('http://', 'https://')) else 'https://' + url
+    """The URL the caller asked for, curl's default scheme applied, or ``None``."""
+    from httplib.cli.argv import requested_url as requested
 
-
-def shim_entry():
-    """The platform entry of this shim (``curl`` / ``curl.cmd`` beside this
-    file), what a wrapper is told in ``NET_HOOK_CURL``."""
-    here = Path(__file__).resolve().parent
-    return str(here / ('curl.cmd' if os.name == 'nt' else 'curl'))
-
-
-def maybe_run_hook(argv):
-    """``NET_HOOKS_<KEY>`` + ``_CURL``: when the caller's URL matches, run the
-    wrapper in this shim's place with argv appended and, in its environment,
-    ``NET_HOOK_URL`` (the requested URL), ``NET_HOOK_KEY`` (the hook),
-    ``NET_HOOK_CURL`` (this shim, to call curl back with) and ``NET_HOOK_SKIP``
-    carrying the KEY so that call runs the shim, not the wrapper again.
-    Returns the wrapper's exit code, or ``None`` when no hook applies."""
-    url = requested_url(argv)
-    if not url:
-        return None
-    hooks = net_hooks.matching(url, kind='curl')
-    if not hooks:
-        return None
-    hook = hooks[0]
-    command = net_hooks.curl_command(hook, python=os.environ.get('AGENTS_PYTHON') or sys.executable)
-    env = dict(os.environ)
-    env[net_hooks.CURL_ENV] = shim_entry()
-    env[net_hooks.URL_ENV] = url
-    env[net_hooks.KEY_ENV] = hook.key
-    env[net_hooks.SKIP_ENV] = ','.join(sorted(net_hooks.skipped(env) | {hook.key}))
-    return subprocess.run([*command, *argv], env=env).returncode
-
-
-def plan_proxy(url, proxy=None, noproxy=None, proxy_user=None):
-    """The :class:`_ProxyPlan` for a request -- the one resolver both the
-    real-curl passthrough and the fallback use, so they cannot disagree.
-
-    ``proxy`` (``-x``) wins over the agent proxy chain (``AGENTS_PROXY``, then
-    the global vars -- see ``httplib.proxy``) and is always a plain ``connect``
-    proxy whose credential is its own userinfo or ``proxy_user`` (``-U``,
-    as Basic) -- never the agent proxy's ``AGENTS_PROXY_AUTH``. For the agent
-    proxy, ``proxy_user`` wins over the configured header value, which wins
-    over the URL's userinfo. A malformed ``AGENTS_PROXY`` or
-    ``AGENTS_PROXY_TYPE`` raises ``ValueError`` (a configuration error, only
-    when that proxy would actually be used).
-    """
-    no_proxy = noproxy if noproxy is not None else agent_proxy.no_proxy_from_env()
-    if proxy:
-        resolved, endpoint = agent_proxy.resolve(proxy, env=False), None
-    else:
-        resolved = agent_proxy.resolve()
-        endpoint = agent_proxy.proxy_type()[1] if resolved else None
-    if not resolved:
-        return None
-    proxy, authorization = resolved
-    if proxy_user:
-        user, _, password = proxy_user.partition(':')
-        authorization = agent_proxy.basic_authorization(user, password)
-    return _ProxyPlan(proxy, authorization, endpoint, no_proxy, agent_proxy.auth_header())
-
-
-def agent_proxy_argv(argv):
-    """Extra LEADING argv so real curl uses the agent proxy, or ``[]``.
-
-    Real curl reads only the global proxy vars (``http_proxy`` & co.), never
-    ``AGENTS_PROXY``, so a bare passthrough would send the agent's traffic
-    the wrong way. Injected only when ``AGENTS_PROXY`` is set and the caller
-    did not name a proxy (``-x``) or a bypass list (``--noproxy``); a
-    caller's ``-U`` keeps the proxy but replaces the credential. A configured
-    header value rides as ``--proxy-header`` (sent to the proxy only, the
-    CONNECT included); URL userinfo as ``--proxy-user``. ``NO_PROXY`` needs
-    nothing: curl honours it even with ``--proxy``. A prefix gateway is not
-    expressible to curl -- see :func:`use_real_curl`."""
-    if not os.environ.get('AGENTS_PROXY'):
-        return []
-    proxy, noproxy, proxy_user = _caller_steering(argv)
-    if proxy or noproxy is not None:
-        return []
-    plan = plan_proxy('', proxy_user=proxy_user)
-    if plan is None or plan.endpoint is not None:
-        return []
-    extra = ['--proxy', plan.proxy]
-    if proxy_user:
-        pass  # curl already has -U on its own argv
-    elif agent_proxy.configured_authorization():
-        extra += ['--proxy-header', '%s: %s' % (plan.auth_header, plan.authorization)]
-    else:
-        creds = agent_proxy.userinfo(agent_proxy.proxy_url())
-        if creds:
-            extra += ['--proxy-user', '%s:%s' % creds]
-    return extra
-
-
-def use_real_curl(argv):
-    """Real curl handles everything except a prefix gateway: it has no notion
-    of ``<proxy><endpoint><url>``, and rewriting the URL argument by hand
-    cannot cover multi-URL invocations, ``-L`` (curl would follow the
-    gateway's Location straight to the origin, credential attached) or
-    config files. So with the agent proxy in play and ``prefix`` configured,
-    the request is served by the fallback, which speaks the gateway per hop;
-    flags the fallback lacks fail loud there, as the shim's contract says."""
-    if not os.environ.get('AGENTS_PROXY'):
-        return True
-    proxy, noproxy, _ = _caller_steering(argv)
-    if proxy or noproxy is not None:
-        return True
-    return agent_proxy.proxy_type()[0] != 'prefix'
+    return requested(argv)
 
 
 def find_real_curl():
@@ -881,6 +86,54 @@ def find_real_curl():
     return None
 
 
+def agent_proxy_argv(argv):
+    """Extra LEADING argv so real curl uses the agent proxy, or ``[]``.
+
+    Real curl reads only the global proxy vars (``http_proxy`` & co.), never
+    ``AGENTS_PROXY``, so a bare passthrough would send the agent's traffic
+    the wrong way. Injected only when ``AGENTS_PROXY`` is set and the caller
+    did not name a proxy (``-x``) or a bypass list (``--noproxy``); a
+    caller's ``-U`` keeps the proxy but replaces the credential. A configured
+    header value rides as ``--proxy-header`` (sent to the proxy only, the
+    CONNECT included); URL userinfo as ``--proxy-user``. ``NO_PROXY`` needs
+    nothing: curl honours it even with ``--proxy``. A prefix gateway is not
+    expressible to curl -- see :func:`use_real_curl`."""
+    if not os.environ.get('AGENTS_PROXY'):
+        return []
+    proxy, noproxy, proxy_user = caller_steering(argv)
+    if proxy or noproxy is not None:
+        return []
+    plan = agent_proxy.plan(proxy_user=proxy_user)
+    if plan is None or plan.endpoint is not None:
+        return []
+    extra = ['--proxy', plan.proxy]
+    if proxy_user:
+        pass  # curl already has -U on its own argv
+    elif agent_proxy.configured_authorization():
+        extra += ['--proxy-header', '%s: %s' % (plan.auth_header, plan.authorization)]
+    else:
+        creds = agent_proxy.userinfo(agent_proxy.proxy_url())
+        if creds:
+            extra += ['--proxy-user', '%s:%s' % creds]
+    return extra
+
+
+def use_real_curl(argv):
+    """Real curl handles everything except a prefix gateway: it has no notion
+    of ``<proxy><endpoint><url>``, and rewriting the URL argument by hand
+    cannot cover multi-URL invocations, ``-L`` (curl would follow the
+    gateway's Location straight to the origin, credential attached) or
+    config files. So with the agent proxy in play and ``prefix`` configured,
+    the request is served by the fallback, which speaks the gateway per hop;
+    flags the fallback lacks fail loud there, as the shim's contract says."""
+    if not os.environ.get('AGENTS_PROXY'):
+        return True
+    proxy, noproxy, _ = caller_steering(argv)
+    if proxy or noproxy is not None:
+        return True
+    return agent_proxy.proxy_type()[0] != 'prefix'
+
+
 def maybe_run_system_curl(argv):
     """Run the real curl with the agent proxy applied; ``None`` when the
     fallback must serve the request (no real curl, or a prefix gateway).
@@ -904,418 +157,6 @@ def maybe_run_system_curl(argv):
     return result.returncode
 
 
-class _AgentProxyHandler(urllib.request.BaseHandler):
-    """Applies the :class:`_ProxyPlan` to EVERY request the opener sends --
-    the first one and each redirect hop -- since urllib builds a fresh
-    ``Request`` per hop that carries neither the proxy nor an unredirected
-    header. Per hop: a bypassed host goes direct; a ``connect`` proxy is set
-    on the request (what ``ProxyHandler`` does after its own env/registry
-    checks, which are deliberately not consulted here); a prefix gateway
-    rewrites the URL to ``<proxy><endpoint><url>`` unless the gateway already
-    wrote it in its own namespace. The credential is an UNREDIRECTED header:
-    urllib sends it to the proxy for http, moves it onto the https CONNECT,
-    and never copies it into the next hop -- so it cannot reach an origin."""
-
-    handler_order = 90  # before the (empty) ProxyHandler at 100
-
-    def __init__(self, plan):
-        self.plan = plan
-
-    def _apply(self, req):
-        plan = self.plan
-        if plan.bypasses(req.full_url):
-            return req
-        if plan.endpoint is None:
-            proxy_parts = urllib.parse.urlsplit(plan.proxy)
-            req.set_proxy(proxy_parts.netloc, proxy_parts.scheme)
-        else:
-            base = agent_proxy.prefix_url('', plan.proxy, plan.endpoint)
-            if not req.full_url.startswith(base):
-                req.full_url = agent_proxy.prefix_url(req.full_url, plan.proxy, plan.endpoint)
-        if plan.authorization:
-            req.add_unredirected_header(plan.auth_header, plan.authorization)
-        return req
-
-    http_request = _apply
-    https_request = _apply
-
-
-#: The ``--write-out`` variables the fallback reports, with curl's meaning and
-#: format. Any other ``%{name}`` (``time_connect``, ``remote_ip``, ``json``...)
-#: or an ``%output{file}`` is refused before the request, like an unsupported flag.
-WRITE_OUT_VARIABLES = frozenset([
-    'content_type', 'errormsg', 'exitcode', 'filename_effective', 'header_json',
-    'http_code', 'http_version', 'method', 'num_headers', 'num_redirects',
-    'redirect_url', 'response_code', 'scheme', 'size_download', 'size_upload',
-    'time_starttransfer', 'time_total', 'url', 'url_effective', 'urlnum',
-])
-#: ``%{stdout}`` / ``%{stderr}`` switch the stream; after ``%{onerror}`` the
-#: rest is written only when the transfer failed.
-_WRITE_OUT_CONTROL = ('stdout', 'stderr', 'onerror')
-_WRITE_OUT_ESCAPES = {'n': '\n', 'r': '\r', 't': '\t'}
-#: http.client's response version -> curl's ``%{http_version}``.
-_HTTP_VERSIONS = {10: '1', 11: '1.1'}
-
-
-def parse_write_out(fmt):
-    """``-w FORMAT`` as ``(kind, value)`` tokens -- ``text``, ``var``,
-    ``header`` (``%header{name}``) and ``control`` -- read the way curl reads
-    it: ``%%`` is ``%``; ``\\n``, ``\\r``, ``\\t`` are escapes; any other
-    ``%x`` or ``\\x``, and an unclosed ``%{``, is written as it stands.
-    ``@file`` / ``@-`` read the format from a file / stdin. A variable the
-    fallback cannot report raises ``NotImplementedError``, before anything
-    is sent."""
-    if fmt.startswith('@'):
-        source = fmt[1:]
-        try:
-            fmt = sys.stdin.read() if source == '-' else Path(source).read_text(encoding='utf-8')
-        except OSError as exc:
-            raise ValueError('--write-out: cannot read %s: %s' % (source, exc))
-    tokens, text, i = [], [], 0
-
-    def take(kind, value):
-        if text:
-            tokens.append(('text', ''.join(text)))
-            del text[:]
-        tokens.append((kind, value))
-
-    while i < len(fmt):
-        char, nxt = fmt[i], fmt[i + 1:i + 2]
-        if char == '\\' and nxt:
-            text.append(_WRITE_OUT_ESCAPES.get(nxt, char + nxt))
-            i += 2
-        elif char != '%' or not nxt:
-            text.append(char)
-            i += 1
-        elif nxt == '%':
-            text.append('%')
-            i += 2
-        else:
-            opener = next((o for o in ('{', 'header{', 'output{') if fmt.startswith(o, i + 1)), None)
-            start = i + 1 + len(opener or '')
-            end = fmt.find('}', start) if opener else -1
-            if opener is None:
-                text.append(char + nxt)  # not a variable: written as it stands
-                i += 2
-            elif end < 0:
-                text.append(fmt[i:start])  # an unclosed %{ is written, the rest read on
-                i = start
-            else:
-                name, i = fmt[start:end], end + 1
-                if opener == 'header{':
-                    take('header', name)
-                elif opener == '{' and name in _WRITE_OUT_CONTROL:
-                    take('control', name)
-                elif opener == '{' and name in WRITE_OUT_VARIABLES:
-                    take('var', name)
-                else:
-                    raise NotImplementedError('Unsupported --write-out variable: %%%s%s}' % (opener, name))
-    if text:
-        tokens.append(('text', ''.join(text)))
-    return tokens
-
-
-class _Transfer(object):
-    """What one fallback transfer did, recorded as it goes so ``--write-out``
-    can report it however the transfer ends."""
-
-    def __init__(self, url):
-        self.url = url or ''     # as the caller typed it: %{url}
-        self.started = time.monotonic()
-        self.first_byte = None   # when the final response's headers arrived
-        self.version = None      # http.client's: 10, 11
-        self.status = 0
-        self.header_items = []
-        self.size_download = 0
-        self.errormsg = ''
-        self.sent = []           # (url, method, body size): every request, redirects included
-
-    def responded(self, response):
-        self.first_byte = time.monotonic()
-        self.version = getattr(response, 'version', None)
-
-
-class _RequestLog(urllib.request.BaseHandler):
-    """Records every request the opener sends -- the first and each redirect
-    hop -- into a :class:`_Transfer`, before a prefix gateway rewrites it."""
-
-    handler_order = 80  # before _AgentProxyHandler (90)
-
-    def __init__(self, transfer):
-        self.transfer = transfer
-
-    def _record(self, req):
-        data = req.data
-        size = len(data) if isinstance(data, (bytes, bytearray)) else 0
-        self.transfer.sent.append((req.full_url, req.get_method(), size))
-        return req
-
-    http_request = _record
-    https_request = _record
-
-
-def _first_header(header_items, name):
-    """The first value of header ``name`` (any case), or ``''``."""
-    name = name.lower()
-    return next((v for k, v in header_items if k.lower() == name), '')
-
-
-def _header_json(header_items):
-    """curl's ``%{header_json}``: lower-cased names in first-seen order, each
-    with all its values, one name per line."""
-    grouped = {}
-    for name, value in header_items:
-        grouped.setdefault(name.lower(), []).append(value)
-    return '{%s\n}' % ',\n'.join(
-        '%s:%s' % (json.dumps(name, ensure_ascii=False), json.dumps(values, ensure_ascii=False, separators=(',', ':')))
-        for name, values in grouped.items())
-
-
-def _caller_url(url, plan):
-    """``url`` as the caller would name it: a prefix gateway's
-    ``<proxy><endpoint>`` stripped, an empty path written ``/`` (curl's
-    ``url_effective``)."""
-    if plan is not None and plan.endpoint is not None:
-        base = agent_proxy.prefix_url('', plan.proxy, plan.endpoint)
-        if url.startswith(base):
-            url = url[len(base):]
-    parts = urllib.parse.urlsplit(url)
-    return url if parts.path else urllib.parse.urlunsplit(parts._replace(path='/'))
-
-
-def write_out_values(args, transfer, exitcode, plan, url):
-    """Every ``WRITE_OUT_VARIABLES`` value for a finished transfer, formatted
-    as curl formats it: a 3-digit code (``000`` when nothing answered),
-    6-decimal seconds, the LAST request's URL, method and body size."""
-    total = time.monotonic() - transfer.started
-    sent_url, method, upload = transfer.sent[-1] if transfer.sent else (url, args.request, 0)
-    effective = _caller_url(sent_url, plan)
-    headers = transfer.header_items
-    location = _first_header(headers, 'location')
-    redirect = urllib.parse.urljoin(effective, location) if location and 300 <= transfer.status < 400 else ''
-    # curl reports the whole elapsed time as start-transfer when nothing answered.
-    first_byte = total if transfer.first_byte is None else transfer.first_byte - transfer.started
-    return {
-        'content_type': _first_header(headers, 'content-type'),
-        'errormsg': transfer.errormsg,
-        'exitcode': str(exitcode),
-        'filename_effective': args.output or '',
-        'header_json': _header_json(headers),
-        'http_code': '%03d' % transfer.status,
-        'http_version': _HTTP_VERSIONS.get(transfer.version, '1.1' if transfer.status else '0'),
-        'method': method,
-        'num_headers': str(len(headers)),
-        'num_redirects': str(max(len(transfer.sent) - 1, 0)),
-        'redirect_url': redirect,
-        'response_code': '%03d' % transfer.status,
-        'scheme': urllib.parse.urlsplit(effective).scheme.lower(),
-        'size_download': str(transfer.size_download),
-        'size_upload': str(upload),
-        'time_starttransfer': '%.6f' % first_byte,
-        'time_total': '%.6f' % total,
-        'url': transfer.url,
-        'url_effective': effective,
-        'urlnum': '0',
-    }
-
-
-def _write_stream(name, text):
-    """``text`` to stdout or stderr as UTF-8, after whatever is already buffered."""
-    stream = sys.stderr if name == 'stderr' else sys.stdout
-    stream.flush()
-    raw = getattr(stream, 'buffer', None)
-    if raw is None:
-        stream.write(text)
-    else:
-        raw.write(text.encode('utf-8'))
-        raw.flush()
-
-
-def emit_write_out(tokens, values, header_items, exitcode):
-    """Write the parsed ``-w`` format: to stdout until ``%{stderr}`` switches
-    it, and nothing after ``%{onerror}`` when the transfer succeeded."""
-    stream = 'stdout'
-    for kind, value in tokens:
-        if kind == 'control':
-            if value != 'onerror':
-                stream = value
-            elif exitcode == 0:
-                return
-            continue
-        if kind == 'header':
-            value = _first_header(header_items, value)
-        elif kind == 'var':
-            value = values[value]
-        _write_stream(stream, value)
-
-
-def run_fallback(argv):
-    """Pure-stdlib (urllib) curl-ish fallback. No third-party dependency."""
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    if args.help:
-        parser.print_help()
-        return 0
-    if args.version:
-        print(SHIM_VERSION)
-        return 0
-    check_not_implemented(args)
-    write_out = parse_write_out(args.write_out) if args.write_out else None
-    url = resolve_url(args, parser)
-    headers, removed = prepare_headers(args, parser)
-    data = prepare_data(args, parser)
-    method = args.request
-    if args.head:
-        method = 'HEAD'
-        data = None
-    if data is not None and 'content-type' not in removed and not any(k.lower() == 'content-type' for k in headers):
-        headers['Content-Type'] = FORM_CONTENT_TYPE
-    cookie_header = _load_cookie_header(args, url)
-    if cookie_header and not any(k.lower() == 'cookie' for k in headers):
-        headers['Cookie'] = cookie_header
-    # One timeout, as urllib has one: -m wins, then --connect-timeout, then the
-    # shim's own --timeout.
-    timeout = args.max_time or args.connect_timeout or args.timeout
-
-    plan = plan_proxy(url, proxy=args.proxy, noproxy=args.noproxy, proxy_user=args.proxy_user)
-
-    if args.verbose and not args.silent:
-        print('Request: %s %s' % (method, url), file=sys.stderr)
-        if data:
-            print('Data:', data.decode('utf-8', errors='replace'), file=sys.stderr)
-        print('Headers:', headers, file=sys.stderr)
-        if plan is not None and not plan.bypasses(url):
-            # The URL only, never the credential: this line ends up in logs.
-            print('Proxy%s: %s%s' % (' (prefix %s)' % plan.endpoint if plan.endpoint else '',
-                                     agent_proxy.redact(plan.proxy),
-                                     ' (with %s)' % plan.auth_header if plan.authorization else ''),
-                  file=sys.stderr)
-
-    # The opener always carries an EMPTY ProxyHandler: urllib's own would
-    # re-read the global vars (never AGENTS_PROXY), re-check NO_PROXY and, on
-    # Windows, the registry's bypass list -- and silently go direct where we
-    # decided to proxy. `_AgentProxyHandler` applies the plan per hop instead.
-    handlers = [
-        urllib.request.HTTPSHandler(context=_ssl_context(args.insecure)),
-        urllib.request.ProxyHandler({}),
-    ]
-    if plan is not None:
-        handlers.append(_AgentProxyHandler(plan))
-    transfer = _Transfer(args.url or args.url_positional)
-    handlers.append(_RequestLog(transfer))
-    if args.location:
-        redirects = urllib.request.HTTPRedirectHandler()
-        if args.max_redirs is not None and args.max_redirs >= 0:
-            # urllib has two limits: distinct URLs (max_redirections) and
-            # repeats of one URL (max_repeats, 4); curl's -N is both.
-            redirects.max_redirections = args.max_redirs
-            redirects.max_repeats = args.max_redirs
-        handlers.append(redirects)
-    else:
-        handlers.append(_NoRedirect())
-    opener = urllib.request.build_opener(*handlers)
-    for name in removed:
-        # urllib adds these itself; a `-H 'Name:'` removal must reach the wire.
-        opener.addheaders = [(k, v) for k, v in opener.addheaders if k.lower() != name]
-
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    rc = _exchange(args, opener, req, timeout, url, transfer)
-    if write_out is not None:
-        # Written whatever the outcome, as curl does: `000` and the exit code
-        # after a transport failure, the status after -f's exit 22.
-        emit_write_out(write_out, write_out_values(args, transfer, rc, plan, url), transfer.header_items, rc)
-    return rc
-
-
-def _exchange(args, opener, req, timeout, url, transfer):
-    """Send ``req``, write what curl writes and return curl's exit code;
-    ``transfer`` records the outcome for ``--write-out``."""
-    transfer.started = time.monotonic()
-    try:
-        resp = opener.open(req, timeout=timeout)
-        transfer.responded(resp)
-        status = resp.getcode()
-        reason = getattr(resp, 'reason', '') or ''
-        header_items = list(resp.headers.items())
-        content = b'' if args.head else resp.read()
-    except urllib.error.HTTPError as exc:
-        # An HTTP status is a response, not a transport error: curl prints it
-        # and exits 0 -- unless -f, which is exit 22 and no body.
-        transfer.responded(getattr(exc, 'fp', None))
-        status = exc.code
-        reason = getattr(exc, 'reason', '') or ''
-        header_items = list(exc.headers.items()) if exc.headers else []
-        transfer.status, transfer.header_items = status, header_items
-        if args.location and 'infinite loop' in str(reason):
-            # urllib's redirect handler gave up (--max-redirs, or a loop):
-            # curl's "(47) Maximum (N) redirects followed".
-            limit = args.max_redirs if args.max_redirs is not None else urllib.request.HTTPRedirectHandler.max_redirections
-            return _fail(args, transfer, EXIT_REDIRECTS, 'Maximum (%d) redirects followed' % limit)
-        content = b'' if args.head else (exc.read() or b'')
-    except NotImplementedError:
-        raise
-    except urllib.error.URLError as exc:
-        return _transport_error(args, exc.reason, transfer)
-    except (socket.timeout, TimeoutError, OSError, ssl.SSLError) as exc:
-        return _transport_error(args, exc, transfer)
-    transfer.status, transfer.header_items = status, header_items
-    transfer.size_download = len(content)  # as it came over the wire, before --compressed
-
-    if args.verbose and not args.silent:
-        print('Response status: %s' % status, file=sys.stderr)
-    if args.cookie_jar:
-        _write_cookie_jar(args.cookie_jar, url, header_items, args.cookie)
-    if args.compressed and not args.head:
-        content = _decode_body(content, header_items)
-    header_bytes = format_response_headers(status, reason, header_items)
-    try:
-        write_header_dump(args, header_bytes)
-        if args.fail and status >= 400:
-            # curl -f: no body, "curl: (22) The requested URL returned error: 404".
-            transfer.size_download = 0
-            return _fail(args, transfer, 22, 'The requested URL returned error: %s' % status)
-        emit_output(args, header_bytes, content)
-    except OSError as exc:
-        # -o / -D not writable, or stdout closed under us: curl's (23).
-        return _fail(args, transfer, EXIT_WRITE, 'Failure writing output to destination: %s' % exc)
-    return 0
-
-
-#: curl's exit codes for the failures the fallback can tell apart.
-EXIT_RESOLVE, EXIT_CONNECT, EXIT_WRITE, EXIT_TIMEOUT, EXIT_REDIRECTS, EXIT_SSL = 6, 7, 23, 28, 47, 60
-
-
-def _fail(args, transfer, code, message):
-    """curl's one line, ``curl: (N) message`` (unless -s without -S); the
-    message is ``%{errormsg}``. Returns ``code``."""
-    transfer.errormsg = message
-    if should_print_error(args):
-        print('curl: (%d) %s' % (code, message), file=sys.stderr)
-    return code
-
-
-def _transport_error(args, reason, transfer):
-    """Print curl's one-line form and return its exit code: 6 (could not
-    resolve), 28 (timed out), 60 (certificate), else 7 (could not connect)."""
-    text = str(reason)
-    if isinstance(reason, socket.gaierror):
-        code, what = EXIT_RESOLVE, 'Could not resolve host'
-    elif isinstance(reason, (socket.timeout, TimeoutError)) or 'timed out' in text:
-        code, what = EXIT_TIMEOUT, 'Operation timed out'
-    elif isinstance(reason, ssl.SSLError):
-        code, what = EXIT_SSL, 'SSL certificate problem'
-    else:
-        code, what = EXIT_CONNECT, 'Failed to connect'
-    return _fail(args, transfer, code, '%s: %s' % (what, text))
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """When -L is absent, curl does not follow redirects; surface the 3xx as-is."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
 def run_real_curl_as_typed(argv):
     """``NET_CURL=0``: the real curl with argv untouched, or exit 2 when there
     is none -- the caller asked for the real thing, a fallback would be a
@@ -1326,6 +167,38 @@ def run_real_curl_as_typed(argv):
             SHIM_ENV, os.environ.get(SHIM_ENV)), file=sys.stderr)
         return 2
     return subprocess.run([curl_path, *argv]).returncode
+
+
+def shim_entry():
+    """The platform entry of this shim (``curl`` / ``curl.cmd`` beside this
+    file), what a wrapper is told in ``NET_HOOK_CURL``."""
+    here = Path(__file__).resolve().parent
+    return str(here / ('curl.cmd' if os.name == 'nt' else 'curl'))
+
+
+def maybe_run_hook(argv):
+    """``NET_HOOKS_<KEY>`` + ``_CURL``: when the caller's URL matches, run the
+    wrapper in this shim's place with argv appended and, in its environment,
+    ``NET_HOOK_URL`` (the requested URL), ``NET_HOOK_KEY`` (the hook),
+    ``NET_HOOK_CURL`` (this shim, to call curl back with) and ``NET_HOOK_SKIP``
+    carrying the KEY so that call runs the shim, not the wrapper again.
+    Returns the wrapper's exit code, or ``None`` when no hook applies."""
+    if not net_hooks.hooks_from_env():
+        return None  # no hook configured: argv need not be read
+    url = requested_url(argv)
+    if not url:
+        return None
+    hooks = net_hooks.matching(url, kind='curl')
+    if not hooks:
+        return None
+    hook = hooks[0]
+    command = net_hooks.curl_command(hook, python=os.environ.get('AGENTS_PYTHON') or sys.executable)
+    env = dict(os.environ)
+    env[net_hooks.CURL_ENV] = shim_entry()
+    env[net_hooks.URL_ENV] = url
+    env[net_hooks.KEY_ENV] = hook.key
+    env[net_hooks.SKIP_ENV] = ','.join(sorted(net_hooks.skipped(env) | {hook.key}))
+    return subprocess.run([*command, *argv], env=env).returncode
 
 
 def main(argv=None):
@@ -1339,16 +212,12 @@ def main(argv=None):
         system_curl_rc = maybe_run_system_curl(argv)
         if system_curl_rc is not None:
             return system_curl_rc
-        return run_fallback(argv)
     except ValueError as exc:
         # A configuration error (a bad AGENTS_PROXY / AGENTS_PROXY_TYPE that
         # would be used) is curl's exit 2, one line on stderr -- not a traceback.
         print('curl: (2) %s' % exc, file=sys.stderr)
         return 2
-    except NotImplementedError as exc:
-        # A flag the fallback does not honour: refused out loud, curl's exit 2.
-        print('curl: (2) %s' % exc, file=sys.stderr)
-        return 2
+    return fallback_main(argv)
 
 
 if __name__ == '__main__':

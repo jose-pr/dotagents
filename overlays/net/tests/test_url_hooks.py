@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-import curl  # noqa: E402  (bin/, via conftest)
+import curl  # noqa: E402  (lib/curl, via conftest)
 from httplib import hooks
 from test_jars_proxy import _Gateway, gateway, origin  # noqa: F401  (fixtures reused)
 from test_proxy_auth import _clean_env, _fallback  # noqa: F401  (autouse fixture reused)
@@ -181,7 +181,7 @@ def test_py_hooks_run_in_key_order_first_answer_wins(origin, gateway, monkeypatc
 
 
 def test_requested_url_from_argv():
-    assert curl.requested_url(["-s", "-H", "X: --url", "example.com/a"]) == "https://example.com/a"
+    assert curl.requested_url(["-s", "-H", "X: --url", "example.com/a"]) == "http://example.com/a", "curl's default scheme"
     assert curl.requested_url(["--url", "http://h/b", "-o", "f"]) == "http://h/b"
     assert curl.requested_url(["-sx", "http://proxy/", "http://h/c"]) == "http://h/c"
     assert curl.requested_url(["-s"]) is None
