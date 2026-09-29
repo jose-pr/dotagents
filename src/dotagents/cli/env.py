@@ -232,10 +232,63 @@ def _looks_like_posix_path_list(key: str, value: str) -> bool:
     return any(_looks_like_posix_chunk(chunk) for chunk in value.split(";") if chunk)
 
 
+#: The lines around the block `env --into` owns in a file. No-op COMMANDS,
+#: not `#` comments: a harness that inlines the file and appends `; cmd` or
+#: `&& cmd` to its last line would otherwise comment the command out.
+INTO_BEGIN = ": dotagents-env-begin"
+INTO_END = ": dotagents-env-end"
+#: The formats `--into` writes: a POSIX shell's, where `:` is the no-op.
+INTO_FORMATS = ("export",)
+
+
+def write_into(path: Path, text: str, output_format: str) -> None:
+    """Put ``text`` into ``path`` as the ONE block ``env --into`` owns there:
+    every earlier block (between :data:`INTO_BEGIN` / :data:`INTO_END`) is
+    removed, anything else in the file -- another hook's lines -- is kept in
+    place, and the new block goes at the end, where a sourced file's later
+    lines win (what an append did). Atomic, LF-only. A hook that re-runs
+    (resume, compact, clear) used to append its whole output each time, and
+    the file Claude Code inlines into every Bash command grew past what Git
+    for Windows' bash accepts as a ``-c`` argument (about 8 KB)."""
+    from dotagents._env import FORMAT_ALIASES
+    from dotagents._fs import write_text_lf
+
+    fmt = FORMAT_ALIASES.get(output_format, output_format)
+    if fmt not in INTO_FORMATS:
+        raise SystemExit("error: --into writes the %s format only, not %r" % ("/".join(INTO_FORMATS), fmt))
+    kept: "list[str]" = []
+    inside = False
+    try:
+        current = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        current = ""
+    for line in current.splitlines():
+        if line.strip() == INTO_BEGIN:
+            inside = True
+        elif line.strip() == INTO_END and inside:
+            inside = False
+        elif not inside:
+            kept.append(line)
+    block = [INTO_BEGIN] + [ln for ln in text.splitlines() if ln] + [INTO_END]
+    write_text_lf(path, "\n".join(kept + block) + "\n", atomic=True)
+
+
+def _prefixed_path_line(new: str, old: str, sep: str) -> "Optional[str]":
+    """``export PATH='<prefix>'"${PATH:+:$PATH}"`` when ``new`` is ``old``
+    with entries put in front, else ``None``. The sourcing shell's own PATH
+    completes it, so the line stays short however long PATH is (the env file
+    is inlined into every Bash command) and keeps what the shell adds."""
+    if not old or not new.endswith(sep + old) or len(new) == len(old) + 1:
+        return None
+    prefix = new[: -(len(old) + 1)]
+    return 'export PATH=%s"${PATH:+%s$PATH}"' % (_sh_quote(prefix), sep)
+
+
 def _format_env(
     env: "dict[str, str]",
     output_format: str,
     removed: "Optional[Iterable[str]]" = None,
+    base: "Optional[dict[str, str]]" = None,
 ) -> str:
     """Render the assembled env in the requested (canonical or aliased) format.
 
@@ -369,9 +422,17 @@ def _format_env(
              for k in keys]
             + ["set -e %s" % k for k in gone if _POSIX_IDENTIFIER_RE.match(k)]
         )
-    # default / "export"
+    # default / "export". With the caller's env (`--diff`), a PATH that is the
+    # caller's own with entries in front is written relative to the sourcing
+    # shell's $PATH rather than in full (see `_prefixed_path_line`).
+    path_line = None
+    if base is not None and "PATH" in env:
+        old = base.get("PATH") or ""
+        if windows_host and _looks_like_path_list("PATH", old):
+            old = _to_posix_path_list(old)
+        path_line = _prefixed_path_line(env["PATH"], old, ":")
     return "\n".join(
-        ["export %s=%s" % (k, _sh_quote(env[k])) for k in keys]
+        [path_line if k == "PATH" and path_line else "export %s=%s" % (k, _sh_quote(env[k])) for k in keys]
         + ["unset %s" % k for k in gone if _POSIX_IDENTIFIER_RE.match(k)]
     )
 
@@ -568,6 +629,14 @@ class Env(DotAgentsArgs):
     )
     ("--cache",)
 
+    into: "Optional[Path]" = None
+    (
+        "Write into this file instead of stdout (a hook's $CLAUDE_ENV_FILE), "
+        "replacing the block an earlier run wrote there and keeping the rest: "
+        "the file holds one current block however often the hook runs."
+    )
+    ("--into",)
+
     # Both flags come from `DotAgentsArgs`; only their HELP is restated here
     # (same flags, defaults and types), because this command's `-g` is narrower
     # than the base's and its store is always the user store.
@@ -631,8 +700,13 @@ class Env(DotAgentsArgs):
 
         # UTF-8 straight to the buffer: a bare print() encodes with the console
         # codepage and dies on the first non-Latin-1 character in any value.
-        text = _format_env(env, output_format, removed) + "\n"
+        # With --diff, PATH may be written relative to the caller's own PATH
+        # (see `_format_env`): the base is what the diff was taken against.
+        text = _format_env(env, output_format, removed, base=base if self.diff else None) + "\n"
         if key is not None:
             _env.write_env_cache(scope, key, text)
+        if self.into is not None:
+            write_into(Path(self.into), text, output_format)
+            return 0
         _write_stdout(text)
         return 0
