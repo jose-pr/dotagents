@@ -1,4 +1,4 @@
-# NET — dependency-free HTTP tooling
+# NET — HTTP tooling with no installs
 
 Installed by `dotagents overlays add net`. `dotagents env` wires it in on its
 own — every installed overlay's `bin/` goes on `PATH`, its `lib/` on `PYTHONPATH`
@@ -12,14 +12,23 @@ overlay ships no setup script and no env file.
 ## curl shim — `$NET_OVERLAY_ROOT/bin/curl` (POSIX sh) / `bin/curl.cmd` (Windows)
 
 A drop-in `curl`: two thin entry scripts, one `curl.py`. It **runs the real
-system `curl` first** (walking `PATH` past its own directory, so it never
-re-executes itself) and only falls back to a pure-stdlib (`urllib`)
-implementation when no other `curl` exists — so on a normal box you get real
-curl, and on a locked-down/minimal host you still get a working `curl` with
-**zero dependencies**. Both entries run `curl.py` with **`$AGENTS_PYTHON`** —
-the interpreter `dotagents` itself runs under, which `dotagents env` exports —
-before trying `python3`/`python` on `PATH`, so a Store stub or an emulated
-build on `PATH` cannot break the shim.
+system `curl` when there is one** (walking `PATH` past its own directory, so it
+never re-executes itself) and otherwise **`httplib.cli`** — `python -m httplib`,
+a curl-compatible command over `urllib` — so on a normal box you get real curl,
+and on a locked-down host without one you still get a working `curl`. Both
+entries run `curl.py` with **`$AGENTS_PYTHON`** — the interpreter `dotagents`
+itself runs under, which `dotagents env` exports — before trying
+`python3`/`python` on `PATH`, so a Store stub or an emulated build on `PATH`
+cannot break the shim.
+
+`httplib.cli` is built on **duho** (the argument library dotagents itself uses),
+taken from the interpreter when it has it (an installed dotagents: that is
+`$AGENTS_PYTHON`) and otherwise from **`$AGENTS_PYLIB`**, the `.pyz` a
+`.pyz`-run dotagents names in its env. Outside a dotagents session with neither,
+the fallback exits 2 with one line saying so (`pip install duho` also does);
+real curl never needs it. Its options are mixin groups, one module per group —
+`request`, `body`, `output`, `writeout`, `tls`, `connection`, `cookies` —
+composed in `options.CurlCmd`; the refused flags live in `unsupported`.
 
     curl https://example.com
     curl -s -o out.json -H 'Accept: application/json' https://api.example.com/x
@@ -43,15 +52,40 @@ build on `PATH` cannot break the shim.
   as typed); the fallback, which would have to use it, exits 2.
 - **`-q` / `--disable`** must be curl's FIRST argument to skip `.curlrc`, so
   the shim keeps a leading one first when it adds the proxy options.
-- Supported: `-X -d --data-raw --data-binary -H -o -s -S -v -i -I -D -b -c -x
-  -U --noproxy -k -A -L --max-redirs -m --connect-timeout --timeout -f -u -e
-  --compressed -w -q -V`, with curl's meaning where it matters:
+- Supported (`curl -h` lists them): request `-X -G --url --url-query -H -A -e
+  -u --basic --oauth2-bearer -r --compressed`; body `-d --data-raw
+  --data-binary --data-urlencode --json -F --form-string -T`; output `-o -O
+  --remote-name-all --output-dir --create-dirs -D -i -I -s -S -v -f
+  --fail-with-body -w`; TLS `-k --cacert --capath -E/--cert --cert-type --key
+  --key-type --pass`; connection `-x -U --noproxy -L --max-redirs -m
+  --connect-timeout --timeout --retry --retry-delay --retry-max-time
+  --retry-connrefused --retry-all-errors`; cookies `-b -c`; and the no-ops `-q -g
+  --http1.1 -N -# --no-progress-meter` (no config file is read, no URL globbed,
+  no progress shown). A URL with no scheme is `http://`, as in curl. With
+  curl's meaning where it matters:
   - **Exit codes are curl's.** An HTTP status is a response, printed and exit 0
-    (a 404, a 302 without `-L`); `-f` makes a 4xx/5xx exit 22 with no body.
-    Transport failures: 6 could not resolve, 7 could not connect, 28 timed out,
-    60 certificate; 23 when `-o`/`-D` cannot be written; an unsupported flag or
-    a bad proxy configuration is exit 2 (`curl: (2) …`, one line, never a
-    traceback). `-o /dev/null` is the null device on Windows too.
+    (a 404, a 302 without `-L`); `-f` makes a 4xx/5xx exit 22 with no body,
+    `--fail-with-body` the same exit with the body. Transport failures: 6 could
+    not resolve, 7 could not connect, 28 timed out, 60 certificate; 23 when
+    `-o`/`-D`/`-O` cannot be written, 26 when `-T` cannot be read, 58 a client
+    certificate that cannot be loaded, 77 a CA bundle/path that cannot; an
+    unsupported flag, a conflicting pair (`-d` with `-F`, `-f` with
+    `--fail-with-body`) or a bad proxy configuration is exit 2 (`curl: (2) …`,
+    one line, never a traceback). `-o /dev/null` is the null device on Windows too.
+  - **`--retry N`** retries what curl calls transient — a timeout and HTTP
+    408/429/500/502/503/504 (`httplib.retry.TRANSIENT_STATUSES`, the list the
+    requests session retries too) — after 1s, doubling (`--retry-delay` fixes
+    it, a `Retry-After` wins), within `--retry-max-time`; `--retry-connrefused`
+    adds a refused connection, `--retry-all-errors` any error (with `-f`, an
+    HTTP error status too). Each retry warns on stderr unless `-s`.
+  - `--json` sends `Content-Type` and `Accept: application/json` (repeats
+    concatenate); `--data-urlencode` takes curl's `content`, `=content`,
+    `name=content`, `@file`, `name@file`; `-G` moves the data into the query;
+    `--url-query` adds to it (`+` as it stands). `-F name=value`,
+    `name=@file` (an upload: filename, type by extension), `name=<file` (its
+    content), with `;type=` / `;filename=`. `-T file` PUTs it (a URL ending in
+    `/` gets its name). `-r` is `Range: bytes=…`, `--oauth2-bearer` a Bearer
+    `Authorization`.
   - **`-w` / `--write-out`** (`@file`, `@-` read the format) writes curl's
     output for `http_code response_code http_version method scheme url
     url_effective redirect_url num_redirects content_type num_headers
@@ -79,8 +113,11 @@ build on `PATH` cannot break the shim.
 - **`NET_CURL=0`** (or `n`/`no`/`false`/`off`) runs the real curl exactly as
   typed — no agent proxy, no hooks, no fallback; exit 2 if there is none. Unset
   or `1`/`y` is the shim.
-- Fallback TLS verifies against the **OS trust store** (via the `certifi` shim);
-  `-k/--insecure` disables verification.
+- Fallback TLS verifies against the **OS trust store** — `httplib.tls`, the
+  same store the requests session uses — unless `--cacert` / `--capath` or
+  `$CURL_CA_BUNDLE` name one, which replaces it as in curl; `-k/--insecure`
+  disables verification. `--cert file[:password]` (the file may hold the key),
+  `--key`, `--pass` present a client certificate, PEM only.
 - `-v` prints the proxy with the password redacted; nothing here logs a credential.
 
 ## certifi shim — `$NET_OVERLAY_ROOT/lib/certifi`
@@ -113,10 +150,13 @@ Windows), shared for a minute and then rebuilt — and names no CA file, so it n
 neither `certifi` nor its shim. `verify=<bundle>` and `$REQUESTS_CA_BUNDLE` /
 `$CURL_CA_BUNDLE` still win; `verify=False` never touches the shared context.
 
-A small session toolkit. `proxy`/`jar` are pure stdlib; `session`/`fetch` import
-`requests` (+`urllib3`) **lazily** — that is the overlay's one *optional*
-dependency (nothing is vendored; see `lib/VENDORED.md`). The curl shim needs it
-not at all.
+A small session toolkit. `proxy`, `jar`, `cookies`, `tls`, `retry` and `hooks`
+are pure stdlib — and the curl fallback (`httplib.cli`) runs on them too, so
+the two agree: one proxy plan (`proxy.plan()`), one Netscape cookie reader,
+writer and matching rule (`cookies`), one OS trust-store context (`tls`), one
+transient-status list (`retry`). `session`/`fetch` import `requests`
+(+`urllib3`) **lazily** — that is the overlay's one *optional* dependency
+(nothing is vendored; see `lib/VENDORED.md`). The curl shim needs it not at all.
 
     from httplib.session import new_session
     from httplib.fetch import request_json

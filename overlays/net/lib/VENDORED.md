@@ -8,9 +8,11 @@ bundle `requests` / `urllib3` / `idna` / `charset_normalizer`.
 The pieces that matter most are zero-dependency without shipping hundreds of
 KB of third-party code:
 
-- **`bin/curl.py`** — dependency-free. Tries the real system `curl` first; its
-  fallback is pure stdlib (`urllib.request` + `ssl`), verifying TLS through the
-  OS trust store via the `certifi` shim below. No `requests` needed.
+- **`bin/curl.py`** — runs the real system `curl` when there is one; its
+  fallback, `lib/httplib/cli`, is `urllib.request` + `ssl` (TLS through the OS
+  trust store) with its options built on **duho**, which is not vendored here
+  either: it comes from the interpreter (an installed dotagents) or the `.pyz`
+  a `.pyz`-run dotagents names in `$AGENTS_PYLIB`. No `requests` needed.
 - **`lib/certifi/`** — an OS-trust-store shim, *not* the real cert bundle. Pure
   stdlib (`os` + `ssl`). ~2 KB, ships no certificates.
 - **`lib/httplib/`** — the session toolkit. `proxy.py` and `jar.py` are pure

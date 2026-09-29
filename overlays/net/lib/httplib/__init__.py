@@ -8,14 +8,22 @@ Public surface (see kb/NET.md):
   proxy.proxy_type / prefix_url        — AGENTS_PROXY_TYPE (connect | prefix[:/endpoint]);
                                          the <proxy><endpoint><url> a prefix gateway gets
   proxy.redact / should_bypass         — a printable URL, the NO_PROXY decision
+  proxy.plan / ProxyPlan               — the whole proxy decision (-x / -U / --noproxy
+                                         overrides included) the session and cli share
+  cookies.load_netscape / save_netscape / cookie_applies / set_cookie_specs
+                                       — Netscape jars and curl's cookie rules
+  tls.os_ssl_context / new_os_context  — the OS trust store as an SSLContext
+  retry.TRANSIENT_STATUSES / retry_after — what counts as transient, Retry-After
   jar.FileCookieJar / FileTokenJar     — file-backed jars under the dotagents store
   hooks                                — NET_HOOKS_<KEY> URL hooks (a curl wrapper,
                                          an httplib callable) matched on the caller's URL
   session.new_session                  — configured requests.Session
   fetch.request_text / request_json / request_with_reauth / *_auto helpers
+  cli (python -m httplib)              — a curl-compatible command: the curl shim's fallback
 
-``proxy``, ``jar`` and ``hooks`` are dependency-free; ``session``/``fetch`` import
-``requests`` lazily.
+``proxy``, ``jar``, ``cookies``, ``tls``, ``retry`` and ``hooks`` are
+dependency-free; ``session``/``fetch`` import ``requests`` lazily; ``cli``
+needs duho (the interpreter's, or ``$AGENTS_PYLIB``'s).
 """
 from .proxy import (  # noqa: F401
     prefix_url, proxies_from_env, proxy_authorization, proxy_type, proxy_url, redact, resolve, should_bypass,
