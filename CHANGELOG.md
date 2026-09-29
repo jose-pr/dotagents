@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-09-30
+
 ### Added
 
 - `env --into FILE` writes the output into FILE as the one block `env` owns
@@ -1332,7 +1334,8 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
   before dispatch; a no-op for a plain install.
 
-[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/jose-pr/dotagents/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/jose-pr/dotagents/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/jose-pr/dotagents/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/jose-pr/dotagents/compare/v0.5.1...v0.6.0
