@@ -181,6 +181,13 @@ has "$(pinned_env --format powershell)" "\${env:FROM_PINNED_STORE} = 'yes'"
 has "$(pinned_env --format cmd)" 'set "FROM_PINNED_STORE=yes"'
 has_re "$(pinned_env --format dotenv)" "^FROM_PINNED_STORE=yes$"
 has "$(pinned_env)" "FROM_PINNED_STORE"
+# Run from a .pyz, env names it in AGENTS_PYLIB, and the vendored duho imports
+# from it by zipimport: what an overlay built on duho (the net overlay's curl
+# fallback) relies on when AGENTS_PYTHON has no duho of its own.
+has_re "$(pyz env --diff --format dotenv -g)" "^AGENTS_PYLIB=.*\.pyz"
+# -S -E: no site-packages, no PYTHONPATH -- a runner that has duho installed
+# must still prove the archive alone provides it.
+"$PYTHON" -S -E -c "import sys; sys.path.insert(0, sys.argv[1]); import duho; assert '.pyz' in duho.__file__, duho.__file__" "$(native "$PYZ")"
 
 # overlays add: positional and aliased flags.
 h=$(pyz overlays add --help)
