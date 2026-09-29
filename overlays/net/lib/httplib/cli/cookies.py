@@ -23,6 +23,11 @@ class CookieArgs(Group):
     "Write cookies to this file after operation"
     ("-c", "--cookie-jar")
 
+    def cookie_from_jar(self):
+        """Is ``-b`` a cookie FILE (the cookie engine: cookies chosen per
+        URL), not a literal string?"""
+        return bool(self.cookie) and os.path.exists(self.cookie)
+
     def cookie_header(self, url):
         """The ``Cookie:`` value from ``-b``: a string (``a=b; c=d``) as given,
         or the rows of a Netscape file that apply to ``url`` (domain, path,

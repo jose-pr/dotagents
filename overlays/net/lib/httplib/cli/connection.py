@@ -43,6 +43,22 @@ class ConnectionArgs(Group):
     "Maximum number of redirects to follow with -L"
     ("--max-redirs",)
 
+    location_trusted: bool = False
+    "With -L, keep sending credentials (Authorization, Cookie) to other hosts"
+    ("--location-trusted",)
+
+    post301: bool = False
+    "Keep POST on a 301 redirect (default: GET)"
+    ("--post301",)
+
+    post302: bool = False
+    "Keep POST on a 302 redirect (default: GET)"
+    ("--post302",)
+
+    post303: bool = False
+    "Keep POST on a 303 redirect (default: GET)"
+    ("--post303",)
+
     timeout: float = 30.0
     "Request timeout in seconds"
     ("--timeout",)

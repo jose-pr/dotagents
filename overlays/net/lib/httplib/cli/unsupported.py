@@ -24,32 +24,32 @@ UNSUPPORTED_ARGS = [
     'http2_prior_knowledge', 'http2', 'http3', 'ignore_content_length',
     'interface', 'ip_resolve', 'ipv4', 'ipv6', 'junk_session_cookies',
     'keepalive_time', 'krb', 'libcurl', 'limit_rate', 'list_only',
-    'local_port', 'location_trusted', 'login_options', 'mail_auth',
-    'mail_from', 'mail_rcpt_allowfails', 'mail_rcpt', 'max_filesize',
-    'metalink', 'negotiate', 'netrc_file', 'netrc_optional', 'netrc', 'next',
-    'no_alpn', 'no_keepalive', 'no_npn', 'no_progress_bar', 'no_sessionid',
-    'ntlm_wb', 'ntlm', 'parallel_immediate', 'parallel_max', 'parallel',
-    'path_as_is', 'pinnedpubkey', 'post301', 'post302', 'post303', 'preproxy',
-    'proto_default', 'proto_redir', 'proto', 'proxy_anyauth', 'proxy_basic',
-    'proxy_cacert', 'proxy_capath', 'proxy_cert_type', 'proxy_cert',
-    'proxy_ciphers', 'proxy_crlfile', 'proxy_digest', 'proxy_header',
-    'proxy_insecure', 'proxy_key_type', 'proxy_key', 'proxy_negotiate',
-    'proxy_ntlm', 'proxy_pass', 'proxy_pinnedpubkey', 'proxy_service_name',
-    'proxy_ssl_allow_beast', 'proxy_ssl_auto_client_cert',
-    'proxy_tls13_ciphers', 'proxy_tlsauthtype', 'proxy_tlspassword',
-    'proxy_tlsuser', 'proxy_tlsv1', 'proxytunnel', 'pubkey', 'quote',
-    'random_file', 'raw', 'remote_header_name', 'remote_time',
-    'request_target', 'resolve', 'sasl_authzid', 'sasl_ir', 'service_name',
-    'show_headers', 'socks4', 'socks4a', 'socks5_basic', 'socks5_gssapi_nec',
-    'socks5_gssapi_service', 'socks5_gssapi', 'socks5_hostname', 'socks5',
-    'speed_limit', 'speed_time', 'ssl_allow_beast', 'ssl_auto_client_cert',
-    'ssl_no_revoke', 'ssl_reqd', 'ssl_revoke_best_effort', 'ssl', 'sslv2',
-    'sslv3', 'stderr', 'styled_output', 'suppress_connect_headers',
-    'tcp_fastopen', 'tcp_nodelay', 'telnet_option', 'tftp_blksize',
-    'tftp_no_options', 'time_cond', 'tls_max', 'tls13_ciphers', 'tlsauthtype',
-    'tlspassword', 'tlsuser', 'tlsv1_0', 'tlsv1_1', 'tlsv1_2', 'tlsv1_3',
-    'tlsv1', 'tr_encoding', 'trace_ascii', 'trace_time', 'trace',
-    'unix_socket', 'use_ascii', 'variable', 'vsock', 'xattr',
+    'local_port', 'login_options', 'mail_auth', 'mail_from',
+    'mail_rcpt_allowfails', 'mail_rcpt', 'max_filesize', 'metalink',
+    'negotiate', 'netrc_file', 'netrc_optional', 'netrc', 'next', 'no_alpn',
+    'no_keepalive', 'no_npn', 'no_progress_bar', 'no_sessionid', 'ntlm_wb',
+    'ntlm', 'parallel_immediate', 'parallel_max', 'parallel', 'path_as_is',
+    'pinnedpubkey', 'preproxy', 'proto_default', 'proto_redir', 'proto',
+    'proxy_anyauth', 'proxy_basic', 'proxy_cacert', 'proxy_capath',
+    'proxy_cert_type', 'proxy_cert', 'proxy_ciphers', 'proxy_crlfile',
+    'proxy_digest', 'proxy_header', 'proxy_insecure', 'proxy_key_type',
+    'proxy_key', 'proxy_negotiate', 'proxy_ntlm', 'proxy_pass',
+    'proxy_pinnedpubkey', 'proxy_service_name', 'proxy_ssl_allow_beast',
+    'proxy_ssl_auto_client_cert', 'proxy_tls13_ciphers', 'proxy_tlsauthtype',
+    'proxy_tlspassword', 'proxy_tlsuser', 'proxy_tlsv1', 'proxytunnel',
+    'pubkey', 'quote', 'random_file', 'raw', 'remote_header_name',
+    'remote_time', 'request_target', 'resolve', 'sasl_authzid', 'sasl_ir',
+    'service_name', 'show_headers', 'socks4', 'socks4a', 'socks5_basic',
+    'socks5_gssapi_nec', 'socks5_gssapi_service', 'socks5_gssapi',
+    'socks5_hostname', 'socks5', 'speed_limit', 'speed_time',
+    'ssl_allow_beast', 'ssl_auto_client_cert', 'ssl_no_revoke', 'ssl_reqd',
+    'ssl_revoke_best_effort', 'ssl', 'sslv2', 'sslv3', 'stderr',
+    'styled_output', 'suppress_connect_headers', 'tcp_fastopen', 'tcp_nodelay',
+    'telnet_option', 'tftp_blksize', 'tftp_no_options', 'time_cond', 'tls_max',
+    'tls13_ciphers', 'tlsauthtype', 'tlspassword', 'tlsuser', 'tlsv1_0',
+    'tlsv1_1', 'tlsv1_2', 'tlsv1_3', 'tlsv1', 'tr_encoding', 'trace_ascii',
+    'trace_time', 'trace', 'unix_socket', 'use_ascii', 'variable', 'vsock',
+    'xattr',
 ]
 
 
@@ -209,8 +209,6 @@ class UnsupportedArgs(Group):
     local_port: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='RANGE')] = None
     ('--local-port',)
 
-    location_trusted: Arg[bool, _HIDDEN] = False
-    ('--location-trusted',)
 
     login_options: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='OPTIONS')] = None
     ('--login-options',)
@@ -284,14 +282,8 @@ class UnsupportedArgs(Group):
     pinnedpubkey: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='HASHES')] = None
     ('--pinnedpubkey',)
 
-    post301: Arg[bool, _HIDDEN] = False
-    ('--post301',)
 
-    post302: Arg[bool, _HIDDEN] = False
-    ('--post302',)
 
-    post303: Arg[bool, _HIDDEN] = False
-    ('--post303',)
 
     preproxy: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PROXY')] = None
     ('--preproxy',)

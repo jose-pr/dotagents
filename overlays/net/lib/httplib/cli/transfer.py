@@ -17,6 +17,7 @@ from .connection import MAX_RETRY_SLEEP
 from .errors import (EXIT_CONNECT, EXIT_HTTP, EXIT_REDIRECTS, EXIT_RESOLVE, EXIT_SSL, EXIT_TIMEOUT,
                      EXIT_WRITE, LocalError, Retry)
 from .request import has_header
+from .redirects import CurlRedirectHandler
 from .routing import AgentProxyHandler
 
 #: The shim's own version line (``-V``); real curl answers when it is present.
@@ -114,7 +115,7 @@ def build_opener(args, plan, context, transfer, removed):
         handlers.append(AgentProxyHandler(plan))
     handlers.append(RequestLog(transfer))
     if args.location:
-        redirects = urllib.request.HTTPRedirectHandler()
+        redirects = CurlRedirectHandler(args, plan)  # curl's rules for what each hop carries
         if args.max_redirs is not None and args.max_redirs >= 0:
             # urllib has two limits: distinct URLs (max_redirections) and
             # repeats of one URL (max_repeats, 4); curl's --max-redirs is both.
