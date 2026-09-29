@@ -59,7 +59,10 @@ The identity/proxy model is wired into the output around the file chain:
     the same set :func:`get_overlay_roots` lists, named by
     :attr:`_overlays.Overlay.root_var` --
     the same name ``dotagents context`` expands as a placeholder), so an env
-    file can reference an overlay's install dir by name.
+    file can reference an overlay's install dir by name. ``AGENTS_PYLIB``
+    (:data:`PYLIB_VAR`) names the ``.pyz`` when dotagents runs from one --
+    where its own libraries (duho, pathlib_next) import from for an overlay
+    built on them; never put on ``PYTHONPATH``.
   * **Proxy** is normalized AFTER the file chain: ``AGENTS_PROXY`` is seeded if
     unset (from ``AGENTS_WEBFETCH_PROXY_URL`` else the global
     HTTPS/HTTP/ALL_PROXY, either case); any proxy var that *already exists* is
@@ -93,6 +96,11 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from dotagents._scope import Scope, project_root_default
+
+#: Names the ``.pyz`` dotagents runs from (unset for an installed dotagents,
+#: whose libraries are in ``AGENTS_PYTHON``'s site-packages): an overlay built
+#: on duho appends it to ``sys.path`` when ``import duho`` fails.
+PYLIB_VAR = "AGENTS_PYLIB"
 
 
 class EnvChanges(dict):
@@ -1047,6 +1055,17 @@ def get_environment(
     # `sys.executable` is '' or None under an embedding host: then nothing is
     # exported rather than an empty command name.
     _seed("AGENTS_PYTHON", sys.executable)
+    # --- AGENTS_PYLIB --- where dotagents' own libraries (duho, pathlib_next)
+    # import from for an overlay that builds on them. Set only when dotagents
+    # runs from a .pyz: the archive, importable by zipimport. An installed
+    # dotagents has them in AGENTS_PYTHON's site-packages already. Never put on
+    # PYTHONPATH, which would shadow a project's own copy: a consumer appends
+    # it to sys.path when its import fails.
+    from dotagents._resources import pyz_archive
+
+    pylib = pyz_archive()
+    if pylib and osenv.get(PYLIB_VAR) != pylib:
+        _apply({PYLIB_VAR: pylib})
 
     # --- Overlay roots --- one `<NAME>_OVERLAY_ROOT` per installed overlay, the
     # same name `dotagents context` expands as a `<NAME_OVERLAY_ROOT>` placeholder
@@ -1208,10 +1227,11 @@ def env_cache_key(scope: Scope, base_env: "dict[str, str]", *parts: str) -> str:
     import hashlib
 
     from dotagents import __version__
+    from dotagents._resources import pyz_archive
 
     scope = _absolute_scope(scope)
     items = [
-        __version__, sys.executable or "", os.getcwd(), scope.level,
+        __version__, sys.executable or "", pyz_archive() or "", os.getcwd(), scope.level,
         str(scope.user_root), str(scope.agents_root), str(scope.project_root),
         str(scope.system_root), *parts,
     ]

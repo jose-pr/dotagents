@@ -37,6 +37,18 @@ def _scratch_dir() -> Path:
     return _scratch
 
 
+def pyz_archive() -> "str | None":
+    """The ``.pyz`` this dotagents is imported from, or None for a plain
+    install. Inside a zipapp a module's ``__file__`` is a path INTO the
+    archive (``.../dotagents.pyz/dotagents/_resources.py``), so the archive
+    is the ancestor that is a file. It also holds the vendored runtime
+    dependencies (duho, pathlib_next), importable from it by zipimport."""
+    for parent in Path(__file__).parents:
+        if parent.is_file():
+            return str(parent)
+    return None
+
+
 def _package_data_dir(name: str) -> "Path | None":
     """Resolve a directory under the installed `dotagents` package (e.g.
     `_overlay`) to a real filesystem Path, working whether the package is a

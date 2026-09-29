@@ -489,6 +489,43 @@ def test_agents_python_is_not_exported_when_the_interpreter_is_unknown(tree, mon
     assert "AGENTS_PYTHON" not in env
 
 
+def test_agents_pylib_names_the_pyz_only_when_running_from_one(tree, tmp_path, monkeypatch):
+    """An installed dotagents has its libraries in AGENTS_PYTHON's
+    site-packages: nothing to export. From a .pyz the archive is where they
+    import from; the walk's value replaces another, and it never reaches
+    PYTHONPATH (a project's own duho must not be shadowed)."""
+    from dotagents import _resources
+
+    agents_dir, project_root = tree
+    assert _resources.pyz_archive() is None, "the suite runs from the source tree"
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert _env.PYLIB_VAR not in env
+    pyz = tmp_path / "dotagents.pyz"
+    pyz.write_bytes(b"PK")
+    monkeypatch.setattr(_resources, "pyz_archive", lambda: str(pyz))
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert env[_env.PYLIB_VAR] == str(pyz)
+    assert str(pyz) not in env.get("PYTHONPATH", "")
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin", _env.PYLIB_VAR: str(pyz)})
+    assert _env.PYLIB_VAR not in env, "already right: no change"
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin", _env.PYLIB_VAR: "/old/dotagents.pyz"})
+    assert env[_env.PYLIB_VAR] == str(pyz), "another archive's value is replaced"
+
+
+def test_pyz_archive_finds_the_archive_a_module_is_imported_from(tmp_path):
+    """Run from a real zipapp: the archive is the ancestor of __file__ that is a file."""
+    import subprocess
+    import zipfile
+
+    src = Path(_env.__file__).resolve().parents[1]
+    pyz = tmp_path / "t.pyz"
+    with zipfile.ZipFile(str(pyz), "w") as zf:
+        zf.write(str(src / "dotagents" / "_resources.py"), "probe_resources.py")
+    code = "import sys; sys.path.insert(0, sys.argv[1]); import probe_resources as r; print(r.pyz_archive())"
+    out = subprocess.run([sys.executable, "-c", code, str(pyz)], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == str(pyz)
+
+
 def test_env_py_runs_under_a_pinned_agents_python(tree, tmp_path, monkeypatch):
     """The pin `env` exports for shims is honoured for dotagents' own
     subprocesses too (only when it names an existing file)."""
