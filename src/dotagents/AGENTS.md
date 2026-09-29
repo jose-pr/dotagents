@@ -38,7 +38,7 @@ and an error saying a command is required, and exits 2.
 | `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; manifest, setup, skills, file count, recorded source. No name: exit 2. |
 | `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
 | `path [-g] [--lib] [--format list\|native\|posix\|json]` | Print the bin dirs `env` puts on `PATH` (`--lib`: the existing lib dirs it puts on `PYTHONPATH`), highest precedence first; runs no env file. `posix` is `:`-joined, MSYS2 form on Windows. |
-| `env [-g] [--format F] [--diff] [--cache]` | Print the assembled environment (`--diff`: only what differs from the caller's; `--cache`: replay the previous output while `env_cache_key` holds, up to `ENV_CACHE_TTL`) in format `F`: `auto` (default: the calling shell), `export`/`posix`/`sh`/`bash`, `dotenv`/`env`, `powershell`/`pwsh`/`ps`, `cmd`/`bat`/`batch`, `fish`, `json`, `ini`, `yaml`. |
+| `env [-g] [--format F] [--diff] [--cache] [--into FILE]` | Print the assembled environment (`--diff`: only what differs from the caller's; `--cache`: replay the previous output while `env_cache_key` holds, up to `ENV_CACHE_TTL`; `--into FILE`: write it into FILE as the one block this command owns there) in format `F`: `auto` (default: the calling shell), `export`/`posix`/`sh`/`bash`, `dotenv`/`env`, `powershell`/`pwsh`/`ps`, `cmd`/`bat`/`batch`, `fish`, `json`, `ini`, `yaml`. |
 | `launch [AGENT] [-g] [--command PROG] [--no-context] [--inline] [--write-agent] [--dry-run] [-- ARGS...]` | Run the agent's CLI with the env applied and the context handed over; the exit code is the harness's (`128+N` on signal N). |
 | `findings add\|list\|show\|done\|reopen\|remove\|index\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding, `done` moves it to `processed/` with a required resolution, `INDEX.md` regenerated on every change. |
 | `about [--json]` | `dotagents-cli <version>`, then `<distribution> <version>` per bundled (`.pyz`) or installed package. |
@@ -123,6 +123,13 @@ returns the exit code.
   ("markdown", "system-reminder", "json")`); `env.Env`; `path.PathCmd`
   (`PATH_FORMATS = ("list", "native", "posix", "json")`); `build_pyz.BuildPyz`;
   `about.About`.
+- `env`: `write_into(path, text, output_format)` — what `--into` does: the file
+  keeps ONE block between `INTO_BEGIN = ": dotagents-env-begin"` and
+  `INTO_END = ": dotagents-env-end"` (no-op commands, not comments, so a `; cmd`
+  appended to the last line still runs; earlier blocks removed, other lines kept,
+  the new block last), written atomically; `INTO_FORMATS = ("export",)`. With
+  `--diff --format export`, a `PATH` that is the caller's with entries in front is
+  written as `export PATH='<prefix>'"${PATH:+:$PATH}"`.
 - `about`: `DISTRIBUTION = "dotagents-cli"`, `BUNDLE_FILE = "_bundle.json"` (written
   by `build-pyz` into the package), `RUNTIME_PACKAGES = ("duho", "pathlib_next",
   "uritools", "netimps", "requests")` (the only packages a plain install reports);

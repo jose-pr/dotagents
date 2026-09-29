@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `env --into FILE` writes the output into FILE as the one block `env` owns
+  there, replacing the block an earlier run wrote and keeping every other line.
+- With `--diff --format export`, a `PATH` that is the caller's own with entries
+  put in front is written as `export PATH='<entries>'"${PATH:+:$PATH}"`, so it
+  stays short and keeps what the sourcing shell has.
 - When `dotagents` runs from a `.pyz`, `env` exports `AGENTS_PYLIB`, the path
   of that archive. The libraries it bundles (duho, pathlib_next) import from
   it, so an overlay built on duho works even when the interpreter in
@@ -16,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   its libraries are already importable from `AGENTS_PYTHON`. The archive is
   never put on `PYTHONPATH`, where it would shadow a project's own copy; a
   consumer adds it to `sys.path` itself when its import fails.
+
+### Fixed
+
+- The Claude Code SessionStart hook no longer appends the whole environment to
+  `$CLAUDE_ENV_FILE` every time it runs (startup, resume, compact, clear). Claude
+  Code inlines that file into every Bash command, and once it passed about 8 KB,
+  Git for Windows' bash truncated the command and every Bash call failed with an
+  unterminated quote. The hook now uses `env --into`, which keeps one block.
+  Re-run `dotagents init -g` to update an installed hook.
 
 ## [0.6.2] - 2026-09-28
 

@@ -87,7 +87,7 @@ the store's, else `dotagents` on `PATH`.
 
 | Hook | Command | Why |
 | --- | --- | --- |
-| `SessionStart` | appends `dotagents env --diff --format export` to `$CLAUDE_ENV_FILE`, then runs `dotagents context` | Claude sources `$CLAUDE_ENV_FILE` before each Bash command, so the env layers reach every command in the session; and it injects the hook's **stdout into the session context**, which is how the assembled context reaches the model. |
+| `SessionStart` | writes `dotagents env --diff --format export` into `$CLAUDE_ENV_FILE` (`--into`: one block, replaced on every run; `PATH` as a prefix on the shell's own), then runs `dotagents context` | Claude sources `$CLAUDE_ENV_FILE` before each Bash command, so the env layers reach every command in the session; and it injects the hook's **stdout into the session context**, which is how the assembled context reaches the model. |
 | `CwdChanged` | when the new directory has a `.agents/`, appends `export AGENTS_PROJECT_ROOT=<it>` to `$CLAUDE_ENV_FILE`; then prints the directory's `AGENTS.md` if there is one | Re-pins the project root after a `cd` into another project, and surfaces that directory's `AGENTS.md`. |
 
 On Windows each event gets a second, PowerShell-native handler (`shell:
@@ -272,6 +272,11 @@ dotagents env --diff --format json   # only vars that differ from the caller's e
   environment, the working directory, the stores, the overlays, every env and `lib`
   file), for at most five minutes; the per-command env loaders use it. The cache is
   owner-only, under `<user store>/.cache/env/`.
+- `--into <file>` — write into `<file>` instead of stdout, as the one block this
+  command owns there (between `: dotagents-env-begin` / `: dotagents-env-end`):
+  an earlier block is replaced, anything else in the file is kept. The SessionStart
+  hook writes `$CLAUDE_ENV_FILE` this way, so the file stays one block however often
+  the hook runs. `export` format only.
 - `-g` / `--global` — skip the project-level env files (the store is unaffected).
 - `--agents-dir <dir>` — user store override for this run.
 
