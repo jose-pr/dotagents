@@ -41,14 +41,26 @@ build on `PATH` cannot break the shim.
   (`*` or a host list) replaces `NO_PROXY`, as in curl. A malformed
   `AGENTS_PROXY`/`AGENTS_PROXY_TYPE` never blocks real curl (one warning, argv
   as typed); the fallback, which would have to use it, exits 2.
+- **`-q` / `--disable`** must be curl's FIRST argument to skip `.curlrc`, so
+  the shim keeps a leading one first when it adds the proxy options.
 - Supported: `-X -d --data-raw --data-binary -H -o -s -S -v -i -I -D -b -c -x
   -U --noproxy -k -A -L --max-redirs -m --connect-timeout --timeout -f -u -e
-  --compressed -V`, with curl's meaning where it matters:
+  --compressed -w -q -V`, with curl's meaning where it matters:
   - **Exit codes are curl's.** An HTTP status is a response, printed and exit 0
     (a 404, a 302 without `-L`); `-f` makes a 4xx/5xx exit 22 with no body.
     Transport failures: 6 could not resolve, 7 could not connect, 28 timed out,
-    60 certificate; an unsupported flag or a bad proxy configuration is exit 2
-    (`curl: (2) …`, one line, never a traceback).
+    60 certificate; 23 when `-o`/`-D` cannot be written; an unsupported flag or
+    a bad proxy configuration is exit 2 (`curl: (2) …`, one line, never a
+    traceback). `-o /dev/null` is the null device on Windows too.
+  - **`-w` / `--write-out`** (`@file`, `@-` read the format) writes curl's
+    output for `http_code response_code http_version method scheme url
+    url_effective redirect_url num_redirects content_type num_headers
+    header_json size_download size_upload time_total time_starttransfer
+    exitcode errormsg filename_effective urlnum`, plus `%header{name}`,
+    `%{stdout}` / `%{stderr}` / `%{onerror}`, `%%` and `\n \r \t` — after
+    failures too (`000` and exit 7 when nothing answered, the status after
+    `-f`'s 22). Any other variable (`time_connect`, `remote_ip`, `json`, …) is
+    refused before the request is sent. `-q` is a no-op (no `.curlrc` is read).
   - `-d` repeats and joins with `&`; `@file` reads a file (CR/LF stripped, as
     curl does), `@-` stdin; `--data-binary` keeps bytes as they are; a body
     without a `Content-Type` gets `application/x-www-form-urlencoded`.
