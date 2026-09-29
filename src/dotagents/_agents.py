@@ -500,14 +500,21 @@ class ClaudeAgent(Agent):
     # SessionStart does two things, in one `type: command` hook (SessionStart
     # supports only command/mcp_tool hooks, and env must run before context):
     #
-    # 1. `dotagents env --diff` output is appended to $CLAUDE_ENV_FILE
+    # 1. `dotagents env --diff` output goes into $CLAUDE_ENV_FILE
     #    (code.claude.com/docs/en/env-vars + hooks.md "Persist environment
     #    variables"): Claude sources that file before each Bash command. It is
     #    set only inside SessionStart/Setup/CwdChanged/FileChanged hook
     #    processes, never in the session's own environment.
-    #      * APPEND (`>>`), never truncate -- other hooks write to the same file.
+    #      * `--into`, not `>>`: the block a previous run wrote is REPLACED
+    #        and anything else in the file (another hook's lines) is kept.
+    #        SessionStart re-runs on resume, compact and clear; appending
+    #        grew the file by the whole env each time, and Claude Code inlines
+    #        it into every Bash command's `bash -c` argument, which Git for
+    #        Windows' bash truncates at about 8 KB -- every Bash call then
+    #        failed with an unterminated quote. PATH is written relative to
+    #        the shell's own ($PATH), which keeps the block small.
     #      * Guard on non-empty (`[ -n "$CLAUDE_ENV_FILE" ]`) -- when unset,
-    #        `>> ""` would create a file literally named "".
+    #        `--into ""` has nowhere to write.
     #
     # 2. `dotagents context`: Claude injects a SessionStart hook's stdout into
     #    the session context.
@@ -534,7 +541,7 @@ class ClaudeAgent(Agent):
     SESSION_START_COMMAND = (
         _HOOK_DOTAGENTS
         + 'if [ -n "$CLAUDE_ENV_FILE" ]; then '
-        '"$d" env --diff --format export >> "$CLAUDE_ENV_FILE"; '
+        '"$d" env --diff --format export --into "$CLAUDE_ENV_FILE"; '
         "fi; "
         '"$d" context'
     )

@@ -110,15 +110,18 @@ def test_hook_finds_dotagents_by_path_not_by_splicing_path():
         assert "PATH=" not in cmd
 
 
-def test_env_hook_appends_and_is_guarded():
-    """Two documented requirements, both load-bearing.
+def test_env_hook_replaces_its_own_block_and_is_guarded():
+    """Three requirements, all load-bearing.
 
-    `>` would discard variables other hooks wrote to the same file; an unguarded
-    redirect with CLAUDE_ENV_FILE unset would create a file named "".
+    `>` would discard variables other hooks wrote to the same file; `>>`
+    grew it by the whole env on every SessionStart (resume, compact, clear)
+    until the file Claude Code inlines into each Bash command passed Git for
+    Windows' ~8 KB `bash -c` limit -- so `env --into` replaces only its own
+    block. An unguarded write with CLAUDE_ENV_FILE unset has nowhere to go.
     """
     cmd = ClaudeAgent.SESSION_START_COMMAND
-    assert '>> "$CLAUDE_ENV_FILE"' in cmd, "must append, never truncate"
-    assert ">>" in cmd and not _has_truncating_redirect(cmd)
+    assert 'env --diff --format export --into "$CLAUDE_ENV_FILE"' in cmd
+    assert ">>" not in cmd and not _has_truncating_redirect(cmd), "no shell redirect into the env file"
     assert '[ -n "$CLAUDE_ENV_FILE" ]' in cmd, "must guard against an unset var"
     assert cmd.index('"$d" env') < cmd.index('"$d" context'), (
         "env must be written before context runs"
