@@ -1,10 +1,14 @@
-"""Netscape cookie-file I/O and requests-session cookie merging."""
+"""Netscape cookie-file I/O, curl's cookie rules, and requests-session
+cookie merging. The requests-free half (``CookieSpec``, ``load_netscape``,
+``save_netscape``, ``cookie_applies``, ``set_cookie_specs``) is what the curl
+fallback's ``-b`` / ``-c`` run on."""
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
-from http.cookies import SimpleCookie
+from http.cookies import Morsel, SimpleCookie
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, List, Optional, Protocol
+from typing import TYPE_CHECKING, Iterable, List, Optional, Protocol, Tuple
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:  # requests is optional at runtime: types only
@@ -31,6 +35,14 @@ class CookieSpec:
     expires: Optional[int]
     name: str
     value: str
+    #: Written as curl writes it: the domain field prefixed ``#HttpOnly_``.
+    http_only: bool = False
+    #: The Netscape include-subdomains flag (``TRUE``), for a domain written
+    #: without the leading dot that says the same.
+    subdomains: bool = False
+
+
+HTTP_ONLY_PREFIX = "#HttpOnly_"
 
 
 def load_netscape(path: Path) -> List[CookieSpec]:
@@ -41,25 +53,98 @@ def load_netscape(path: Path) -> List[CookieSpec]:
         line = line.strip()
         # curl writes an HttpOnly cookie's domain as `#HttpOnly_<domain>`; any
         # other `#` line is a comment.
-        if not line or (line.startswith("#") and not line.startswith("#HttpOnly_")):
+        if not line or (line.startswith("#") and not line.startswith(HTTP_ONLY_PREFIX)):
             continue
         parts = line.split("\t")
         if len(parts) < 7:
             continue
-        domain, _flag, cpath, secure, expires, name, value = parts[:7]
-        if domain.startswith("#HttpOnly_"):
-            domain = domain[len("#HttpOnly_"):]
+        domain, flag, cpath, secure, expires, name, value = parts[:7]
+        http_only = domain.startswith(HTTP_ONLY_PREFIX)
+        if http_only:
+            domain = domain[len(HTTP_ONLY_PREFIX):]
         cookies.append(
             CookieSpec(
                 domain=domain,
                 path=cpath or "/",
                 secure=str(secure).upper() == "TRUE",
-                expires=int(expires) if str(expires).isdigit() else None,
+                # `0` is how the format writes a session cookie: no expiry.
+                expires=int(expires) if str(expires).isdigit() and int(expires) else None,
                 name=name,
                 value=value,
+                http_only=http_only,
+                subdomains=flag.upper() == "TRUE",
             )
         )
     return cookies
+
+
+def cookie_applies(cookie: CookieSpec, url: str, now: Optional[float] = None) -> bool:
+    """Does ``cookie`` go with a request to ``url``, as curl decides: the
+    domain (the host itself, or a subdomain for a leading dot or the
+    include-subdomains flag), a path prefix, ``Secure`` only over https, and
+    not expired (``0`` / ``None`` is a session cookie)."""
+    parts = urlparse(url)
+    domain = cookie.domain
+    if cookie.subdomains and not domain.startswith("."):
+        domain = "." + domain
+    if not domain_covers(domain, parts.hostname or ""):
+        return False
+    if not (parts.path or "/").startswith(cookie.path or "/"):
+        return False
+    if cookie.secure and parts.scheme != "https":
+        return False
+    if cookie.expires and cookie.expires <= (time.time() if now is None else now):
+        return False
+    return True
+
+
+def _morsel_expiry(morsel: "Morsel[str]", now: float) -> Optional[int]:
+    """A Set-Cookie's expiry as a unix time: ``Max-Age`` (seconds from now)
+    wins over ``Expires`` (an HTTP date); ``None`` for a session cookie or an
+    unparseable value."""
+    if morsel["max-age"]:
+        try:
+            return int(now) + int(morsel["max-age"])
+        except ValueError:
+            return None
+    if morsel["expires"]:
+        from email.utils import parsedate_to_datetime
+
+        try:
+            return int(parsedate_to_datetime(morsel["expires"]).timestamp())
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return None
+
+
+def set_cookie_specs(
+    values: Iterable[str], default_domain: str, now: Optional[float] = None
+) -> List[Tuple[CookieSpec, bool]]:
+    """``(cookie, gone)`` for every cookie the ``Set-Cookie`` header
+    ``values`` carry: the domain defaults to ``default_domain`` (the host
+    asked), the path to ``/``; ``gone`` when the server expires it (an empty
+    value, ``Max-Age=0``, a past date). An unparseable header is skipped."""
+    now = time.time() if now is None else now
+    out: List[Tuple[CookieSpec, bool]] = []
+    for header in values:
+        parsed: "SimpleCookie" = SimpleCookie()
+        try:
+            parsed.load(header)
+        except Exception:
+            continue
+        for morsel in parsed.values():
+            expires = _morsel_expiry(morsel, now)
+            spec = CookieSpec(
+                domain=morsel["domain"] or default_domain,
+                path=morsel["path"] or "/",
+                secure=bool(morsel["secure"]),
+                expires=expires,
+                name=morsel.key,
+                value=morsel.value,
+                http_only=bool(morsel["httponly"]),
+            )
+            out.append((spec, not morsel.value or (expires is not None and expires <= int(now))))
+    return out
 
 
 def apply_to_session(session: "requests.Session", cookies: Iterable[CookieSpec]) -> None:
@@ -90,7 +175,9 @@ def save_netscape(session_cookies: "Iterable[CookieLike]", path: Path) -> None:
     lines = ["# Netscape HTTP Cookie File\n"]
     for cookie in session_cookies:
         domain = getattr(cookie, "domain", "") or ""
-        flag = "TRUE" if domain.startswith(".") else "FALSE"
+        flag = "TRUE" if domain.startswith(".") or getattr(cookie, "subdomains", False) else "FALSE"
+        if getattr(cookie, "http_only", False):
+            domain = HTTP_ONLY_PREFIX + domain
         cpath = getattr(cookie, "path", "/") or "/"
         secure = "TRUE" if bool(getattr(cookie, "secure", False)) else "FALSE"
         expires_val = getattr(cookie, "expires", None)
@@ -121,31 +208,21 @@ def merge_set_cookie_headers(session: "requests.Session", response: "requests.Re
     if not set_cookies:
         return
     resp_host = urlparse(getattr(response, "url", "") or "").hostname or ""
-    for header in set_cookies:
-        parsed = SimpleCookie()
+    for cookie, gone in set_cookie_specs(set_cookies, resp_host):
+        if gone:
+            try:
+                session.cookies.clear(domain=cookie.domain, path=cookie.path, name=cookie.name)
+            except Exception:
+                pass
+            continue
         try:
-            parsed.load(header)
+            session.cookies.set(
+                cookie.name,
+                cookie.value,
+                domain=cookie.domain,
+                path=cookie.path,
+                secure=cookie.secure,
+                expires=cookie.expires,
+            )
         except Exception:
             continue
-        for morsel in parsed.values():
-            domain = morsel["domain"] or resp_host
-            cpath = morsel["path"] or "/"
-            if morsel["max-age"] == "0" or not morsel.value:
-                try:
-                    session.cookies.clear(domain=domain, path=cpath, name=morsel.key)
-                except Exception:
-                    pass
-                continue
-            secure = bool(morsel["secure"])
-            expires = None
-            try:
-                session.cookies.set(
-                    morsel.key,
-                    morsel.value,
-                    domain=domain,
-                    path=cpath,
-                    secure=secure,
-                    expires=expires,
-                )
-            except Exception:
-                continue

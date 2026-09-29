@@ -70,10 +70,20 @@ def test_an_explicit_bundle_is_still_honoured(tmp_path):
 
 
 def test_the_os_context_is_shared_then_renewed(monkeypatch):
+    from httplib import tls as httplib_tls
+
     first = httplib_session.os_ssl_context()
     assert isinstance(first, ssl.SSLContext) and first.verify_mode == ssl.CERT_REQUIRED
     assert httplib_session.os_ssl_context() is first, "shared: pools are keyed by it"
-    monkeypatch.setattr(httplib_session, "_os_context_at", 0.0)
-    monkeypatch.setattr(httplib_session.time, "monotonic",
-                        lambda: httplib_session.OS_CONTEXT_MAX_AGE + 1.0)
+    assert httplib_tls.os_ssl_context() is first, "one context: the session's is httplib.tls's"
+    monkeypatch.setattr(httplib_tls, "_os_context_at", 0.0)
+    monkeypatch.setattr(httplib_tls.time, "monotonic", lambda: httplib_tls.OS_CONTEXT_MAX_AGE + 1.0)
     assert httplib_session.os_ssl_context() is not first, "renewed after its lifetime"
+
+
+def test_the_session_retries_what_curl_calls_transient():
+    """One list: the session's Retry and the curl fallback's --retry."""
+    from httplib.retry import TRANSIENT_STATUSES
+
+    retry = _adapter().max_retries
+    assert set(retry.status_forcelist) == set(TRANSIENT_STATUSES) and 408 in TRANSIENT_STATUSES

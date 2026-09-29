@@ -31,8 +31,6 @@ shim and the ``certifi`` shim work with zero dependencies regardless.
 from __future__ import annotations
 
 import re
-import ssl
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Optional, Union
 from urllib.parse import urlparse
@@ -41,6 +39,8 @@ from . import hooks as _hooks
 from .auth import AuthProvider
 from .cookies import CookieSpec, apply_to_session, domain_covers, merge_set_cookie_headers
 from .jar import CookieJar, FileCookieJar, FileTokenJar, TokenJar
+from .retry import TRANSIENT_STATUSES
+from .tls import OS_CONTEXT_MAX_AGE, os_ssl_context  # noqa: F401  (re-exported: session's own API)
 # The module, not its functions: `should_bypass`'s default sentinel belongs
 # to the module instance, and a function bound by name before a reload
 # would pass a stale one.
@@ -67,24 +67,6 @@ def _import_requests():
     return requests, HTTPAdapter, Retry
 
 
-#: How long the OS trust-store context is reused (seconds) before it is
-#: rebuilt, so a certificate added to the system store is picked up.
-OS_CONTEXT_MAX_AGE = 60
-_os_context: "Optional[ssl.SSLContext]" = None
-_os_context_at = 0.0
-
-
-def os_ssl_context() -> "ssl.SSLContext":
-    """An ``SSLContext`` verifying against the OS trust store, shared for
-    :data:`OS_CONTEXT_MAX_AGE` seconds. Shared, because urllib3 keys its
-    connection pools by the context object: one per request would never reuse
-    a connection."""
-    global _os_context, _os_context_at
-    now = time.monotonic()
-    if _os_context is None or now - _os_context_at > OS_CONTEXT_MAX_AGE:
-        _os_context = ssl.create_default_context()
-        _os_context_at = now
-    return _os_context
 
 
 def _agent_proxy_adapter_class(HTTPAdapter):
@@ -202,7 +184,7 @@ def new_session(
     verify: VerifyT = True,
     retries: int = 3,
     backoff: float = 1,
-    status_forcelist: Iterable[int] = (429, 500, 502, 503, 504),
+    status_forcelist: Iterable[int] = TRANSIENT_STATUSES,
     cookies: Union[bool, str, "CookieJar"] = False,
     tokens: Union[bool, str, "TokenJar"] = False,
     auth_provider: Optional["AuthProvider"] = None,
@@ -244,10 +226,9 @@ def new_session(
     authorization: Optional[str] = None
     endpoint: Optional[str] = None
     if proxies is None:
-        resolved = _proxy.resolve()
-        if resolved:
-            proxy_url, authorization = resolved
-            endpoint = _proxy.proxy_type()[1]
+        planned = _proxy.plan()  # the decision the curl fallback makes too
+        if planned is not None:
+            proxy_url, authorization, endpoint = planned.proxy, planned.authorization, planned.endpoint
     else:
         # Caller-supplied proxies are requests' business (userinfo included);
         # the configured credential still applies if one of them IS the agent proxy.

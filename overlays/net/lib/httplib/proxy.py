@@ -253,3 +253,67 @@ def proxies_from_env() -> Optional[dict]:
     if not p:
         return None
     return {"http": p, "https": p}
+
+
+class ProxyPlan:
+    """One proxy decision -- the session's adapter and the curl fallback's
+    handler both apply it per hop.
+
+    ``proxy`` -- the proxy URL without userinfo; ``authorization`` -- the
+    credential (the header value), or ``None``; ``auth_header`` -- the header
+    it rides in (:func:`auth_header`); ``endpoint`` -- ``None`` for a
+    ``connect`` proxy, the ``/endpoint`` of a prefix gateway; ``no_proxy`` --
+    the bypass list in force (curl's ``--noproxy`` REPLACES ``NO_PROXY``),
+    re-checked for every hop's host.
+    """
+
+    __slots__ = ("proxy", "authorization", "endpoint", "no_proxy", "auth_header")
+
+    def __init__(
+        self, proxy: str, authorization: Optional[str], endpoint: Optional[str],
+        no_proxy: Optional[str], auth_header: Optional[str] = None,
+    ) -> None:
+        self.proxy = proxy
+        self.authorization = authorization
+        self.endpoint = endpoint
+        self.no_proxy = no_proxy
+        self.auth_header = auth_header or DEFAULT_AUTH_HEADER
+
+    def bypasses(self, url: str) -> bool:
+        return should_bypass(url, no_proxy=self.no_proxy)
+
+    @property
+    def gateway_base(self) -> Optional[str]:
+        """``<proxy><endpoint>`` of a prefix gateway (a URL already in its
+        namespace starts with it), or ``None`` for a ``connect`` proxy."""
+        return prefix_url("", self.proxy, self.endpoint) if self.endpoint is not None else None
+
+
+def plan(
+    proxy: Optional[str] = None, noproxy: Optional[str] = None, proxy_user: Optional[str] = None,
+) -> Optional[ProxyPlan]:
+    """The :class:`ProxyPlan` for a request, or ``None`` for direct.
+
+    ``proxy`` (curl's ``-x``) wins over the agent proxy chain
+    (``AGENTS_PROXY``, then the global vars) and is always a plain ``connect``
+    proxy whose credential is its own userinfo or ``proxy_user`` (``-U``, as
+    Basic) -- never the agent proxy's ``AGENTS_PROXY_AUTH``. For the agent
+    proxy, ``proxy_user`` wins over the configured header value, which wins
+    over the URL's userinfo. ``noproxy`` replaces ``NO_PROXY``. A malformed
+    ``AGENTS_PROXY`` or ``AGENTS_PROXY_TYPE`` raises ``ValueError`` (a
+    configuration error, only when that proxy would actually be used).
+    """
+    no_proxy = noproxy if noproxy is not None else no_proxy_from_env()
+    endpoint: Optional[str] = None
+    if proxy:
+        resolved = resolve(proxy, env=False)
+    else:
+        resolved = resolve()
+        endpoint = proxy_type()[1] if resolved else None
+    if not resolved:
+        return None
+    url, authorization = resolved
+    if proxy_user:
+        user, _, password = proxy_user.partition(":")
+        authorization = basic_authorization(user, password)
+    return ProxyPlan(url, authorization, endpoint, no_proxy, auth_header())
