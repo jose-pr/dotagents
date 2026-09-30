@@ -433,7 +433,8 @@ API:
   `Overlay.sort_key`, then contract-A `AGENTS.md` (every store and the project root)
   and `AGENTS.local.md` (project store and project root), each prefixed
   `<!-- Source: <path> -->`. Then a skills listing (`- **name** (`<SKILL.md>`):
-  description`, from each skill's leading frontmatter; a project skill wins).
+  description`, from each skill's leading frontmatter; a project skill wins), then
+  a "Local additions to overlay files" section when `local_additions` finds any.
   `<PROJECT_ROOT>` and `<NAME_OVERLAY_ROOT>` placeholders expand; with
   `expand_vars` so do `$NAME_OVERLAY_ROOT` / `${NAME_OVERLAY_ROOT}`. `inline`
   appends the on-demand `.md` files the sources reference, each resolved against
@@ -441,7 +442,13 @@ API:
   system source never into the project).
 - `assemble_context_data(agent, scope, *, inline=False, expand_vars=True) -> dict`
   — `{"agent", "harness", "sources", "context", "skills": [{"name",
-  "description", "path"}]}`; `context` without the skills listing.
+  "description", "path"}], "local_additions": [{"overlay_file", "local": [...]}]}`;
+  `context` without the skills and local-additions listings.
+- `local_additions(scope) -> list[tuple[Path, list[Path]]]` — the user's own
+  additions to installed overlay files: for each `.md` an overlay in `scope.overlays`
+  ships in a subdirectory other than `skills/`, every store's file at the same
+  relative path (`<store>/kb/RUST.md` for the overlay's `kb/RUST.md`), in
+  `scope.stores` order. A store's root files never match.
 
 ## `dotagents._agents`
 

@@ -216,7 +216,11 @@ Assembles the effective context an agent should load — the overlay `CONTEXT.md
 and the project root's own `AGENTS.md` / `AGENTS.local.md` — minus whatever the harness already loads by itself (for Claude Code, whatever its
 `CLAUDE.md` files really `@`-include) — and prints it to **stdout** by default
 (POSIX convention); pass a path to write a file, or `--write-agent` to merge it into
-each agent's own instruction file.
+each agent's own instruction file. It ends with the skills on offer and, when there are
+any, your **local additions to overlay files** — a store file at the same path as an
+overlay's (`~/.agents/kb/RUST.md` for the rust overlay's `kb/RUST.md`; see
+[Overlays](overlays.md)); `--format json` carries both as their own keys (`skills`,
+`local_additions`).
 
 ```bash
 dotagents context                              # print the active agent's context to stdout

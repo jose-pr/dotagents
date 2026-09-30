@@ -79,8 +79,17 @@ up under `<store>/install_backup/` first. What the `.gitignore` / `.ignore` at t
 overlay's root match (an ignore file in a subdirectory is just a file it ships), and
 tool caches, belong to the install (a setup script's output, local
 state) and are left alone; `--prune` clears them too. A `requires` added upstream is
-installed. An installed overlay is upstream's copy, not a place for your edits: keep
-those in your own files (a `kb/` file, `AGENTS.local.md`).
+installed. An installed overlay is upstream's copy, not a place for your edits.
+
+### Your additions to an overlay's files
+
+Put your own text for an overlay file at the **same path under the store root**: an
+addition to the rust overlay's `kb/RUST.md` goes in `~/.agents/kb/RUST.md` (or
+`<project>/.agents/kb/RUST.md` for one project). `sync` never touches it, and agents
+read it alongside the overlay's file, winning on conflict: the base `AGENTS.md` tells
+them to, and `dotagents context` lists every addition it finds (for each `.md` an
+overlay ships in a subdirectory other than `skills/`). Private names, local tool paths
+and links into your own notes belong there, never in the overlay.
 
 Removing an overlay deletes only its directory and unpublishes only the skills **it**
 published (a copy the user edited is left alone). Its lines in `AGENTS.md`'s managed

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Your own additions to an installed overlay's file live at the same path under the
+  store root (`~/.agents/kb/RUST.md` for the rust overlay's `kb/RUST.md`, or
+  `<project>/.agents/kb/RUST.md`), where `overlays sync` never touches them. The
+  base `AGENTS.md` tells agents to read them alongside the overlay's file, and
+  `dotagents context` lists the ones it finds (JSON: `local_additions`).
+
 ## [0.7.0] - 2026-10-01
 
 ### Changed
