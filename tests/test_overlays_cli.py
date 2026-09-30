@@ -1,6 +1,6 @@
 """`dotagents overlays` command behaviour fixed in the 2026-09-09 review:
 name normalization on add/remove, remove's un-merge, skills published from the
-INSTALLED copy, `sync --copy` / `--overwrite`, dry-run setup reporting, up-front
+INSTALLED copy, `sync --copy` and changed files, dry-run setup reporting, up-front
 validation, `requires`, `show` and the manifest reader's comment handling --
 plus the failure modes found since:
 confinement of `requires`/`rules`, broken repos and registries, removing a
@@ -138,10 +138,10 @@ def test_skills_are_published_from_the_installed_copy(world, tmp_path):
 
 
 # --------------------------------------------------------------------------
-# sync: --copy honoured, --overwrite updates changed files
+# sync: --copy honoured, a changed upstream file lands
 # --------------------------------------------------------------------------
 
-def test_sync_copy_and_overwrite(world):
+def test_sync_updates_changed_files_and_honours_copy(world):
     src, scope_root = world
     _overlay(src, "up", skill="s1", files=[("kb/UP.md", "v1\n")])
     _add(src, scope_root, "up")
@@ -149,13 +149,8 @@ def test_sync_copy_and_overwrite(world):
     assert installed.read_text(encoding="utf-8") == "v1\n"
 
     (src / "up" / "kb" / "UP.md").write_text("v2\n", encoding="utf-8")
-    # Plain sync never clobbers.
     _run(OverlaySync, pattern=None, repo=[str(src)], global_scope=True,
-         agents_dir=scope_root, copy=True, overwrite=False, dry_run=False)
-    assert installed.read_text(encoding="utf-8") == "v1\n"
-    # --overwrite replaces the changed file.
-    _run(OverlaySync, pattern=None, repo=[str(src)], global_scope=True,
-         agents_dir=scope_root, copy=True, overwrite=True, dry_run=False)
+         agents_dir=scope_root, copy=True, dry_run=False)
     assert installed.read_text(encoding="utf-8") == "v2\n"
 
     # --copy: a skill removed from the shared dir is republished as a COPY.
@@ -163,7 +158,7 @@ def test_sync_copy_and_overwrite(world):
 
     shutil.rmtree(str(scope_root / "skills" / "s1"))
     _run(OverlaySync, pattern=None, repo=[str(src)], global_scope=True,
-         agents_dir=scope_root, copy=True, overwrite=False, dry_run=False)
+         agents_dir=scope_root, copy=True, dry_run=False)
     assert (scope_root / "skills" / "s1").is_dir()
     assert not os.path.islink(str(scope_root / "skills" / "s1"))
 

@@ -267,15 +267,17 @@ def test_install_overlay_dir_copies_files_and_manifest(tmp_path):
     assert copied >= 2 and skipped == 0
 
 
-def test_install_overlay_dir_no_clobber(tmp_path):
+def test_reinstall_makes_the_install_match_the_source(tmp_path):
     src = make_source(tmp_path)
     dest = tmp_path / "dest" / "py-demo"
+    backups = tmp_path / "backup"
     Overlay(src / "py-demo").install_to(dest, False)
-    # Hand-edit an installed file; re-install must not clobber it.
+    # A hand edit is replaced by the source's file, the edit backed up first.
     (dest / "kb" / "PY.md").write_text("EDITED\n", encoding="utf-8")
-    copied, skipped, _ = Overlay(src / "py-demo").install_to(dest, False)
-    assert (dest / "kb" / "PY.md").read_text(encoding="utf-8") == "EDITED\n"
-    assert copied == 0 and skipped >= 1
+    result = Overlay(src / "py-demo").install_to(dest, False, backup_root=backups)
+    assert (dest / "kb" / "PY.md").read_text(encoding="utf-8") == (src / "py-demo" / "kb" / "PY.md").read_text(encoding="utf-8")
+    assert result.replaced == ["kb/PY.md"] and (backups / "kb" / "PY.md").read_text(encoding="utf-8") == "EDITED\n"
+    assert result.written == 1
 
 
 def test_overlay_files_excludes_manifest_and_caches(tmp_path):

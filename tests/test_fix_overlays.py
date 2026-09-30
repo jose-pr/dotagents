@@ -664,18 +664,21 @@ def test_an_interrupted_fresh_install_leaves_nothing_behind(world, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# overlays-12: sync reports kept files, refreshes the manifest, prunes
+# sync / add make the install exactly the source, but for what the overlay's
+# .gitignore / .ignore files match (and caches), which --prune clears too
 # --------------------------------------------------------------------------
 
-def test_sync_reports_a_differing_file_as_kept_not_unchanged(world, caplog):
+def test_sync_replaces_an_edited_file_and_backs_it_up(world, caplog):
     src, store = world
     _overlay(src, "demo", files=[("kb/D.md", "d\n")])
     _add(src, store, "demo")
-    (store / "overlays" / "demo" / "kb" / "D.md").write_text("edited\n", encoding="utf-8")
+    (store / "overlays" / "demo" / "kb" / "D.md").write_text("mine\n", encoding="utf-8")
     with caplog.at_level(logging.INFO):
-        _sync(store, repo=[str(src)])
-    assert any("kept kb/D.md" in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
-    assert not any("2 unchanged" in r.getMessage() for r in caplog.records)
+        assert _sync(store, repo=[str(src)]) == 0
+    assert (store / "overlays" / "demo" / "kb" / "D.md").read_text(encoding="utf-8") == "d\n"
+    backups = list((store / "install_backup").rglob("D.md"))
+    assert backups and backups[0].read_text(encoding="utf-8") == "mine\n"
+    assert any("replaced kb/D.md" in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
 
 
 def test_plain_sync_refreshes_the_manifest(world):
@@ -687,33 +690,65 @@ def test_plain_sync_refreshes_the_manifest(world):
     assert "NEW-ROUTE" in (store / "AGENTS.md").read_text(encoding="utf-8")
 
 
-def test_sync_prunes_files_dropped_upstream_unless_edited(world, tmp_path):
+def test_sync_removes_whatever_the_source_does_not_ship(world):
     src, store = world
     ov = _overlay(src, "demo", files=[("env.py", "OLD\n"), ("kb/K.md", "k\n")])
     _add(src, store, "demo")
     installed = store / "overlays" / "demo"
     (installed / "kb" / "K.md").write_text("edited here\n", encoding="utf-8")
+    (installed / "notes" / "mine.md").parent.mkdir()
+    (installed / "notes" / "mine.md").write_text("never upstream\n", encoding="utf-8")
     (ov / "env.py").rename(ov / "pre.env.py")
     (ov / "kb" / "K.md").unlink()
     assert _sync(store, repo=[str(src)]) == 0
-    assert not (installed / "env.py").exists(), "an unmodified file the source dropped is removed"
-    assert (installed / "pre.env.py").is_file()
-    assert (installed / "kb" / "K.md").is_file(), "an edited one is kept"
-    assert _sync(store, repo=[str(src)], prune=True) == 0
-    assert not (installed / "kb" / "K.md").exists()
-    backups = list((store / "install_backup").rglob("K.md"))
-    assert backups and backups[0].read_text(encoding="utf-8") == "edited here\n"
+    assert sorted(p.relative_to(installed).as_posix() for p in installed.rglob("*") if p.is_file()) == [
+        ".dotagents-install.json", "overlay.toml", "pre.env.py",
+    ], "exactly the source (and the install record)"
+    backed = {p.name: p.read_text(encoding="utf-8") for p in (store / "install_backup").rglob("*") if p.is_file()}
+    assert backed == {"K.md": "edited here\n", "mine.md": "never upstream\n"}, (
+        "what dotagents did not put there is backed up; env.py was unedited"
+    )
 
 
-def test_sync_overwrite_backs_up_what_it_replaces(world):
+def test_ignored_files_are_the_installs_own_until_prune(world):
     src, store = world
-    _overlay(src, "demo", files=[("kb/D.md", "d\n")])
+    ov = _overlay(src, "demo", files=[
+        ("kb/K.md", "k\n"), (".gitignore", "state/\n*.log\n"), ("lib/.ignore", "cache.db\n"),
+        ("state/from-the-source.txt", "a source checkout's local file\n"),
+    ])
     _add(src, store, "demo")
-    (store / "overlays" / "demo" / "kb" / "D.md").write_text("mine\n", encoding="utf-8")
-    assert _sync(store, repo=[str(src)], overwrite=True) == 0
-    assert (store / "overlays" / "demo" / "kb" / "D.md").read_text(encoding="utf-8") == "d\n"
-    backups = list((store / "install_backup").rglob("D.md"))
-    assert backups and backups[0].read_text(encoding="utf-8") == "mine\n"
+    installed = store / "overlays" / "demo"
+    assert not (installed / "state").exists(), "an ignored file in the source is not the overlay"
+    (installed / "state").mkdir()
+    (installed / "state" / "token").write_text("setup wrote this\n", encoding="utf-8")
+    (installed / "run.log").write_text("log\n", encoding="utf-8")
+    (installed / "lib" / "cache.db").write_text("db\n", encoding="utf-8")
+    (installed / "__pycache__").mkdir()
+    (installed / "__pycache__" / "x.pyc").write_bytes(b"\0")
+    (ov / "kb" / "K.md").write_text("k2\n", encoding="utf-8")
+    assert _sync(store, repo=[str(src)]) == 0
+    assert (installed / "kb" / "K.md").read_text(encoding="utf-8") == "k2\n"
+    for kept in ("state/token", "run.log", "lib/cache.db", "__pycache__/x.pyc"):
+        assert (installed / kept).is_file(), kept
+    assert _sync(store, repo=[str(src)], prune=True) == 0
+    for gone in ("state", "run.log", "lib/cache.db", "__pycache__"):
+        assert not (installed / gone).exists(), gone
+    assert (installed / "kb" / "K.md").is_file() and (installed / ".gitignore").is_file()
+
+
+def test_re_adding_an_installed_overlay_matches_the_source_too(world):
+    src, store = world
+    _overlay(src, "demo", files=[("kb/D.md", "d\n"), (".gitignore", "local/\n")])
+    _add(src, store, "demo")
+    installed = store / "overlays" / "demo"
+    (installed / "kb" / "D.md").write_text("mine\n", encoding="utf-8")
+    (installed / "local").mkdir()
+    (installed / "local" / "x").write_text("x\n", encoding="utf-8")
+    assert _add(src, store, "demo") == 0
+    assert (installed / "kb" / "D.md").read_text(encoding="utf-8") == "d\n"
+    assert (installed / "local" / "x").is_file()
+    assert _add(src, store, "demo", prune=True) == 0
+    assert not (installed / "local").exists()
 
 
 # --------------------------------------------------------------------------

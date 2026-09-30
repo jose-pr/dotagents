@@ -323,25 +323,23 @@ def _file_digest(path: Path) -> str:
 
 class InstallResult(object):
     """What :meth:`Overlay.install_to` did. Unpacks as the historical
-    ``(written, skipped, lines)``, ``skipped`` being unchanged + kept."""
+    ``(written, skipped, lines)``, ``skipped`` being the unchanged files."""
 
     def __init__(self) -> None:
         self.written = 0
         self.unchanged = 0
-        #: Files left alone that DIFFER from the source (hand edits, or a
-        #: source change not applied without ``--overwrite``).
-        self.kept: "list[str]" = []
-        #: Files removed because the source no longer ships them.
+        #: Files replaced although they were not what dotagents installed
+        #: (edited here): backed up first when a backup root was given.
+        self.replaced: "list[str]" = []
+        #: Files removed: not in the source, or cleared by ``prune``.
         self.removed: "list[str]" = []
-        #: Files the source no longer ships that were edited here, so kept.
-        self.orphans_kept: "list[str]" = []
-        #: Files copied to the backup root before being replaced or pruned.
+        #: Files copied to the backup root before being replaced or removed.
         self.backed_up: "list[str]" = []
         self.lines: "list[str]" = []
 
     @property
     def skipped(self) -> int:
-        return self.unchanged + len(self.kept)
+        return self.unchanged
 
     def __iter__(self):
         return iter((self.written, self.skipped, self.lines))
@@ -850,44 +848,49 @@ class Overlay:
             blocks.append(body.rstrip())
         return blocks, warnings
 
+    def ignore_rules(self):
+        """The overlay's ``.gitignore`` / ``.ignore`` rules (:mod:`dotagents._ignore`)."""
+        from dotagents._ignore import IgnoreRules
+
+        return IgnoreRules.from_tree(self.path, self.SKIP_PARTS)
+
     def install_to(
         self,
         dest_overlay_dir: Path,
         dry_run: bool,
-        overwrite: bool = False,
         *,
         prune: bool = False,
         backup_root: "Optional[Path]" = None,
         source: "Optional[dict[str, Any]]" = None,
     ) -> "InstallResult":
-        """Install the overlay as a *directory* under `<scope>/overlays/<name>/`:
-        the overlay is the discoverable unit.
+        """Make `dest_overlay_dir` (`<scope>/overlays/<name>/`) exactly this
+        overlay: every file it ships (see :meth:`files`) is installed or
+        replaced, its `overlay.toml` refreshed, and every other file in the
+        install is removed -- except what the overlay's ``.gitignore`` /
+        ``.ignore`` files match, plus its install record and tool caches
+        (:attr:`SKIP_PARTS`): those are the install's own (setup output,
+        local state) and are never copied, replaced or removed. `prune`
+        clears them too, leaving exactly the upstream files (and the record).
 
-        Copies every file the overlay ships (minus caches -- see :meth:`files`)
-        into `dest_overlay_dir`, create-if-absent so re-adding an overlay never
-        clobbers a file the user hand-edited inside the installed copy: such a
-        file is KEPT and reported (:attr:`InstallResult.kept`), never counted as
-        unchanged. `overwrite` (`sync --overwrite`) replaces files whose content
-        differs from the source, first copying each to `backup_root` when one is
-        given. The overlay's own `overlay.toml` is always refreshed, so a new
-        `routing` / `rules` / `requires` upstream reaches the installed copy.
+        A file replaced or removed that is not what dotagents installed there
+        (edited here, or never installed by it) is first copied to
+        `backup_root` when one is given (:attr:`InstallResult.backed_up`,
+        :attr:`InstallResult.replaced`); what `prune` clears is not backed up.
 
         The install record (:attr:`INSTALL_RECORD`) keeps the digest of every
         file written and `source` (where the overlay came from; the previous
-        value when `None`). A recorded file the source no longer ships is
-        removed when it is still exactly what was installed, and kept (and
-        reported) when it was edited here -- unless `prune`, which removes it
-        too (backed up like an overwrite). An install without a record (made
-        before records existed) prunes nothing.
-
-        Returns an :class:`InstallResult`, which still unpacks as the old
-        ``(written, skipped, lines)``."""
+        value when `None`)."""
         dest = Path(dest_overlay_dir)
         installed = Overlay(dest)
         record = installed.read_install_record()
         old_files: "dict[str, str]" = record.get("files", {})
         new_files: "dict[str, str]" = {}
         result = InstallResult()
+        rules = self.ignore_rules()
+
+        def local(rel: str, target: Path) -> bool:
+            """Is `target` something dotagents did not put there?"""
+            return old_files.get(rel) != _file_digest(target)
 
         def backup(rel: str, target: Path) -> None:
             if backup_root is None or dry_run:
@@ -904,27 +907,24 @@ class Overlay:
 
         for src in self.files():
             rel = src.relative_to(self.path).as_posix()
+            if rules.ignored(rel):
+                continue  # the source's local state, not the overlay
             target = dest / rel
             digest = _file_digest(src)
+            new_files[rel] = digest
             if target.is_file():
                 if _same_content(src, target):
                     result.lines.append("skip (exists): %s" % rel)
                     result.unchanged += 1
-                    new_files[rel] = digest
                     continue
-                if not overwrite:
-                    result.lines.append("keep (differs from source): %s" % rel)
-                    result.kept.append(rel)
-                    if rel in old_files:
-                        new_files[rel] = old_files[rel]
-                    continue
-                backup(rel, target)
+                if local(rel, target):
+                    backup(rel, target)
+                    result.replaced.append(rel)
                 result.lines.append("update: %s" % rel)
             else:
                 result.lines.append("install: %s" % rel)
             write(src, target)
             result.written += 1
-            new_files[rel] = digest
 
         # The manifest is dotagents' own metadata: always the source's.
         if self.manifest_path.is_file():
@@ -938,28 +938,58 @@ class Overlay:
                 write(self.manifest_path, target)
                 result.written += 1
 
-        # Files installed earlier that the source no longer ships.
-        for rel, digest in sorted(old_files.items()):
-            if rel in new_files:
-                continue
-            target = dest / rel
-            if not target.is_file():
-                continue
-            if _file_digest(target) != digest and not prune:
-                result.lines.append("keep (gone from source, modified here): %s" % rel)
-                result.orphans_kept.append(rel)
-                new_files[rel] = digest
-                continue
-            if _file_digest(target) != digest:
-                backup(rel, target)
-            result.lines.append("remove (gone from source): %s" % rel)
-            result.removed.append(rel)
+        # Everything else in the install: removed, unless it is the install's
+        # own (ignored, a cache) and `prune` was not asked for. An own
+        # directory is never walked into (a `.venv` can be large): skipped
+        # whole, or with `prune` removed whole.
+        if dest.is_dir():
+            keep = {self.MANIFEST_NAME, self.INSTALL_RECORD}
+
+            def join(base: str, name: str) -> str:
+                return "%s/%s" % (base, name) if base else name
+
+            def drop(rel: str, target: Path, own: bool) -> None:
+                if not own and local(rel, target):
+                    backup(rel, target)
+                result.lines.append("remove (%s): %s" % ("pruned" if own else "not in the source", rel))
+                result.removed.append(rel)
+                if not dry_run:
+                    target.unlink()
+
+            for dirpath, dirnames, filenames in os.walk(str(dest)):
+                base = Path(dirpath).relative_to(dest).as_posix()
+                base = "" if base == "." else base
+                descend = []
+                for name in sorted(dirnames):
+                    rel = join(base, name)
+                    target = Path(dirpath) / name
+                    if target.is_symlink():
+                        filenames.append(name)  # a link is an entry, not a tree
+                        continue
+                    own = name in self.SKIP_PARTS or rules.ignored(rel, True)
+                    if not own:
+                        descend.append(name)
+                    elif prune:
+                        result.lines.append("remove (pruned): %s/" % rel)
+                        result.removed.append(rel + "/")
+                        if not dry_run:
+                            shutil.rmtree(str(target))
+                dirnames[:] = descend
+                for name in sorted(filenames):
+                    rel = join(base, name)
+                    if rel in keep or rel in new_files:
+                        continue
+                    own = name.endswith(".pyc") or rules.ignored(rel)
+                    if own and not prune:
+                        continue
+                    drop(rel, Path(dirpath) / name, own)
             if not dry_run:
-                target.unlink()
-                parent = target.parent
-                while parent != dest and parent.is_dir() and not any(parent.iterdir()):
-                    parent.rmdir()
-                    parent = parent.parent
+                for dirpath, dirnames, filenames in os.walk(str(dest), topdown=False):
+                    here = Path(dirpath)
+                    if here != dest and not any(here.iterdir()):
+                        rel = here.relative_to(dest).as_posix()
+                        if prune or not rules.ignored(rel, True):
+                            here.rmdir()
 
         if not dry_run:
             dest.mkdir(parents=True, exist_ok=True)

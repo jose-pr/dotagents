@@ -200,7 +200,7 @@ def _session_env(scope, logger) -> "dict[str, str]":
 
 
 def _backup_root(scope, name: str) -> Path:
-    """Where `sync --overwrite` / `--prune` copy a file before replacing or
+    """Where `add` / `sync` copy a locally edited file before replacing or
     removing it: the store's timestamped ``install_backup/`` root."""
     from dotagents._merge import timestamped_backup_root
 
@@ -255,36 +255,31 @@ def _source_inside_install_root(scope, name: str, src: Path) -> "Optional[str]":
 
 
 def _log_install(logger, verb: str, name: str, result, dry_run: bool) -> None:
-    """One summary line per overlay, and a warning naming every file left
-    alone although it differs from the source."""
+    """One summary line per overlay, and a warning naming every file edited
+    here that the install replaced or removed (each backed up first)."""
     parts = ["%d file(s) %s" % (result.written, verb), "%d unchanged" % result.unchanged]
-    if result.kept:
-        parts.append("%d kept (differ from the source)" % len(result.kept))
     if result.removed:
-        parts.append("%d removed (gone from the source)" % len(result.removed))
+        parts.append("%d removed" % len(result.removed))
     logger.info("overlay %s: %s%s", name, ", ".join(parts), " [dry-run]" if dry_run else "")
-    if result.kept:
+    if result.replaced:
         logger.warning(
-            "overlay %s: kept %s -- they differ from the source (sync --overwrite "
-            "replaces them, backing each up first)", name, ", ".join(result.kept),
-        )
-    if result.orphans_kept:
-        logger.warning(
-            "overlay %s: kept %s -- the source no longer ships them but they were "
-            "edited here (sync --prune removes them, backing each up first)",
-            name, ", ".join(result.orphans_kept),
+            "overlay %s: replaced %s -- edited here; the install matches its source now", name,
+            ", ".join(result.replaced),
         )
     if result.backed_up:
         logger.info("overlay %s: backed up %s", name, ", ".join(result.backed_up))
 
 
 def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: bool,
-                 dry_run: bool, logger, setup_timeout: "Optional[int]" = None) -> "list[str]":
+                 dry_run: bool, logger, setup_timeout: "Optional[int]" = None,
+                 prune: bool = False) -> "list[str]":
     """Install (or re-install) overlay ``name`` from ``src`` into the scope,
     publish its skills and run its setup. A FRESH install is copied into a
     staging dir that discovery ignores and moved into place whole, and is
     rolled back (skills unpublished, dir removed) when its setup fails --
-    never left installed but unconfigured. Raises on setup failure. Returns
+    never left installed but unconfigured. An EXISTING install is made to
+    match the source (see `Overlay.install_to`; ``prune`` clears its ignored
+    files too), local edits backed up first. Raises on setup failure. Returns
     the skills the overlay ships."""
     from dotagents import _overlays, _skills
     from dotagents._sources import source_record
@@ -309,7 +304,8 @@ def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: b
                 _remove_tree(staging)
             raise
     else:
-        result = overlay.install_to(dest, dry_run, source=record)
+        result = overlay.install_to(dest, dry_run, prune=prune,
+                                    backup_root=_backup_root(scope, name), source=record)
     for line in result.lines:
         logger.info(line)
     _log_install(logger, "installed", name, result, dry_run)
@@ -414,7 +410,8 @@ class OverlayAdd(_RepoArgs):
     rebuilt from the pristine base over every installed overlay's routing and
     rules, in (priority, name) order. An overlay whose setup fails on a fresh
     install is rolled back; the block is recomposed over whatever is installed
-    either way."""
+    either way. Adding an overlay already installed makes it match its source
+    again, as ``sync`` does."""
 
     _parsername_ = "add"
 
@@ -437,6 +434,10 @@ class OverlayAdd(_RepoArgs):
     no_requires: bool = False
     "Do not install the overlays each manifest's `requires` names."
     ("--no-requires",)
+
+    prune: bool = False
+    "Re-adding an installed overlay: also clear its .gitignore/.ignore'd files and caches."
+    ("--prune",)
 
     dry_run: bool = False
     "Show what would happen without touching anything."
@@ -474,6 +475,7 @@ class OverlayAdd(_RepoArgs):
                 skills += _install_one(
                     scope, name, src, origin, copy=self.copy, no_setup=self.no_setup,
                     dry_run=self.dry_run, logger=self._logger_, setup_timeout=self.setup_timeout,
+                    prune=self.prune,
                 )
         finally:
             # Recompose the whole managed block from the pristine base over ALL
@@ -793,12 +795,13 @@ class OverlaySync(_RepoArgs):
     Each installed overlay is fetched again from the repo it was INSTALLED
     from (its install record) -- not from whichever repo now offers the name
     first -- unless ``--repo`` is given, which replaces each recorded source:
-    the overlay resolves through that chain instead. New files land and
-    ``overlay.toml`` is always refreshed; an existing file that differs from
-    the source is kept and reported unless ``--overwrite``, which replaces it
-    (backed up first). A file the source no longer ships is removed when it
-    is unmodified, and kept (reported) when it was edited here unless
-    ``--prune``. A ``requires`` added upstream is installed. The managed
+    the overlay resolves through that chain instead. The install is made to
+    match the source exactly: new and changed files land, ``overlay.toml`` is
+    refreshed, and files the source does not ship are removed -- a file edited
+    here is backed up first (``<store>/install_backup/``). What the overlay's
+    ``.gitignore`` / ``.ignore`` files match (setup output, local state) and
+    tool caches are left alone; ``--prune`` clears them too. A ``requires``
+    added upstream is installed. The managed
     block is recomposed over every installed overlay. An optional ``<glob>``
     filters which installed overlays to sync (``sync 'py*'``). A repo that
     cannot be loaded fails the sync (after the others are synced); a repo
@@ -814,12 +817,8 @@ class OverlaySync(_RepoArgs):
     "Copy skills into the shared dir instead of symlinking (no-symlink fallback)."
     ("--copy",)
 
-    overwrite: bool = False
-    "Replace installed files whose content differs from the source (backed up first)."
-    ("--overwrite",)
-
     prune: bool = False
-    "Also remove files the source dropped that were edited here (backed up first)."
+    "Also clear the overlay's .gitignore/.ignore'd files and caches: exactly the upstream files."
     ("--prune",)
 
     no_setup: bool = False
@@ -918,18 +917,18 @@ class OverlaySync(_RepoArgs):
                     failures.append(name)
                     continue
                 result = _overlays.Overlay(overlay_src).install_to(
-                    dest_dir, self.dry_run, overwrite=self.overwrite, prune=self.prune,
+                    dest_dir, self.dry_run, prune=self.prune,
                     backup_root=_backup_root(scope, name), source=source_record(origin),
                 )
                 for line in result.lines:
-                    if not line.startswith(("skip", "keep")):
+                    if not line.startswith("skip"):
                         self._logger_.info("sync: %s", line)
                 _log_install(self._logger_, "written", name, result, self.dry_run)
                 synced_sources[overlay.normalized_name] = overlay_src
                 if not self.dry_run:
                     _skills.resync_overlay_skills(
                         dest_dir, scope.shared_skills_dir, copy=self.copy,
-                        overwrite=self.overwrite, logger=self._logger_,
+                        overwrite=True, logger=self._logger_,  # a published copy matches too
                     )
                 rc = _run_setup(scope, dest_dir, name, no_setup=self.no_setup,
                                 dry_run=self.dry_run, logger=self._logger_,
