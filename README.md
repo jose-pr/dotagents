@@ -153,14 +153,14 @@ installed first, its `routing`/`rules` merge into `AGENTS.md`'s managed block, a
 `skills/<name>/` are symlinked (or `--copy`'d, for Windows / no-symlink) into the
 store's shared `skills/` so every agent sees the same skills.
 
-- `add` and `sync` never clobber a file you hand-edited inside an installed overlay:
-  a file that differs from the source is kept and reported. A fresh `add` whose setup
-  script fails is rolled back.
+- `add` and `sync` keep an installed overlay exactly as its source ships it: changed
+  files are replaced and files the source does not ship are removed, anything edited
+  there backed up under `<store>/install_backup/` first. What the overlay's
+  `.gitignore` / `.ignore` match (setup output, local state) and tool caches are left
+  alone; `--prune` clears them too. A fresh `add` whose setup script fails is rolled
+  back.
 - `sync` refreshes each overlay from the repo it was installed from (`--repo` replaces
-  that source), removes files the source dropped that you never edited, installs a
-  `requires` added upstream, and re-merges the managed block. `--overwrite` also
-  replaces edited files and `--prune` removes edited files the source dropped; both
-  back each file up under `<store>/install_backup/` first.
+  that source), installs a `requires` added upstream, and re-merges the managed block.
 - `remove` deletes the overlay's directory, unpublishes only the skills **it**
   published, and recomposes `AGENTS.md`'s managed block over the overlays that remain,
   so its rules and routing leave with it. It refuses an overlay another installed

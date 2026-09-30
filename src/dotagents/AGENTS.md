@@ -31,9 +31,9 @@ and an error saying a command is required, and exits 2.
 | Command | Contract |
 | --- | --- |
 | `init [-g] [--dest D] [--from SRC] [--bin-dir D] [--agents a,b] [--no-hooks] [--powershell-env-hook] [--force] [--dry-run]` | Merge the base block into `<store>/AGENTS.md`, write `<store>/bin/dotagents[.cmd]`, and per active agent (`--agents`, else detected + `claude`) write its include and hooks. `--force` replaces `AGENTS.md`'s content, backed up under `<store>/install_backup/<timestamp>/`. `--from` records its base in `<store>/dotagents/config.toml`. |
-| `overlays add NAME... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/`, publish its skills, run its `setup.py`, recompose the managed block. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused; a fresh install whose setup fails is rolled back. No name: exit 2. |
+| `overlays add NAME... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--prune] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does; `--prune` clears its ignored files too), publish its skills, run its `setup.py`, recompose the managed block. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused; a fresh install whose setup fails is rolled back. No name: exit 2. |
 | `overlays remove NAME... [-g] [--force] [--dry-run]` | Delete the overlay dirs, unpublish the skills they published, recompose the block. Refuses an overlay another installed overlay requires unless `--force`. No name: exit 2. |
-| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--overwrite] [--prune] [--no-setup] [--setup-timeout S] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it). Files that differ from the source are kept unless `--overwrite`; files the source dropped are removed if unedited, else kept unless `--prune`; replaced/pruned files are backed up under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/`, or its setup fails. |
+| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--prune] [--no-setup] [--setup-timeout S] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it): the install is made to match the source exactly: new and changed files land, `overlay.toml` is refreshed, files the source does not ship are removed; a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. What the overlay's `.gitignore` / `.ignore` files match (setup output, local state) and tool caches are left alone; `--prune` clears them too. Installs new `requires`. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/`, or its setup fails. |
 | `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` flagged) and what the repos offer. |
 | `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; manifest, setup, skills, file count, recorded source. No name: exit 2. |
 | `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
@@ -94,6 +94,22 @@ are skipped.
   `AGENTS_MD_PLACEHOLDER`, `base_agents_text` (`dotagents._resources`),
   `OVERLAY_ROOT_NOTE` (`dotagents._overlays`), `resolve_user_store`
   (`dotagents._scope`).
+
+## `dotagents._ignore`
+
+`.gitignore` / `.ignore` rules for a tree, as git reads them (pure stdlib) --
+what an installed overlay keeps as its own when `add` / `sync` mirror its source.
+
+- `IGNORE_FILES = (".gitignore", ".ignore")` — read in each directory in that
+  order, so `.ignore` wins (ripgrep's precedence); a deeper directory's rules win
+  over a shallower one's.
+- `parse(text, base="") -> list` — one file's rules (`base`: its directory):
+  comments, `\#` / `\!` escapes, `!` negation, leading/middle `/` anchoring,
+  trailing `/` directory-only, `*`, `?`, `[...]`, `**`.
+- `class IgnoreRules(rules=())` — `from_tree(root, skip_parts=())` collects every
+  ignore file under `root` (not descending into `skip_parts`); `ignored(rel,
+  is_dir=False) -> bool` decides a `/`-joined path, a path under an ignored
+  directory staying ignored whatever a later `!` says, as in git.
 
 ## `dotagents._resources`
 
@@ -198,9 +214,9 @@ returns the exit code.
   string arrays including multi-line strings, an integer); `None` plus one warning
   when it is not valid TOML.
 - `class InstallResult` — what `install_to` did: `written`, `unchanged`,
-  `kept` (differ from source), `removed` (dropped by the source), `orphans_kept`
-  (dropped but edited), `backed_up`, `lines`; property `skipped` (= unchanged +
-  kept). Unpacks as `(written, skipped, lines)`.
+  `replaced` (edited here, replaced by the source's file), `removed` (not in the
+  source, or cleared by `prune`), `backed_up`, `lines`; property `skipped`
+  (= unchanged). Unpacks as `(written, skipped, lines)`.
 - `class Overlay(path, store=None)` — one overlay directory; `os.PathLike`; equal
   and hashed by `path`; nothing read at construction.
   - Class data: `NAME_RE`, `RESERVED_NAMES` (Windows device names),
@@ -246,12 +262,16 @@ returns the exit code.
   - `rule_blocks(rel_paths) -> tuple[list[str], list[str]]` — `(blocks, warnings)`:
     each file's leading `- **` bullets up to its next `## ` heading; a path outside
     the overlay, missing or unreadable is a warning.
-  - `install_to(dest_overlay_dir, dry_run, overwrite=False, *, prune=False,
-    backup_root=None, source=None) -> InstallResult` — copy `files()` in; a file
-    that differs is kept unless `overwrite`; `overlay.toml` always refreshed; a
-    recorded file the source dropped is removed when unedited, kept unless `prune`
-    when edited; replaced/pruned files copied under `backup_root` first; writes the
-    install record (`source`, or the previous one when `None`).
+  - `ignore_rules() -> IgnoreRules` — the overlay's `.gitignore` / `.ignore`
+    rules (`dotagents._ignore`).
+  - `install_to(dest_overlay_dir, dry_run, *, prune=False, backup_root=None,
+    source=None) -> InstallResult` — make the install exactly the overlay:
+    `files()` installed or replaced, `overlay.toml` refreshed, every other file
+    removed; what `ignore_rules()` matches, the install record and `SKIP_PARTS`
+    caches are never copied, replaced or removed unless `prune` (which clears
+    them, without backup); a replaced or removed file that is not what dotagents
+    installed is copied under `backup_root` first; writes the install record
+    (`source`, or the previous one when `None`).
 - `OVERLAY_ROOT_NOTE: str` — the line emitted once above overlay routing lines that
   use `$<NAME>_OVERLAY_ROOT`.
 - `recompose_overlay_block(agents_md, base_block, overlays, dry_run, logger) -> bool`

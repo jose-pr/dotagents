@@ -73,10 +73,13 @@ store). Each overlay:
   reads that dir sees the same skills.
 
 `sync` refreshes each overlay from the repo it was installed from (`--repo` replaces
-that source for the run), removes files the source dropped that you never edited,
-installs a `requires` added upstream, and reports files that differ from the source
-instead of replacing them — `--overwrite` replaces them and `--prune` also removes
-edited files the source dropped, each backed up under `<store>/install_backup/` first.
+that source for the run) and makes the install exactly the source: changed files are
+replaced and files the source does not ship are removed, anything edited there backed
+up under `<store>/install_backup/` first. What the overlay's `.gitignore` / `.ignore`
+files match, and tool caches, belong to the install (a setup script's output, local
+state) and are left alone; `--prune` clears them too. A `requires` added upstream is
+installed. An installed overlay is upstream's copy, not a place for your edits: keep
+those in your own files (a `kb/` file, `AGENTS.local.md`).
 
 Removing an overlay deletes only its directory and unpublishes only the skills **it**
 published (a copy the user edited is left alone). Its lines in `AGENTS.md`'s managed

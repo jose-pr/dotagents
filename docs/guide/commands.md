@@ -163,7 +163,7 @@ Manages opt-in overlays **by name**. See [Overlays](overlays.md) for the full mo
 dotagents overlays add python engineering  # install into the scope, publish skills, merge rules/routing
 dotagents overlays list                    # installed (discovered) + available from the repos
 dotagents overlays sync 'py*'              # refresh installed overlays matching a glob
-dotagents overlays sync --overwrite        # also replace installed files you edited (backed up)
+dotagents overlays sync --prune            # also clear what .gitignore/.ignore protect: exactly upstream
 dotagents overlays remove python           # delete the overlay dir, unpublish its skills, un-merge its rules
 dotagents overlays show python             # describe one: manifest, requires, setup, skills, source (--json)
 ```
@@ -184,13 +184,17 @@ dotagents overlays show python             # describe one: manifest, requires, s
   it as done.
 - **`sync`** refreshes each installed overlay from the repo it was installed from
   (recorded in `<overlay>/.dotagents-install.json`); `--repo` replaces that recorded
-  source for the run. New files land and `overlay.toml` is refreshed; a file that
-  differs from the source is kept and reported, and `--overwrite` replaces it. A file
-  the source no longer ships is removed when you never edited it, and kept (reported)
-  when you did, unless `--prune`. `--overwrite` and `--prune` copy each file to
-  `<store>/install_backup/<timestamp>/overlays/<name>/` first. A `requires` added
-  upstream is installed, and a published skill copy you edited is kept unless
-  `--overwrite`.
+  source for the run. The install is made to match the source exactly: new and changed
+  files land, `overlay.toml` is refreshed, and files the source does not ship are
+  removed. A file you edited (or added) there is copied to
+  `<store>/install_backup/<timestamp>/overlays/<name>/` before it is replaced or
+  removed. What the overlay's `.gitignore` / `.ignore` files match — setup output,
+  local state — and tool caches (`__pycache__`, `.venv`, …) are the install's own and
+  left alone; `--prune` clears them too, leaving exactly the upstream files. A
+  `requires` added upstream is installed, and published skill copies are refreshed.
+  `add` of an overlay already installed does the same (with `--prune` too). Keep your
+  own additions outside `<store>/overlays/` — a `kb/` file of your own, an
+  `AGENTS.local.md` — where a sync never touches them.
 - **`remove`** deletes the overlay's directory, unpublishes the skills it published
   (and their links in Claude's skills dir), and recomposes `AGENTS.md`'s managed block over the overlays that remain, so its
   rules and routing leave with it. It refuses an overlay another installed overlay

@@ -96,7 +96,7 @@ python -m dotagents build-pyz --out dist/dotagents.pyz   # or build it (needs a 
   holds the git checkouts and remote sources the repos materialize (the directory carries a
   `.gitignore` of `*`, so a store kept in git never records them).
 - `install_backup/<timestamp>/` — what `init --force` replaced, and what
-  `overlays sync --overwrite` / `--prune` replaced or removed.
+  `overlays add` / `sync` replaced or removed that had been edited in an installed overlay.
 - `dotagents/cmds/` — only if you create it: your own command modules (see
   [Authoring → Custom commands](authoring.md#custom-commands)).
 - `dotagents/config.toml` — only after `init --from`: records that base, so a later
