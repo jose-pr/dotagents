@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-01
+
 ### Added
 
 - Your own additions to an installed overlay's file live at the same path under the
@@ -1370,7 +1372,8 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
   before dispatch; a no-op for a plain install.
 
-[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/jose-pr/dotagents/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/jose-pr/dotagents/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/jose-pr/dotagents/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/jose-pr/dotagents/compare/v0.6.1...v0.6.2
