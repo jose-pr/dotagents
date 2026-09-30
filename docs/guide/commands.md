@@ -88,7 +88,7 @@ the store's, else `dotagents` on `PATH`.
 | Hook | Command | Why |
 | --- | --- | --- |
 | `SessionStart` | writes `dotagents env --diff --format export` into `$CLAUDE_ENV_FILE` (`--into`: one block, replaced on every run; `PATH` as a prefix on the shell's own), then runs `dotagents context` | Claude sources `$CLAUDE_ENV_FILE` before each Bash command, so the env layers reach every command in the session; and it injects the hook's **stdout into the session context**, which is how the assembled context reaches the model. |
-| `CwdChanged` | when the new directory has a `.agents/`, appends `export AGENTS_PROJECT_ROOT=<it>` to `$CLAUDE_ENV_FILE`; then prints the directory's `AGENTS.md` if there is one | Re-pins the project root after a `cd` into another project, and surfaces that directory's `AGENTS.md`. |
+| `CwdChanged` | when the new directory has a `.agents/`, writes `export AGENTS_PROJECT_ROOT=<it>` into `$CLAUDE_ENV_FILE`, replacing the pin an earlier `cd` wrote; then prints the directory's `AGENTS.md` if there is one | Re-pins the project root after a `cd` into another project, and surfaces that directory's `AGENTS.md`. |
 
 On Windows each event gets a second, PowerShell-native handler (`shell:
 "powershell"`) that runs only when Claude Code would find no Git Bash, so a machine
@@ -105,11 +105,16 @@ without a prompt on each one requires `permissionDecision: "allow"`, which skips
 approval prompt (your deny and ask rules still apply). It is off by default, and a
 plain `init` removes one an earlier release wired.
 
-The env half **appends** (`>>`) and is guarded by `[ -n "$CLAUDE_ENV_FILE" ]`, both
-per the [hooks docs](https://code.claude.com/docs/en/hooks#persist-environment-variables):
-other hooks write to the same file, so `>` would discard their variables, and an
-unguarded redirect would create a file literally named `""` where the variable is
-unset. `$CLAUDE_ENV_FILE` exists only inside SessionStart/Setup/CwdChanged/FileChanged
+The env half never truncates the file and is guarded by `[ -n "$CLAUDE_ENV_FILE" ]`
+(see the [hooks docs](https://code.claude.com/docs/en/hooks#persist-environment-variables)):
+another hook may write to the same file, so each hook replaces only its own part --
+SessionStart its `env --into` block, CwdChanged its one `AGENTS_PROJECT_ROOT` line --
+and keeps every other line. Appending instead grew the file on every re-run (resume,
+compact, clear) and every `cd`, and Claude Code inlines it into each Bash command, which
+Git for Windows' bash cuts off at about 8 KB. Each run starts from a fresh environment
+(the hooks docs: previously sourced env files are not loaded in the hook's process), so
+SessionStart recomputes the whole diff: a value changed since the last run is updated,
+and one no env layer sets any more drops out. `$CLAUDE_ENV_FILE` exists only inside SessionStart/Setup/CwdChanged/FileChanged
 hook processes — it is absent from the session's own shell, so checking for it with
 `env | grep` proves nothing.
 

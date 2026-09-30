@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `--prune` (on `sync`, and now on `add`) clears what `.gitignore` / `.ignore`
   protect and the tool caches too, leaving exactly the upstream files.
 
+### Fixed
+
+- The Claude Code CwdChanged hook keeps one `AGENTS_PROJECT_ROOT` pin in
+  `$CLAUDE_ENV_FILE`, replacing the previous one, instead of appending a line on
+  every `cd` (the file is inlined into every Bash command). Other lines in the file
+  are kept. Re-run `dotagents init -g` to update an installed hook.
+
 ### Removed
 
 - `overlays sync --overwrite`: replacing is what `sync` always does now.
