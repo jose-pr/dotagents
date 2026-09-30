@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A command module whose class declares no `_parsername_` is named by its
+  class in kebab case again (`LeakCheck` -> `dotagents leak-check`). Since 0.6.2
+  (duho 0.6.0) such a command was only reachable as `dotagents LeakCheck`.
 - The Claude Code CwdChanged hook keeps one `AGENTS_PROJECT_ROOT` pin in
   `$CLAUDE_ENV_FILE`, replacing the previous one, instead of appending a line on
   every `cd` (the file is inlined into every Bash command). Other lines in the file

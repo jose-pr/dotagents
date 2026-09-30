@@ -68,6 +68,10 @@ are skipped.
 - `class Dotagents(LoggingArgs, Cli)` — the umbrella; field `cmdspath: list[str]`.
 - `CMDS_PATH_ENV = "AGENTS_CMDS_PATH"`.
 - Re-exported for command modules: `DotAgentsArgs`, `_write_stdout` (see below).
+- `kebab_name(class_name) -> str` — a discovered command's default name when its
+  class declares no `_parsername_`: `LeakCheck` -> `leak-check`, `HTTPServer` ->
+  `http-server`, `my_cmd` -> `my-cmd`. `_parsername_` is optional in a command
+  module; an explicit one always wins.
 
 ## `dotagents.cli._common`
 
@@ -75,7 +79,8 @@ are skipped.
   `global_scope: bool = False` (`--global`, `-g`) and
   `agents_dir: Optional[Path] = None` (`--agents-dir`); `resolve_scope(*,
   project_root=None) -> Scope` (via `_scope.resolve_scope`). Subclass it alone
-  (`class X(DotAgentsArgs)`), define `_parsername_` and `__call__(self) -> int`. A
+  (`class X(DotAgentsArgs)`), define `__call__(self) -> int` and optionally
+  `_parsername_` (default: `kebab_name` of the class, for a discovered module). A
   subclass may redeclare a field with the same type and default to change its help.
 - `_write_stdout(text) -> None` — write to stdout as UTF-8 whatever the console's
   encoding (a bare `print` fails on a non-Latin-1 character under cp1252).
