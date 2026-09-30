@@ -713,12 +713,16 @@ def test_sync_removes_whatever_the_source_does_not_ship(world):
 def test_ignored_files_are_the_installs_own_until_prune(world):
     src, store = world
     ov = _overlay(src, "demo", files=[
-        ("kb/K.md", "k\n"), (".gitignore", "state/\n*.log\n"), ("lib/.ignore", "cache.db\n"),
+        ("kb/K.md", "k\n"), (".gitignore", "state/\n*.log\n"), (".ignore", "lib/cache.db\n"),
         ("state/from-the-source.txt", "a source checkout's local file\n"),
+        # Only the root's ignore files count: this one is a template the overlay ships.
+        ("references/.gitignore", "*\n"), ("references/README.md", "template\n"),
     ])
     _add(src, store, "demo")
     installed = store / "overlays" / "demo"
     assert not (installed / "state").exists(), "an ignored file in the source is not the overlay"
+    assert (installed / "references" / ".gitignore").is_file() and (installed / "references" / "README.md").is_file()
+    (installed / "lib").mkdir()
     (installed / "state").mkdir()
     (installed / "state" / "token").write_text("setup wrote this\n", encoding="utf-8")
     (installed / "run.log").write_text("log\n", encoding="utf-8")

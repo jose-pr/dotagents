@@ -849,10 +849,11 @@ class Overlay:
         return blocks, warnings
 
     def ignore_rules(self):
-        """The overlay's ``.gitignore`` / ``.ignore`` rules (:mod:`dotagents._ignore`)."""
+        """The rules of the ``.gitignore`` / ``.ignore`` at the overlay's root
+        (:mod:`dotagents._ignore`); one in a subdirectory is an ordinary file."""
         from dotagents._ignore import IgnoreRules
 
-        return IgnoreRules.from_tree(self.path, self.SKIP_PARTS)
+        return IgnoreRules.for_root(self.path)
 
     def install_to(
         self,
@@ -866,8 +867,8 @@ class Overlay:
         """Make `dest_overlay_dir` (`<scope>/overlays/<name>/`) exactly this
         overlay: every file it ships (see :meth:`files`) is installed or
         replaced, its `overlay.toml` refreshed, and every other file in the
-        install is removed -- except what the overlay's ``.gitignore`` /
-        ``.ignore`` files match, plus its install record and tool caches
+        install is removed -- except what the ``.gitignore`` / ``.ignore`` at
+        the overlay's root match, plus its install record and tool caches
         (:attr:`SKIP_PARTS`): those are the install's own (setup output,
         local state) and are never copied, replaced or removed. `prune`
         clears them too, leaving exactly the upstream files (and the record).
