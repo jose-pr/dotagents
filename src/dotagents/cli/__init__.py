@@ -204,6 +204,27 @@ def _buildable(commands, file=None) -> "list":
     return out
 
 
+def kebab_name(class_name: str) -> str:
+    """A command class's default subcommand name: ``LeakCheck`` ->
+    ``leak-check``, ``HTTPServer`` -> ``http-server``, ``my_cmd`` -> ``my-cmd``."""
+    import re
+
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "-", class_name)
+    return re.sub(r"[-_]+", "-", spaced).strip("-").lower()
+
+
+def _named(commands) -> "list":
+    """``commands``, each discovered class that declares no ``_parsername_``
+    of its own given the kebab-case of its class name (:func:`kebab_name`).
+    ``_parsername_`` is optional in a command module: duho < 0.6 derived that
+    name itself, and from 0.6.0 it uses the class name as it is (``LeakCheck``),
+    which broke ``dotagents leak-check`` for a module that relied on it."""
+    for command in commands:
+        if isinstance(command, type) and "_parsername_" not in vars(command):
+            command._parsername_ = kebab_name(command.__name__)
+    return commands
+
+
 def _discover_modules(directory: Path) -> "list":
     """duho's per-directory discovery, made resilient per MODULE.
 
@@ -234,7 +255,7 @@ def _discover_modules(directory: Path) -> "list":
             "the whole directory, not just itself",
             directory,
         )
-        return _buildable(discover_commands(directory))
+        return _named(_buildable(discover_commands(directory)))
     commands = []
     for file in sorted(directory.glob("*.py")):
         if file.name.startswith("_"):
@@ -245,7 +266,7 @@ def _discover_modules(directory: Path) -> "list":
         except (Exception, SystemExit) as exc:  # noqa: BLE001 -- see docstring
             _LOGGER.warning("skipping command module %s: %s", file, _describe(exc))
             continue
-        commands.extend(_buildable(found, file))
+        commands.extend(_named(_buildable(found, file)))
     return commands
 
 

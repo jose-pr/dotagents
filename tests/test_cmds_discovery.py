@@ -208,6 +208,44 @@ def test_discover_honors_cmdspath_flag(monkeypatch, tmp_path):
     assert "toy" in names
 
 
+UNNAMED = '''\
+"""A command module that declares no _parsername_."""
+
+from duho import Cmd, LoggingArgs
+
+
+class LeakCheck(LoggingArgs, Cmd):
+    """Named by its class."""
+
+    def __call__(self) -> int:
+        print("ran")
+        return 0
+'''
+
+
+def test_a_command_without_parsername_gets_its_kebab_class_name(monkeypatch, tmp_path, capsys):
+    """`_parsername_` is optional: duho >= 0.6.0 names such a class `LeakCheck`,
+    dotagents gives it `leak-check` (what duho < 0.6 derived)."""
+    cmds = tmp_path / "extra"
+    _write(cmds / "leak_check.py", UNNAMED)
+    _write(cmds / "toy.py", TOY)
+    monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user" / ".agents"))
+    monkeypatch.setenv("AGENTS_CMDS_PATH", str(cmds))
+    monkeypatch.chdir(tmp_path)
+    names = _names(cli._discover([]))
+    assert "leak-check" in names and "LeakCheck" not in names
+    assert "toy" in names, "an explicit _parsername_ wins"
+    assert cli.main(["leak-check"]) == 0 and "ran" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("class_name, expected", [
+    ("LeakCheck", "leak-check"), ("HTTPServer", "http-server"), ("my_cmd", "my-cmd"),
+    ("Sync2Remote", "sync2-remote"), ("A", "a"), ("Already-Kebab", "already-kebab"),
+])
+def test_kebab_name(class_name, expected):
+    assert cli.kebab_name(class_name) == expected
+
+
 # --------------------------------------------------------------------------- #
 # Scope walk: user AND project both contribute
 # --------------------------------------------------------------------------- #
