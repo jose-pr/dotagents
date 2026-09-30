@@ -553,10 +553,22 @@ class ClaudeAgent(Agent):
     # `%q` quotes the path for the bash that sources the file: a `'` in a
     # directory name used to leave an unterminated quote that broke every
     # later source of $CLAUDE_ENV_FILE (and a crafted name ran commands).
+    # The file keeps ONE pin, the latest: an earlier `export
+    # AGENTS_PROJECT_ROOT=` line is dropped and every other line (another
+    # hook's) kept. Appending grew the file by a line per `cd`, and Claude Code
+    # inlines it into every Bash command (see SESSION_START_COMMAND). Pure bash,
+    # 3.2-compatible (macOS): no mapfile, no external command, so a `cd` stays
+    # instant.
     CWD_CHANGED_COMMAND = (
         'if [ -n "$CLAUDE_ENV_FILE" ] && [ -d .agents ]; then '
-        "printf 'export AGENTS_PROJECT_ROOT=%q\\n' \"$(pwd -W 2>/dev/null || pwd)\" "
-        '>> "$CLAUDE_ENV_FILE"; fi; '
+        "kept=(); "
+        'if [ -f "$CLAUDE_ENV_FILE" ]; then '
+        'while IFS= read -r line || [ -n "$line" ]; do '
+        'case "$line" in "export AGENTS_PROJECT_ROOT="*) ;; *) kept+=("$line") ;; esac; '
+        'done < "$CLAUDE_ENV_FILE"; fi; '
+        '{ for line in ${kept[@]+"${kept[@]}"}; do printf \'%s\\n\' "$line"; done; '
+        "printf 'export AGENTS_PROJECT_ROOT=%q\\n' \"$(pwd -W 2>/dev/null || pwd)\"; "
+        '} > "$CLAUDE_ENV_FILE"; fi; '
         "[ -f AGENTS.md ] && cat AGENTS.md || true"
     )
 

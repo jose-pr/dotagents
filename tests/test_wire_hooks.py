@@ -302,7 +302,7 @@ class TestDualShellSessionHooks:
         project's root."""
         cmd = ClaudeAgent.CWD_CHANGED_COMMAND
         assert "export AGENTS_PROJECT_ROOT=" in cmd
-        assert '>> "$CLAUDE_ENV_FILE"' in cmd
+        assert ">>" not in cmd, "one pin replaced, not a line appended per cd"
         assert "[ -d .agents ]" in cmd, "only a directory that IS a project re-pins"
         assert "pwd -W" in cmd, "Git Bash needs the Windows-native form for a Windows Python"
 
@@ -323,6 +323,30 @@ class TestDualShellSessionHooks:
         pinned = env_file.read_text(encoding="utf-8")
         assert pinned.startswith("export AGENTS_PROJECT_ROOT=")  # %q-quoted
         assert tmp_path.name in pinned
+
+    @pytest.mark.skipif(BASH is None, reason="needs a working bash")
+    def test_cwd_changed_keeps_one_pin_and_other_lines(self, tmp_path):
+        """Each `cd` replaces the pin instead of appending another line, and a
+        line another hook wrote to the same file stays."""
+        import subprocess
+
+        env_file = tmp_path / "env.sh"
+        env_file.write_text("export OTHER_HOOK='kept'\nexport AGENTS_PROJECT_ROOT='/old'\n", encoding="utf-8")
+        for name in ("one", "two", "three"):
+            project = tmp_path / name
+            (project / ".agents").mkdir(parents=True)
+            proc = subprocess.run(
+                [BASH, "-c", ClaudeAgent.CWD_CHANGED_COMMAND], cwd=str(project),
+                env={**os.environ, "CLAUDE_ENV_FILE": str(env_file)}, capture_output=True, text=True,
+            )
+            assert proc.returncode == 0, proc.stderr
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+        assert lines[0] == "export OTHER_HOOK='kept'"
+        pins = [ln for ln in lines if ln.startswith("export AGENTS_PROJECT_ROOT=")]
+        assert len(pins) == 1 and pins[0].endswith("three"), lines
+        sourced = subprocess.run([BASH, "-c", 'source "$1" && printf %s "$OTHER_HOOK"', "bash", str(env_file)],
+                                 capture_output=True, text=True)
+        assert sourced.stdout == "kept", sourced.stderr
 
     def test_idempotent_no_duplication_across_shell_variants(self, tmp_path):
         dest, root = _scope_with_skills(tmp_path), tmp_path / "claude"
