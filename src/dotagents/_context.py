@@ -309,6 +309,44 @@ def _get_skills_listing(scope: _scope.Scope) -> str:
     return "\n\n## Available Skills (Opt-in)\n" + "\n".join(lines) + "\n"
 
 
+def local_additions(scope: _scope.Scope) -> "list[tuple[Path, list[Path]]]":
+    """The user's own additions to installed overlay files: for each ``.md``
+    an overlay ships in a subdirectory (``kb/``, ``flows/``, ``rules/`` ... --
+    not ``skills/``, whose published copies sit at the same path in a store),
+    every store's file at the same relative path (``~/.agents/kb/RUST.md`` for
+    an overlay's ``kb/RUST.md``), in store order. An overlay file is upstream's
+    copy, replaced by ``overlays sync``; the addition is where the user's own
+    text lives. A store's root files (``AGENTS.md``, ``env.py``) never match:
+    only a file in a subdirectory counts."""
+    stores = list(scope.stores)
+    out: "list[tuple[Path, list[Path]]]" = []
+    for overlay in scope.overlays:
+        for path in overlay.files():
+            rel = path.relative_to(overlay.path)
+            if path.suffix.lower() != ".md" or len(rel.parts) < 2 or rel.parts[0] == "skills":
+                continue
+            found = [store / rel for store in stores if (store / rel).is_file()]
+            if found:
+                out.append((path, found))
+    return out
+
+
+def _get_local_additions_listing(scope: _scope.Scope) -> str:
+    """The local additions (:func:`local_additions`) as a markdown section, or ''."""
+    additions = local_additions(scope)
+    if not additions:
+        return ""
+    lines = [
+        "- `%s` -- also read %s" % (path, ", ".join("`%s`" % p for p in found))
+        for path, found in additions
+    ]
+    return (
+        "\n\n## Local additions to overlay files\n"
+        "The user's own additions: read each with the overlay file it extends; it wins on conflict.\n"
+        + "\n".join(lines) + "\n"
+    )
+
+
 def _resolve_and_filter_sources(
     agent: _agents.Agent, scope: _scope.Scope
 ) -> "tuple[list[tuple[str, Path, Path | None]], list[Path]]":
@@ -424,6 +462,7 @@ def assemble_context(
     if not source_paths:
         return ""
     text += _get_skills_listing(scope)
+    text += _get_local_additions_listing(scope)
     return text
 
 
@@ -440,11 +479,12 @@ def assemble_context_data(
           "sources": [<absolute source path>, ...],  # after harness subtraction
           "context": <assembled markdown text, minus the skills listing>,
           "skills": [{"name": ..., "description": ..., "path": <SKILL.md>}, ...],
+          "local_additions": [{"overlay_file": ..., "local": [<path>, ...]}, ...],
         }
     ``context`` is the same assembled(+inlined, with ``inline=True``) text the
-    markdown format emits, but WITHOUT the skills listing appended -- skills are
-    their own structured field so a consumer can render them separately and
-    keep the opt-in distinction."""
+    markdown format emits, but WITHOUT the skills and local-additions listings
+    appended -- both are their own structured fields so a consumer can render
+    them separately."""
     text, source_paths = _assemble(agent, scope, inline, expand_vars)
 
     skills = [
@@ -457,4 +497,8 @@ def assemble_context_data(
         "sources": source_paths,
         "context": text,
         "skills": skills,
+        "local_additions": [
+            {"overlay_file": str(path), "local": [str(p) for p in found]}
+            for path, found in local_additions(scope)
+        ],
     }

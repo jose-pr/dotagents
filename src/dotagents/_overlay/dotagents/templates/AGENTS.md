@@ -16,6 +16,12 @@ Startup: annotate that you read `{{AGENTS_MD}}`.
   config). These files say what lives there and how to work in it, so reading them
   first is cheaper than rediscovering it from the source. How `.agents/` is
   populated — real directory, symlink, committed or not — is yours to decide.
+- **Local additions to overlay files**: an overlay file (`$<NAME>_OVERLAY_ROOT/<path>`)
+  is upstream's copy, and `dotagents overlays sync` replaces it. The user's own
+  additions live at the same `<path>` under this config directory and the project's
+  `.agents/`: when you read an overlay file, read those too — they extend it and win on
+  conflict (`dotagents context` lists the ones it finds). Never write user-specific text
+  into an overlay file; put it there.
 - **Global-config misses**: if these instructions caused a mistake or rework, or you
   have an improvement idea, record it and move on — don't edit the config:
   `dotagents findings add -g "<one line>" -b "<what happened, evidence>"`. Read the
