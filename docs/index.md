@@ -23,8 +23,8 @@ carry the opinions.
   composable **overlays** you layer in explicitly with `dotagents overlays add
   <name>`. The overlays in this repo are examples — payloads riding on dotagents,
   swappable for your own; see [Overlays](guide/overlays.md) for what each ships.
-  An installed overlay is kept exactly as upstream ships it (what its `.gitignore` /
-  `.ignore` protect stays yours), so your own changes live in your own files.
+  An installed overlay is kept exactly as upstream ships it (what the `.gitignore` /
+  `.ignore` at its root protect stays yours), so your own changes live in your own files.
 - **Two scopes.** Config installs into a **user** store (`~/.agents`, configurable)
   or a **project** store (`<project>/.agents`). Overlays, skills, commands, and env
   files all resolve across the same scope precedence.

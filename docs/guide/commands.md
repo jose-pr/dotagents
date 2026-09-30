@@ -188,8 +188,8 @@ dotagents overlays show python             # describe one: manifest, requires, s
   files land, `overlay.toml` is refreshed, and files the source does not ship are
   removed. A file you edited (or added) there is copied to
   `<store>/install_backup/<timestamp>/overlays/<name>/` before it is replaced or
-  removed. What the overlay's `.gitignore` / `.ignore` files match — setup output,
-  local state — and tool caches (`__pycache__`, `.venv`, …) are the install's own and
+  removed. What the `.gitignore` / `.ignore` at the overlay's root match — setup
+  output, local state — and tool caches (`__pycache__`, `.venv`, …) are the install's own and
   left alone; `--prune` clears them too, leaving exactly the upstream files. A
   `requires` added upstream is installed, and published skill copies are refreshed.
   `add` of an overlay already installed does the same (with `--prune` too). Keep your

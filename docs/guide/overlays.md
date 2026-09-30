@@ -75,8 +75,9 @@ store). Each overlay:
 `sync` refreshes each overlay from the repo it was installed from (`--repo` replaces
 that source for the run) and makes the install exactly the source: changed files are
 replaced and files the source does not ship are removed, anything edited there backed
-up under `<store>/install_backup/` first. What the overlay's `.gitignore` / `.ignore`
-files match, and tool caches, belong to the install (a setup script's output, local
+up under `<store>/install_backup/` first. What the `.gitignore` / `.ignore` at the
+overlay's root match (an ignore file in a subdirectory is just a file it ships), and
+tool caches, belong to the install (a setup script's output, local
 state) and are left alone; `--prune` clears them too. A `requires` added upstream is
 installed. An installed overlay is upstream's copy, not a place for your edits: keep
 those in your own files (a `kb/` file, `AGENTS.local.md`).

@@ -155,8 +155,8 @@ store's shared `skills/` so every agent sees the same skills.
 
 - `add` and `sync` keep an installed overlay exactly as its source ships it: changed
   files are replaced and files the source does not ship are removed, anything edited
-  there backed up under `<store>/install_backup/` first. What the overlay's
-  `.gitignore` / `.ignore` match (setup output, local state) and tool caches are left
+  there backed up under `<store>/install_backup/` first. What the `.gitignore` /
+  `.ignore` at the overlay's root match (setup output, local state) and tool caches are left
   alone; `--prune` clears them too. A fresh `add` whose setup script fails is rolled
   back.
 - `sync` refreshes each overlay from the repo it was installed from (`--repo` replaces

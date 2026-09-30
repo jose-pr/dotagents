@@ -12,9 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `overlays sync`, and `overlays add` of an overlay already installed, make the
   install exactly what the source ships: changed files are replaced and files the
   source does not ship are removed, including ones edited or added in the install
-  (each backed up under `<store>/install_backup/` first). What the overlay's
-  `.gitignore` / `.ignore` files match, and tool caches, are the install's own and
-  left alone. Previously an edited file was kept unless `--overwrite`.
+  (each backed up under `<store>/install_backup/` first). What the `.gitignore` /
+  `.ignore` at the overlay's root match (read as git reads a `.gitignore`; one in a
+  subdirectory is an ordinary file), and tool caches, are the install's own and left
+  alone. Previously an edited file was kept unless `--overwrite`.
 - `--prune` (on `sync`, and now on `add`) clears what `.gitignore` / `.ignore`
   protect and the tool caches too, leaving exactly the upstream files.
 
