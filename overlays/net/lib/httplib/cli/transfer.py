@@ -573,6 +573,7 @@ def run(args):
         if args.prepare_download(headers):
             return 0  # --skip-existing: the file is there
         args.connection = args.connector()  # --interface / --local-port / --pinnedpubkey
+        args.dns = args.dns_override()  # --dns-servers / --dns-*-addr / --dns-interface / --doh-url
         if args.limit_rate:
             limited = args.rate()
             if data is not None and limited:

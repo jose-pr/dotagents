@@ -10,7 +10,26 @@ from ._duho import NS, Arg
 from .args import Group
 from .errors import EXIT_CONNECT, EXIT_TIMEOUT
 from .connector import Connector, parse_local_port, parse_pins, resolve_interface
-from .netconn import resolving, unix_socket_handlers
+from .netconn import DnsOverride, resolving, unix_socket_handlers
+
+
+def _interface_addresses(name):
+    """One address per family of the interface ``name`` (netimps), for
+    --dns-interface; none found is curl's 45."""
+    from .connector import EXIT_INTERFACE
+    from .errors import LocalError
+    from .netconn import _netimps
+
+    netimps = _netimps('--dns-interface', ('get_interfaces', 'resolve_wire'))
+    found = {}
+    for iface in netimps.get_interfaces():
+        if iface.name == name:
+            for ip in iface.ips:
+                address = str(getattr(ip, 'ip', ip))
+                found.setdefault(':' in address, address)
+    if not found:
+        raise LocalError(EXIT_INTERFACE, "Couldn't bind to interface '%s'" % name)
+    return list(found.values())
 
 
 def parse_rate(spec, flag):
@@ -68,6 +87,30 @@ class ConnectionArgs(Group):
     speed_time: Arg[Optional[int], NS(metavar='SECONDS')] = None
     "How long the transfer may stay below --speed-limit (default 30)"
     ("-y", "--speed-time")
+
+    dns_servers: Arg[Optional[str], NS(metavar='ADDRESSES')] = None
+    "Resolve names with these nameservers (IP[:PORT],...; needs netimps)"
+    ("--dns-servers",)
+
+    dns_ipv4_addr: Arg[Optional[str], NS(metavar='ADDRESS')] = None
+    "Send IPv4 DNS queries from this address (needs netimps)"
+    ("--dns-ipv4-addr",)
+
+    dns_ipv6_addr: Arg[Optional[str], NS(metavar='ADDRESS')] = None
+    "Send IPv6 DNS queries from this address (needs netimps)"
+    ("--dns-ipv6-addr",)
+
+    dns_interface: Arg[Optional[str], NS(metavar='INTERFACE')] = None
+    "Send DNS queries from this interface's addresses (needs netimps)"
+    ("--dns-interface",)
+
+    doh_url: Arg[Optional[str], NS(metavar='URL')] = None
+    "Resolve names with DNS over HTTPS at this https URL (needs netimps)"
+    ("--doh-url",)
+
+    doh_insecure: bool = False
+    "Do not verify the DNS-over-HTTPS server's certificate"
+    ("--doh-insecure",)
 
     ignore_content_length: bool = False
     "Read the body until the server closes, whatever Content-Length says"
@@ -178,7 +221,26 @@ class ConnectionArgs(Group):
         """The name-resolution override (-4 / -6 / --resolve / --connect-to)
         for the length of the transfer."""
         family = socket.AF_INET if self.ipv4 else socket.AF_INET6 if self.ipv6 else 0
-        return resolving(family, self.resolve or (), self.connect_to or ())
+        return resolving(family, self.resolve or (), self.connect_to or (), getattr(self, 'dns', None))
+
+    def dns_override(self):
+        """The :class:`DnsOverride` the DNS flags ask for, or ``None``."""
+        sources = [a for a in (self.dns_ipv4_addr, self.dns_ipv6_addr) if a]
+        if self.dns_interface:
+            sources += _interface_addresses(self.dns_interface)
+        if not (self.dns_servers or sources or self.doh_url):
+            return None
+        servers = [s.strip() for s in (self.dns_servers or '').split(',') if s.strip()]
+        context = None
+        if self.doh_url:
+            from .tls import build_ssl_context
+            from .errors import LocalError
+
+            try:
+                context = build_ssl_context(self.doh_insecure, cacert=self.cacert, capath=self.capath)
+            except LocalError:
+                context = build_ssl_context(self.doh_insecure)
+        return DnsOverride(servers, sources, self.doh_url, context, self.connect_timeout or self.max_time)
 
     def connector(self):
         """The :class:`Connector` the transfer's connections share; an

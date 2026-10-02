@@ -64,7 +64,8 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
   --pinnedpubkey`; connection `-x -U -p --noproxy -L --max-redirs --location-trusted
   --post301 --post302 --post303 -m --connect-timeout --timeout -4 -6 --resolve
   --connect-to --unix-socket --interface --local-port --limit-rate -Y/--speed-limit
-  -y/--speed-time --ignore-content-length --retry --retry-delay --retry-max-time
+  -y/--speed-time --ignore-content-length --dns-servers --dns-ipv4-addr --dns-ipv6-addr
+  --dns-interface --doh-url --doh-insecure --retry --retry-delay --retry-max-time
   --retry-connrefused --retry-all-errors`; cookies `-b -c`; and the no-ops `-q -g
   --http1.1 -N -# --no-progress-meter --styled-output --no-keepalive
   --keepalive-time --tcp-nodelay --ssl-no-revoke --ssl-revoke-best-effort
@@ -104,6 +105,15 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     server's chain against a PEM list (revoked: 60); `--pinnedpubkey
     sha256//BASE64[;...]` or a public-key file requires the server's key (exit
     90), checked even with `-k`.
+  - **Name resolution by netimps** (`pip install 'netimps>=0.3.3'`; without it
+    these flags are refused, exit 2): `--dns-servers IP[:PORT],...` asks those
+    nameservers (UDP, TCP when truncated), `--dns-ipv4-addr` /
+    `--dns-ipv6-addr` / `--dns-interface` send the queries from that address,
+    `--doh-url https://...` asks a DNS-over-HTTPS endpoint, verified as the
+    transfer is (`--cacert`) unless `--doh-insecure`, and never through a
+    proxy. A name none of them resolves is exit 6; an address needs no lookup.
+    `--doh-url` is checked against real curl; the `--dns-servers` family needs a
+    curl built with c-ares, which most are not (they refuse it, exit 2).
   - **Connections**: `-4`/`-6`, `--resolve HOST:PORT:ADDR` and `--connect-to
     HOST1:PORT1:HOST2:PORT2` steer only name resolution, so the `Host` header,
     TLS name and certificate check stay the URL's; `--unix-socket PATH` needs a

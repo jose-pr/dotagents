@@ -14,27 +14,25 @@ _HIDDEN = NS(help=argparse.SUPPRESS)
 #: The fields below; a set one is refused.
 UNSUPPORTED_ARGS = [
     'append', 'cert_status', 'config', 'crlf', 'delegation', 'disable_eprt',
-    'disable_epsv', 'dns_interface', 'dns_ipv4_addr', 'dns_ipv6_addr',
-    'dns_servers', 'doh_url', 'egd_file', 'engine', 'expect100_timeout',
-    'fail_early', 'false_start', 'ftp_account', 'ftp_alternative_to_user',
-    'ftp_create_dirs', 'ftp_method', 'ftp_pasv', 'ftp_skip_pasv_ip',
-    'ftp_ssl_ccc_mode', 'ftp_ssl_ccc', 'ftp_ssl_control',
-    'happy_eyeballs_timeout_ms', 'haproxy_protocol', 'hostpubmd5', 'http1_0',
-    'http2_prior_knowledge', 'http2', 'http3', 'ip_resolve',
-    'junk_session_cookies', 'krb', 'libcurl', 'list_only', 'login_options',
-    'mail_auth', 'mail_from', 'mail_rcpt_allowfails', 'mail_rcpt', 'metalink',
-    'negotiate', 'next', 'no_progress_bar', 'ntlm_wb', 'ntlm',
-    'parallel_immediate', 'parallel_max', 'parallel', 'path_as_is', 'preproxy',
-    'proto_default', 'proto_redir', 'proto', 'proxy_anyauth', 'proxy_basic',
-    'proxy_cacert', 'proxy_capath', 'proxy_cert_type', 'proxy_cert',
-    'proxy_ciphers', 'proxy_crlfile', 'proxy_digest', 'proxy_header',
-    'proxy_insecure', 'proxy_key_type', 'proxy_key', 'proxy_negotiate',
-    'proxy_ntlm', 'proxy_pass', 'proxy_pinnedpubkey', 'proxy_service_name',
-    'proxy_ssl_allow_beast', 'proxy_ssl_auto_client_cert',
-    'proxy_tls13_ciphers', 'proxy_tlsauthtype', 'proxy_tlspassword',
-    'proxy_tlsuser', 'proxy_tlsv1', 'pubkey', 'quote', 'random_file', 'raw',
-    'sasl_authzid', 'sasl_ir', 'service_name', 'socks4', 'socks4a',
-    'socks5_basic', 'socks5_gssapi_nec', 'socks5_gssapi_service',
+    'disable_epsv', 'egd_file', 'engine', 'expect100_timeout', 'fail_early',
+    'false_start', 'ftp_account', 'ftp_alternative_to_user', 'ftp_create_dirs',
+    'ftp_method', 'ftp_pasv', 'ftp_skip_pasv_ip', 'ftp_ssl_ccc_mode',
+    'ftp_ssl_ccc', 'ftp_ssl_control', 'happy_eyeballs_timeout_ms',
+    'haproxy_protocol', 'hostpubmd5', 'http1_0', 'http2_prior_knowledge',
+    'http2', 'http3', 'ip_resolve', 'junk_session_cookies', 'krb', 'libcurl',
+    'list_only', 'login_options', 'mail_auth', 'mail_from',
+    'mail_rcpt_allowfails', 'mail_rcpt', 'metalink', 'negotiate', 'next',
+    'no_progress_bar', 'ntlm_wb', 'ntlm', 'parallel_immediate', 'parallel_max',
+    'parallel', 'path_as_is', 'preproxy', 'proto_default', 'proto_redir',
+    'proto', 'proxy_anyauth', 'proxy_basic', 'proxy_cacert', 'proxy_capath',
+    'proxy_cert_type', 'proxy_cert', 'proxy_ciphers', 'proxy_crlfile',
+    'proxy_digest', 'proxy_header', 'proxy_insecure', 'proxy_key_type',
+    'proxy_key', 'proxy_negotiate', 'proxy_ntlm', 'proxy_pass',
+    'proxy_pinnedpubkey', 'proxy_service_name', 'proxy_ssl_allow_beast',
+    'proxy_ssl_auto_client_cert', 'proxy_tls13_ciphers', 'proxy_tlsauthtype',
+    'proxy_tlspassword', 'proxy_tlsuser', 'proxy_tlsv1', 'pubkey', 'quote',
+    'random_file', 'raw', 'sasl_authzid', 'sasl_ir', 'service_name', 'socks4',
+    'socks4a', 'socks5_basic', 'socks5_gssapi_nec', 'socks5_gssapi_service',
     'socks5_gssapi', 'socks5_hostname', 'socks5', 'ssl_allow_beast',
     'ssl_auto_client_cert', 'ssl_reqd', 'ssl', 'sslv2', 'sslv3',
     'suppress_connect_headers', 'tcp_fastopen', 'telnet_option',
@@ -74,20 +72,10 @@ class UnsupportedArgs(Group):
     disable_epsv: Arg[bool, _HIDDEN] = False
     ('--disable-epsv',)
 
-    dns_interface: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='INTERFACE')] = None
-    ('--dns-interface',)
 
-    dns_ipv4_addr: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='ADDRESS')] = None
-    ('--dns-ipv4-addr',)
 
-    dns_ipv6_addr: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='ADDRESS')] = None
-    ('--dns-ipv6-addr',)
 
-    dns_servers: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='ADDRESSES')] = None
-    ('--dns-servers',)
 
-    doh_url: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='URL')] = None
-    ('--doh-url',)
 
     egd_file: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
     ('--egd-file',)
