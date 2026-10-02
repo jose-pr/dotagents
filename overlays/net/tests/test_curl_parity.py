@@ -255,6 +255,53 @@ def _pipe(a, b):
     back.join(5)
 
 
+def _digest_ok(header, method):
+    """Whether ``header`` answers _digest_proxy's challenge (agent / s3cret)."""
+    import hashlib
+
+    if not header or not header.lower().startswith("digest "):
+        return False
+    fields = dict(re.findall(r'(\w+)="?([^",]*)"?', header[7:]))
+
+    def md5(text):
+        return hashlib.md5(text.encode()).hexdigest()
+
+    ha1, ha2 = md5("agent:proxy:s3cret"), md5("%s:%s" % (method, fields.get("uri", "")))
+    if fields.get("qop"):
+        want = md5(":".join([ha1, fields.get("nonce", ""), fields.get("nc", ""), fields.get("cnonce", ""),
+                             fields["qop"], ha2]))
+    else:
+        want = md5("%s:%s:%s" % (ha1, fields.get("nonce", ""), ha2))
+    return fields.get("username") == "agent" and fields.get("response") == want
+
+
+def _digest_proxy(offer_basic=False):
+    """A proxy that wants Digest (MD5, qop=auth) -- or Basic too, when it
+    offers both -- on plain requests and on CONNECT, answering each 407 on the
+    same connection; once authenticated it tunnels or answers itself."""
+    def handle(conn, head):
+        while True:
+            first = head.split(b"\r\n", 1)[0].decode()
+            method, target = first.split(" ")[:2]
+            auth = _header(head, "Proxy-Authorization")
+            if _digest_ok(auth, method) or (offer_basic and auth == BASIC):
+                break
+            challenge = ['Proxy-Authenticate: Digest realm="proxy", nonce="n0nce", qop="auth", algorithm=MD5']
+            if offer_basic:
+                challenge.append('Proxy-Authenticate: Basic realm="proxy"')
+            _respond(conn, "407 Proxy Authentication Required", b"auth", challenge)
+            head = _read_head(conn)
+            if not head:
+                return
+        if method == "CONNECT":
+            host, port = target.rsplit(":", 1)
+            upstream = socket.create_connection((host, int(port)), timeout=5)
+            conn.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            return _pipe(conn, upstream)
+        _respond(conn, "200 OK", b"via-proxy")
+    return handle
+
+
 def _proxy(require=BASIC, connect_status=None, plain_status=None, drop_connect=False, header="Proxy-Authorization"):
     """A forward proxy: ``require`` is the Proxy-Authorization it wants (407
     otherwise) in ``header``; ``connect_status`` answers every CONNECT, ``drop_connect``
@@ -371,6 +418,7 @@ def world(request, tmp_path_factory):
         ("proxy_403", _proxy(connect_status="403 Forbidden")),
         ("proxy_502", _proxy(connect_status="502 Bad Gateway", plain_status="502 Bad Gateway")),
         ("proxy_drops", _proxy(drop_connect=True)),
+        ("digest_proxy", _digest_proxy()), ("digest_or_basic_proxy", _digest_proxy(offer_basic=True)),
         ("echo", _echo), ("header_proxy", _header_proxy), ("stalls", _stalls), ("longer_than_said", _longer_than_said), ("sixty_k", _sixty_k),
         ("no_colon", _no_colon), ("plain_at_once", _plain_at_once), ("range_ignored", _range_ignored), ("range_416", _range_416),
         ("bad_gzip", _bad_gzip), ("unknown_encoding", _unknown_encoding), ("many_headers", _many_headers),
@@ -595,6 +643,26 @@ SCENARIOS = [
     ("https proxy wants a client certificate", lambda w: ["-x", w["https_proxy_mutual"], "--proxy-cacert", _ca(w), X],
      {}, True, {}),
     ("agent proxy over https", lambda w: ["--proxy-insecure", X], {"AGENTS_PROXY": "@https_proxy"}, True, {}),
+    # Proxy Digest: nothing up front, the 407 answered once.
+    ("--proxy-digest", lambda w: ["-x", P(w, "digest_proxy"), "--proxy-digest", "-U", "agent:s3cret", X],
+     {}, False, {}),
+    ("--proxy-digest wrong password", lambda w: ["-x", P(w, "digest_proxy"), "--proxy-digest", "-U", "agent:bad", X],
+     {}, False, {}),
+    ("--proxy-digest credentials in the URL", lambda w: ["-x", P(w, "digest_proxy").replace("//", "//agent:s3cret@"),
+                                                         "--proxy-digest", X], {}, False, {}),
+    ("--proxy-anyauth picks Digest", lambda w: ["-x", P(w, "digest_or_basic_proxy"), "--proxy-anyauth", "-U",
+                                                "agent:s3cret", X], {}, False, {}),
+    ("--proxy-anyauth, Digest only", lambda w: ["-x", P(w, "digest_proxy"), "--proxy-anyauth", "-U", "agent:s3cret",
+                                                X], {}, False, {}),
+    ("Basic to a Digest proxy", lambda w: ["-x", P(w, "digest_proxy"), "-U", "agent:s3cret", X], {}, False, {}),
+    ("--proxy-digest over CONNECT", lambda w: w["ca"] + ["-x", P(w, "digest_proxy"), "--proxy-digest", "-U",
+                                                         "agent:s3cret", S(w)], {}, True, {}),
+    ("--proxy-digest over CONNECT, wrong password", lambda w: w["ca"] + ["-x", P(w, "digest_proxy"), "--proxy-digest",
+                                                                         "-U", "agent:bad", S(w)], {}, True, {}),
+    ("--proxy-anyauth over CONNECT", lambda w: w["ca"] + ["-x", P(w, "digest_or_basic_proxy"), "--proxy-anyauth",
+                                                          "-U", "agent:s3cret", S(w)], {}, True, {}),
+    ("--proxy-digest with -p", lambda w: ["-p", "-x", P(w, "digest_proxy"), "--proxy-digest", "-U", "agent:s3cret",
+                                          w["echo"] + "/d"], {}, False, {}),
     # --proxy-header: to the proxy only -- the plain request to it, or the CONNECT.
     ("--proxy-header, plain proxying", lambda w: ["-x", P(w, "header_proxy"), "--proxy-header", "X-P: 1", "-H",
                                                   "X-O: 2", X], {}, False, {}),

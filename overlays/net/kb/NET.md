@@ -64,7 +64,8 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
   --pinnedpubkey`; connection `-x -U -p -0/--http1.0 --proxy-header --proxy-basic --socks4
   --socks4a --socks5 --socks5-hostname --socks5-basic --preproxy --proxy-insecure --proxy-cacert
   --proxy-capath --proxy-cert --proxy-cert-type --proxy-key --proxy-key-type --proxy-pass --proxy-ciphers
-  --proxy-crlfile --proxy-pinnedpubkey --proxy-tlsv1 --noproxy -L --max-redirs --location-trusted
+  --proxy-crlfile --proxy-pinnedpubkey --proxy-tlsv1 --proxy-digest --proxy-anyauth --noproxy -L
+  --max-redirs --location-trusted
   --post301 --post302 --post303 -m --connect-timeout --timeout -4 -6 --resolve
   --connect-to --unix-socket --interface --local-port --limit-rate -Y/--speed-limit
   -y/--speed-time --ignore-content-length --dns-servers --dns-ipv4-addr --dns-ipv6-addr
@@ -111,7 +112,11 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     `--proxy-key` / `--proxy-pass`, `--proxy-crlfile`,
     `--proxy-pinnedpubkey`, `--proxy-ciphers`, `--proxy-tlsv1` -- never by
     `--cacert` or `-k`, which stay the origin's; an https target goes through
-    it with the origin's TLS inside the proxy's.
+    it with the origin's TLS inside the proxy's. `--proxy-digest` sends no credential up front and
+    answers the proxy's 407 once with Digest (MD5 / SHA-256), on the plain
+    request or on the CONNECT; `--proxy-anyauth` takes Digest when offered, else
+    Basic. NTLM, Negotiate and SOCKS5 GSS-API are not available (no standard-
+    library implementation): those flags stay refused.
   - **Shaping a connection**: `--interface` takes an IP address, a host
     (`host!NAME`) or an interface (`if!NAME`, or a bare name; by name only with
     netimps installed), `--local-port N[-M]` the first port of the range that

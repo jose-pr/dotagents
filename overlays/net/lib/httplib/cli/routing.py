@@ -67,13 +67,15 @@ class AgentProxyHandler(urllib.request.BaseHandler):
 
     handler_order = 90  # before the (empty) ProxyHandler at 100
 
-    def __init__(self, plan, tunnel_http=False, headers=None, socks=None, preproxy=None, proxy_tls=None):
+    def __init__(self, plan, tunnel_http=False, headers=None, socks=None, preproxy=None, proxy_tls=None,
+                 proxy_auth=None):
         self.plan = plan
         self.tunnel_http = tunnel_http  # -p: CONNECT for http URLs too
         self.headers = dict(headers or {})  # --proxy-header: to the proxy only
         self.socks = socks  # the plan's proxy when it is SOCKS (connector.Socks)
         self.preproxy = preproxy  # --preproxy: SOCKS to reach the HTTP proxy
         self.proxy_tls = proxy_tls  # an https:// proxy's TLS (tls.ProxyTLS)
+        self.proxy_auth = proxy_auth  # --proxy-digest / --proxy-anyauth (connector.ProxyAuth)
 
     def _apply(self, req):
         plan = self.plan
@@ -100,8 +102,10 @@ class AgentProxyHandler(urllib.request.BaseHandler):
         elif not req.full_url.startswith(plan.gateway_base):
             req.full_url = agent_proxy.prefix_url(req.full_url, plan.proxy, plan.endpoint)
         for_proxy = dict(self.headers)
-        if plan.authorization:
+        if plan.authorization and self.proxy_auth is None:
             for_proxy[plan.auth_header] = plan.authorization
+        if self.proxy_auth is not None:
+            req.proxy_auth = self.proxy_auth  # answers the CONNECT's 407
         if plan.endpoint is None and getattr(req, '_tunnel_host', None):
             req.tunnel_headers = for_proxy  # on the CONNECT alone
         else:

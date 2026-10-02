@@ -25,7 +25,7 @@ from .errors import (EXIT_CONNECT, EXIT_EMPTY_REPLY, EXIT_HTTP, EXIT_PARTIAL, EX
                      LocalError, Retry)
 from .request import has_header
 from .redirects import CurlRedirectHandler
-from .connector import ConnectHTTPHandler, ConnectHTTPSHandler, Socks
+from .connector import ConnectHTTPHandler, ConnectHTTPSHandler, ProxyAuth, Socks
 from .routing import AgentProxyHandler, check_proxy_syntax
 from .tls import UnusableContext
 
@@ -218,8 +218,16 @@ def build_opener(args, plan, context, transfer, removed):
         ConnectHTTPHandler(args.connection), ConnectHTTPSHandler(args.connection, context)]
     handlers.append(urllib.request.ProxyHandler({}))
     if plan is not None:
+        proxy_auth = _proxy_auth(args, plan)
         handlers.append(AgentProxyHandler(plan, tunnel_http=args.proxytunnel, headers=args.proxy_headers(),
-                                          socks=args.socks, preproxy=args.socks_pre, proxy_tls=args.proxy_tls()))
+                                          socks=args.socks, preproxy=args.socks_pre, proxy_tls=args.proxy_tls(),
+                                          proxy_auth=proxy_auth))
+        if proxy_auth is not None:
+            # Plain proxying: urllib's handlers answer the 407, once.
+            passwords = _ProxyPassword(proxy_auth.user, proxy_auth.password)
+            handlers.append(_OnceProxyDigest(passwords))
+            if proxy_auth.anyauth:
+                handlers.append(_OnceProxyBasic(passwords))
     if args.request_target:
         handlers.append(RequestTarget(args.request_target))
     handlers.append(RequestLog(transfer))
@@ -530,6 +538,51 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
         # -o / -D not writable, or stdout closed under us: curl's (23).
         return fail(args, transfer, EXIT_WRITE, 'Failure writing output to destination: %s' % exc)
     return 0
+
+
+class _ProxyPassword(urllib.request.HTTPPasswordMgr):
+    """The proxy's credentials for any realm and URL: urllib's proxy Digest
+    looks them up by the TARGET URL, which no proxy entry would match."""
+
+    def __init__(self, user, password):
+        urllib.request.HTTPPasswordMgr.__init__(self)
+        self.credentials = (user, password)
+
+    def find_user_password(self, realm, authuri):
+        return self.credentials
+
+
+class _OnceProxyDigest(urllib.request.ProxyDigestAuthHandler):
+    """urllib's proxy Digest, answering a 407 once as curl does (urllib
+    itself retries five times, then reports a 401 of its own)."""
+
+    def http_error_407(self, req, fp, code, msg, headers):
+        if req.has_header('Proxy-authorization'):
+            return None
+        return urllib.request.ProxyDigestAuthHandler.http_error_407(self, req, fp, code, msg, headers)
+
+
+class _OnceProxyBasic(urllib.request.ProxyBasicAuthHandler):
+    def http_error_407(self, req, fp, code, msg, headers):
+        offered = headers.get_all('Proxy-Authenticate') or []
+        if req.has_header('Proxy-authorization') or not any(c.strip().lower().startswith('basic') for c in offered):
+            return None  # answered already, or Basic is not offered (urllib would raise)
+        return urllib.request.ProxyBasicAuthHandler.http_error_407(self, req, fp, code, msg, headers)
+
+
+def _proxy_auth(args, plan):
+    """A :class:`ProxyAuth` for --proxy-digest / --proxy-anyauth with
+    credentials (-U, else the proxy URL's), or ``None``."""
+    if not (args.proxy_digest or args.proxy_anyauth) or plan is None or plan.endpoint is not None:
+        return None
+    if args.proxy_user:
+        user, _, password = args.proxy_user.partition(':')
+    else:
+        found = agent_proxy.userinfo(args.effective_proxy() or agent_proxy.proxy_url())
+        if not found:
+            return None
+        user, password = found
+    return ProxyAuth(user, password, anyauth=args.proxy_anyauth)
 
 
 def _socks_for(args, plan, proxy):

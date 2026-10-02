@@ -333,6 +333,61 @@ class _Reader(io.RawIOBase):
         return self.transport.recv_into(buffer)
 
 
+class ProxyAuth(object):
+    """--proxy-digest / --proxy-anyauth: nothing up front; the proxy's 407
+    is answered once, with Digest (or, for anyauth, Basic when that is all it
+    offers)."""
+
+    def __init__(self, user, password, anyauth=False):
+        self.user, self.password, self.anyauth = user, password, anyauth
+
+    def answer(self, challenges, method, uri):
+        """The ``Proxy-Authorization`` for ``challenges`` (the 407's
+        ``Proxy-Authenticate`` values), or ``None`` when none is ours."""
+        for challenge in challenges:
+            if challenge.strip().lower().startswith('digest'):
+                return digest_authorization(challenge, self.user, self.password, method, uri)
+        if self.anyauth and any(c.strip().lower().startswith('basic') for c in challenges):
+            token = base64.b64encode(('%s:%s' % (self.user, self.password)).encode('utf-8')).decode('ascii')
+            return 'Basic ' + token
+        return None
+
+
+def digest_authorization(challenge, user, password, method, uri):
+    """RFC 7616 Digest (MD5 / SHA-256, ``qop=auth`` when offered) for one
+    challenge."""
+    import os
+
+    fields = urllib.request.parse_keqv_list(urllib.request.parse_http_list(challenge.split(None, 1)[1]))
+    algorithm = (fields.get('algorithm') or 'MD5').upper()
+    digest = {'MD5': hashlib.md5, 'SHA-256': hashlib.sha256}.get(algorithm.replace('-SESS', ''))
+    if digest is None:
+        return None
+
+    def h(text):
+        return digest(text.encode('utf-8')).hexdigest()
+
+    realm, nonce = fields.get('realm', ''), fields.get('nonce', '')
+    ha1 = h('%s:%s:%s' % (user, realm, password))
+    cnonce = os.urandom(8).hex()
+    if algorithm.endswith('-SESS'):
+        ha1 = h('%s:%s:%s' % (ha1, nonce, cnonce))
+    ha2 = h('%s:%s' % (method, uri))
+    qops = [q.strip() for q in fields.get('qop', '').split(',') if q.strip()]
+    parts = ['username="%s"' % user, 'realm="%s"' % realm, 'nonce="%s"' % nonce, 'uri="%s"' % uri]
+    if 'auth' in qops:
+        response = h('%s:%s:00000001:%s:auth:%s' % (ha1, nonce, cnonce, ha2))
+        parts += ['cnonce="%s"' % cnonce, 'nc=00000001', 'qop=auth']
+    else:
+        response = h('%s:%s:%s' % (ha1, nonce, ha2))
+    parts.append('response="%s"' % response)
+    if fields.get('opaque'):
+        parts.append('opaque="%s"' % fields['opaque'])
+    if fields.get('algorithm'):
+        parts.append('algorithm=%s' % fields['algorithm'])
+    return 'Digest ' + ', '.join(parts)
+
+
 def _check_pins(sock, pins):
     if pins is None:
         return
@@ -389,7 +444,7 @@ class Connector(object):
             raise
         return sock
 
-    def connection_class(self, base, tunnel_headers=None, socks=None, proxy_tls=None):
+    def connection_class(self, base, tunnel_headers=None, socks=None, proxy_tls=None, proxy_auth=None):
         """``base`` (``HTTPConnection`` / ``HTTPSConnection``) bound to this
         connector, its CONNECT carrying ``tunnel_headers`` too, its TCP
         connection made through ``socks`` (a :class:`Socks`) when given."""
@@ -414,6 +469,42 @@ class Connector(object):
                 merged = dict(headers or {})
                 merged.update(tunnel_headers or {})
                 base.set_tunnel(self, host, port, merged)
+
+            if proxy_auth is not None:
+                def _tunnel(self):
+                    """The CONNECT, answering one 407 the way --proxy-digest /
+                    --proxy-anyauth ask (http.client's own drops the challenge).
+                    A refusal raises as http.client's does."""
+                    target = '%s:%d' % (self._tunnel_host, self._tunnel_port)
+                    authorization = None
+                    for _ in range(2):
+                        lines = ['CONNECT %s HTTP/1.1' % target, 'Host: %s' % target]
+                        lines += ['%s: %s' % item for item in self._tunnel_headers.items()]
+                        if authorization:
+                            lines.append('Proxy-Authorization: %s' % authorization)
+                        self.send(('\r\n'.join(lines) + '\r\n\r\n').encode('latin-1'))
+                        response = self.response_class(self.sock, method='CONNECT')
+                        response.begin()
+                        if response.status == 200:
+                            return
+                        challenges = response.headers.get_all('Proxy-Authenticate') or []
+                        if response.status != 407 or authorization or not challenges:
+                            break
+                        authorization = proxy_auth.answer(challenges, 'CONNECT', target)
+                        if authorization is None:
+                            break
+                        if response.length:
+                            response.read()  # the 407's body, before the same connection is reused
+                        if response.will_close:
+                            self.sock.close()
+                            self.sock = None
+                            self._reopen()
+                    self.close()
+                    raise OSError('Tunnel connection failed: %d %s' % (response.status, response.reason.strip()))
+
+            def _reopen(self):
+                raw = self._create_connection((self.host, self.port), self.timeout, self.source_address)
+                self.sock = proxy_tls.context.wrap_socket(raw, server_hostname=self.host) if proxy_tls else raw
 
             def connect(self):
                 if proxy_tls is None:
@@ -444,7 +535,8 @@ class ConnectHTTPHandler(urllib.request.HTTPHandler):
 
     def http_open(self, req):
         klass = self.connector.connection_class(http.client.HTTPConnection, getattr(req, 'tunnel_headers', None),
-                                                getattr(req, 'socks_via', None), getattr(req, 'proxy_tls', None))
+                                                getattr(req, 'socks_via', None), getattr(req, 'proxy_tls', None),
+                                                getattr(req, 'proxy_auth', None))
         return self.do_open(klass, req)
 
 
@@ -460,7 +552,8 @@ class ConnectHTTPSHandler(urllib.request.HTTPSHandler):
 
     def https_open(self, req):
         klass = self.connector.connection_class(http.client.HTTPSConnection, getattr(req, 'tunnel_headers', None),
-                                                getattr(req, 'socks_via', None), getattr(req, 'proxy_tls', None))
+                                                getattr(req, 'socks_via', None), getattr(req, 'proxy_tls', None),
+                                                getattr(req, 'proxy_auth', None))
         kwargs = {'context': self._context}
         if hasattr(self, '_check_hostname'):  # Python < 3.12
             kwargs['check_hostname'] = self._check_hostname

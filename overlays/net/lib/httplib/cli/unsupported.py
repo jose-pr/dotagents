@@ -24,17 +24,16 @@ UNSUPPORTED_ARGS = [
     'mail_rcpt_allowfails', 'mail_rcpt', 'metalink', 'negotiate', 'next',
     'no_progress_bar', 'ntlm_wb', 'ntlm', 'parallel_immediate', 'parallel_max',
     'parallel', 'path_as_is', 'proto_default', 'proto_redir', 'proto',
-    'proxy_anyauth', 'proxy_digest', 'proxy_negotiate', 'proxy_ntlm',
-    'proxy_service_name', 'proxy_ssl_allow_beast',
-    'proxy_ssl_auto_client_cert', 'proxy_tls13_ciphers', 'proxy_tlsauthtype',
-    'proxy_tlspassword', 'proxy_tlsuser', 'pubkey', 'quote', 'random_file',
-    'raw', 'sasl_authzid', 'sasl_ir', 'service_name', 'socks5_gssapi_nec',
-    'socks5_gssapi_service', 'socks5_gssapi', 'ssl_allow_beast',
-    'ssl_auto_client_cert', 'ssl_reqd', 'ssl', 'sslv2', 'sslv3',
-    'suppress_connect_headers', 'tcp_fastopen', 'telnet_option',
-    'tftp_blksize', 'tftp_no_options', 'tls13_ciphers', 'tlsauthtype',
-    'tlspassword', 'tlsuser', 'tr_encoding', 'trace_ascii', 'trace_time',
-    'trace', 'use_ascii', 'variable', 'vsock', 'xattr',
+    'proxy_negotiate', 'proxy_ntlm', 'proxy_service_name',
+    'proxy_ssl_allow_beast', 'proxy_ssl_auto_client_cert',
+    'proxy_tls13_ciphers', 'proxy_tlsauthtype', 'proxy_tlspassword',
+    'proxy_tlsuser', 'pubkey', 'quote', 'random_file', 'raw', 'sasl_authzid',
+    'sasl_ir', 'service_name', 'socks5_gssapi_nec', 'socks5_gssapi_service',
+    'socks5_gssapi', 'ssl_allow_beast', 'ssl_auto_client_cert', 'ssl_reqd',
+    'ssl', 'sslv2', 'sslv3', 'suppress_connect_headers', 'tcp_fastopen',
+    'telnet_option', 'tftp_blksize', 'tftp_no_options', 'tls13_ciphers',
+    'tlsauthtype', 'tlspassword', 'tlsuser', 'tr_encoding', 'trace_ascii',
+    'trace_time', 'trace', 'use_ascii', 'variable', 'vsock', 'xattr',
 ]
 
 
@@ -224,8 +223,6 @@ class UnsupportedArgs(Group):
     proto: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PROTOCOLS')] = None
     ('--proto',)
 
-    proxy_anyauth: Arg[bool, _HIDDEN] = False
-    ('--proxy-anyauth',)
 
 
 
@@ -234,8 +231,6 @@ class UnsupportedArgs(Group):
 
 
 
-    proxy_digest: Arg[bool, _HIDDEN] = False
-    ('--proxy-digest',)
 
 
 

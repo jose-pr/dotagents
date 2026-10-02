@@ -92,6 +92,14 @@ class ConnectionArgs(Group):
     "Use Basic for -U (the default; a no-op)"
     ("--proxy-basic",)
 
+    proxy_digest: bool = False
+    "Answer the proxy's 407 with Digest for -U (nothing sent up front)"
+    ("--proxy-digest",)
+
+    proxy_anyauth: bool = False
+    "Answer the proxy's 407 with what it asks: Digest, else Basic"
+    ("--proxy-anyauth",)
+
     noproxy: Arg[Optional[str], NS(metavar='HOSTS')] = None
     "Hosts that bypass the proxy (* for all); replaces NO_PROXY"
     ("--noproxy",)
