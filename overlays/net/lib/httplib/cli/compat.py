@@ -13,6 +13,8 @@ The differences, measured against curl's own builds (8.17-8.22):
   (77) and the netrc file when it is read (26);
 - an unknown protocol name in ``--proto`` / ``--proto-redir``: a usage error
   (exit 2) from 8.18 on; before, the name is ignored;
+- a ``-w`` variable newer than the version (``WRITE_OUT_SINCE``): a warning
+  ("unknown --write-out variable") and nothing written;
 - a name a ``socks5://`` / ``socks4://`` proxy needs resolved here and that
   does not resolve: 97 before 8.20 (worded "Could not resolve proxy: <the
   proxy>"), 6 from 8.20 on.
@@ -122,6 +124,16 @@ def socks_unresolved(host, proxy_host):
     if version() >= (8, 20, 0):
         return 6, 'Could not resolve host: %s' % host
     return 97, 'Could not resolve proxy: %s' % proxy_host
+
+
+#: The curl release that added a -w variable, where it is newer than 8.17.
+WRITE_OUT_SINCE = {'size_delivered': (8, 20, 0)}
+
+
+def knows_write_out(name):
+    """Whether the curl answered as knows the -w variable ``name``."""
+    since = WRITE_OUT_SINCE.get(name)
+    return since is None or version() >= since
 
 
 def rejects_unknown_protocols():

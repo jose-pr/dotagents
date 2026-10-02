@@ -169,8 +169,8 @@ def test_format_from_a_file(origin, tmp_path, monkeypatch, capsysbinary):
 
 
 @pytest.mark.parametrize("fmt, named", [
-    ("%{time_connect}", "%{time_connect}"),
-    ("%{json}", "%{json}"),
+    ("%{ssl_verify_result}", "%{ssl_verify_result}"),
+    ("%{certs}", "%{certs}"),
     ("%output{f.txt}x", "%output{f.txt}"),
 ])
 def test_an_unreportable_variable_is_refused_before_sending(fmt, named, origin, monkeypatch, capsysbinary):

@@ -943,3 +943,57 @@ def test_a_url_glob_is_refused_not_sent_as_typed(world):
     for url in ("/{a,b}", "/file[1-3].txt", "/x[a-c:2]"):
         rc, code, out, err = _run(["-sS", world["origin"] + url], {}, real=False)
         assert rc == 2 and b"pass -g" in err, err
+
+
+# --------------------------------------------------------------------------- #
+# -w's timings, addresses and %{json}: times differ run to run, so they are
+# checked for curl's format and order; everything else is compared exactly.
+# --------------------------------------------------------------------------- #
+_TIMES = ("time_namelookup", "time_connect", "time_appconnect", "time_pretransfer", "time_posttransfer",
+          "time_starttransfer", "time_total", "time_redirect")
+_SAME = ("exitcode", "http_code", "remote_ip", "remote_port", "local_ip", "num_connects", "size_header",
+         "size_delivered", "http_connect", "proxy_used", "num_retries", "url.host", "url.port", "url.path",
+         "urle.path", "referer", "conn_id", "xfer_id")
+_NUMBERS = ("local_port", "speed_download", "speed_upload", "size_request")
+
+
+@pytest.mark.parametrize("name,argv,tls", [
+    ("http", lambda w: [w["origin"] + "/t"], False),
+    ("https", lambda w: w["ca"] + [S(w)], True),
+    ("through a proxy", lambda w: ["-x", P(w, "open_proxy"), X], False),
+    ("https through a CONNECT", lambda w: w["ca"] + ["-x", P(w, "open_proxy"), S(w)], True),
+    ("refused", lambda w: [P(w, "dead") + "/"], False),
+    ("with a referer", lambda w: ["-e", "http://ref.example/", w["origin"] + "/t"], False),
+])
+def test_write_out_timings_and_addresses(world, name, argv, tls):
+    if tls and not world["tls"]:
+        pytest.skip("no openssl to make the TLS origin's certificate with")
+    names = _TIMES + _SAME + _NUMBERS
+    fmt = "|".join("%{" + v + "}" for v in names)
+    args = ["-s", "-o", os.devnull, "-w", fmt] + argv(world)
+    real = dict(zip(names, _run(args, {}, real=True)[2].decode().split("|")))
+    fallback = dict(zip(names, _run(args, {}, real=False)[2].decode().split("|")))
+    assert set(real) == set(fallback) == set(names), (real, fallback)
+    for side in (real, fallback):
+        for key in _TIMES:
+            assert re.match(r"^\d+\.\d{6}$", side[key]), (key, side[key])
+        for key in _NUMBERS:
+            assert re.match(r"^-?\d+$", side[key]), (key, side[key])
+        if side["exitcode"] == "0":
+            chain = [float(side[k]) for k in ("time_namelookup", "time_connect", "time_pretransfer",
+                                              "time_starttransfer", "time_total")]
+            assert chain == sorted(chain), (name, chain)
+    assert {k: fallback[k] for k in _SAME} == {k: real[k] for k in _SAME}, name
+
+
+def test_write_out_json_has_curls_keys(world):
+    import json
+
+    args = ["-s", "-o", os.devnull, "-w", "%{json}", world["origin"] + "/t"]
+    real = json.loads(_run(args, {}, real=True)[2])
+    fallback = json.loads(_run(args, {}, real=False)[2])
+    assert set(real) <= set(fallback), sorted(set(real) - set(fallback))
+    for key in ("http_code", "exitcode", "remote_ip", "remote_port", "num_connects", "size_download", "url.host",
+                "scheme", "method"):
+        assert fallback[key] == real[key], (key, fallback[key], real[key])
+    assert type(fallback["time_total"]) is float and type(fallback["local_port"]) is int

@@ -193,11 +193,24 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     output for `http_code response_code http_version method scheme url
     url_effective redirect_url num_redirects content_type num_headers
     header_json size_download size_upload time_total time_starttransfer
-    exitcode errormsg filename_effective urlnum`, plus `%header{name}`,
-    `%{stdout}` / `%{stderr}` / `%{onerror}`, `%%` and `\n \r \t` — after
-    failures too (`000` and exit 7 when nothing answered, the status after
-    `-f`'s 22). Any other variable (`time_connect`, `remote_ip`, `json`, …) is
-    refused before the request is sent. `-q` is a no-op (no `.curlrc` is read).
+    exitcode errormsg filename_effective urlnum`, the timings `time_namelookup
+    time_connect time_appconnect time_pretransfer time_posttransfer
+    time_redirect time_queue`, the addresses `remote_ip remote_port local_ip
+    local_port`, `num_connects num_retries speed_download speed_upload
+    size_header size_request size_delivered http_connect proxy_used referer
+    conn_id xfer_id`, the parts `url.*` / `urle.*` (scheme, user, password,
+    host, port, path, query, fragment), and `%{json}` with curl's keys, plus
+    `%header{name}`, `%{stdout}` / `%{stderr}` / `%{onerror}`, `%%` and `\n
+    \r \t` — after failures too (`000` and exit 7 when nothing answered, the
+    status after `-f`'s 22). Timings are measured on the connection (lookup,
+    connect, handshake, request sent, first byte); urllib opens a new
+    connection per redirect, so `num_connects` counts hops curl may reuse one
+    for. `size_delivered` is curl 8.20's: answering as an older curl
+    (`NET_CURL_COMPAT`), it warns and writes nothing, as that curl does. In
+    `%{json}`, `ssl_verify_result` is 0 (verified, or not checked under
+    `-k`); `certs` / `num_certs` are empty. Any other variable (`certs`,
+    `ssl_verify_result`, …) is refused before the request is sent. `-q` is a
+    no-op (no `.curlrc` is read).
   - `-d` repeats and joins with `&`; `@file` reads a file (CR/LF stripped, as
     curl does), `@-` stdin; `--data-binary` keeps bytes as they are; a body
     without a `Content-Type` gets `application/x-www-form-urlencoded`.

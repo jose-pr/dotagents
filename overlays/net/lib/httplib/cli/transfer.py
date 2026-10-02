@@ -53,6 +53,17 @@ class Transfer(object):
         self.size_download = 0
         self.errormsg = ''
         self.sent = []                    # (url, method, body size): every request, redirects included
+        # -w's timings (time.monotonic(), None until reached) and addresses.
+        self.t_namelookup = self.t_connect = self.t_appconnect = None
+        self.t_pretransfer = self.t_posttransfer = None
+        self.final_start = None           # when the last request (after any redirects) began
+        self.remote = self.local = None   # (address, port) of the last connection
+        self.connects = 0
+        self.retries = 0
+        self.size_request = 0
+        self.size_header = 0
+        self.size_delivered = 0
+        self.connect_status = 0           # the last CONNECT reply's status
 
     def responded(self, response):
         self.first_byte = time.monotonic()
@@ -69,6 +80,7 @@ class RequestLog(urllib.request.BaseHandler):
         self.transfer = transfer
 
     def _record(self, req):
+        self.transfer.final_start = time.monotonic()
         data = req.data
         size = len(data) if isinstance(data, (bytes, bytearray)) else 0
         self.transfer.sent.append((req.full_url, req.get_method(), size))
@@ -215,6 +227,7 @@ def build_opener(args, plan, context, transfer, removed):
     direct where we decided to proxy. ``AgentProxyHandler`` applies the plan
     per hop instead."""
     args.connection.connect_replies = []
+    args.connection.transfer = transfer
     handlers = args.connection_handlers(context) or [
         ConnectHTTPHandler(args.connection), ConnectHTTPSHandler(args.connection, context)]
     handlers.append(urllib.request.ProxyHandler({}))
@@ -512,6 +525,7 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
         except EncodingError as exc:
             return fail(args, transfer, EXIT_BAD_ENCODING, str(exc))
     header_bytes = format_response_headers(status, reason, header_items)
+    transfer.size_header = len(header_bytes) + sum(len(r) for r in args.connection.connect_replies)
     if not args.suppress_connect_headers:
         # curl shows the proxy's CONNECT reply before the response's own headers.
         header_bytes = b''.join(args.connection.connect_replies) + header_bytes
@@ -533,6 +547,7 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
                 transfer.size_download = 0
             return fail(args, transfer, EXIT_HTTP, 'The requested URL returned error: %s' % status)
         args.emit_output(header_bytes, content)
+        transfer.size_delivered = len(content)
         if cut is not None:
             # What arrived is written, as curl writes it, then the failure.
             raw = resp.fp if isinstance(resp, urllib.error.HTTPError) else resp
@@ -708,6 +723,7 @@ def _attempts(args, typed, url, method, plan, context, removed, data, headers, t
     while True:
         in_time = not args.retry_max_time or time.monotonic() - first < args.retry_max_time
         transfer = Transfer(typed, url, method, plan)
+        transfer.retries = max(args.retry or 0, 0) - retries
         opener = build_opener(args, plan, context, transfer, removed)
         req = urllib.request.Request(url, data=data, headers=dict(headers), method=method)
         try:

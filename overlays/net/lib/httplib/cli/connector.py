@@ -13,6 +13,7 @@ import ipaddress
 import socket
 import ssl
 import struct
+import time
 import urllib.parse
 import urllib.request
 
@@ -414,6 +415,7 @@ class Connector(object):
     def __init__(self, source=None, ports=None, pins=None, http10=False):
         self.source = source
         self.connect_replies = []  # each CONNECT reply of the attempt, for -i / -D
+        self.transfer = None  # the attempt's Transfer: where -w's timings and addresses go
         self.ports = ports
         self.pins = pins
         self.http10 = http10
@@ -423,20 +425,48 @@ class Connector(object):
         return self.source is not None or self.ports is not None
 
     def create_connection(self, address, timeout=_DEFAULT_TIMEOUT, source_address=None):
-        """``socket.create_connection`` from the chosen source: each port of
-        the range in turn while the bind is what fails; none left: 45."""
-        host = self.source or ''
+        """``socket.create_connection``, done here: the name looked up (timed),
+        each address tried in turn -- from the chosen source, each port of the
+        range while the bind is what fails (none left: 45) -- and the attempt's
+        Transfer told when the lookup and the connect finished, which
+        addresses the connection has, and that one more was made."""
+        host, port = address
+        record = self.transfer
+        infos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+        if record is not None:
+            record.t_namelookup = time.monotonic()
         low, high = self.ports or (0, 0)
-        last = None
-        for port in range(low, high + 1):
-            try:
-                return socket.create_connection(address, timeout, (host, port))
-            except OSError as exc:
-                if getattr(exc, 'errno', None) not in _BIND_ERRNOS and getattr(exc, 'winerror', None) not in _BIND_ERRNOS:
-                    raise
-                last = exc
-        what = '%s port %d-%d' % (host or '*', low, high) if self.ports else "'%s'" % host
-        raise LocalError(EXIT_INTERFACE, "Couldn't bind to %s: %s" % (what, last))
+        last = bind_error = None
+        for family, kind, proto, _, sockaddr in infos:
+            for local_port in range(low, high + 1):
+                sock = socket.socket(family, kind, proto)
+                try:
+                    if timeout is not _DEFAULT_TIMEOUT:
+                        sock.settimeout(timeout)
+                    if self.binds:
+                        try:
+                            sock.bind((self.source or ('::' if family == socket.AF_INET6 else ''), local_port))
+                        except OSError as exc:
+                            bind_error = exc
+                            raise
+                    sock.connect(sockaddr)
+                except OSError as exc:
+                    sock.close()
+                    last = exc
+                    if exc is bind_error and self.ports and (getattr(exc, 'errno', None) in _BIND_ERRNOS
+                                                             or getattr(exc, 'winerror', None) in _BIND_ERRNOS):
+                        continue  # the next port of the range
+                    break  # the next address
+                if record is not None:
+                    record.t_connect = time.monotonic()
+                    record.remote = sock.getpeername()[:2]
+                    record.local = sock.getsockname()[:2]
+                    record.connects += 1
+                return sock
+        if last is not None and last is bind_error:
+            what = '%s port %d-%d' % (self.source or '*', low, high) if self.ports else "'%s'" % self.source
+            raise LocalError(EXIT_INTERFACE, "Couldn't bind to %s: %s" % (what, last))
+        raise last if last is not None else OSError('getaddrinfo returned no address for %s' % host)
 
     def check_pin(self, sock):
         _check_pins(sock, self.pins)
@@ -444,8 +474,7 @@ class Connector(object):
     def socks_connection(self, socks, address, timeout=_DEFAULT_TIMEOUT, source_address=None):
         """A connection to ``address`` through ``socks``: TCP to the proxy
         (from this connector's source), then the handshake."""
-        connect = self.create_connection if self.binds else socket.create_connection
-        sock = connect((socks.host, socks.port), timeout, source_address)
+        sock = self.create_connection((socks.host, socks.port), timeout, source_address)
         try:
             socks_handshake(sock, socks, address[0], address[1])
         except Exception:
@@ -459,6 +488,10 @@ class Connector(object):
         connection made through ``socks`` (a :class:`Socks`) when given."""
         connector = self
 
+        def _appconnect():
+            if connector.transfer is not None:
+                connector.transfer.t_appconnect = time.monotonic()
+
         class Connection(base):
             if connector.http10:
                 # http.client's own HTTP/1.0 mode: the request line, and no
@@ -471,8 +504,21 @@ class Connector(object):
                 if socks is not None:
                     self._create_connection = lambda address, timeout=_DEFAULT_TIMEOUT, source=None: (
                         connector.socks_connection(socks, address, timeout, source))
-                elif connector.binds:
+                else:
                     self._create_connection = connector.create_connection
+
+            def _send_output(self, message_body=None, encode_chunked=False):
+                # The request leaves now (-w time_pretransfer); its head is
+                # counted (size_request); once sent, time_posttransfer.
+                record = connector.transfer
+                if self.sock is None and self.auto_open:
+                    self.connect()  # http.client connects inside the first send: connect first
+                if record is not None:
+                    record.t_pretransfer = time.monotonic()
+                    record.size_request += len(b"\r\n".join(self._buffer + [b"", b""]))
+                base._send_output(self, message_body, encode_chunked)
+                if record is not None:
+                    record.t_posttransfer = time.monotonic()
 
             def set_tunnel(self, host, port=None, headers=None):
                 merged = dict(headers or {})
@@ -496,6 +542,8 @@ class Connector(object):
                     response = self.response_class(self.sock, method='CONNECT')
                     response.begin()
                     connector.connect_replies.append(_reply_head(response))
+                    if connector.transfer is not None:
+                        connector.transfer.connect_status = response.status
                     if response.status == 200:
                         return
                     challenges = response.headers.get_all('Proxy-Authenticate') or []
@@ -522,6 +570,7 @@ class Connector(object):
                     base.connect(self)
                     if isinstance(self, http.client.HTTPSConnection):
                         connector.check_pin(self.sock)
+                        _appconnect()
                     return
                 # An https:// proxy: TLS to it (its own context), then the
                 # CONNECT through that, then the origin's TLS inside it.
@@ -533,6 +582,7 @@ class Connector(object):
                     if isinstance(self, http.client.HTTPSConnection):
                         self.sock = TLSInTLS(self.sock, self._context, self._tunnel_host)
                         connector.check_pin(self.sock)
+                        _appconnect()
 
         return Connection
 
