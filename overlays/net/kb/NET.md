@@ -68,8 +68,10 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
   --http1.1 -N -# --no-progress-meter --styled-output --no-keepalive
   --keepalive-time --tcp-nodelay --ssl-no-revoke --ssl-revoke-best-effort
   --ca-native --proxy-ca-native --no-alpn --no-npn --no-sessionid`, each true of
-  this client (no config file read, no URL globbed, no progress shown, no
-  keepalive, revocation check, session reuse or ALPN). A URL with no scheme is
+  this client (no config file read, no progress shown, no keepalive, revocation
+  check, session reuse or ALPN). `-g` sends a URL's `{}` / `[]` as typed;
+  without it a glob pattern (one transfer per expansion in curl) is refused,
+  exit 2, and a broken one is curl's exit 3. A URL with no scheme is
   `http://`, as in curl; an option value may start with `-` (`-z -DATE`, `-d
   -1`), as in curl. With curl's meaning where it matters:
   - **`-L` follows as curl does**: credentials (`Authorization` from `-u`,
@@ -93,16 +95,28 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     HOST1:PORT1:HOST2:PORT2` steer only name resolution, so the `Host` header,
     TLS name and certificate check stay the URL's; `--unix-socket PATH` needs a
     Python with `AF_UNIX` (not Windows CPython), else it is refused.
-  - **Exit codes are curl's.** An HTTP status is a response, printed and exit 0
-    (a 404, a 302 without `-L`); `-f` makes a 4xx/5xx exit 22 with no body,
-    `--fail-with-body` the same exit with the body. Transport failures: 6 could
-    not resolve, 7 could not connect, 28 timed out, 35 a failed TLS handshake,
-    60 a certificate that does not verify, 59 an unusable `--ciphers` list; 23
-    when `-o`/`-D`/`-O` cannot be written, 26 when `-T` cannot be read, 58 a client
-    certificate that cannot be loaded, 77 a CA bundle/path that cannot; an
-    unsupported flag, a conflicting pair (`-d` with `-F`, `-f` with
-    `--fail-with-body`) or a bad proxy configuration is exit 2 (`curl: (2) …`,
-    one line, never a traceback). `-o /dev/null` is the null device on Windows too.
+  - **Exit codes are curl's**, checked against real curl by
+    `tests/test_curl_parity.py` (same command, same fake servers; skipped
+    without a curl). An HTTP status is a response, printed and exit 0 (a 404, a
+    302 without `-L`, a plain-http proxy's 407); `-f` makes a 4xx/5xx exit 22
+    with no body, `--fail-with-body` the same exit with the body.
+    Before anything is sent: 1 a scheme curl does not speak, 3 a URL it cannot
+    parse; 2 a `--cacert` / `--netrc-file` naming no file, 26 a `-d @` / `-H @`
+    / `-w @` / `-T` file that cannot be read (these print `curl: message`
+    with no `(N)` and no `-w`, as curl does). Connecting: 5 the proxy's name
+    or URL is unusable, 6 the host's name, 7 could not connect, 28 timed out,
+    35 a failed TLS handshake, 60 a certificate that does not verify, 58 a
+    client certificate and 77 a CA bundle/path that cannot be loaded (at the
+    handshake, so an `http://` transfer never fails on them), 59 an unusable
+    `--ciphers` list. A proxy refusing the https CONNECT is 56 (22 under `-f`;
+    curl 8.21 says 7, 8.18 and earlier 56), dropping it 56. The reply: 52
+    nothing came back, 1 not HTTP at all, 56 the connection reset, 18 a body
+    shorter than its `Content-Length` or chunks cut short (what arrived is
+    written first), 56 a malformed chunk; 23 when `-o`/`-D`/`-O` cannot be
+    written, 26 when a `-F` file cannot be read. An unsupported flag, a
+    conflicting pair (`-d` with `-F`, `-f` with `--fail-with-body`) or a bad
+    proxy configuration is exit 2 (`curl: (2) …`, one line, never a
+    traceback). `-o /dev/null` is the null device on Windows too.
   - **`--retry N`** retries what curl calls transient — a timeout and HTTP
     408/429/500/502/503/504 (`httplib.retry.TRANSIENT_STATUSES`, the list the
     requests session retries too) — after 1s, doubling (`--retry-delay` fixes
@@ -130,7 +144,7 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     curl does), `@-` stdin; `--data-binary` keeps bytes as they are; a body
     without a `Content-Type` gets `application/x-www-form-urlencoded`.
   - `-H 'Name: v'` sets, `-H 'Name:'` removes the header (urllib's own defaults
-    included), `-H 'Name;'` sends it empty. `-u user:pass` is Basic, `-e` the
+    included), `-H 'Name;'` sends it empty, `-H @file` one header per line. `-u user:pass` is Basic, `-e` the
     Referer, `--compressed` asks for gzip/deflate and decodes the body.
   - `-b <file>` sends only the rows that apply to the URL — domain (the leading
     dot or the `TRUE` flag covers subdomains), path, `Secure` only over https,
@@ -206,7 +220,9 @@ transient-status list (`retry`). `session`/`fetch` import `requests`
   `Basic`. **`AGENTS_PROXY_AUTH_HEADER`** names the header the value rides in,
   default `Proxy-Authorization`, for a gateway that wants it under another name
   (`X-Proxy-Token`); the session, the fallback and real curl's `--proxy-header`
-  all use it. `new_session()` delivers it through its HTTP adapter — on the
+  all use it, and all send it to the proxy only — on the https `CONNECT`, never
+  through the tunnel (urllib by itself moves only a header named
+  `Proxy-Authorization` there). `new_session()` delivers it through its HTTP adapter — on the
   plain-http request and on the HTTPS `CONNECT`, for the agent proxy only — so
   it never reaches an origin or another proxy (a `proxies=` you pass yourself is
   not given it unless it is the agent proxy), and the session gets past a 407 on
