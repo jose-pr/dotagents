@@ -6,7 +6,8 @@ from .options import build_parser
 from .request import default_scheme
 
 _STEERING = {
-    'proxy': ('-x', '--proxy'), 'noproxy': ('--noproxy',), 'proxy_user': ('-U', '--proxy-user'),
+    'proxy': ('-x', '--proxy', '--socks4', '--socks4a', '--socks5', '--socks5-hostname'),
+    'noproxy': ('--noproxy',), 'proxy_user': ('-U', '--proxy-user'),
     'url': ('--url',),
 }
 

@@ -61,7 +61,8 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
   --etag-compare --no-clobber --skip-existing --remove-on-error --max-filesize`;
   TLS `-k --cacert --capath -E/--cert --cert-type --key --key-type --pass
   -1/--tlsv1 --tlsv1.0 --tlsv1.1 --tlsv1.2 --tlsv1.3 --tls-max --ciphers --crlfile
-  --pinnedpubkey`; connection `-x -U -p -0/--http1.0 --noproxy -L --max-redirs --location-trusted
+  --pinnedpubkey`; connection `-x -U -p -0/--http1.0 --proxy-header --proxy-basic --socks4
+  --socks4a --socks5 --socks5-hostname --socks5-basic --preproxy --noproxy -L --max-redirs --location-trusted
   --post301 --post302 --post303 -m --connect-timeout --timeout -4 -6 --resolve
   --connect-to --unix-socket --interface --local-port --limit-rate -Y/--speed-limit
   -y/--speed-time --ignore-content-length --dns-servers --dns-ipv4-addr --dns-ipv6-addr
@@ -93,6 +94,16 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     and an unmet condition or a 304 writes no file; `--no-clobber` writes
     `name.1`..`name.100`; `--max-filesize` over the limit is exit 63 with nothing
     written.
+  - **Proxies**: `-x` takes `http://` and `socks4://` / `socks4a://` /
+    `socks5://` / `socks5h://` (`socks://` is SOCKS4), as does
+    `AGENTS_PROXY`; the `--socks*` flags name one too and override `-x`.
+    `socks5` and `socks4` resolve the name here, `socks5h` and `socks4a` let
+    the proxy do it; SOCKS5 credentials come from `-U` or the URL. A SOCKS
+    handshake that fails is exit 97 (refused, unreachable, rejected
+    credentials, no acceptable method, dropped). `--preproxy socks5h://...`
+    reaches the `-x` proxy through SOCKS. `--proxy-header` goes to the proxy
+    only: the request to it, or the CONNECT -- never through a tunnel, never
+    to a bypassed host. `--proxy-basic` is a no-op (`-U` is Basic).
   - **Shaping a connection**: `--interface` takes an IP address, a host
     (`host!NAME`) or an interface (`if!NAME`, or a bare name; by name only with
     netimps installed), `--local-port N[-M]` the first port of the range that

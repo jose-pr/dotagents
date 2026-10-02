@@ -25,7 +25,7 @@ from .errors import (EXIT_CONNECT, EXIT_EMPTY_REPLY, EXIT_HTTP, EXIT_PARTIAL, EX
                      LocalError, Retry)
 from .request import has_header
 from .redirects import CurlRedirectHandler
-from .connector import ConnectHTTPHandler, ConnectHTTPSHandler
+from .connector import ConnectHTTPHandler, ConnectHTTPSHandler, Socks
 from .routing import AgentProxyHandler, check_proxy_syntax
 from .tls import UnusableContext
 
@@ -218,7 +218,8 @@ def build_opener(args, plan, context, transfer, removed):
         ConnectHTTPHandler(args.connection), ConnectHTTPSHandler(args.connection, context)]
     handlers.append(urllib.request.ProxyHandler({}))
     if plan is not None:
-        handlers.append(AgentProxyHandler(plan, tunnel_http=args.proxytunnel, headers=args.proxy_headers()))
+        handlers.append(AgentProxyHandler(plan, tunnel_http=args.proxytunnel, headers=args.proxy_headers(),
+                                          socks=args.socks, preproxy=args.socks_pre))
     if args.request_target:
         handlers.append(RequestTarget(args.request_target))
     handlers.append(RequestLog(transfer))
@@ -527,6 +528,24 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
     return 0
 
 
+def _socks_for(args, plan, proxy):
+    """``(socks proxy, socks pre-proxy)`` for the transfer: the plan's proxy
+    when it is SOCKS (credentials from -U, else its URL's userinfo), and
+    --preproxy in front of an HTTP proxy."""
+    if plan is None:
+        return None, None
+    user = password = None
+    if args.proxy_user:
+        user, _, password = args.proxy_user.partition(':')
+    raw = proxy or agent_proxy.proxy_url() or ''
+    if Socks.is_socks(raw):
+        return Socks(raw, user, password), None
+    pre = Socks(args.preproxy) if args.preproxy else None
+    if pre is not None and not Socks.is_socks(args.preproxy):
+        raise NotImplementedError('--preproxy must be a SOCKS proxy (socks4://, socks4a://, socks5://, socks5h://)')
+    return None, pre
+
+
 def _count(number, one, many):
     return '%d %s' % (number, one if number == 1 else many)
 
@@ -566,8 +585,12 @@ def run(args):
         cookie_header = args.cookie_header(url)
         if cookie_header and not has_header(headers, 'cookie'):
             headers['Cookie'] = cookie_header
-        check_proxy_syntax(args.proxy or agent_proxy.proxy_url())  # curl's 5
-        plan = agent_proxy.plan(proxy=args.proxy, noproxy=args.noproxy, proxy_user=args.proxy_user)
+        proxy = args.effective_proxy()
+        if not proxy and args.preproxy and Socks.is_socks(args.preproxy):
+            proxy = args.preproxy  # a pre-proxy with no proxy after it is the proxy
+        check_proxy_syntax(proxy or agent_proxy.proxy_url())  # curl's 5
+        plan = agent_proxy.plan(proxy=proxy, noproxy=args.noproxy, proxy_user=args.proxy_user)
+        args.socks, args.socks_pre = _socks_for(args, plan, proxy)
         transfer = Transfer(typed, url, method, plan)
         args.output_target(url)
         if args.prepare_download(headers):

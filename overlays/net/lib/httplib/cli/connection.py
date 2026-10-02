@@ -60,6 +60,30 @@ class ConnectionArgs(Group):
     "Proxy user and password"
     ("-U", "--proxy-user")
 
+    socks4: Arg[Optional[str], NS(metavar='HOST[:PORT]')] = None
+    "Use this SOCKS4 proxy (overrides -x)"
+    ("--socks4",)
+
+    socks4a: Arg[Optional[str], NS(metavar='HOST[:PORT]')] = None
+    "Use this SOCKS4a proxy, which resolves the name (overrides -x)"
+    ("--socks4a",)
+
+    socks5: Arg[Optional[str], NS(metavar='HOST[:PORT]')] = None
+    "Use this SOCKS5 proxy, resolving the name here (overrides -x)"
+    ("--socks5",)
+
+    socks5_hostname: Arg[Optional[str], NS(metavar='HOST[:PORT]')] = None
+    "Use this SOCKS5 proxy, which resolves the name (overrides -x)"
+    ("--socks5-hostname",)
+
+    socks5_basic: bool = False
+    "Offer SOCKS5 username/password auth (what the fallback does; a no-op)"
+    ("--socks5-basic",)
+
+    preproxy: Arg[Optional[str], NS(metavar='[PROTOCOL://]HOST[:PORT]')] = None
+    "Reach the -x proxy through this SOCKS proxy"
+    ("--preproxy",)
+
     proxy_header: Arg[Optional[List[str]], NS(metavar='HEADER')] = None
     "Header for the proxy only (Name: value, Name; for empty, @file); repeatable"
     ("--proxy-header",)
@@ -253,6 +277,14 @@ class ConnectionArgs(Group):
             except LocalError:
                 context = build_ssl_context(self.doh_insecure)
         return DnsOverride(servers, sources, self.doh_url, context, self.connect_timeout or self.max_time)
+
+    def effective_proxy(self):
+        """The proxy URL: a --socks* flag (they override -x), else -x."""
+        for kind, value in (('socks5h', self.socks5_hostname), ('socks5', self.socks5), ('socks4a', self.socks4a),
+                            ('socks4', self.socks4)):
+            if value:
+                return value if '://' in value else '%s://%s' % (kind, value)
+        return self.proxy
 
     def proxy_headers(self):
         """``{name: value}`` for --proxy-header (``@file`` read, ``Name;`` empty);

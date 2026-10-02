@@ -28,6 +28,7 @@ def test_the_measured_boundaries(monkeypatch, version, code, first):
     monkeypatch.setenv(compat.VAR, version)
     assert compat.connect_refused_code() == code
     assert compat.checks_files_first() is first
+    assert compat.socks_unresolved("h.example", "proxy.example")[0] == (6 if code == 7 else 97)
 
 
 def test_auto_is_the_installed_curl_else_the_newest(monkeypatch):

@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 import curl  # noqa: E402  (bin/, via conftest)
+from fake_socks import FakeSocks  # noqa: E402  (tests/)
 from test_curl_options import _openssl, pki  # noqa: F401  (fixture reused)
 
 SHIM = Path(curl.__file__).resolve()
@@ -137,8 +138,14 @@ def _echo(conn, head):
     peer = conn.getpeername()
     body = b"%s|host=%s|auth=%s|from=%s:%d|x=%s" % (lines[0], (_header(head, "Host") or "").encode(),
                                                     (_header(head, "Authorization") or "").encode(), peer[0].encode(),
-                                                    peer[1] if b"/port" in lines[0] else 0, _x_headers(head))
+                                                    _port_note(peer[1]) if b"/port" in lines[0] else 0, _x_headers(head))
     _respond(conn, "200 OK", body)
+
+
+def _port_note(port):
+    """1 for a client port inside the --local-port scenario's range: which one
+    is free differs between two runs back to back (TIME_WAIT)."""
+    return 1 if 47310 <= port <= 47330 else port
 
 
 def _x_headers(head):
@@ -371,6 +378,8 @@ def world(request, tmp_path_factory):
         ("token_proxy", _proxy(header="X-Proxy-Token")),
     )}
     w["dead"] = "http://127.0.0.1:%d" % _closed_port()
+    socks = {mode: FakeSocks(mode) for mode in ("ok", "auth", "refuse", "unreachable", "drop")}
+    w.update({"socks_" + mode: "127.0.0.1:%d" % s.port for mode, s in socks.items()})
     w["tmp"] = tmp_path_factory.mktemp("parity")
     (w["tmp"] / "partial").write_bytes(b"012")
     (w["tmp"] / "garbage.pem").write_text("not a certificate\n")
@@ -501,6 +510,49 @@ SCENARIOS = [
     ("-0 sends HTTP/1.0", lambda w: ["-0", w["echo"] + "/v"], {}, False, {}),
     ("-0 with -w", lambda w: ["-0", "-w", "[%{http_version} %{http_code}]", w["origin"] + "/"], {}, False, {}),
     ("-0 upload", lambda w: ["-0", "-T", str(w["tmp"] / "partial"), w["echo"] + "/up"], {}, False, {}),
+    # SOCKS: the proxy carries the connection; the request is the origin's.
+    ("socks5, an address", lambda w: ["-x", "socks5://" + w["socks_ok"], w["echo"] + "/s"], {}, False, {}),
+    ("socks5, a name resolved here", lambda w: ["-x", "socks5://" + w["socks_ok"], "--resolve",
+                                                "named.test:%s:127.0.0.1" % w["echo"].rsplit(":", 1)[1],
+                                                w["echo"].replace("127.0.0.1", "named.test") + "/s"], {}, False, {}),
+    ("socks5h, the proxy resolves", lambda w: ["-x", "socks5h://" + w["socks_ok"], _localhost(w, "echo")],
+     {}, False, {}),
+    ("socks4", lambda w: ["-x", "socks4://" + w["socks_ok"], _localhost(w, "echo")], {}, False, {}),
+    ("socks4a", lambda w: ["-x", "socks4a://" + w["socks_ok"], _localhost(w, "echo")], {}, False, {}),
+    ("socks:// is socks4", lambda w: ["-x", "socks://" + w["socks_ok"], w["echo"] + "/s"], {}, False, {}),
+    ("--socks5", lambda w: ["--socks5", w["socks_ok"], w["echo"] + "/s"], {}, False, {}),
+    ("--socks5-hostname", lambda w: ["--socks5-hostname", w["socks_ok"], _localhost(w, "echo")], {}, False, {}),
+    ("--socks4", lambda w: ["--socks4", w["socks_ok"], w["echo"] + "/s"], {}, False, {}),
+    ("--socks4a overrides -x", lambda w: ["-x", P(w, "dead"), "--socks4a", w["socks_ok"], _localhost(w, "echo")],
+     {}, False, {}),
+    ("socks5 credentials in the URL", lambda w: ["-x", "socks5h://agent:s3cret@" + w["socks_auth"],
+                                                 _localhost(w, "echo")], {}, False, {}),
+    ("socks5 credentials from -U", lambda w: ["-x", "socks5h://" + w["socks_auth"], "-U", "agent:s3cret",
+                                              _localhost(w, "echo")], {}, False, {}),
+    ("--socks5-basic", lambda w: ["--socks5-basic", "-x", "socks5h://agent:s3cret@" + w["socks_auth"],
+                                  w["echo"] + "/s"], {}, False, {}),
+    ("socks5 wrong password", lambda w: ["-x", "socks5h://agent:bad@" + w["socks_auth"], w["echo"] + "/s"],
+     {}, False, {}),
+    ("socks5 no credentials", lambda w: ["-x", "socks5h://" + w["socks_auth"], w["echo"] + "/s"], {}, False, {}),
+    ("socks5 refused", lambda w: ["-x", "socks5h://" + w["socks_refuse"], w["echo"] + "/s"], {}, False, {}),
+    ("socks5 unreachable", lambda w: ["-x", "socks5h://" + w["socks_unreachable"], w["echo"] + "/s"], {}, False, {}),
+    ("socks4 refused", lambda w: ["-x", "socks4://" + w["socks_refuse"], w["echo"] + "/s"], {}, False, {}),
+    ("socks dropped", lambda w: ["-x", "socks5h://" + w["socks_drop"], w["echo"] + "/s"], {}, False, {}),
+    ("socks proxy refused", lambda w: ["-x", "socks5h://" + w["dead"].split("//")[1], w["echo"] + "/s"],
+     {}, False, {}),
+    ("socks proxy not resolvable", lambda w: ["-x", "socks5h://nonexistent.invalid:1080", w["echo"] + "/s"],
+     {}, False, {}),
+    ("socks5, target not resolvable here", lambda w: ["-x", "socks5://" + w["socks_ok"], "http://nonexistent.invalid/"],
+     {}, False, {}),
+    ("socks5h, target not resolvable there", lambda w: ["-x", "socks5h://" + w["socks_ok"],
+                                                        "http://nonexistent.invalid/"], {}, False, {}),
+    ("socks -w", lambda w: ["-x", "socks5h://" + w["socks_refuse"], "-w", "[%{http_code} %{exitcode}]",
+                            w["echo"] + "/s"], {}, False, {}),
+    ("socks5h to https", lambda w: w["ca"] + ["-x", "socks5h://" + w["socks_ok"], S(w)], {}, True, {}),
+    ("--preproxy to an HTTP proxy", lambda w: ["--preproxy", "socks5h://" + w["socks_ok"], "-x",
+                                              P(w, "header_proxy"), "--proxy-header", "X-P: 1", X], {}, False, {}),
+    ("--preproxy alone", lambda w: ["--preproxy", "socks5h://" + w["socks_ok"], w["echo"] + "/s"], {}, False, {}),
+    ("agent proxy is SOCKS", lambda w: [_localhost(w, "echo")], {"AGENTS_PROXY": "@socks5h"}, False, {}),
     # --proxy-header: to the proxy only -- the plain request to it, or the CONNECT.
     ("--proxy-header, plain proxying", lambda w: ["-x", P(w, "header_proxy"), "--proxy-header", "X-P: 1", "-H",
                                                   "X-O: 2", X], {}, False, {}),
@@ -634,6 +686,12 @@ SCENARIOS = [
 ]
 
 
+def _localhost(world, name):
+    """The server ``name`` addressed as localhost (so the name, not an
+    address, is what a SOCKS client has to resolve or pass on)."""
+    return world[name].replace("127.0.0.1", "localhost") + "/s"
+
+
 def _write(world, name, text):
     path = world["tmp"] / name
     path.write_text(text, encoding="ascii")
@@ -663,6 +721,8 @@ def _env(world, env):
     for key, value in env.items():
         if value == "@proxy+userinfo":
             value = world["proxy"].replace("//", "//agent:s3cret@")
+        elif value == "@socks5h":
+            value = "socks5h://" + world["socks_ok"]
         elif value.startswith("@"):
             value = world[value[1:]]
         out[key] = value

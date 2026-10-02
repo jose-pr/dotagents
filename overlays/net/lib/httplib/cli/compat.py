@@ -10,7 +10,10 @@ The differences, measured against curl's own builds (8.17-8.22):
 - a proxy refusing the CONNECT: 56 before 8.20, 7 from 8.20 on;
 - a ``--cacert`` / ``--netrc-file`` naming no file: refused before anything
   else (exit 2) from 8.18 on; before, the CA file fails at the TLS handshake
-  (77) and the netrc file when it is read (26).
+  (77) and the netrc file when it is read (26);
+- a name a ``socks5://`` / ``socks4://`` proxy needs resolved here and that
+  does not resolve: 97 before 8.20 (worded "Could not resolve proxy: <the
+  proxy>"), 6 from 8.20 on.
 """
 import os
 import re
@@ -110,6 +113,13 @@ def check():
 def connect_refused_code():
     """curl's exit when the proxy answers the CONNECT with an error status."""
     return 7 if version() >= (8, 20, 0) else 56
+
+
+def socks_unresolved(host, proxy_host):
+    """``(exit code, message)`` for a target a SOCKS client could not resolve."""
+    if version() >= (8, 20, 0):
+        return 6, 'Could not resolve host: %s' % host
+    return 97, 'Could not resolve proxy: %s' % proxy_host
 
 
 def checks_files_first():

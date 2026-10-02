@@ -23,17 +23,16 @@ UNSUPPORTED_ARGS = [
     'list_only', 'login_options', 'mail_auth', 'mail_from',
     'mail_rcpt_allowfails', 'mail_rcpt', 'metalink', 'negotiate', 'next',
     'no_progress_bar', 'ntlm_wb', 'ntlm', 'parallel_immediate', 'parallel_max',
-    'parallel', 'path_as_is', 'preproxy', 'proto_default', 'proto_redir',
-    'proto', 'proxy_anyauth', 'proxy_cacert', 'proxy_capath',
-    'proxy_cert_type', 'proxy_cert', 'proxy_ciphers', 'proxy_crlfile',
-    'proxy_digest', 'proxy_insecure', 'proxy_key_type', 'proxy_key',
-    'proxy_negotiate', 'proxy_ntlm', 'proxy_pass', 'proxy_pinnedpubkey',
-    'proxy_service_name', 'proxy_ssl_allow_beast',
-    'proxy_ssl_auto_client_cert', 'proxy_tls13_ciphers', 'proxy_tlsauthtype',
-    'proxy_tlspassword', 'proxy_tlsuser', 'proxy_tlsv1', 'pubkey', 'quote',
-    'random_file', 'raw', 'sasl_authzid', 'sasl_ir', 'service_name', 'socks4',
-    'socks4a', 'socks5_basic', 'socks5_gssapi_nec', 'socks5_gssapi_service',
-    'socks5_gssapi', 'socks5_hostname', 'socks5', 'ssl_allow_beast',
+    'parallel', 'path_as_is', 'proto_default', 'proto_redir', 'proto',
+    'proxy_anyauth', 'proxy_cacert', 'proxy_capath', 'proxy_cert_type',
+    'proxy_cert', 'proxy_ciphers', 'proxy_crlfile', 'proxy_digest',
+    'proxy_insecure', 'proxy_key_type', 'proxy_key', 'proxy_negotiate',
+    'proxy_ntlm', 'proxy_pass', 'proxy_pinnedpubkey', 'proxy_service_name',
+    'proxy_ssl_allow_beast', 'proxy_ssl_auto_client_cert',
+    'proxy_tls13_ciphers', 'proxy_tlsauthtype', 'proxy_tlspassword',
+    'proxy_tlsuser', 'proxy_tlsv1', 'pubkey', 'quote', 'random_file', 'raw',
+    'sasl_authzid', 'sasl_ir', 'service_name', 'socks5_gssapi_nec',
+    'socks5_gssapi_service', 'socks5_gssapi', 'ssl_allow_beast',
     'ssl_auto_client_cert', 'ssl_reqd', 'ssl', 'sslv2', 'sslv3',
     'suppress_connect_headers', 'tcp_fastopen', 'telnet_option',
     'tftp_blksize', 'tftp_no_options', 'tls13_ciphers', 'tlsauthtype',
@@ -218,8 +217,6 @@ class UnsupportedArgs(Group):
 
 
 
-    preproxy: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PROXY')] = None
-    ('--preproxy',)
 
     proto_default: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PROTO')] = None
     ('--proto-default',)
@@ -328,14 +325,8 @@ class UnsupportedArgs(Group):
     ('--service-name',)
 
 
-    socks4: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='HOST[:PORT]')] = None
-    ('--socks4',)
 
-    socks4a: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='HOST[:PORT]')] = None
-    ('--socks4a',)
 
-    socks5_basic: Arg[bool, _HIDDEN] = False
-    ('--socks5-basic',)
 
     socks5_gssapi_nec: Arg[bool, _HIDDEN] = False
     ('--socks5-gssapi-nec',)
@@ -346,11 +337,7 @@ class UnsupportedArgs(Group):
     socks5_gssapi: Arg[bool, _HIDDEN] = False
     ('--socks5-gssapi',)
 
-    socks5_hostname: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='HOST[:PORT]')] = None
-    ('--socks5-hostname',)
 
-    socks5: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='HOST[:PORT]')] = None
-    ('--socks5',)
 
 
 

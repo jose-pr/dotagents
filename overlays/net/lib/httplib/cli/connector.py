@@ -10,12 +10,129 @@ import hashlib
 import http.client
 import ipaddress
 import socket
+import struct
+import urllib.parse
 import urllib.request
 
 from .errors import EXIT_USAGE, EarlyExit, LocalError
 
 EXIT_INTERFACE = 45
 EXIT_PINNED = 90
+EXIT_PROXY = 97
+
+#: socket.create_connection's "no timeout given" marker (private to socket).
+_DEFAULT_TIMEOUT = getattr(socket, "_GLOBAL_DEFAULT_TIMEOUT", None)
+
+#: Proxy URL schemes that are SOCKS, by the protocol each speaks: curl's
+#: ``socks://`` is SOCKS4; ``socks5`` resolves the name locally, ``socks5h``
+#: and ``socks4a`` let the proxy resolve it.
+SOCKS_SCHEMES = {'socks': 'socks4', 'socks4': 'socks4', 'socks4a': 'socks4a', 'socks5': 'socks5',
+                 'socks5h': 'socks5h'}
+
+
+class Socks(object):
+    """One SOCKS proxy: ``kind`` (``socks4``/``socks4a``/``socks5``/``socks5h``),
+    ``host``, ``port`` (1080 by default) and the ``user``/``password`` SOCKS5
+    sends (SOCKS4 sends the user as its id)."""
+
+    def __init__(self, url, user=None, password=None):
+        parts = urllib.parse.urlsplit(url if '://' in url else 'socks4://' + url)
+        self.kind = SOCKS_SCHEMES[parts.scheme.lower()]
+        self.host = parts.hostname
+        self.port = parts.port or 1080
+        if user is None and parts.username is not None:
+            user = urllib.parse.unquote(parts.username)
+            password = urllib.parse.unquote(parts.password or '')
+        self.user, self.password = user, password
+
+    @staticmethod
+    def is_socks(url):
+        return bool(url) and url.split('://', 1)[0].lower() in SOCKS_SCHEMES and '://' in url
+
+
+def _exact(sock, count):
+    data = b''
+    while len(data) < count:
+        piece = sock.recv(count - len(data))
+        if not piece:
+            raise ConnectionResetError('Connection was reset')
+        data += piece
+    return data
+
+
+def _local_address(socks, host, port, family=0):
+    """``host`` resolved here, as socks4 / socks5 ask; not resolvable: curl's
+    6, or 97 before 8.20 (``compat``)."""
+    try:
+        return socket.getaddrinfo(host, port, family, socket.SOCK_STREAM)[0][4][0]
+    except socket.gaierror:
+        from .compat import socks_unresolved
+
+        raise LocalError(*socks_unresolved(host, socks.host))
+
+
+def socks_handshake(sock, socks, host, port):
+    """Ask ``socks`` (connected as ``sock``) for ``host``:``port``. A refusal,
+    an auth failure or a broken handshake is curl's 97."""
+    try:
+        if socks.kind in ('socks4', 'socks4a'):
+            _socks4(sock, socks, host, port)
+        else:
+            _socks5(sock, socks, host, port)
+    except OSError as exc:
+        raise LocalError(EXIT_PROXY, 'Recv failure: %s' % (getattr(exc, 'strerror', None) or exc))
+
+
+def _socks4(sock, socks, host, port):
+    user = (socks.user or '').encode('utf-8') + b'\x00'
+    try:
+        address = socket.inet_aton(str(ipaddress.IPv4Address(host)))
+        name = b''
+    except ValueError:
+        if socks.kind == 'socks4a':
+            address, name = b'\x00\x00\x00\x01', host.encode('idna') + b'\x00'
+        else:
+            address, name = socket.inet_aton(_local_address(socks, host, port, socket.AF_INET)), b''
+    sock.sendall(struct.pack('!BBH', 4, 1, port) + address + user + name)
+    reply = _exact(sock, 8)
+    if reply[1] != 0x5a:
+        bound = '%s:%d' % (socket.inet_ntoa(reply[4:8]), struct.unpack('!H', reply[2:4])[0])
+        raise LocalError(EXIT_PROXY, '[SOCKS] cannot complete SOCKS4 connection to %s. (%d), request rejected or '
+                                     'failed.' % (bound, reply[1]))
+
+
+def _socks5(sock, socks, host, port):
+    methods = b'\x00\x02' if socks.user is not None else b'\x00'
+    sock.sendall(b'\x05' + bytes([len(methods)]) + methods)
+    chosen = _exact(sock, 2)[1]
+    if chosen == 0x02:
+        user, password = (socks.user or '').encode('utf-8'), (socks.password or '').encode('utf-8')
+        sock.sendall(b'\x01' + bytes([len(user)]) + user + bytes([len(password)]) + password)
+        status = _exact(sock, 2)
+        if status[1] != 0:
+            raise LocalError(EXIT_PROXY, 'User was rejected by the SOCKS5 server (%d %d).' % (status[0], status[1]))
+    elif chosen != 0x00:
+        raise LocalError(EXIT_PROXY, 'No authentication method was acceptable.')
+    try:
+        literal = ipaddress.ip_address(host.strip('[]'))
+    except ValueError:
+        literal = None
+    if literal is None and socks.kind == 'socks5':
+        literal = ipaddress.ip_address(_local_address(socks, host, port))
+    if literal is None:
+        name = host.encode('idna')
+        target = b'\x03' + bytes([len(name)]) + name
+    elif literal.version == 4:
+        target = b'\x01' + literal.packed
+    else:
+        target = b'\x04' + literal.packed
+    sock.sendall(b'\x05\x01\x00' + target + struct.pack('!H', port))
+    head = _exact(sock, 4)
+    if head[1] != 0:
+        raise LocalError(EXIT_PROXY, 'cannot complete SOCKS5 connection to %s. (%d)' % (host, head[1]))
+    kind = head[3]
+    _exact(sock, {1: 4, 4: 16}.get(kind, 0) or _exact(sock, 1)[0])
+    _exact(sock, 2)
 
 #: A bind that failed because of the address or port, not the peer: the next
 #: port of a --local-port range is tried.
@@ -142,7 +259,7 @@ class Connector(object):
     def binds(self):
         return self.source is not None or self.ports is not None
 
-    def create_connection(self, address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
+    def create_connection(self, address, timeout=_DEFAULT_TIMEOUT, source_address=None):
         """``socket.create_connection`` from the chosen source: each port of
         the range in turn while the bind is what fails; none left: 45."""
         host = self.source or ''
@@ -166,9 +283,22 @@ class Connector(object):
             sock.close()
             raise LocalError(EXIT_PINNED, 'SSL: public key does not match pinned public key')
 
-    def connection_class(self, base, tunnel_headers=None):
+    def socks_connection(self, socks, address, timeout=_DEFAULT_TIMEOUT, source_address=None):
+        """A connection to ``address`` through ``socks``: TCP to the proxy
+        (from this connector's source), then the handshake."""
+        connect = self.create_connection if self.binds else socket.create_connection
+        sock = connect((socks.host, socks.port), timeout, source_address)
+        try:
+            socks_handshake(sock, socks, address[0], address[1])
+        except Exception:
+            sock.close()
+            raise
+        return sock
+
+    def connection_class(self, base, tunnel_headers=None, socks=None):
         """``base`` (``HTTPConnection`` / ``HTTPSConnection``) bound to this
-        connector, its CONNECT carrying ``tunnel_headers`` too."""
+        connector, its CONNECT carrying ``tunnel_headers`` too, its TCP
+        connection made through ``socks`` (a :class:`Socks`) when given."""
         connector = self
 
         class Connection(base):
@@ -180,7 +310,10 @@ class Connector(object):
 
             def __init__(self, *args, **kwargs):
                 base.__init__(self, *args, **kwargs)
-                if connector.binds:
+                if socks is not None:
+                    self._create_connection = lambda address, timeout=_DEFAULT_TIMEOUT, source=None: (
+                        connector.socks_connection(socks, address, timeout, source))
+                elif connector.binds:
                     self._create_connection = connector.create_connection
 
             def set_tunnel(self, host, port=None, headers=None):
@@ -204,7 +337,8 @@ class ConnectHTTPHandler(urllib.request.HTTPHandler):
         self.connector = connector
 
     def http_open(self, req):
-        klass = self.connector.connection_class(http.client.HTTPConnection, getattr(req, 'tunnel_headers', None))
+        klass = self.connector.connection_class(http.client.HTTPConnection, getattr(req, 'tunnel_headers', None),
+                                                getattr(req, 'socks_via', None))
         return self.do_open(klass, req)
 
 
@@ -219,7 +353,8 @@ class ConnectHTTPSHandler(urllib.request.HTTPSHandler):
         self.connector = connector
 
     def https_open(self, req):
-        klass = self.connector.connection_class(http.client.HTTPSConnection, getattr(req, 'tunnel_headers', None))
+        klass = self.connector.connection_class(http.client.HTTPSConnection, getattr(req, 'tunnel_headers', None),
+                                                getattr(req, 'socks_via', None))
         kwargs = {'context': self._context}
         if hasattr(self, '_check_hostname'):  # Python < 3.12
             kwargs['check_hostname'] = self._check_hostname
