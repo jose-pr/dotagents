@@ -102,6 +102,15 @@ def build_ssl_context(insecure, cacert=None, capath=None, cert=None, key=None, p
     return ctx
 
 
+class ProxyTLS(object):
+    """TLS to an ``https://`` proxy: its ``context`` (from the ``--proxy-*``
+    options, never the origin's) and the ``pins`` its key must match."""
+
+    def __init__(self, context, pins=None):
+        self.context = context
+        self.pins = pins
+
+
 class UnusableContext(object):
     """Stands in for the SSL context when its files could not be loaded.
     urllib builds HTTPS connections with it as with any context; the
@@ -119,6 +128,9 @@ class UnusableContext(object):
     def wrap_socket(self, sock, *args, **kwargs):
         raise self.error
 
+    def wrap_bio(self, *args, **kwargs):
+        raise self.error
+
 
 class TLSArgs(Group):
     """Server verification and the client certificate."""
@@ -126,6 +138,55 @@ class TLSArgs(Group):
     crlfile: Arg[Optional[str], NS(metavar='FILE')] = None
     "Check the server's chain against this certificate revocation list (PEM)"
     ("--crlfile",)
+
+    # The same, for an https:// proxy (never taken from the origin's options).
+    proxy_insecure: bool = False
+    "Do not verify the https:// proxy's certificate"
+    ("--proxy-insecure",)
+
+    proxy_cacert: Arg[Optional[str], NS(metavar='FILE')] = None
+    "Verify the https:// proxy against this CA bundle (PEM)"
+    ("--proxy-cacert",)
+
+    proxy_capath: Arg[Optional[str], NS(metavar='DIR')] = None
+    "Verify the https:// proxy against this hashed CA directory"
+    ("--proxy-capath",)
+
+    proxy_cert: Arg[Optional[str], NS(metavar='FILE[:PASSWORD]')] = None
+    "Client certificate for the https:// proxy (PEM)"
+    ("--proxy-cert",)
+
+    proxy_cert_type: Arg[Optional[str], NS(metavar='TYPE')] = None
+    "--proxy-cert type: PEM only"
+    ("--proxy-cert-type",)
+
+    proxy_key: Arg[Optional[str], NS(metavar='FILE')] = None
+    "Private key for --proxy-cert (PEM)"
+    ("--proxy-key",)
+
+    proxy_key_type: Arg[Optional[str], NS(metavar='TYPE')] = None
+    "--proxy-key type: PEM only"
+    ("--proxy-key-type",)
+
+    proxy_pass: Arg[Optional[str], NS(metavar='PHRASE')] = None
+    "Passphrase for --proxy-key"
+    ("--proxy-pass",)
+
+    proxy_ciphers: Arg[Optional[str], NS(metavar='LIST')] = None
+    "OpenSSL cipher list for the https:// proxy"
+    ("--proxy-ciphers",)
+
+    proxy_crlfile: Arg[Optional[str], NS(metavar='FILE')] = None
+    "Check the https:// proxy's chain against this revocation list (PEM)"
+    ("--proxy-crlfile",)
+
+    proxy_pinnedpubkey: Arg[Optional[str], NS(metavar='HASHES|FILE')] = None
+    "Require the https:// proxy's key: sha256//BASE64[;...] or a key file (exit 90)"
+    ("--proxy-pinnedpubkey",)
+
+    proxy_tlsv1: bool = False
+    "TLS 1.0 or later to the https:// proxy"
+    ("--proxy-tlsv1",)
 
     pinnedpubkey: Arg[Optional[str], NS(metavar='HASHES|FILE')] = None
     "Require the server key: sha256//BASE64[;...] or a public key file (exit 90)"
@@ -224,6 +285,8 @@ class TLSArgs(Group):
     def _check(self):
         _pem_only('--cert-type', self.cert_type)
         _pem_only('--key-type', self.key_type)
+        _pem_only('--proxy-cert-type', self.proxy_cert_type)
+        _pem_only('--proxy-key-type', self.proxy_key_type)
         if self.tls_max is not None and self.tls_max not in TLS_MAX:
             raise ValueError('--tls-max: expected one of %s, got %r' % (', '.join(TLS_MAX), self.tls_max))
 
@@ -242,14 +305,28 @@ class TLSArgs(Group):
         """curl's parse-time check: a ``--cacert`` / ``--crlfile`` / ``--netrc-file`` naming
         no file is exit 2 before anything else -- from curl 8.18 on
         (``compat``); before, each fails where it is used."""
-        missing = [p for p in (self.cacert, self.crlfile, getattr(self, 'netrc_file', None))
-                   if p and not os.path.exists(p)]
+        named = (('--cacert', self.cacert), ('--crlfile', self.crlfile), ('--proxy-cacert', self.proxy_cacert),
+                 ('--proxy-crlfile', self.proxy_crlfile), ('--netrc-file', getattr(self, 'netrc_file', None)))
+        missing = [path for _, path in named if path and not os.path.exists(path)]
         if not missing or not compat.checks_files_first():
             return
-        for flag, path in (('--cacert', self.cacert), ('--crlfile', self.crlfile),
-                           ('--netrc-file', getattr(self, 'netrc_file', None))):
+        for flag, path in named:
             if path and not os.path.exists(path):
                 raise EarlyExit(EXIT_USAGE, "The file '%s' provided to %s does not exist" % (path, flag))
+
+    def proxy_tls(self):
+        """:class:`ProxyTLS` for an https:// proxy; a file that cannot be used
+        fails at the proxy's handshake, as the origin's do at its own."""
+        try:
+            context = build_ssl_context(self.proxy_insecure, cacert=self.proxy_cacert, capath=self.proxy_capath,
+                                        cert=self.proxy_cert, key=self.proxy_key, passphrase=self.proxy_pass,
+                                        min_version=ssl.TLSVersion.TLSv1 if self.proxy_tlsv1 else None,
+                                        ciphers=self.proxy_ciphers, crlfile=self.proxy_crlfile)
+        except LocalError as exc:
+            context = UnusableContext(exc)
+        from .connector import parse_pins
+
+        return ProxyTLS(context, parse_pins(self.proxy_pinnedpubkey) if self.proxy_pinnedpubkey else None)
 
     def ssl_context(self):
         floor, top = self.tls_versions()

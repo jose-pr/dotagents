@@ -400,9 +400,14 @@ def world(request, tmp_path_factory):
         mutual.verify_mode = ssl.CERT_REQUIRED
         w["tls_mutual"] = servers.serve(_origin, tls=mutual).replace("http://", "https://")
         w.update(_revocation_and_pins(certs, w["tmp"]))
+        # HTTPS proxies: TLS to the proxy, then the usual proxy behaviour.
+        w["https_proxy"] = servers.serve(_proxy(require=None), tls=context).replace("http://", "https://")
+        w["https_proxy_auth"] = servers.serve(_proxy(), tls=context).replace("http://", "https://")
+        w["https_proxy_mutual"] = servers.serve(_proxy(require=None), tls=mutual).replace("http://", "https://")
     else:
         w["tls"], w["ca"], w["certs"], w["tls_mutual"] = None, [], None, None
-        w.update(crl_revoked=None, crl_clean=None, pin=None, pubkey=None)
+        w.update(crl_revoked=None, crl_clean=None, pin=None, pubkey=None, https_proxy=None, https_proxy_auth=None,
+                 https_proxy_mutual=None)
     yield w
     servers.close()
 
@@ -553,6 +558,43 @@ SCENARIOS = [
                                               P(w, "header_proxy"), "--proxy-header", "X-P: 1", X], {}, False, {}),
     ("--preproxy alone", lambda w: ["--preproxy", "socks5h://" + w["socks_ok"], w["echo"] + "/s"], {}, False, {}),
     ("agent proxy is SOCKS", lambda w: [_localhost(w, "echo")], {"AGENTS_PROXY": "@socks5h"}, False, {}),
+    # HTTPS proxies: TLS to the proxy, verified by the --proxy-* TLS options.
+    ("https proxy, http target", lambda w: ["-x", w["https_proxy"], "--proxy-cacert", _ca(w), X], {}, True, {}),
+    ("https proxy, --proxy-insecure", lambda w: ["-x", w["https_proxy"], "--proxy-insecure", X], {}, True, {}),
+    ("https proxy, untrusted", lambda w: ["-x", w["https_proxy"], X], {}, True, {}),
+    ("https proxy, --cacert is not for it", lambda w: w["ca"] + ["-x", w["https_proxy"], X], {}, True, {}),
+    ("https proxy, name mismatch", lambda w: ["-x", w["https_proxy"].replace("127.0.0.1", "localhost"),
+                                             "--proxy-cacert", _ca(w), X], {}, True, {}),
+    ("https proxy, https target", lambda w: w["ca"] + ["-x", w["https_proxy"], "--proxy-cacert", _ca(w), S(w)],
+     {}, True, {}),
+    ("https proxy, https target untrusted", lambda w: ["-x", w["https_proxy"], "--proxy-cacert", _ca(w), S(w)],
+     {}, True, {}),
+    ("https proxy, -k is not for it", lambda w: ["-k", "-x", w["https_proxy"], S(w)], {}, True, {}),
+    ("https proxy, both insecure", lambda w: ["-k", "--proxy-insecure", "-x", w["https_proxy"], S(w)], {}, True, {}),
+    ("https proxy, -p http target", lambda w: ["-p", "-x", w["https_proxy"], "--proxy-cacert", _ca(w),
+                                               w["echo"] + "/t"], {}, True, {}),
+    ("https proxy, credentials", lambda w: ["-x", w["https_proxy_auth"], "--proxy-cacert", _ca(w), "-U",
+                                            "agent:s3cret", X], {}, True, {}),
+    ("https proxy, 407", lambda w: ["-x", w["https_proxy_auth"], "--proxy-cacert", _ca(w), X], {}, True, {}),
+    ("https proxy, CONNECT with credentials", lambda w: w["ca"] + ["-x", w["https_proxy_auth"], "--proxy-cacert",
+                                                                   _ca(w), "-U", "agent:s3cret", S(w)], {}, True, {}),
+    ("https proxy, CONNECT 407", lambda w: w["ca"] + ["-x", w["https_proxy_auth"], "--proxy-cacert", _ca(w), S(w)],
+     {}, True, {}),
+    ("--proxy-pinnedpubkey match", lambda w: ["-x", w["https_proxy"], "--proxy-insecure", "--proxy-pinnedpubkey",
+                                              w["pin"], X], {}, True, {}),
+    ("--proxy-pinnedpubkey mismatch", lambda w: ["-x", w["https_proxy"], "--proxy-insecure", "--proxy-pinnedpubkey",
+                                                 "sha256//" + "A" * 43 + "=", X], {}, True, {}),
+    ("--proxy-crlfile revoked", lambda w: ["-x", w["https_proxy"], "--proxy-cacert", _ca(w), "--proxy-crlfile",
+                                           w["crl_revoked"], X], {}, True, {}),
+    ("--proxy-cacert missing", lambda w: ["-x", w["https_proxy"], "--proxy-cacert", str(w["tmp"] / "none.pem"), X],
+     {}, True, {}),
+    ("--proxy-tlsv1", lambda w: ["-x", w["https_proxy"], "--proxy-cacert", _ca(w), "--proxy-tlsv1", X], {}, True, {}),
+    ("--proxy-cert", lambda w: ["-x", w["https_proxy_mutual"], "--proxy-cacert", _ca(w), "--proxy-cert",
+                                str(w["certs"] / "client.pem"), "--proxy-key", str(w["certs"] / "client.key"), X],
+     {}, True, {}),
+    ("https proxy wants a client certificate", lambda w: ["-x", w["https_proxy_mutual"], "--proxy-cacert", _ca(w), X],
+     {}, True, {}),
+    ("agent proxy over https", lambda w: ["--proxy-insecure", X], {"AGENTS_PROXY": "@https_proxy"}, True, {}),
     # --proxy-header: to the proxy only -- the plain request to it, or the CONNECT.
     ("--proxy-header, plain proxying", lambda w: ["-x", P(w, "header_proxy"), "--proxy-header", "X-P: 1", "-H",
                                                   "X-O: 2", X], {}, False, {}),
@@ -617,7 +659,9 @@ SCENARIOS = [
      {}, False, {}),
     ("60: name does not match", lambda w: w["ca"] + [S(w).replace("127.0.0.1", "localhost")], {}, True, {}),
     ("77: --cacert not a bundle", lambda w: ["--cacert", str(w["tmp"] / "garbage.pem"), S(w)], {}, True, {}),
-    ("client certificate required", lambda w: w["ca"] + [w["tls_mutual"] + "/"], {}, True, {}),
+    # The server's "certificate required" alert races curl's first write: 56
+    # when curl reads it, 55 when the reset reaches its send first.
+    ("client certificate required", lambda w: w["ca"] + [w["tls_mutual"] + "/"], {}, True, {55: 56}),
     ("client certificate given", lambda w: w["ca"] + ["--cert", str(w["certs"] / "client.pem"), "--key",
                                                      str(w["certs"] / "client.key"), w["tls_mutual"] + "/"], {}, True, {}),
     # A proxy, plain http: its answer is the response.
@@ -686,6 +730,10 @@ SCENARIOS = [
 ]
 
 
+def _ca(world):
+    return str(world["certs"] / "ca.pem")
+
+
 def _localhost(world, name):
     """The server ``name`` addressed as localhost (so the name, not an
     address, is what a SOCKS client has to resolve or pass on)."""
@@ -713,6 +761,16 @@ SCHANNEL_OWN = {
     "77: --cacert not a bundle": "it ignores a CA file it cannot read and fails verification (60)",
     "client certificate given": "it cannot load a PEM client certificate (58)",
     "--crlfile, revoked": "the --ssl-no-revoke this harness needs for it turns revocation checks off",
+    "--proxy-cert": "it cannot load a PEM client certificate (58)",
+    "https proxy, http target": "it checks the https:// proxy's revocation and curl has no option to relax that",
+    "https proxy, https target": "it checks the https:// proxy's revocation and curl has no option to relax that",
+    "https proxy, -p http target": "it checks the https:// proxy's revocation and curl has no option to relax that",
+    "https proxy, credentials": "it checks the https:// proxy's revocation and curl has no option to relax that",
+    "https proxy, 407": "it checks the https:// proxy's revocation and curl has no option to relax that",
+    "https proxy, CONNECT with credentials": "it checks the https:// proxy's revocation and curl has no option to relax that",
+    "https proxy, CONNECT 407": "it checks the https:// proxy's revocation and curl has no option to relax that",
+    "--proxy-tlsv1": "it checks the https:// proxy's revocation and curl has no option to relax that",
+    "https proxy wants a client certificate": "it checks the https:// proxy's revocation and curl has no option to relax that",
 }
 
 
@@ -721,6 +779,8 @@ def _env(world, env):
     for key, value in env.items():
         if value == "@proxy+userinfo":
             value = world["proxy"].replace("//", "//agent:s3cret@")
+        elif value == "@https_proxy":
+            value = world["https_proxy"]
         elif value == "@socks5h":
             value = "socks5h://" + world["socks_ok"]
         elif value.startswith("@"):
@@ -745,7 +805,7 @@ def test_the_fallback_answers_as_curl_does(world, name, argv, env, tls, allowed)
     fallback = _run(command(), environment, real=False)
     code, err_code, out = real[:3]
     if code in allowed:
-        # A version difference: what the fallback answers instead.
+        # A known difference (a race between two outcomes): what the fallback answers instead.
         out = out.replace(b"%d]" % code, b"%d]" % allowed[code])
         code = allowed[code]
         err_code = code if err_code is not None else None

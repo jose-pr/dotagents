@@ -8,8 +8,10 @@ import base64
 import errno
 import hashlib
 import http.client
+import io
 import ipaddress
 import socket
+import ssl
 import struct
 import urllib.parse
 import urllib.request
@@ -243,6 +245,103 @@ def parse_pins(spec):
     return {hashlib.sha256(data).digest()}
 
 
+class TLSInTLS(object):
+    """A TLS session carried inside another (the origin's, inside the one to
+    an https:// proxy): ``ssl.SSLObject`` over memory BIOs, pumped through
+    the outer socket -- an ``SSLSocket`` cannot itself be wrapped again.
+    Offers what http.client uses of a socket."""
+
+    def __init__(self, outer, context, server_hostname):
+        self.outer = outer
+        self.incoming, self.outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+        self.tls = context.wrap_bio(self.incoming, self.outgoing, server_hostname=server_hostname)
+        self._pump(self.tls.do_handshake)
+
+    def _pump(self, operation, *args):
+        while True:
+            try:
+                result = operation(*args)
+            except ssl.SSLWantReadError:
+                self._flush()
+                data = self.outer.recv(65536)
+                if data:
+                    self.incoming.write(data)
+                else:
+                    self.incoming.write_eof()
+                continue
+            except ssl.SSLWantWriteError:
+                self._flush()
+                continue
+            self._flush()
+            return result
+
+    def _flush(self):
+        data = self.outgoing.read()
+        if data:
+            self.outer.sendall(data)
+
+    def sendall(self, data):
+        view = memoryview(data)
+        while view:
+            sent = self._pump(self.tls.write, view)
+            view = view[sent:]
+
+    def send(self, data):
+        return self._pump(self.tls.write, data)
+
+    def recv(self, size=65536):
+        try:
+            return self._pump(self.tls.read, size)
+        except (ssl.SSLZeroReturnError, ssl.SSLEOFError):
+            return b''
+
+    def recv_into(self, buffer, size=0):
+        data = self.recv(size or len(buffer))
+        buffer[:len(data)] = data
+        return len(data)
+
+    def makefile(self, mode='rb', buffering=-1, **kwargs):
+        return io.BufferedReader(_Reader(self), buffering if buffering and buffering > 0 else io.DEFAULT_BUFFER_SIZE)
+
+    def getpeercert(self, binary_form=False):
+        return self.tls.getpeercert(binary_form)
+
+    def settimeout(self, timeout):
+        self.outer.settimeout(timeout)
+
+    def gettimeout(self):
+        return self.outer.gettimeout()
+
+    def setsockopt(self, *args):
+        return self.outer.setsockopt(*args)
+
+    def fileno(self):
+        return self.outer.fileno()
+
+    def close(self):
+        self.outer.close()
+
+
+class _Reader(io.RawIOBase):
+    def __init__(self, transport):
+        self.transport = transport
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        return self.transport.recv_into(buffer)
+
+
+def _check_pins(sock, pins):
+    if pins is None:
+        return
+    der = sock.getpeercert(binary_form=True)
+    if not der or hashlib.sha256(subject_public_key_info(der)).digest() not in pins:
+        sock.close()
+        raise LocalError(EXIT_PINNED, 'SSL: public key does not match pinned public key')
+
+
 class Connector(object):
     """What every connection of one transfer shares: ``source`` (an address
     or ``None``), ``ports`` (``(low, high)`` or ``None``), ``pins`` (SHA-256
@@ -276,12 +375,7 @@ class Connector(object):
         raise LocalError(EXIT_INTERFACE, "Couldn't bind to %s: %s" % (what, last))
 
     def check_pin(self, sock):
-        if self.pins is None:
-            return
-        der = sock.getpeercert(binary_form=True)
-        if not der or hashlib.sha256(subject_public_key_info(der)).digest() not in self.pins:
-            sock.close()
-            raise LocalError(EXIT_PINNED, 'SSL: public key does not match pinned public key')
+        _check_pins(sock, self.pins)
 
     def socks_connection(self, socks, address, timeout=_DEFAULT_TIMEOUT, source_address=None):
         """A connection to ``address`` through ``socks``: TCP to the proxy
@@ -295,7 +389,7 @@ class Connector(object):
             raise
         return sock
 
-    def connection_class(self, base, tunnel_headers=None, socks=None):
+    def connection_class(self, base, tunnel_headers=None, socks=None, proxy_tls=None):
         """``base`` (``HTTPConnection`` / ``HTTPSConnection``) bound to this
         connector, its CONNECT carrying ``tunnel_headers`` too, its TCP
         connection made through ``socks`` (a :class:`Socks`) when given."""
@@ -322,9 +416,21 @@ class Connector(object):
                 base.set_tunnel(self, host, port, merged)
 
             def connect(self):
-                base.connect(self)
-                if isinstance(self, http.client.HTTPSConnection):
-                    connector.check_pin(self.sock)
+                if proxy_tls is None:
+                    base.connect(self)
+                    if isinstance(self, http.client.HTTPSConnection):
+                        connector.check_pin(self.sock)
+                    return
+                # An https:// proxy: TLS to it (its own context), then the
+                # CONNECT through that, then the origin's TLS inside it.
+                raw = self._create_connection((self.host, self.port), self.timeout, self.source_address)
+                self.sock = proxy_tls.context.wrap_socket(raw, server_hostname=self.host)
+                _check_pins(self.sock, proxy_tls.pins)
+                if self._tunnel_host:
+                    self._tunnel()
+                    if isinstance(self, http.client.HTTPSConnection):
+                        self.sock = TLSInTLS(self.sock, self._context, self._tunnel_host)
+                        connector.check_pin(self.sock)
 
         return Connection
 
@@ -338,7 +444,7 @@ class ConnectHTTPHandler(urllib.request.HTTPHandler):
 
     def http_open(self, req):
         klass = self.connector.connection_class(http.client.HTTPConnection, getattr(req, 'tunnel_headers', None),
-                                                getattr(req, 'socks_via', None))
+                                                getattr(req, 'socks_via', None), getattr(req, 'proxy_tls', None))
         return self.do_open(klass, req)
 
 
@@ -354,7 +460,7 @@ class ConnectHTTPSHandler(urllib.request.HTTPSHandler):
 
     def https_open(self, req):
         klass = self.connector.connection_class(http.client.HTTPSConnection, getattr(req, 'tunnel_headers', None),
-                                                getattr(req, 'socks_via', None))
+                                                getattr(req, 'socks_via', None), getattr(req, 'proxy_tls', None))
         kwargs = {'context': self._context}
         if hasattr(self, '_check_hostname'):  # Python < 3.12
             kwargs['check_hostname'] = self._check_hostname

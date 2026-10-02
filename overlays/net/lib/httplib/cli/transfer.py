@@ -219,7 +219,7 @@ def build_opener(args, plan, context, transfer, removed):
     handlers.append(urllib.request.ProxyHandler({}))
     if plan is not None:
         handlers.append(AgentProxyHandler(plan, tunnel_http=args.proxytunnel, headers=args.proxy_headers(),
-                                          socks=args.socks, preproxy=args.socks_pre))
+                                          socks=args.socks, preproxy=args.socks_pre, proxy_tls=args.proxy_tls()))
     if args.request_target:
         handlers.append(RequestTarget(args.request_target))
     handlers.append(RequestLog(transfer))
@@ -305,6 +305,10 @@ def transport_error(args, reason, transfer, may_retry):
     elif isinstance(reason, (socket.timeout, TimeoutError)) or 'timed out' in text:
         code, message = EXIT_TIMEOUT, 'Operation timed out after %d milliseconds with 0 bytes received' % (
             _elapsed_ms(transfer))
+    elif isinstance(reason, ssl.SSLError) and 'CERTIFICATE_REQUIRED' in str(reason).upper():
+        # TLS 1.3 sends "certificate required" after the handshake, on the
+        # first read: curl's receive error.
+        code, message = EXIT_RECV, 'Recv failure: %s' % text
     elif isinstance(reason, ssl.SSLCertVerificationError):
         code, message = EXIT_SSL, 'SSL certificate problem: %s' % text
     elif isinstance(reason, ssl.SSLError):

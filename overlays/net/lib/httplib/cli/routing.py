@@ -67,12 +67,13 @@ class AgentProxyHandler(urllib.request.BaseHandler):
 
     handler_order = 90  # before the (empty) ProxyHandler at 100
 
-    def __init__(self, plan, tunnel_http=False, headers=None, socks=None, preproxy=None):
+    def __init__(self, plan, tunnel_http=False, headers=None, socks=None, preproxy=None, proxy_tls=None):
         self.plan = plan
         self.tunnel_http = tunnel_http  # -p: CONNECT for http URLs too
         self.headers = dict(headers or {})  # --proxy-header: to the proxy only
         self.socks = socks  # the plan's proxy when it is SOCKS (connector.Socks)
         self.preproxy = preproxy  # --preproxy: SOCKS to reach the HTTP proxy
+        self.proxy_tls = proxy_tls  # an https:// proxy's TLS (tls.ProxyTLS)
 
     def _apply(self, req):
         plan = self.plan
@@ -86,6 +87,8 @@ class AgentProxyHandler(urllib.request.BaseHandler):
             req.socks_via = self.preproxy
         if plan.endpoint is None:
             proxy_parts = urllib.parse.urlsplit(plan.proxy)
+            if proxy_parts.scheme.lower() == 'https':
+                req.proxy_tls = self.proxy_tls
             if self.tunnel_http and req.type == 'http':
                 # -p: connect to the proxy, CONNECT to the origin, then the
                 # origin's own request (its path and Host) through the tunnel.

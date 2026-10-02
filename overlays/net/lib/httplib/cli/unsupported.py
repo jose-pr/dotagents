@@ -24,14 +24,11 @@ UNSUPPORTED_ARGS = [
     'mail_rcpt_allowfails', 'mail_rcpt', 'metalink', 'negotiate', 'next',
     'no_progress_bar', 'ntlm_wb', 'ntlm', 'parallel_immediate', 'parallel_max',
     'parallel', 'path_as_is', 'proto_default', 'proto_redir', 'proto',
-    'proxy_anyauth', 'proxy_cacert', 'proxy_capath', 'proxy_cert_type',
-    'proxy_cert', 'proxy_ciphers', 'proxy_crlfile', 'proxy_digest',
-    'proxy_insecure', 'proxy_key_type', 'proxy_key', 'proxy_negotiate',
-    'proxy_ntlm', 'proxy_pass', 'proxy_pinnedpubkey', 'proxy_service_name',
-    'proxy_ssl_allow_beast', 'proxy_ssl_auto_client_cert',
-    'proxy_tls13_ciphers', 'proxy_tlsauthtype', 'proxy_tlspassword',
-    'proxy_tlsuser', 'proxy_tlsv1', 'pubkey', 'quote', 'random_file', 'raw',
-    'sasl_authzid', 'sasl_ir', 'service_name', 'socks5_gssapi_nec',
+    'proxy_anyauth', 'proxy_digest', 'proxy_negotiate', 'proxy_ntlm',
+    'proxy_service_name', 'proxy_ssl_allow_beast',
+    'proxy_ssl_auto_client_cert', 'proxy_tls13_ciphers', 'proxy_tlsauthtype',
+    'proxy_tlspassword', 'proxy_tlsuser', 'pubkey', 'quote', 'random_file',
+    'raw', 'sasl_authzid', 'sasl_ir', 'service_name', 'socks5_gssapi_nec',
     'socks5_gssapi_service', 'socks5_gssapi', 'ssl_allow_beast',
     'ssl_auto_client_cert', 'ssl_reqd', 'ssl', 'sslv2', 'sslv3',
     'suppress_connect_headers', 'tcp_fastopen', 'telnet_option',
@@ -231,36 +228,18 @@ class UnsupportedArgs(Group):
     ('--proxy-anyauth',)
 
 
-    proxy_cacert: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
-    ('--proxy-cacert',)
 
-    proxy_capath: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='DIR')] = None
-    ('--proxy-capath',)
 
-    proxy_cert_type: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='TYPE')] = None
-    ('--proxy-cert-type',)
 
-    proxy_cert: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='CERT')] = None
-    ('--proxy-cert',)
 
-    proxy_ciphers: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='LIST')] = None
-    ('--proxy-ciphers',)
 
-    proxy_crlfile: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
-    ('--proxy-crlfile',)
 
     proxy_digest: Arg[bool, _HIDDEN] = False
     ('--proxy-digest',)
 
 
-    proxy_insecure: Arg[bool, _HIDDEN] = False
-    ('--proxy-insecure',)
 
-    proxy_key_type: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='TYPE')] = None
-    ('--proxy-key-type',)
 
-    proxy_key: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='KEY')] = None
-    ('--proxy-key',)
 
     proxy_negotiate: Arg[bool, _HIDDEN] = False
     ('--proxy-negotiate',)
@@ -268,11 +247,7 @@ class UnsupportedArgs(Group):
     proxy_ntlm: Arg[bool, _HIDDEN] = False
     ('--proxy-ntlm',)
 
-    proxy_pass: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PASS')] = None
-    ('--proxy-pass',)
 
-    proxy_pinnedpubkey: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='HASHES')] = None
-    ('--proxy-pinnedpubkey',)
 
     proxy_service_name: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='NAME')] = None
     ('--proxy-service-name',)
@@ -295,8 +270,6 @@ class UnsupportedArgs(Group):
     proxy_tlsuser: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='USER')] = None
     ('--proxy-tlsuser',)
 
-    proxy_tlsv1: Arg[bool, _HIDDEN] = False
-    ('--proxy-tlsv1',)
 
 
     pubkey: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='KEY')] = None

@@ -62,7 +62,9 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
   TLS `-k --cacert --capath -E/--cert --cert-type --key --key-type --pass
   -1/--tlsv1 --tlsv1.0 --tlsv1.1 --tlsv1.2 --tlsv1.3 --tls-max --ciphers --crlfile
   --pinnedpubkey`; connection `-x -U -p -0/--http1.0 --proxy-header --proxy-basic --socks4
-  --socks4a --socks5 --socks5-hostname --socks5-basic --preproxy --noproxy -L --max-redirs --location-trusted
+  --socks4a --socks5 --socks5-hostname --socks5-basic --preproxy --proxy-insecure --proxy-cacert
+  --proxy-capath --proxy-cert --proxy-cert-type --proxy-key --proxy-key-type --proxy-pass --proxy-ciphers
+  --proxy-crlfile --proxy-pinnedpubkey --proxy-tlsv1 --noproxy -L --max-redirs --location-trusted
   --post301 --post302 --post303 -m --connect-timeout --timeout -4 -6 --resolve
   --connect-to --unix-socket --interface --local-port --limit-rate -Y/--speed-limit
   -y/--speed-time --ignore-content-length --dns-servers --dns-ipv4-addr --dns-ipv6-addr
@@ -103,7 +105,13 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     credentials, no acceptable method, dropped). `--preproxy socks5h://...`
     reaches the `-x` proxy through SOCKS. `--proxy-header` goes to the proxy
     only: the request to it, or the CONNECT -- never through a tunnel, never
-    to a bypassed host. `--proxy-basic` is a no-op (`-U` is Basic).
+    to a bypassed host. `--proxy-basic` is a no-op (`-U` is Basic). An
+    `https://` proxy is spoken to over TLS, verified by its own options --
+    `--proxy-cacert`, `--proxy-capath`, `--proxy-insecure`, `--proxy-cert` /
+    `--proxy-key` / `--proxy-pass`, `--proxy-crlfile`,
+    `--proxy-pinnedpubkey`, `--proxy-ciphers`, `--proxy-tlsv1` -- never by
+    `--cacert` or `-k`, which stay the origin's; an https target goes through
+    it with the origin's TLS inside the proxy's.
   - **Shaping a connection**: `--interface` takes an IP address, a host
     (`host!NAME`) or an interface (`if!NAME`, or a bare name; by name only with
     netimps installed), `--local-port N[-M]` the first port of the range that
@@ -200,7 +208,10 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
   nothing. Only for a Schannel curl, and never when the command names
   `--ssl-no-revoke` / `--ssl-revoke-best-effort` itself. The same values as
   dotagents' `git_ssl_revoke` for git, whose Schannel default is already
-  best-effort. The fallback checks no revocation (as OpenSSL curl) unless
+  best-effort. curl has no such option for an `https://` proxy's own
+  certificate: through one whose certificate has no revocation list, a
+  Schannel curl fails whatever is set (the fallback does not: `NET_CURL=` cannot
+  help, but removing the real curl from PATH, or an OpenSSL curl, does). The fallback checks no revocation (as OpenSSL curl) unless
   `--crlfile`.
 - **`NET_CURL_COMPAT`** — the curl version the fallback answers as where curl
   versions disagree (`8.19`, `8.19.0`), or `auto` (default): the real curl on
