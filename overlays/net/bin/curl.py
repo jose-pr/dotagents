@@ -137,8 +137,8 @@ def use_real_curl(argv):
 def maybe_run_system_curl(argv):
     """Run the real curl with the agent proxy applied; ``None`` when the
     fallback must serve the request (no real curl, or a prefix gateway).
-    A malformed proxy configuration never blocks real curl: it runs with
-    argv as typed, after one warning."""
+    A malformed proxy configuration -- or no duho to read argv with --
+    never blocks real curl: it runs with argv as typed, after one warning."""
     curl_path = find_real_curl()
     if not curl_path:
         return None
@@ -146,7 +146,7 @@ def maybe_run_system_curl(argv):
         if not use_real_curl(argv):
             return None
         extra = agent_proxy_argv(argv)
-    except ValueError as exc:
+    except (ValueError, ImportError) as exc:
         print('curl: ignoring the agent proxy: %s' % exc, file=sys.stderr)
         extra = []
     # curl skips its config file only when -q / --disable is its FIRST
@@ -212,9 +212,10 @@ def main(argv=None):
         system_curl_rc = maybe_run_system_curl(argv)
         if system_curl_rc is not None:
             return system_curl_rc
-    except ValueError as exc:
+    except (ValueError, ImportError) as exc:
         # A configuration error (a bad AGENTS_PROXY / AGENTS_PROXY_TYPE that
-        # would be used) is curl's exit 2, one line on stderr -- not a traceback.
+        # would be used), or a URL hook with no duho to read argv with, is
+        # curl's exit 2, one line on stderr -- not a traceback.
         print('curl: (2) %s' % exc, file=sys.stderr)
         return 2
     return fallback_main(argv)
