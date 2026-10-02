@@ -8,8 +8,9 @@ proxy), with an empty PATH it serves it itself. Skipped when no real curl is
 installed. The servers are raw sockets on 127.0.0.1, so each failure is
 exact: a reply cut short, a reset, a proxy refusing or dropping the CONNECT.
 
-Where curl versions disagree, the allowance names the versions measured; the
-fallback answers as the older, more widely installed ones do.
+Where curl versions disagree, the fallback answers as the version
+``NET_CURL_COMPAT`` names (``httplib.cli.compat``): the comparison sets it to
+the real curl's own version, so every scenario is exact for any curl.
 """
 import base64
 import os
@@ -317,6 +318,17 @@ def _schannel():
 
 
 SCHANNEL = bool(REAL_CURL) and _schannel()
+
+
+def _real_version():
+    from httplib.cli.compat import installed_version
+
+    found = installed_version() if REAL_CURL else None
+    return "%d.%d.%d" % found if found else "auto"
+
+
+#: The fallback answers as this curl (NET_CURL_COMPAT).
+REAL_VERSION = _real_version()
 EMPTY_PATH = None
 
 
@@ -329,6 +341,8 @@ def _run(argv, env, real):
     e = {k: v for k, v in os.environ.items() if not _PROXY_VARS.match(k)}
     e.update(env)
     e["PATH"] = (os.path.dirname(REAL_CURL) + os.pathsep + os.environ.get("PATH", "")) if real else EMPTY_PATH
+    if not real:
+        e.setdefault("NET_CURL_COMPAT", REAL_VERSION)
     if real and SCHANNEL:
         # Schannel cannot check revocation for a private test CA: a
         # certificate the CA signs would fail as "revocation status unknown".
@@ -347,10 +361,6 @@ def _run(argv, env, real):
 # ``allowed`` maps a real exit code to the fallback's where curl versions
 # disagree: the comparison accepts the fallback's code, in stdout too.
 # --------------------------------------------------------------------------- #
-#: curl 8.21 (Windows, Schannel) says 7 for a CONNECT the proxy refuses;
-#: 8.18 and earlier (8.18 measured on Linux, OpenSSL) say 56.
-CONNECT_REFUSED = {7: 56}
-
 S = lambda w: (w["tls"] or "https://127.0.0.1:1") + "/"  # noqa: E731
 P = lambda w, name: w[name]  # noqa: E731
 X = "http://example.invalid/"
@@ -410,6 +420,9 @@ SCENARIOS = [
     ("-d @missing", lambda w: ["-d", "@" + str(w["tmp"] / "missing.bin"), w["origin"] + "/"], {}, False, {}),
     ("-F @missing", lambda w: ["-F", "f=@" + str(w["tmp"] / "missing.bin"), w["origin"] + "/"], {}, False, {}),
     ("-H @missing", lambda w: ["-H", "@" + str(w["tmp"] / "missing.txt"), w["origin"] + "/"], {}, False, {}),
+    ("--cacert missing", lambda w: ["--cacert", str(w["tmp"] / "missing.pem"), S(w)], {}, True, {}),
+    ("--netrc-file missing", lambda w: ["--netrc-file", str(w["tmp"] / "missing.netrc"), w["origin"] + "/"],
+     {}, False, {}),
     ("-w @missing", lambda w: ["-w", "@" + str(w["tmp"] / "missing.txt"), w["origin"] + "/"], {}, False, {}),
     # TLS.
     ("TLS trusted", lambda w: w["ca"] + [S(w)], {}, True, {}),
@@ -438,15 +451,15 @@ SCENARIOS = [
     # A proxy, https: the CONNECT.
     ("CONNECT refused", lambda w: ["-x", P(w, "dead"), S(w)], {}, False, {}),
     ("CONNECT proxy not resolvable", lambda w: ["-x", "http://nonexistent.invalid:3128", S(w)], {}, False, {}),
-    ("CONNECT 407", lambda w: w["ca"] + ["-x", P(w, "proxy"), S(w)], {}, False, CONNECT_REFUSED),
+    ("CONNECT 407", lambda w: w["ca"] + ["-x", P(w, "proxy"), S(w)], {}, False, {}),
     ("CONNECT 407 -f", lambda w: w["ca"] + ["-f", "-x", P(w, "proxy"), S(w)], {}, False, {}),
     ("CONNECT 407 -w", lambda w: w["ca"] + ["-w", "[%{http_code} %{exitcode}]", "-x", P(w, "proxy"), S(w)],
-     {}, False, CONNECT_REFUSED),
+     {}, False, {}),
     ("CONNECT wrong credential", lambda w: w["ca"] + ["-x", P(w, "proxy"), "-U", "agent:bad", S(w)],
-     {}, False, CONNECT_REFUSED),
-    ("CONNECT 403", lambda w: w["ca"] + ["-x", P(w, "proxy_403"), S(w)], {}, False, CONNECT_REFUSED),
+     {}, False, {}),
+    ("CONNECT 403", lambda w: w["ca"] + ["-x", P(w, "proxy_403"), S(w)], {}, False, {}),
     ("CONNECT 403 -f", lambda w: w["ca"] + ["-f", "-x", P(w, "proxy_403"), S(w)], {}, False, {}),
-    ("CONNECT 502", lambda w: w["ca"] + ["-x", P(w, "proxy_502"), S(w)], {}, False, CONNECT_REFUSED),
+    ("CONNECT 502", lambda w: w["ca"] + ["-x", P(w, "proxy_502"), S(w)], {}, False, {}),
     ("CONNECT dropped", lambda w: w["ca"] + ["-x", P(w, "proxy_drops"), S(w)], {}, False, {}),
     ("CONNECT empty reply", lambda w: w["ca"] + ["-x", P(w, "empty"), S(w)], {}, False, {}),
     ("CONNECT target unreachable", lambda w: ["-x", P(w, "open_proxy"), "https://127.0.0.1:%d/" % _closed_port()],
@@ -466,11 +479,11 @@ SCENARIOS = [
     ("agent proxy not resolvable", lambda w: [X], {"AGENTS_PROXY": "http://nonexistent.invalid:3128"}, False, {}),
     ("agent proxy malformed", lambda w: [X], {"AGENTS_PROXY": "not a url"}, False, {}),
     ("agent proxy CONNECT 407", lambda w: w["ca"] + [S(w)], {"AGENTS_PROXY": "@proxy", "AGENTS_PROXY_AUTH": "Basic eA=="},
-     False, CONNECT_REFUSED),
+     False, {}),
     ("agent proxy CONNECT 407 -f", lambda w: w["ca"] + ["-f", S(w)],
      {"AGENTS_PROXY": "@proxy", "AGENTS_PROXY_AUTH": "Basic eA=="}, False, {}),
     ("agent proxy bearer CONNECT 407", lambda w: w["ca"] + [S(w)], {"AGENTS_PROXY": "@proxy", "AGENTS_PROXY_AUTH": "Bearer t"},
-     False, CONNECT_REFUSED),
+     False, {}),
     ("agent proxy CONNECT tunnelled", lambda w: w["ca"] + [S(w)], {"AGENTS_PROXY": "@proxy", "AGENTS_PROXY_AUTH": BASIC},
      True, {}),
     # AGENTS_PROXY_AUTH_HEADER: the credential in a header of that name, to

@@ -15,6 +15,7 @@ import urllib.request
 from httplib import proxy as agent_proxy
 from httplib.retry import retry_after
 
+from . import compat
 from .body import FORM_CONTENT_TYPE
 from .download import EXIT_FILESIZE
 from .connection import MAX_RETRY_SLEEP
@@ -232,13 +233,13 @@ def transport_error(args, reason, transfer, may_retry):
     elif isinstance(reason, ssl.SSLError):
         code, message = EXIT_SSL_CONNECT, 'SSL connect error: %s' % text
     elif tunnel:
-        # The proxy answered the CONNECT with a status: curl's 56 (8.21 says
-        # 7), or under -f the status as an HTTP error, 22.
+        # The proxy answered the CONNECT with a status: 56 before curl 8.20,
+        # 7 since (compat); under -f the status as an HTTP error, 22.
         status = int(tunnel.group(1))
         if args.fails_on(status):
             code, message = EXIT_HTTP, 'The requested URL returned error: %d' % status
         else:
-            code, message = EXIT_RECV, 'CONNECT tunnel failed, response %d' % status
+            code, message = compat.connect_refused_code(), 'CONNECT tunnel failed, response %d' % status
     elif via_proxy and isinstance(reason, (http.client.RemoteDisconnected, ConnectionResetError)) \
             and urllib.parse.urlsplit(_hop_url(transfer)).scheme == 'https':
         code, message = EXIT_RECV, 'Proxy CONNECT aborted'
@@ -448,6 +449,7 @@ def run(args):
         print(SHIM_VERSION)
         return 0
     args.check()
+    compat.check()  # an unreadable NET_CURL_COMPAT: exit 2
     tokens = args.write_out_tokens()  # an unsupported -w variable fails before anything is sent
     args.check_files()  # --cacert / --netrc-file naming nothing: curl's 2, before anything else
     typed = args.url or args.url_positional

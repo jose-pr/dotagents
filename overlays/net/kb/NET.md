@@ -101,15 +101,16 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     302 without `-L`, a plain-http proxy's 407); `-f` makes a 4xx/5xx exit 22
     with no body, `--fail-with-body` the same exit with the body.
     Before anything is sent: 1 a scheme curl does not speak, 3 a URL it cannot
-    parse; 2 a `--cacert` / `--netrc-file` naming no file, 26 a `-d @` / `-H @`
+    parse; 2 a `--cacert` / `--netrc-file` naming no file (from curl 8.18 on;
+    before, 77 at the handshake / 26), 26 a `-d @` / `-H @`
     / `-w @` / `-T` file that cannot be read (these print `curl: message`
     with no `(N)` and no `-w`, as curl does). Connecting: 5 the proxy's name
     or URL is unusable, 6 the host's name, 7 could not connect, 28 timed out,
     35 a failed TLS handshake, 60 a certificate that does not verify, 58 a
     client certificate and 77 a CA bundle/path that cannot be loaded (at the
     handshake, so an `http://` transfer never fails on them), 59 an unusable
-    `--ciphers` list. A proxy refusing the https CONNECT is 56 (22 under `-f`;
-    curl 8.21 says 7, 8.18 and earlier 56), dropping it 56. The reply: 52
+    `--ciphers` list. A proxy refusing the https CONNECT is 56, or 7 from curl
+    8.20 on (`NET_CURL_COMPAT`; 22 under `-f`), dropping it 56. The reply: 52
     nothing came back, 1 not HTTP at all, 56 the connection reset, 18 a body
     shorter than its `Content-Length` or chunks cut short (what arrived is
     written first), 56 a malformed chunk; 23 when `-o`/`-D`/`-O` cannot be
@@ -155,6 +156,11 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
 - **Unsupported flags fail loud** (`curl: (2) Unsupported options: --http2`, exit
   2) rather than silently do the wrong thing — that guard is deliberate. If you
   hit one, call real `curl`.
+- **`NET_CURL_COMPAT`** — the curl version the fallback answers as where curl
+  versions disagree (`8.19`, `8.19.0`), or `auto` (default): the real curl on
+  PATH, else the newest measured (8.22). It changes only the answers listed in
+  `httplib/cli/compat.py`, each measured against curl's own builds; an
+  unreadable value is exit 2.
 - **`NET_CURL=0`** (or `n`/`no`/`false`/`off`) runs the real curl exactly as
   typed — no agent proxy, no hooks, no fallback; exit 2 if there is none. Unset
   or `1`/`y` is the shim.

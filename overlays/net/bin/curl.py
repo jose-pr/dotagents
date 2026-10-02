@@ -15,7 +15,6 @@ matches. Python 3.9+; the real-curl path needs duho only when the agent proxy
 or a URL hook is in play (to read argv the way curl does).
 """
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -66,24 +65,9 @@ def find_real_curl():
     Python < 3.12 consults the cwd too) and any hit that has a ``curl.py``
     beside it (another installed copy of the shim -- a project-scope net
     overlay next to the user-scope one would otherwise exec each other)."""
-    here = Path(__file__).resolve().parent
-    for directory in os.environ.get('PATH', '').split(os.pathsep):
-        if not directory:
-            continue
-        try:
-            searched = Path(directory).resolve()
-            if searched == here:
-                continue
-            found = shutil.which('curl', path=directory)
-            if not found:
-                continue
-            found_path = Path(found).resolve()
-            if found_path.parent != searched or (found_path.parent / 'curl.py').is_file():
-                continue
-        except OSError:
-            continue
-        return found
-    return None
+    from httplib.cli.compat import find_real_curl as find
+
+    return find(skip=Path(__file__).resolve().parent)
 
 
 def agent_proxy_argv(argv):

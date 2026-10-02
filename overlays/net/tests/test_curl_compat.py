@@ -1,0 +1,56 @@
+"""NET_CURL_COMPAT: the curl version the fallback answers as where versions
+disagree (``httplib.cli.compat``). The parity tests prove each answer against
+real curl; these pin the setting itself."""
+import pytest
+
+import curl  # noqa: E402  (bin/, via conftest)
+from httplib.cli import compat
+
+
+@pytest.fixture(autouse=True)
+def _fresh(monkeypatch):
+    monkeypatch.setattr(compat, "_cached", {})
+    monkeypatch.delenv(compat.VAR, raising=False)
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("8.19", (8, 19, 0)), ("8.19.0", (8, 19, 0)), ("8.22.1", (8, 22, 1)),
+    ("curl 8.21.0 (aarch64-w64-mingw32) libcurl/8.21.0", (8, 21, 0)), ("", None), ("x", None),
+])
+def test_versions_parse(text, expected):
+    assert compat.parse_version(text) == expected
+
+
+@pytest.mark.parametrize("version,code,first", [
+    ("8.17", 56, False), ("8.18", 56, True), ("8.19.9", 56, True), ("8.20", 7, True), ("8.22", 7, True),
+])
+def test_the_measured_boundaries(monkeypatch, version, code, first):
+    monkeypatch.setenv(compat.VAR, version)
+    assert compat.connect_refused_code() == code
+    assert compat.checks_files_first() is first
+
+
+def test_auto_is_the_installed_curl_else_the_newest(monkeypatch):
+    monkeypatch.setattr(compat, "installed_version", lambda: (8, 18, 0))
+    assert compat.version() == (8, 18, 0)
+    monkeypatch.setattr(compat, "_cached", {})
+    monkeypatch.setattr(compat, "installed_version", lambda: None)
+    monkeypatch.setenv(compat.VAR, "auto")
+    assert compat.version() == compat.NEWEST
+
+
+def test_an_unreadable_value_is_exit_2(monkeypatch, capsys):
+    monkeypatch.setenv(compat.VAR, "latest")
+    monkeypatch.setattr(curl, "find_real_curl", lambda: None)
+    rc = curl.main(["-sS", "-x", "http://127.0.0.1:1", "https://example.invalid/"])
+    err = capsys.readouterr().err
+    assert rc == 2 and "NET_CURL_COMPAT=latest" in err, err
+
+
+def test_the_shim_never_finds_itself(tmp_path, monkeypatch):
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    for name in ("curl", "curl.cmd", "curl.py"):
+        (shim_dir / name).write_text("")
+    monkeypatch.setenv("PATH", str(shim_dir))
+    assert compat.find_real_curl() is None
