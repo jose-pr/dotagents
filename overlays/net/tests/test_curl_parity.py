@@ -65,6 +65,8 @@ def _reset(conn):
 
 def _origin(conn, head):
     path = head.split(b" ")[1] if b" " in head else b"/"
+    if _header(head, "Proxy-Authorization") or _header(head, "X-Proxy-Token"):
+        return _respond(conn, "200 OK", b"leaked")  # a proxy credential reached the origin
     if path.endswith(b"/404"):
         return _respond(conn, "404 Not Found", b"nope")
     if path.endswith(b"/500"):
@@ -134,13 +136,13 @@ def _pipe(a, b):
     back.join(5)
 
 
-def _proxy(require=BASIC, connect_status=None, plain_status=None, drop_connect=False):
+def _proxy(require=BASIC, connect_status=None, plain_status=None, drop_connect=False, header="Proxy-Authorization"):
     """A forward proxy: ``require`` is the Proxy-Authorization it wants (407
-    otherwise); ``connect_status`` answers every CONNECT, ``drop_connect``
+    otherwise) in ``header``; ``connect_status`` answers every CONNECT, ``drop_connect``
     closes on it; a CONNECT it accepts is tunnelled to the target."""
     def handle(conn, head):
         method, target = head.split(b"\r\n", 1)[0].decode().split(" ")[:2]
-        auth = _header(head, "Proxy-Authorization")
+        auth = _header(head, header)
         if method == "CONNECT":
             if drop_connect:
                 return
@@ -224,6 +226,7 @@ def world(request, tmp_path_factory):
         ("proxy_403", _proxy(connect_status="403 Forbidden")),
         ("proxy_502", _proxy(connect_status="502 Bad Gateway", plain_status="502 Bad Gateway")),
         ("proxy_drops", _proxy(drop_connect=True)),
+        ("token_proxy", _proxy(header="X-Proxy-Token")),
     )}
     w["dead"] = "http://127.0.0.1:%d" % _closed_port()
     w["tmp"] = tmp_path_factory.mktemp("parity")
@@ -387,6 +390,17 @@ SCENARIOS = [
     ("agent proxy bearer CONNECT 407", lambda w: w["ca"] + [S(w)], {"AGENTS_PROXY": "@proxy", "AGENTS_PROXY_AUTH": "Bearer t"},
      False, CONNECT_REFUSED),
     ("agent proxy CONNECT tunnelled", lambda w: w["ca"] + [S(w)], {"AGENTS_PROXY": "@proxy", "AGENTS_PROXY_AUTH": BASIC},
+     True, {}),
+    # AGENTS_PROXY_AUTH_HEADER: the credential in a header of that name, to
+    # the proxy only -- on the CONNECT for https, never through the tunnel.
+    ("agent proxy custom header", lambda w: [X],
+     {"AGENTS_PROXY": "@token_proxy", "AGENTS_PROXY_AUTH": BASIC, "AGENTS_PROXY_AUTH_HEADER": "X-Proxy-Token"},
+     False, {}),
+    ("agent proxy custom header CONNECT", lambda w: w["ca"] + [S(w)],
+     {"AGENTS_PROXY": "@token_proxy", "AGENTS_PROXY_AUTH": BASIC, "AGENTS_PROXY_AUTH_HEADER": "X-Proxy-Token"},
+     True, {}),
+    ("agent proxy custom header never reaches the origin", lambda w: w["ca"] + [S(w)],
+     {"AGENTS_PROXY": "@open_proxy", "AGENTS_PROXY_AUTH": BASIC, "AGENTS_PROXY_AUTH_HEADER": "X-Proxy-Token"},
      True, {}),
     ("agent proxy dropped CONNECT", lambda w: w["ca"] + [S(w)], {"AGENTS_PROXY": "@proxy_drops"}, False, {}),
 ]

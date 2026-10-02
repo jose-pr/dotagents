@@ -23,7 +23,7 @@ from .errors import (EXIT_CONNECT, EXIT_EMPTY_REPLY, EXIT_HTTP, EXIT_PARTIAL, EX
                      EXIT_TIMEOUT, EXIT_WEIRD_REPLY, EXIT_WRITE, LocalError, Retry)
 from .request import has_header
 from .redirects import CurlRedirectHandler
-from .routing import AgentProxyHandler, check_proxy_syntax
+from .routing import AgentProxyHandler, TunnelHTTPSHandler, check_proxy_syntax
 from .tls import UnusableContext
 
 #: The shim's own version line (``-V``); real curl answers when it is present.
@@ -116,7 +116,7 @@ def build_opener(args, plan, context, transfer, removed):
     NO_PROXY and, on Windows, the registry's bypass list -- and silently go
     direct where we decided to proxy. ``AgentProxyHandler`` applies the plan
     per hop instead."""
-    handlers = args.connection_handlers(context) or [urllib.request.HTTPSHandler(context=context)]
+    handlers = args.connection_handlers(context) or [TunnelHTTPSHandler(context=context)]
     handlers.append(urllib.request.ProxyHandler({}))
     if plan is not None:
         handlers.append(AgentProxyHandler(plan))

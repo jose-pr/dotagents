@@ -1,6 +1,7 @@
 """The urllib side of the proxy decision: the handler that applies an
 ``httplib.proxy.ProxyPlan`` -- the same plan the session's adapter applies --
 to every hop, and the caller's view of a URL a prefix gateway rewrote."""
+import http.client
 import re
 import urllib.parse
 import urllib.request
@@ -58,9 +59,12 @@ class AgentProxyHandler(urllib.request.BaseHandler):
     (what ``ProxyHandler`` does after its own env/registry checks, which are
     deliberately not consulted here); a prefix gateway rewrites the URL to
     ``<proxy><endpoint><url>`` unless the gateway already wrote it in its own
-    namespace. The credential is an UNREDIRECTED header: urllib sends it to
-    the proxy for http, moves it onto the https CONNECT, and never copies it
-    into the next hop -- so it cannot reach an origin."""
+    namespace. The credential never reaches an origin: for http it is an
+    UNREDIRECTED header (sent to the proxy, never copied into the next hop);
+    for https through a ``connect`` proxy it rides on the CONNECT alone
+    (:class:`TunnelHTTPSHandler`) -- urllib itself moves only a header named
+    ``Proxy-Authorization`` there and would send any other name
+    (``AGENTS_PROXY_AUTH_HEADER``) through the tunnel to the origin."""
 
     handler_order = 90  # before the (empty) ProxyHandler at 100
 
@@ -77,9 +81,33 @@ class AgentProxyHandler(urllib.request.BaseHandler):
         elif not req.full_url.startswith(plan.gateway_base):
             req.full_url = agent_proxy.prefix_url(req.full_url, plan.proxy, plan.endpoint)
         if plan.authorization:
-            req.add_unredirected_header(plan.auth_header, plan.authorization)
+            if plan.endpoint is None and getattr(req, '_tunnel_host', None):
+                req.tunnel_headers = {plan.auth_header: plan.authorization}
+            else:
+                req.add_unredirected_header(plan.auth_header, plan.authorization)
         return req
 
     http_request = _apply
     https_request = _apply
 
+
+class TunnelHTTPSHandler(urllib.request.HTTPSHandler):
+    """urllib's HTTPS handler, with ``req.tunnel_headers`` (set by
+    :class:`AgentProxyHandler`) sent on the proxy's CONNECT and nowhere
+    else."""
+
+    def https_open(self, req):
+        extra = getattr(req, 'tunnel_headers', None)
+        if not extra:
+            return urllib.request.HTTPSHandler.https_open(self, req)
+
+        class TunnelConnection(http.client.HTTPSConnection):
+            def set_tunnel(self, host, port=None, headers=None):
+                merged = dict(headers or {})
+                merged.update(extra)
+                http.client.HTTPSConnection.set_tunnel(self, host, port, merged)
+
+        kwargs = {'context': self._context}
+        if hasattr(self, '_check_hostname'):  # Python < 3.12
+            kwargs['check_hostname'] = self._check_hostname
+        return self.do_open(TunnelConnection, req, **kwargs)
