@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   skips a revocation list that is missing or unreachable, `false` skips the check, as
   git on Linux does, `true` enforces it. It is passed to every git call, so a stricter
   git configuration elsewhere no longer fails an https clone on Windows, and a clone
-  that still fails on revocation says which setting to change.
+  that still fails on revocation says which setting to change. A git too old to know
+  `best-effort` (it rejects the value) runs the call again without the setting.
 
 ## [0.7.1] - 2026-10-01
 

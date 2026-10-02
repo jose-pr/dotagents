@@ -313,7 +313,8 @@ a directory of overlays or a registry file (default: the root); for a **source**
 - `class SourceCache(root, logger=None, ssl_revoke="best-effort")` — every git call
   runs as `git -c http.schannelCheckRevoke=<ssl_revoke> ...` (Git for Windows'
   Schannel checks revocation; git with OpenSSL ignores it), and a failure that looks
-  like a revocation check names the key. `repo_dir(location, ref=None) -> Path`
+  like a revocation check names the key. A git that rejects the value as a bad
+  boolean (older than `best-effort`) is asked again without it. `repo_dir(location, ref=None) -> Path`
   (`<root>/<slug>-<hash>`); `checkout(spec) -> Path` (clone or fetch, once per
   process; a failed fetch of an existing checkout is a warning);
   `materialize(spec) -> Path` (a `url` spec: `file://` in place, anything else
