@@ -68,6 +68,10 @@ class ConnectionArgs(Group):
     "Tunnel through the proxy with CONNECT for http URLs too"
     ("-p", "--proxytunnel")
 
+    http1_0: bool = False
+    "Send HTTP/1.0 requests"
+    ("-0", "--http1.0")
+
     interface: Arg[Optional[str], NS(metavar='NAME')] = None
     "Connect from this IP address, interface (if!NAME) or host (host!NAME)"
     ("--interface",)
@@ -248,7 +252,7 @@ class ConnectionArgs(Group):
         source = resolve_interface(self.interface) if self.interface else None
         ports = parse_local_port(self.local_port) if self.local_port else None
         pins = parse_pins(self.pinnedpubkey) if getattr(self, 'pinnedpubkey', None) else None
-        return Connector(source, ports, pins)
+        return Connector(source, ports, pins, http10=self.http1_0)
 
     def rate(self):
         """--limit-rate in bytes per second, or ``None``."""

@@ -125,6 +125,13 @@ def _echo(conn, head):
     """Answers with what it was asked: the request line, Host, Authorization
     and the client's address -- a 401 first for /auth without credentials."""
     lines = head.split(b"\r\n")
+    # Read the whole body: closing with unread data is a reset, not an answer.
+    pending = int(_header(head, "Content-Length") or 0) - (len(head) - head.find(b"\r\n\r\n") - 4)
+    while pending > 0:
+        chunk = conn.recv(min(pending, 65536))
+        if not chunk:
+            break
+        pending -= len(chunk)
     if b"/auth" in lines[0] and not _header(head, "Authorization"):
         return _respond(conn, "401 Unauthorized", b"", ['WWW-Authenticate: Basic realm="x"'])
     peer = conn.getpeername()
@@ -461,6 +468,9 @@ SCENARIOS = [
     ("3: no host", lambda w: ["-w", "[%{exitcode}]", "http:///x"], {}, False, {}),
     # Flags the fallback took on from curl's list (one request each, so what
     # the server saw is compared too).
+    ("-0 sends HTTP/1.0", lambda w: ["-0", w["echo"] + "/v"], {}, False, {}),
+    ("-0 with -w", lambda w: ["-0", "-w", "[%{http_version} %{http_code}]", w["origin"] + "/"], {}, False, {}),
+    ("-0 upload", lambda w: ["-0", "-T", str(w["tmp"] / "partial"), w["echo"] + "/up"], {}, False, {}),
     ("--request-target *", lambda w: ["--request-target", "*", "-X", "OPTIONS", w["echo"] + "/x"], {}, False, {}),
     ("--request-target", lambda w: ["--request-target", "/other?q=1", w["echo"] + "/x"], {}, False, {}),
     ("-p tunnels http", lambda w: ["-p", "-x", P(w, "open_proxy"), w["echo"] + "/tunnelled"], {}, False, {}),

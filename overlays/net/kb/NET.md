@@ -61,7 +61,7 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
   --etag-compare --no-clobber --skip-existing --remove-on-error --max-filesize`;
   TLS `-k --cacert --capath -E/--cert --cert-type --key --key-type --pass
   -1/--tlsv1 --tlsv1.0 --tlsv1.1 --tlsv1.2 --tlsv1.3 --tls-max --ciphers --crlfile
-  --pinnedpubkey`; connection `-x -U -p --noproxy -L --max-redirs --location-trusted
+  --pinnedpubkey`; connection `-x -U -p -0/--http1.0 --noproxy -L --max-redirs --location-trusted
   --post301 --post302 --post303 -m --connect-timeout --timeout -4 -6 --resolve
   --connect-to --unix-socket --interface --local-port --limit-rate -Y/--speed-limit
   -y/--speed-time --ignore-content-length --dns-servers --dns-ipv4-addr --dns-ipv6-addr

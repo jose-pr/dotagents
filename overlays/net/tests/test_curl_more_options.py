@@ -307,7 +307,7 @@ def test_stderr_goes_to_a_file(tmp_path, monkeypatch, capsysbinary):
 
 
 @pytest.mark.parametrize("short, long", [("-K", "--config"), ("-Z", "--parallel"), ("-a", "--append"),
-                                         ("-0", "--http1.0"), ("-j", "--junk-session-cookies")])
+                                         ("-B", "--use-ascii"), ("-j", "--junk-session-cookies")])
 def test_short_aliases_of_refused_flags_are_refused_in_one_line(short, long, tmp_path, monkeypatch, capsysbinary):
     argv = [short, "x"] if short == "-K" else [short]
     rc, out = _run(monkeypatch, capsysbinary, tmp_path, ["-s", *argv, "http://127.0.0.1:1/"])

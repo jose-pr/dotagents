@@ -129,12 +129,14 @@ def parse_pins(spec):
 class Connector(object):
     """What every connection of one transfer shares: ``source`` (an address
     or ``None``), ``ports`` (``(low, high)`` or ``None``), ``pins`` (SHA-256
-    digests of acceptable server keys, or ``None``)."""
+    digests of acceptable server keys, or ``None``), ``http10`` (``-0``:
+    HTTP/1.0 requests)."""
 
-    def __init__(self, source=None, ports=None, pins=None):
+    def __init__(self, source=None, ports=None, pins=None, http10=False):
         self.source = source
         self.ports = ports
         self.pins = pins
+        self.http10 = http10
 
     @property
     def binds(self):
@@ -170,6 +172,12 @@ class Connector(object):
         connector = self
 
         class Connection(base):
+            if connector.http10:
+                # http.client's own HTTP/1.0 mode: the request line, and no
+                # chunked upload.
+                _http_vsn = 10
+                _http_vsn_str = 'HTTP/1.0'
+
             def __init__(self, *args, **kwargs):
                 base.__init__(self, *args, **kwargs)
                 if connector.binds:

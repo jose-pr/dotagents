@@ -18,8 +18,8 @@ UNSUPPORTED_ARGS = [
     'false_start', 'ftp_account', 'ftp_alternative_to_user', 'ftp_create_dirs',
     'ftp_method', 'ftp_pasv', 'ftp_skip_pasv_ip', 'ftp_ssl_ccc_mode',
     'ftp_ssl_ccc', 'ftp_ssl_control', 'happy_eyeballs_timeout_ms',
-    'haproxy_protocol', 'hostpubmd5', 'http1_0', 'http2_prior_knowledge',
-    'http2', 'http3', 'ip_resolve', 'junk_session_cookies', 'krb', 'libcurl',
+    'haproxy_protocol', 'hostpubmd5', 'http2_prior_knowledge', 'http2',
+    'http3', 'ip_resolve', 'junk_session_cookies', 'krb', 'libcurl',
     'list_only', 'login_options', 'mail_auth', 'mail_from',
     'mail_rcpt_allowfails', 'mail_rcpt', 'metalink', 'negotiate', 'next',
     'no_progress_bar', 'ntlm_wb', 'ntlm', 'parallel_immediate', 'parallel_max',
@@ -128,8 +128,6 @@ class UnsupportedArgs(Group):
     hostpubmd5: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='MD5')] = None
     ('--hostpubmd5',)
 
-    http1_0: Arg[bool, _HIDDEN] = False
-    ('-0', '--http1.0',)
 
     http2_prior_knowledge: Arg[bool, _HIDDEN] = False
     ('--http2-prior-knowledge',)
