@@ -251,6 +251,9 @@ def git_ssl_revoke(*stores: "Optional[Path]") -> str:
 
 #: What a revocation-check failure looks like in git's stderr (Schannel).
 _REVOCATION_FAILURE = re.compile(r"revocation|CRYPT_E_|SEC_E_UNTRUSTED", re.IGNORECASE)
+#: A git too old to know ``best-effort`` reads it as a broken boolean and
+#: fails every https call: the call is made again without the setting.
+_UNKNOWN_REVOKE_VALUE = re.compile(r"bad boolean config value .* for 'http\.schannelcheckrevoke'", re.IGNORECASE)
 
 
 class SourceCache(object):
@@ -354,11 +357,16 @@ class SourceCache(object):
     def _git(self, args: "list[str]", cwd: "Optional[Path]", *, check: bool = True) -> "subprocess.CompletedProcess":
         env = dict(os.environ)
         env["GIT_TERMINAL_PROMPT"] = "0"  # never hang on a credential prompt
+        setting = ["-c", "http.schannelCheckRevoke=%s" % self.ssl_revoke]
         try:
             proc = subprocess.run(
-                ["git", "-c", "http.schannelCheckRevoke=%s" % self.ssl_revoke, *args],
-                cwd=str(cwd) if cwd else None, capture_output=True, text=True, env=env,
+                ["git", *setting, *args], cwd=str(cwd) if cwd else None, capture_output=True, text=True, env=env,
             )
+            if proc.returncode != 0 and _UNKNOWN_REVOKE_VALUE.search(proc.stderr or ""):
+                # An older git (no best-effort): its own default applies.
+                proc = subprocess.run(
+                    ["git", *args], cwd=str(cwd) if cwd else None, capture_output=True, text=True, env=env,
+                )
         except OSError as exc:
             raise SourceError("error: git is needed for a git overlay source: %s" % exc)
         if check and proc.returncode != 0:

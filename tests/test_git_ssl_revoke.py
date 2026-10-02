@@ -64,6 +64,22 @@ def test_a_revocation_failure_names_the_setting(tmp_path, monkeypatch):
     assert "CRYPT_E_NO_REVOCATION_CHECK" in message and 'git_ssl_revoke = "false"' in message
 
 
+def test_a_git_without_best_effort_runs_again_without_it(tmp_path, monkeypatch):
+    seen = []
+
+    def run(cmd, **kwargs):
+        seen.append(cmd)
+        if "http.schannelCheckRevoke=best-effort" in cmd:
+            return subprocess.CompletedProcess(cmd, 128, "", "fatal: bad boolean config value 'best-effort' for "
+                                                              "'http.schannelcheckrevoke'\n")
+        return subprocess.CompletedProcess(cmd, 0, "ok", "")
+
+    monkeypatch.setattr(_sources.subprocess, "run", run)
+    proc = _sources.SourceCache(tmp_path)._git(["ls-remote", "https://example.invalid/r.git"], None)
+    assert proc.returncode == 0 and len(seen) == 2
+    assert seen[1] == ["git", "ls-remote", "https://example.invalid/r.git"]
+
+
 def test_any_other_failure_has_no_hint(tmp_path, monkeypatch):
     monkeypatch.setattr(_sources.subprocess, "run",
                         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 128, "", "fatal: repository not found"))
