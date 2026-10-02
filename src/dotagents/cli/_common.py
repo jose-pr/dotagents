@@ -324,7 +324,10 @@ def _resolve_from(
     if cache_root is None:
         cache_root = resolve_user_store(None) / ".cache" / "overlays"
     try:
-        target = _sources.locate(spec, _sources.SourceCache(Path(cache_root), logger))
+        cache = _sources.SourceCache(
+            Path(cache_root), logger, ssl_revoke=_sources.git_ssl_revoke(resolve_user_store(None))
+        )
+        target = _sources.locate(spec, cache)
     except SystemExit as exc:
         message = str(exc.code if exc.code is not None else exc)
         if message.startswith("error: "):

@@ -214,6 +214,45 @@ def url_scheme(location: str) -> str:
     return location.split("://", 1)[0].lower()
 
 
+#: The store-config key (``<store>/dotagents/config.toml``) for git's
+#: certificate-revocation check on https clones and fetches, passed to every
+#: git call as ``http.schannelCheckRevoke`` -- Git for Windows' Schannel
+#: backend checks revocation; git elsewhere (OpenSSL) checks no CRLs and
+#: ignores the setting. ``best-effort`` (the default, stated explicitly so a
+#: stricter git config cannot fail dotagents' clones) skips a CRL that is
+#: missing or unreachable; ``false`` skips the check, as on Linux; ``true``
+#: enforces it.
+GIT_SSL_REVOKE_KEY = "git_ssl_revoke"
+GIT_SSL_REVOKE_VALUES = ("best-effort", "true", "false")
+GIT_SSL_REVOKE_DEFAULT = "best-effort"
+
+
+def git_ssl_revoke(*stores: "Optional[Path]") -> str:
+    """The first ``git_ssl_revoke`` set in ``stores``' config (the project
+    store before the user store), else the default. Any other value raises
+    :class:`SourceError` naming the file."""
+    from dotagents.cli._common import STORE_CONFIG, read_store_config
+
+    for store in stores:
+        if store is None:
+            continue
+        value = read_store_config(store).get(GIT_SSL_REVOKE_KEY)
+        if value is None:
+            continue
+        normalized = value.strip().lower()
+        if normalized not in GIT_SSL_REVOKE_VALUES:
+            raise SourceError(
+                "error: %s = %r in %s: expected one of %s"
+                % (GIT_SSL_REVOKE_KEY, value, Path(store) / STORE_CONFIG, ", ".join(GIT_SSL_REVOKE_VALUES))
+            )
+        return normalized
+    return GIT_SSL_REVOKE_DEFAULT
+
+
+#: What a revocation-check failure looks like in git's stderr (Schannel).
+_REVOCATION_FAILURE = re.compile(r"revocation|CRYPT_E_|SEC_E_UNTRUSTED", re.IGNORECASE)
+
+
 class SourceCache(object):
     """What the commands fetch, under ``root``: git clones, one per repository
     location AND ref (two registry entries naming the same repository at
@@ -223,9 +262,10 @@ class SourceCache(object):
     (a remote directory synced down, a remote file copied), each refreshed
     once per process."""
 
-    def __init__(self, root: Path, logger: Any = None):
+    def __init__(self, root: Path, logger: Any = None, ssl_revoke: str = GIT_SSL_REVOKE_DEFAULT):
         self.root = Path(root)
         self.logger = logger
+        self.ssl_revoke = ssl_revoke  # git's http.schannelCheckRevoke (GIT_SSL_REVOKE_KEY)
         self._fresh: "set[str]" = set()  # locations fetched during this process
 
     # --- pathlib_next paths ----------------------------------------------
@@ -316,15 +356,21 @@ class SourceCache(object):
         env["GIT_TERMINAL_PROMPT"] = "0"  # never hang on a credential prompt
         try:
             proc = subprocess.run(
-                ["git", *args], cwd=str(cwd) if cwd else None,
-                capture_output=True, text=True, env=env,
+                ["git", "-c", "http.schannelCheckRevoke=%s" % self.ssl_revoke, *args],
+                cwd=str(cwd) if cwd else None, capture_output=True, text=True, env=env,
             )
         except OSError as exc:
             raise SourceError("error: git is needed for a git overlay source: %s" % exc)
         if check and proc.returncode != 0:
+            output = proc.stderr.strip() or proc.stdout.strip()
+            hint = ""
+            if _REVOCATION_FAILURE.search(output):
+                hint = (
+                    "\n(the certificate's revocation check failed: set %s = \"false\" in"
+                    " <store>/dotagents/config.toml to skip it, as git does on Linux)" % GIT_SSL_REVOKE_KEY
+                )
             raise SourceError(
-                "error: git %s failed (exit %d): %s"
-                % (args[0], proc.returncode, redact(proc.stderr.strip() or proc.stdout.strip()))
+                "error: git %s failed (exit %d): %s%s" % (args[0], proc.returncode, redact(output), hint)
             )
         return proc
 
@@ -934,4 +980,4 @@ def resolve(
     ordered += [Spec("dir", str(p)) for p in registry_files(*stores)]
     if not ordered and not allow_empty:
         raise SourceError(NO_SOURCE_MESSAGE)
-    return CompositeSource(ordered, SourceCache(cache_root, logger))
+    return CompositeSource(ordered, SourceCache(cache_root, logger, ssl_revoke=git_ssl_revoke(*stores)))
