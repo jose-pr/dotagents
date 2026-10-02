@@ -53,7 +53,7 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
 - **`-q` / `--disable`** must be curl's FIRST argument to skip `.curlrc`, so
   the shim keeps a leading one first when it adds the proxy options.
 - Supported (`curl -h` lists them): request `-X -G --url --url-query -H -A -e
-  -r --compressed --request-target`; auth `-u --basic --digest --anyauth --oauth2-bearer -n --netrc-file
+  -r --compressed --request-target --proto --proto-redir --proto-default --path-as-is`; auth `-u --basic --digest --anyauth --oauth2-bearer -n --netrc-file
   --netrc-optional` and `user:pw@` in the URL; body `-d --data-ascii --data-raw
   --data-binary --data-urlencode --json -F --form-string -T`; output `-o -O
   --remote-name-all --output-dir --create-dirs -D -i --show-headers -I -s -S -v
@@ -70,7 +70,8 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
   --connect-to --unix-socket --interface --local-port --limit-rate -Y/--speed-limit
   -y/--speed-time --ignore-content-length --dns-servers --dns-ipv4-addr --dns-ipv6-addr
   --dns-interface --doh-url --doh-insecure --retry --retry-delay --retry-max-time
-  --retry-connrefused --retry-all-errors`; cookies `-b -c`; and the no-ops `-q -g
+  --retry-connrefused --retry-all-errors`; cookies `-b -c -j`; and the no-ops `-q -g --fail-early --expect100-timeout
+  --tcp-fastopen --false-start --happy-eyeballs-timeout-ms --random-file --egd-file
   --http1.1 -N -# --no-progress-meter --styled-output --no-keepalive
   --keepalive-time --tcp-nodelay --ssl-no-revoke --ssl-revoke-best-effort
   --ca-native --proxy-ca-native --no-alpn --no-npn --no-sessionid`, each true of
@@ -117,6 +118,15 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     request or on the CONNECT; `--proxy-anyauth` takes Digest when offered, else
     Basic. NTLM, Negotiate and SOCKS5 GSS-API are not available (no standard-
     library implementation): those flags stay refused.
+  - **URLs as curl reads them**: `/a/../b` is sent as `/b` and `/a/./b/.` as
+    `/a/b/` (the query untouched), unless `--path-as-is`; a redirect's target
+    too. `--proto` (`+name`, `-name`, `=name`, `all`) limits every request and
+    hop, `--proto-redir` (default http, https, ftp, ftps) the redirects: a
+    disallowed one is exit 1. `--proto-default https` is the scheme of a URL
+    that names none. `-b <file>` sends its cookies in curl's order (longest
+    path, domain, name first; the later line first); `-j` leaves out its
+    session cookies. `-i` / `-D` show a proxy's CONNECT reply before the
+    response, as curl does, unless `--suppress-connect-headers`.
   - **Shaping a connection**: `--interface` takes an IP address, a host
     (`host!NAME`) or an interface (`if!NAME`, or a bare name; by name only with
     netimps installed), `--local-port N[-M]` the first port of the range that

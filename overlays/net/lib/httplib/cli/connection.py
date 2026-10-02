@@ -156,6 +156,41 @@ class ConnectionArgs(Group):
     "Do not verify the DNS-over-HTTPS server's certificate"
     ("--doh-insecure",)
 
+    # No-ops for one HTTP/1.1 transfer, each true of this client: one URL (no
+    # --fail-early), no Expect: 100-continue, no TCP Fast Open, TLS False
+    # Start or Happy Eyeballs, no entropy file read, no CONNECT headers shown.
+    fail_early: bool = False
+    "Stop at the first failed transfer (a no-op: one transfer)"
+    ("--fail-early",)
+
+    expect100_timeout: Arg[Optional[str], NS(metavar='SECONDS')] = None
+    "Wait for 100-continue (a no-op: Expect: 100-continue is never sent)"
+    ("--expect100-timeout",)
+
+    tcp_fastopen: bool = False
+    "TCP Fast Open (a no-op)"
+    ("--tcp-fastopen",)
+
+    false_start: bool = False
+    "TLS False Start (a no-op)"
+    ("--false-start",)
+
+    happy_eyeballs_timeout_ms: Arg[Optional[str], NS(metavar='MS')] = None
+    "Happy Eyeballs delay (a no-op: addresses are tried in turn)"
+    ("--happy-eyeballs-timeout-ms",)
+
+    random_file: Arg[Optional[str], NS(metavar='FILE')] = None
+    "Entropy file (a no-op, as in curl itself)"
+    ("--random-file",)
+
+    egd_file: Arg[Optional[str], NS(metavar='FILE')] = None
+    "EGD socket (a no-op, as in curl itself)"
+    ("--egd-file",)
+
+    suppress_connect_headers: bool = False
+    "Leave the proxy's CONNECT reply out of -i / -D output"
+    ("--suppress-connect-headers",)
+
     ignore_content_length: bool = False
     "Read the body until the server closes, whatever Content-Length says"
     ("--ignore-content-length",)

@@ -76,6 +76,74 @@ def check_url(url):
         raise LocalError(EXIT_URL, 'URL rejected: No host part in the URL')
 
 
+#: Every protocol curl knows, for --proto's names (``all`` is all of them).
+ALL_PROTOCOLS = frozenset(SCHEMES) | CURL_SCHEMES
+
+#: Where a redirect may go by default (curl: http, https, ftp, ftps).
+DEFAULT_REDIRECT_PROTOCOLS = frozenset(['http', 'https', 'ftp', 'ftps'])
+
+
+def parse_protocols(spec, flag, start):
+    """curl's protocol list (``--proto`` / ``--proto-redir``): comma-separated
+    names, each ``+`` (add; the default), ``-`` (remove) or ``=`` (exactly
+    these, from nothing), ``all`` for every protocol; ``start`` is the set
+    before the list. An unknown name is curl's parse-time 2."""
+    allowed = set(start)
+    for token in (spec or '').split(','):
+        token = token.strip()
+        if not token:
+            continue
+        op, name = (token[0], token[1:]) if token[0] in '+-=' else ('+', token)
+        name = name.strip().lower()
+        names = set(ALL_PROTOCOLS) if name == 'all' else {name}
+        if name != 'all' and name not in ALL_PROTOCOLS:
+            from .compat import rejects_unknown_protocols
+
+            if not rejects_unknown_protocols():
+                names = set()  # curl before 8.18 ignores the name
+            else:
+                raise EarlyExit(EXIT_USAGE, "unrecognized protocol '%s'\ncurl: option %s: is badly used here\n"
+                                            "curl: try 'curl --help' or 'curl --manual' for more information"
+                                            % (name, flag))
+        if op == '=':
+            allowed = set(names)
+        elif op == '-':
+            allowed -= names
+        else:
+            allowed |= names
+    return allowed
+
+
+def remove_dot_segments(path):
+    """RFC 3986's remove_dot_segments, what curl does to a URL's path unless
+    --path-as-is: ``/a/../b`` -> ``/b``, ``/a/./b/.`` -> ``/a/b/``."""
+    out = []
+    segments = path.split('/')
+    for index, segment in enumerate(segments):
+        last = index == len(segments) - 1
+        if segment == '..':
+            if len(out) > 1:
+                out.pop()
+            if last:
+                out.append('')
+        elif segment == '.':
+            if last:
+                out.append('')
+        else:
+            out.append(segment)
+    joined = '/'.join(out)
+    return joined if joined.startswith('/') or not path.startswith('/') else '/' + joined
+
+
+def normalize_path(url):
+    """``url`` with its path's dot segments resolved (query and fragment as
+    they are)."""
+    parts = urllib.parse.urlsplit(url)
+    if '.' not in parts.path:
+        return url
+    return urllib.parse.urlunsplit(parts._replace(path=remove_dot_segments(parts.path)))
+
+
 def _header_lines(values):
     """``-H`` values with each ``@file`` replaced by its lines (curl's
     header file: one header per line, blank lines skipped). A file that is
@@ -93,11 +161,12 @@ def _header_lines(values):
                 yield line
 
 
-def default_scheme(url):
-    """``url`` with curl's default scheme, ``http://``, when it names none;
-    ``scheme:///host/path`` read as ``scheme://host/path``, as curl does."""
+def default_scheme(url, scheme='http'):
+    """``url`` with curl's default scheme (``http``, or --proto-default's)
+    when it names none; ``scheme:///host/path`` read as
+    ``scheme://host/path``, as curl does."""
     if '://' not in url:
-        return 'http://' + url
+        return '%s://%s' % (scheme, url)
     scheme, rest = url.split('://', 1)
     return '%s://%s' % (scheme, rest.lstrip('/')) if rest.startswith('/') else url
 
@@ -167,6 +236,22 @@ class RequestArgs(Group):
     "Ask for a compressed response and decode it"
     ("--compressed",)
 
+    proto: Arg[Optional[str], NS(metavar='PROTOCOLS')] = None
+    "Allow only these protocols (+name, -name, =name, all; comma-separated)"
+    ("--proto",)
+
+    proto_redir: Arg[Optional[str], NS(metavar='PROTOCOLS')] = None
+    "Allow only these protocols on a redirect (default http,https,ftp,ftps)"
+    ("--proto-redir",)
+
+    proto_default: Arg[Optional[str], NS(metavar='PROTOCOL')] = None
+    "The scheme of a URL that names none (default http)"
+    ("--proto-default",)
+
+    path_as_is: bool = False
+    "Send /../ and /./ in the path as typed (default: resolved, as curl does)"
+    ("--path-as-is",)
+
     request_target: Arg[Optional[str], NS(metavar='TARGET')] = None
     "Send this request target (e.g. '*' for OPTIONS) instead of the URL's path"
     ("--request-target",)
@@ -179,12 +264,28 @@ class RequestArgs(Group):
         url = self.url or self.url_positional
         if not url:
             raise EarlyExit(EXIT_USAGE, "(2) no URL specified\ncurl: try 'curl --help' or 'curl --manual' for more information")
-        url = default_scheme(url)
+        if self.proto_default is not None and self.proto_default.lower() not in ALL_PROTOCOLS:
+            raise EarlyExit(1, "option --proto-default: a specified protocol is unsupported by libcurl\n"
+                               "curl: try 'curl --help' or 'curl --manual' for more information")
+        url = default_scheme(url, (self.proto_default or 'http').lower())
         if not self.globoff:
             check_glob(url)
         check_url(url)
+        self.check_protocol(url)
         url = self.remember_auth_url(url)  # user:pw@ -> credentials
+        if not self.path_as_is:
+            url = normalize_path(url)
         return add_query(url, [url_encoded(q, self.read_data, raw_plus=True) for q in self.url_query or []])
+
+    def check_protocol(self, url, redirect=False):
+        """curl's exit 1 for a URL --proto (or, on a redirect, --proto-redir)
+        does not allow."""
+        scheme = url.split('://', 1)[0].lower()
+        allowed = parse_protocols(self.proto, '--proto', ALL_PROTOCOLS)
+        if redirect:
+            allowed &= parse_protocols(self.proto_redir, '--proto-redir', DEFAULT_REDIRECT_PROTOCOLS)
+        if scheme not in allowed:
+            raise LocalError(EXIT_PROTOCOL, 'Protocol "%s" is disabled%s' % (scheme, ' (in redirect)' if redirect else ''))
 
     def request_method(self, has_body, uploading):
         """-I is HEAD; else -X; else GET with -G, PUT with -T, POST with a

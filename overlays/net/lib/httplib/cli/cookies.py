@@ -23,6 +23,14 @@ class CookieArgs(Group):
     "Write cookies to this file after operation"
     ("-c", "--cookie-jar")
 
+    junk_session_cookies: bool = False
+    "Ignore the session cookies (no expiry) of the -b file"
+    ("-j", "--junk-session-cookies")
+
+    def _jar(self):
+        """The -b file's cookies, its session cookies dropped under -j."""
+        return [c for c in load_netscape(Path(self.cookie)) if c.expires or not self.junk_session_cookies]
+
     def cookie_from_jar(self):
         """Is ``-b`` a cookie FILE (the cookie engine: cookies chosen per
         URL), not a literal string?"""
@@ -36,7 +44,11 @@ class CookieArgs(Group):
         if not self.cookie:
             return None
         if os.path.exists(self.cookie):
-            pairs = ['%s=%s' % (c.name, c.value) for c in load_netscape(Path(self.cookie)) if cookie_applies(c, url)]
+            # curl's order: longest path, domain, name first; the newest (later in the file) first.
+            jar = list(enumerate(self._jar()))
+            jar.sort(key=lambda item: (-len(item[1].path or ''), -len(item[1].domain or ''), -len(item[1].name),
+                                       -item[0]))
+            pairs = ['%s=%s' % (c.name, c.value) for _, c in jar if cookie_applies(c, url)]
             return '; '.join(pairs) if pairs else None
         return self.cookie
 
@@ -51,7 +63,7 @@ class CookieArgs(Group):
             return
         rows = {}
         if self.cookie and os.path.exists(self.cookie):
-            for cookie in load_netscape(Path(self.cookie)):
+            for cookie in self._jar():
                 rows[(cookie.domain, cookie.path, cookie.name)] = cookie
         values = [v for k, v in header_items if k.lower() == 'set-cookie']
         for cookie, gone in set_cookie_specs(values, urllib.parse.urlsplit(url).hostname or ''):

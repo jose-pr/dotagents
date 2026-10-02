@@ -19,6 +19,7 @@ Checked against curl 8.21:
 import urllib.parse
 import urllib.request
 
+from .request import normalize_path
 from .routing import caller_url
 
 #: Request headers that describe a body, dropped when the next hop has none.
@@ -58,6 +59,9 @@ class CurlRedirectHandler(urllib.request.HTTPRedirectHandler):
         if code not in (301, 302, 303, 307, 308):
             return None
         newurl = newurl.replace(' ', '%20')
+        self.args.check_protocol(newurl, redirect=True)  # --proto / --proto-redir: exit 1
+        if not self.args.path_as_is:
+            newurl = normalize_path(newurl)
         method = req.get_method()
         if self.args.request:  # -X: curl keeps a forced method on every hop
             new_method = method

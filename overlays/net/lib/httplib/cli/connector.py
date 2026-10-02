@@ -397,6 +397,14 @@ def _check_pins(sock, pins):
         raise LocalError(EXIT_PINNED, 'SSL: public key does not match pinned public key')
 
 
+def _reply_head(response):
+    """A CONNECT reply's status line and headers, as -i shows them."""
+    version = {10: '1.0', 11: '1.1'}.get(response.version, '1.1')
+    head = 'HTTP/%s %d %s\r\n' % (version, response.status, response.reason)
+    head += ''.join('%s: %s\r\n' % item for item in response.headers.items())
+    return (head + '\r\n').encode('latin-1')
+
+
 class Connector(object):
     """What every connection of one transfer shares: ``source`` (an address
     or ``None``), ``ports`` (``(low, high)`` or ``None``), ``pins`` (SHA-256
@@ -405,6 +413,7 @@ class Connector(object):
 
     def __init__(self, source=None, ports=None, pins=None, http10=False):
         self.source = source
+        self.connect_replies = []  # each CONNECT reply of the attempt, for -i / -D
         self.ports = ports
         self.pins = pins
         self.http10 = http10
@@ -470,37 +479,39 @@ class Connector(object):
                 merged.update(tunnel_headers or {})
                 base.set_tunnel(self, host, port, merged)
 
-            if proxy_auth is not None:
-                def _tunnel(self):
-                    """The CONNECT, answering one 407 the way --proxy-digest /
-                    --proxy-anyauth ask (http.client's own drops the challenge).
-                    A refusal raises as http.client's does."""
-                    target = '%s:%d' % (self._tunnel_host, self._tunnel_port)
-                    authorization = None
-                    for _ in range(2):
-                        lines = ['CONNECT %s HTTP/1.1' % target, 'Host: %s' % target]
-                        lines += ['%s: %s' % item for item in self._tunnel_headers.items()]
-                        if authorization:
-                            lines.append('Proxy-Authorization: %s' % authorization)
-                        self.send(('\r\n'.join(lines) + '\r\n\r\n').encode('latin-1'))
-                        response = self.response_class(self.sock, method='CONNECT')
-                        response.begin()
-                        if response.status == 200:
-                            return
-                        challenges = response.headers.get_all('Proxy-Authenticate') or []
-                        if response.status != 407 or authorization or not challenges:
-                            break
-                        authorization = proxy_auth.answer(challenges, 'CONNECT', target)
-                        if authorization is None:
-                            break
-                        if response.length:
-                            response.read()  # the 407's body, before the same connection is reused
-                        if response.will_close:
-                            self.sock.close()
-                            self.sock = None
-                            self._reopen()
-                    self.close()
-                    raise OSError('Tunnel connection failed: %d %s' % (response.status, response.reason.strip()))
+            def _tunnel(self):
+                """The CONNECT, done here rather than by http.client: each reply
+                is kept for -i / -D (curl prints it before the response), and
+                a 407 is answered once when --proxy-digest / --proxy-anyauth
+                ask (http.client's own drops the challenge). A refusal raises
+                as http.client's does."""
+                target = '%s:%d' % (self._tunnel_host, self._tunnel_port)
+                authorization = None
+                for _ in range(2):
+                    lines = ['CONNECT %s HTTP/1.1' % target, 'Host: %s' % target]
+                    lines += ['%s: %s' % item for item in self._tunnel_headers.items()]
+                    if authorization:
+                        lines.append('Proxy-Authorization: %s' % authorization)
+                    self.send(('\r\n'.join(lines) + '\r\n\r\n').encode('latin-1'))
+                    response = self.response_class(self.sock, method='CONNECT')
+                    response.begin()
+                    connector.connect_replies.append(_reply_head(response))
+                    if response.status == 200:
+                        return
+                    challenges = response.headers.get_all('Proxy-Authenticate') or []
+                    if proxy_auth is None or response.status != 407 or authorization or not challenges:
+                        break
+                    authorization = proxy_auth.answer(challenges, 'CONNECT', target)
+                    if authorization is None:
+                        break
+                    if response.length:
+                        response.read()  # the 407's body, before the same connection is reused
+                    if response.will_close:
+                        self.sock.close()
+                        self.sock = None
+                        self._reopen()
+                self.close()
+                raise OSError('Tunnel connection failed: %d %s' % (response.status, response.reason.strip()))
 
             def _reopen(self):
                 raw = self._create_connection((self.host, self.port), self.timeout, self.source_address)

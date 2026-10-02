@@ -214,6 +214,7 @@ def build_opener(args, plan, context, transfer, removed):
     NO_PROXY and, on Windows, the registry's bypass list -- and silently go
     direct where we decided to proxy. ``AgentProxyHandler`` applies the plan
     per hop instead."""
+    args.connection.connect_replies = []
     handlers = args.connection_handlers(context) or [
         ConnectHTTPHandler(args.connection), ConnectHTTPSHandler(args.connection, context)]
     handlers.append(urllib.request.ProxyHandler({}))
@@ -511,6 +512,9 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
         except EncodingError as exc:
             return fail(args, transfer, EXIT_BAD_ENCODING, str(exc))
     header_bytes = format_response_headers(status, reason, header_items)
+    if not args.suppress_connect_headers:
+        # curl shows the proxy's CONNECT reply before the response's own headers.
+        header_bytes = b''.join(args.connection.connect_replies) + header_bytes
     try:
         outcome = args.download_outcome(status, header_items)
     except LocalError as exc:

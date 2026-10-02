@@ -67,6 +67,9 @@ def _reset(conn):
 
 def _origin(conn, head):
     path = head.split(b" ")[1] if b" " in head else b"/"
+    if path.endswith(b"/to-http"):
+        port = conn.getsockname()[1]
+        return _respond(conn, "302 Found", extra=["Location: http://127.0.0.1:%d/landed" % port])
     if _header(head, "Proxy-Authorization") or _header(head, "X-Proxy-Token"):
         return _respond(conn, "200 OK", b"leaked")  # a proxy credential reached the origin
     if path.endswith(b"/404"):
@@ -139,6 +142,8 @@ def _echo(conn, head):
     body = b"%s|host=%s|auth=%s|from=%s:%d|x=%s" % (lines[0], (_header(head, "Host") or "").encode(),
                                                     (_header(head, "Authorization") or "").encode(), peer[0].encode(),
                                                     _port_note(peer[1]) if b"/port" in lines[0] else 0, _x_headers(head))
+    if _header(head, "Cookie"):
+        body += b"|cookie=" + _header(head, "Cookie").encode()
     _respond(conn, "200 OK", body)
 
 
@@ -663,6 +668,41 @@ SCENARIOS = [
                                                           "-U", "agent:s3cret", S(w)], {}, True, {}),
     ("--proxy-digest with -p", lambda w: ["-p", "-x", P(w, "digest_proxy"), "--proxy-digest", "-U", "agent:s3cret",
                                           w["echo"] + "/d"], {}, False, {}),
+    # --proto, --proto-redir, --proto-default.
+    ("--proto =https on http", lambda w: ["--proto", "=https", w["echo"] + "/p"], {}, False, {}),
+    ("--proto -all,https", lambda w: ["--proto", "-all,https", w["echo"] + "/p"], {}, False, {}),
+    ("--proto =http,https", lambda w: ["--proto", "=http,https", w["echo"] + "/p"], {}, False, {}),
+    ("--proto -http", lambda w: ["--proto", "-http", w["echo"] + "/p"], {}, False, {}),
+    ("--proto +ftp", lambda w: ["--proto", "+ftp", w["echo"] + "/p"], {}, False, {}),
+    ("--proto unknown name", lambda w: ["--proto", "=bogus", w["echo"] + "/p"], {}, False, {}),
+    ("--proto =https -w", lambda w: ["--proto", "=https", "-w", "[%{exitcode}]", w["echo"] + "/p"], {}, False, {}),
+    ("--proto-redir =https", lambda w: ["-L", "--proto-redir", "=https", w["origin"] + "/to-http"], {}, False, {}),
+    ("--proto-redir -all,http", lambda w: ["-L", "--proto-redir", "-all,http", w["origin"] + "/to-http"],
+     {}, False, {}),
+    ("--proto =http blocks the https hop", lambda w: ["-L", "--proto", "=https", w["origin"] + "/to-http"],
+     {}, False, {}),
+    ("--proto-default http", lambda w: ["--proto-default", "http", w["echo"].split("//")[1] + "/x"], {}, False, {}),
+    ("--proto-default unknown", lambda w: ["--proto-default", "bogus", w["echo"].split("//")[1] + "/x"],
+     {}, False, {}),
+    ("--proto-default https to a plain port", lambda w: ["--proto-default", "https", "-m", "10",
+                                                         w["plain_at_once"].split("//")[1] + "/x"], {}, False, {}),
+    # Dot segments: resolved as curl does, unless --path-as-is.
+    ("dot segments /a/../b", lambda w: [w["echo"] + "/a/../b"], {}, False, {}),
+    ("dot segments /a/./b/.", lambda w: [w["echo"] + "/a/./b/."], {}, False, {}),
+    ("dot segments /../x", lambda w: [w["echo"] + "/../x"], {}, False, {}),
+    ("dot segments, query untouched", lambda w: [w["echo"] + "/a/b/../../c?q=/../"], {}, False, {}),
+    ("--path-as-is", lambda w: ["--path-as-is", w["echo"] + "/a/../b"], {}, False, {}),
+    # -j and the no-ops.
+    ("-j drops session cookies", lambda w: ["-j", "-b", _write(w, "jar.txt", _JAR), w["echo"] + "/c"], {}, False, {}),
+    ("-b, curl's matching rules", lambda w: ["-b", _write(w, "rules.txt", _RULES_JAR), w["echo"] + "/adminx/y"],
+     {}, False, {}),
+    ("-b keeps session cookies", lambda w: ["-b", _write(w, "jar.txt", _JAR), w["echo"] + "/c"], {}, False, {}),
+    ("no-ops", lambda w: ["--fail-early", "--expect100-timeout", "1", "--tcp-fastopen", "--false-start",
+                          "--happy-eyeballs-timeout-ms", "100", "--random-file", "x", "--egd-file", "x",
+                          w["echo"] + "/n"], {}, False, {}),
+    ("-i through a CONNECT", lambda w: w["ca"] + ["-i", "-x", P(w, "open_proxy"), S(w)], {}, True, {}),
+    ("-i --suppress-connect-headers", lambda w: w["ca"] + ["-i", "--suppress-connect-headers", "-x",
+                                                            P(w, "open_proxy"), S(w)], {}, True, {}),
     # --proxy-header: to the proxy only -- the plain request to it, or the CONNECT.
     ("--proxy-header, plain proxying", lambda w: ["-x", P(w, "header_proxy"), "--proxy-header", "X-P: 1", "-H",
                                                   "X-O: 2", X], {}, False, {}),
@@ -800,6 +840,20 @@ SCENARIOS = [
 
 def _ca(world):
     return str(world["certs"] / "ca.pem")
+
+
+#: A Secure cookie (sent to 127.0.0.1 over http: a secure context), a leading-dot
+#: domain (never covers an IP address), a path that is a prefix of the URL's
+#: but not a path-match (/admin vs /adminx), and an HttpOnly row.
+_RULES_JAR = ("127.0.0.1\tFALSE\t/\tTRUE\t4102444800\tsecure\t1\n"
+              ".0.0.1\tTRUE\t/\tFALSE\t4102444800\tdotted\t2\n"
+              "127.0.0.1\tFALSE\t/admin\tFALSE\t4102444800\tadmin\t3\n"
+              "127.0.0.1\tFALSE\t/adminx\tFALSE\t4102444800\tadminx\t4\n"
+              "#HttpOnly_127.0.0.1\tFALSE\t/\tFALSE\t4102444800\thidden\t5\n")
+
+
+_JAR = ("127.0.0.1\tFALSE\t/\tFALSE\t0\tsession\tyes\n"
+        "127.0.0.1\tFALSE\t/\tFALSE\t4102444800\tlasting\tyes\n")
 
 
 def _localhost(world, name):

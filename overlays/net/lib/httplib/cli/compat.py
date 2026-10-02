@@ -11,6 +11,8 @@ The differences, measured against curl's own builds (8.17-8.22):
 - a ``--cacert`` / ``--netrc-file`` naming no file: refused before anything
   else (exit 2) from 8.18 on; before, the CA file fails at the TLS handshake
   (77) and the netrc file when it is read (26);
+- an unknown protocol name in ``--proto`` / ``--proto-redir``: a usage error
+  (exit 2) from 8.18 on; before, the name is ignored;
 - a name a ``socks5://`` / ``socks4://`` proxy needs resolved here and that
   does not resolve: 97 before 8.20 (worded "Could not resolve proxy: <the
   proxy>"), 6 from 8.20 on.
@@ -120,6 +122,12 @@ def socks_unresolved(host, proxy_host):
     if version() >= (8, 20, 0):
         return 6, 'Could not resolve host: %s' % host
     return 97, 'Could not resolve proxy: %s' % proxy_host
+
+
+def rejects_unknown_protocols():
+    """Whether an unknown name in --proto / --proto-redir is exit 2 (else it
+    is ignored)."""
+    return version() >= (8, 18, 0)
 
 
 def checks_files_first():

@@ -14,26 +14,23 @@ _HIDDEN = NS(help=argparse.SUPPRESS)
 #: The fields below; a set one is refused.
 UNSUPPORTED_ARGS = [
     'append', 'cert_status', 'config', 'crlf', 'delegation', 'disable_eprt',
-    'disable_epsv', 'egd_file', 'engine', 'expect100_timeout', 'fail_early',
-    'false_start', 'ftp_account', 'ftp_alternative_to_user', 'ftp_create_dirs',
-    'ftp_method', 'ftp_pasv', 'ftp_skip_pasv_ip', 'ftp_ssl_ccc_mode',
-    'ftp_ssl_ccc', 'ftp_ssl_control', 'happy_eyeballs_timeout_ms',
-    'haproxy_protocol', 'hostpubmd5', 'http2_prior_knowledge', 'http2',
-    'http3', 'ip_resolve', 'junk_session_cookies', 'krb', 'libcurl',
-    'list_only', 'login_options', 'mail_auth', 'mail_from',
+    'disable_epsv', 'engine', 'ftp_account', 'ftp_alternative_to_user',
+    'ftp_create_dirs', 'ftp_method', 'ftp_pasv', 'ftp_skip_pasv_ip',
+    'ftp_ssl_ccc_mode', 'ftp_ssl_ccc', 'ftp_ssl_control', 'haproxy_protocol',
+    'hostpubmd5', 'http2_prior_knowledge', 'http2', 'http3', 'ip_resolve',
+    'krb', 'libcurl', 'list_only', 'login_options', 'mail_auth', 'mail_from',
     'mail_rcpt_allowfails', 'mail_rcpt', 'metalink', 'negotiate', 'next',
     'no_progress_bar', 'ntlm_wb', 'ntlm', 'parallel_immediate', 'parallel_max',
-    'parallel', 'path_as_is', 'proto_default', 'proto_redir', 'proto',
-    'proxy_negotiate', 'proxy_ntlm', 'proxy_service_name',
+    'parallel', 'proxy_negotiate', 'proxy_ntlm', 'proxy_service_name',
     'proxy_ssl_allow_beast', 'proxy_ssl_auto_client_cert',
     'proxy_tls13_ciphers', 'proxy_tlsauthtype', 'proxy_tlspassword',
-    'proxy_tlsuser', 'pubkey', 'quote', 'random_file', 'raw', 'sasl_authzid',
-    'sasl_ir', 'service_name', 'socks5_gssapi_nec', 'socks5_gssapi_service',
+    'proxy_tlsuser', 'pubkey', 'quote', 'raw', 'sasl_authzid', 'sasl_ir',
+    'service_name', 'socks5_gssapi_nec', 'socks5_gssapi_service',
     'socks5_gssapi', 'ssl_allow_beast', 'ssl_auto_client_cert', 'ssl_reqd',
-    'ssl', 'sslv2', 'sslv3', 'suppress_connect_headers', 'tcp_fastopen',
-    'telnet_option', 'tftp_blksize', 'tftp_no_options', 'tls13_ciphers',
-    'tlsauthtype', 'tlspassword', 'tlsuser', 'tr_encoding', 'trace_ascii',
-    'trace_time', 'trace', 'use_ascii', 'variable', 'vsock', 'xattr',
+    'ssl', 'sslv2', 'sslv3', 'telnet_option', 'tftp_blksize',
+    'tftp_no_options', 'tls13_ciphers', 'tlsauthtype', 'tlspassword',
+    'tlsuser', 'tr_encoding', 'trace_ascii', 'trace_time', 'trace',
+    'use_ascii', 'variable', 'vsock', 'xattr',
 ]
 
 
@@ -72,20 +69,12 @@ class UnsupportedArgs(Group):
 
 
 
-    egd_file: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
-    ('--egd-file',)
 
     engine: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='ENGINE')] = None
     ('--engine',)
 
-    expect100_timeout: Arg[Optional[float], _HIDDEN] = None
-    ('--expect100-timeout',)
 
-    fail_early: Arg[bool, _HIDDEN] = False
-    ('--fail-early',)
 
-    false_start: Arg[bool, _HIDDEN] = False
-    ('--false-start',)
 
     ftp_account: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='DATA')] = None
     ('--ftp-account',)
@@ -114,8 +103,6 @@ class UnsupportedArgs(Group):
     ftp_ssl_control: Arg[bool, _HIDDEN] = False
     ('--ftp-ssl-control',)
 
-    happy_eyeballs_timeout_ms: Arg[Optional[int], _HIDDEN] = None
-    ('--happy-eyeballs-timeout-ms',)
 
     haproxy_protocol: Arg[bool, _HIDDEN] = False
     ('--haproxy-protocol',)
@@ -140,8 +127,6 @@ class UnsupportedArgs(Group):
 
 
 
-    junk_session_cookies: Arg[bool, _HIDDEN] = False
-    ('-j', '--junk-session-cookies',)
 
 
     krb: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='LEVEL')] = None
@@ -206,22 +191,14 @@ class UnsupportedArgs(Group):
     parallel: Arg[bool, _HIDDEN] = False
     ('-Z', '--parallel',)
 
-    path_as_is: Arg[bool, _HIDDEN] = False
-    ('--path-as-is',)
 
 
 
 
 
 
-    proto_default: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PROTO')] = None
-    ('--proto-default',)
 
-    proto_redir: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PROTOCOLS')] = None
-    ('--proto-redir',)
 
-    proto: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PROTOCOLS')] = None
-    ('--proto',)
 
 
 
@@ -273,8 +250,6 @@ class UnsupportedArgs(Group):
     quote: Arg[Optional[List[str]], _HIDDEN] = None
     ('-Q', '--quote')
 
-    random_file: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
-    ('--random-file',)
 
     raw: Arg[bool, _HIDDEN] = False
     ('--raw',)
@@ -331,11 +306,7 @@ class UnsupportedArgs(Group):
 
 
 
-    suppress_connect_headers: Arg[bool, _HIDDEN] = False
-    ('--suppress-connect-headers',)
 
-    tcp_fastopen: Arg[bool, _HIDDEN] = False
-    ('--tcp-fastopen',)
 
 
     telnet_option: Arg[Optional[List[str]], _HIDDEN] = None
