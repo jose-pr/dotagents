@@ -306,7 +306,14 @@ a directory of overlays or a registry file (default: the root); for a **source**
 - `redact(text) -> str` — URL userinfo removed, query values masked.
 - `uri_path_class()` — `pathlib_next.uri.UriPath`, or `None` without the `uri` extra.
 - `url_scheme(location) -> str` — the lower-cased scheme.
-- `class SourceCache(root, logger=None)` — `repo_dir(location, ref=None) -> Path`
+- `GIT_SSL_REVOKE_KEY = "git_ssl_revoke"`, `GIT_SSL_REVOKE_VALUES = ("best-effort",
+  "true", "false")`, `GIT_SSL_REVOKE_DEFAULT = "best-effort"`;
+  `git_ssl_revoke(*stores) -> str` — the first store config (`config.toml`) that sets
+  the key, project store first; another value raises `SourceError` naming the file.
+- `class SourceCache(root, logger=None, ssl_revoke="best-effort")` — every git call
+  runs as `git -c http.schannelCheckRevoke=<ssl_revoke> ...` (Git for Windows'
+  Schannel checks revocation; git with OpenSSL ignores it), and a failure that looks
+  like a revocation check names the key. `repo_dir(location, ref=None) -> Path`
   (`<root>/<slug>-<hash>`); `checkout(spec) -> Path` (clone or fetch, once per
   process; a failed fetch of an existing checkout is a warning);
   `materialize(spec) -> Path` (a `url` spec: `file://` in place, anything else

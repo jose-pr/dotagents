@@ -101,7 +101,17 @@ python -m dotagents build-pyz --out dist/dotagents.pyz   # or build it (needs a 
   [Authoring → Custom commands](authoring.md#custom-commands)).
 - `dotagents/config.toml` — only after `init --from`: records that base, so a later
   `init` and every `overlays add` / `remove` / `sync` compose over it. Delete its
-  `base` line to return to the bundled base.
+  `base` line to return to the bundled base. You may add one setting by hand:
+  `git_ssl_revoke` — how strictly the git clones of overlay repos check that the
+  server's certificate is not revoked. `best-effort` (the default) skips a
+  revocation list that is missing or unreachable; `false` skips the check, as git
+  on Linux always does; `true` enforces it. It matters on Windows, where git
+  checks revocation and an https clone otherwise fails when the list cannot be
+  fetched; a project store's setting wins over the user store's.
+
+  ```toml
+  git_ssl_revoke = "false"
+  ```
 
 ## What runs, and from where
 

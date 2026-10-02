@@ -220,7 +220,8 @@ config miss is a **finding** — `dotagents findings add -g` for the user store
 triage closes each with its resolution, which is the record. How you keep any
 decisions beyond that is up to you. A store's `dotagents/` directory exists only for
 your own command modules (`dotagents/cmds/`), which you create when you add your first
-one, and for `dotagents/config.toml`, which records an `init --from` base. This
+one, and for `dotagents/config.toml`, which records an `init --from` base and,
+if you set it, `git_ssl_revoke` (how git checks certificate revocation on Windows). This
 repo follows the same rule: its working material lives in an **untracked** `.agents/`,
 never committed — so what's public here is only the CLI, the base overlay, and the
 opt-in overlays. If you fork, keep the tracked surface free of personal paths and

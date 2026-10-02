@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `git_ssl_revoke` in `<store>/dotagents/config.toml` sets how the git clones and
+  fetches of overlay repos check certificate revocation: `best-effort` (the default)
+  skips a revocation list that is missing or unreachable, `false` skips the check, as
+  git on Linux does, `true` enforces it. It is passed to every git call, so a stricter
+  git configuration elsewhere no longer fails an https clone on Windows, and a clone
+  that still fails on revocation says which setting to change.
+
 ## [0.7.1] - 2026-10-01
 
 ### Added
