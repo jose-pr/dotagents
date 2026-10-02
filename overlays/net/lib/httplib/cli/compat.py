@@ -17,7 +17,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 VAR = 'NET_CURL_COMPAT'
 
@@ -59,17 +59,30 @@ def parse_version(text):
     return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)) if m else None
 
 
+_described: Dict[str, Tuple[Optional[Tuple[int, int, int]], bool]] = {}
+
+
+def describe(path):
+    """``(version, schannel)`` of the curl at ``path`` (``curl -V``, once per
+    process): its version or ``None``, and whether its TLS is Windows'
+    Schannel -- which checks certificate revocation, unlike OpenSSL."""
+    if path not in _described:
+        try:
+            out = getattr(subprocess.run([path, '-V'], capture_output=True, timeout=10, stdin=subprocess.DEVNULL),
+                          'stdout', b'')
+        except (OSError, subprocess.SubprocessError):
+            out = b''
+        text = (out or b'').decode('ascii', 'replace')
+        first = text.splitlines()[:1]
+        version = parse_version(first[0]) if first and first[0].startswith('curl ') else None
+        _described[path] = (version, 'schannel' in text.lower())
+    return _described[path]
+
+
 def installed_version():
     """The real curl's version (``curl -V``), or ``None`` without one."""
     path = find_real_curl()
-    if not path:
-        return None
-    try:
-        out = subprocess.run([path, '-V'], capture_output=True, timeout=10, stdin=subprocess.DEVNULL).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    first = out.decode('ascii', 'replace').splitlines()[:1]
-    return parse_version(first[0]) if first and first[0].startswith('curl ') else None
+    return describe(path)[0] if path else None
 
 
 def version():

@@ -4,7 +4,9 @@
      caller's argv and its exit code returned -- with ONE addition: when
      ``AGENTS_PROXY`` is set and the caller does not steer the proxy
      (``-x``/``--proxy*``/``--noproxy``/``-U``), ``--proxy`` and its
-     credential are added, since real curl reads only the global proxy vars.
+     credential are added, since real curl reads only the global proxy vars;
+     and for a Schannel curl (Windows), ``--ssl-revoke-best-effort``
+     (``NET_CURL_SSL_REVOKE``).
      A leading ``-q`` stays first. ``NET_CURL=0`` runs it exactly as typed.
   2. **Else the net overlay's fallback**, ``httplib.cli`` (``python -m
      httplib``): the common curl surface over the standard library and duho.
@@ -28,6 +30,16 @@ from httplib import hooks as net_hooks  # noqa: E402  (pure stdlib; via LIB_DIR)
 from httplib import proxy as agent_proxy  # noqa: E402  (pure stdlib; via LIB_DIR)
 from httplib.cli import main as fallback_main  # noqa: E402  (imports duho only when run)
 from httplib.cli import run_fallback  # noqa: E402,F401  (re-exported for callers and tests)
+
+#: Revocation checking for a real curl on Windows' Schannel, which (unlike
+#: OpenSSL) checks it and fails a certificate whose revocation list is
+#: missing or unreachable: ``best-effort`` (default) adds curl's
+#: ``--ssl-revoke-best-effort``, ``false`` its ``--ssl-no-revoke``, ``true``
+#: nothing (curl's own strict check). The same values as dotagents'
+#: ``git_ssl_revoke`` for git, whose Schannel default is already best-effort.
+REVOKE_ENV = 'NET_CURL_SSL_REVOKE'
+_REVOKE_VALUES = ('best-effort', 'true', 'false')
+_REVOKE_FLAGS = ('--ssl-no-revoke', '--ssl-revoke-best-effort')
 
 #: ``NET_CURL=0`` / ``n`` / ``no`` / ``false`` / ``off``: run the real curl
 #: exactly as typed -- no agent proxy, no hooks, no fallback. Anything else
@@ -68,6 +80,25 @@ def find_real_curl():
     from httplib.cli.compat import find_real_curl as find
 
     return find(skip=Path(__file__).resolve().parent)
+
+
+def revoke_argv(curl_path, argv):
+    """The revocation flag to add for ``curl_path`` (see :data:`REVOKE_ENV`):
+    only for a Schannel curl (Windows), only when the caller chose none, and
+    best-effort only where curl has it (7.70). An unknown value: ValueError."""
+    mode = (os.environ.get(REVOKE_ENV) or 'best-effort').strip().lower()
+    if mode not in _REVOKE_VALUES:
+        raise ValueError('%s=%s: expected one of %s' % (REVOKE_ENV, os.environ.get(REVOKE_ENV), ', '.join(_REVOKE_VALUES)))
+    if mode == 'true' or os.name != 'nt' or any(a in _REVOKE_FLAGS for a in argv):
+        return []
+    from httplib.cli.compat import describe
+
+    version, schannel = describe(curl_path)
+    if not schannel:
+        return []
+    if mode == 'false':
+        return ['--ssl-no-revoke']
+    return ['--ssl-revoke-best-effort'] if version and version >= (7, 70, 0) else []
 
 
 def agent_proxy_argv(argv):
@@ -126,6 +157,7 @@ def maybe_run_system_curl(argv):
     curl_path = find_real_curl()
     if not curl_path:
         return None
+    revoke = revoke_argv(curl_path, argv)  # a bad NET_CURL_SSL_REVOKE: exit 2
     try:
         if not use_real_curl(argv):
             return None
@@ -137,7 +169,7 @@ def maybe_run_system_curl(argv):
     # argument (any "-q..." cluster, e.g. -qs); anywhere else it is ignored,
     # so the injected proxy options go after it.
     lead = argv[:1] if argv and (argv[0].startswith('-q') or argv[0] == '--disable') else []
-    result = subprocess.run([curl_path, *lead, *extra, *argv[len(lead):]])
+    result = subprocess.run([curl_path, *lead, *revoke, *extra, *argv[len(lead):]])
     return result.returncode
 
 

@@ -179,6 +179,18 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
 - **Unsupported flags fail loud** (`curl: (2) Unsupported options: --http2`, exit
   2) rather than silently do the wrong thing — that guard is deliberate. If you
   hit one, call real `curl`.
+- **`NET_CURL_SSL_REVOKE`** — certificate revocation for a real curl on
+  Windows' Schannel (Git Bash's curl, `System32\curl.exe`), which checks it and
+  fails with exit 60 ("the revocation status is unknown") when a certificate's
+  revocation list is missing or unreachable — common behind a TLS-inspecting
+  proxy — while OpenSSL curls (Linux, macOS) never check. `best-effort`
+  (default) adds `--ssl-revoke-best-effort`: a list that is there is checked, a
+  missing one is not a failure. `false` adds `--ssl-no-revoke`, `true` adds
+  nothing. Only for a Schannel curl, and never when the command names
+  `--ssl-no-revoke` / `--ssl-revoke-best-effort` itself. The same values as
+  dotagents' `git_ssl_revoke` for git, whose Schannel default is already
+  best-effort. The fallback checks no revocation (as OpenSSL curl) unless
+  `--crlfile`.
 - **`NET_CURL_COMPAT`** — the curl version the fallback answers as where curl
   versions disagree (`8.19`, `8.19.0`), or `auto` (default): the real curl on
   PATH, else the newest measured (8.22). It changes only the answers listed in
