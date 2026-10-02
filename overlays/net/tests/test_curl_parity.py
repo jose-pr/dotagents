@@ -135,10 +135,40 @@ def _echo(conn, head):
     if b"/auth" in lines[0] and not _header(head, "Authorization"):
         return _respond(conn, "401 Unauthorized", b"", ['WWW-Authenticate: Basic realm="x"'])
     peer = conn.getpeername()
-    body = b"%s|host=%s|auth=%s|from=%s:%d" % (lines[0], (_header(head, "Host") or "").encode(),
-                                               (_header(head, "Authorization") or "").encode(), peer[0].encode(),
-                                               peer[1] if b"/port" in lines[0] else 0)
+    body = b"%s|host=%s|auth=%s|from=%s:%d|x=%s" % (lines[0], (_header(head, "Host") or "").encode(),
+                                                    (_header(head, "Authorization") or "").encode(), peer[0].encode(),
+                                                    peer[1] if b"/port" in lines[0] else 0, _x_headers(head))
     _respond(conn, "200 OK", body)
+
+
+def _x_headers(head):
+    """The ``X-`` headers of a request head, sorted: what a test asked for,
+    without the User-Agent and connection headers each curl writes its own way."""
+    lines = [line for line in head.split(b"\r\n")[1:] if line.lower().startswith(b"x-")]
+    return b",".join(sorted(line.replace(b": ", b":") for line in lines))
+
+
+def _header_proxy(conn, head):
+    """A proxy that shows what it received: for plain proxying, the request's
+    X- headers; for a CONNECT followed by plain HTTP (-p), the CONNECT's X-
+    headers and the inner request's; a CONNECT followed by TLS is tunnelled
+    to the target, so the origin shows what reached it."""
+    first = head.split(b"\r\n", 1)[0]
+    if not first.startswith(b"CONNECT"):
+        return _respond(conn, "200 OK", b"proxy-saw=" + _x_headers(head))
+    conn.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+    opening = conn.recv(65536)
+    if opening[:1] == b"\x16":  # a TLS ClientHello: tunnel it
+        host, port = first.split(b" ")[1].decode().rsplit(":", 1)
+        upstream = socket.create_connection((host, int(port)), timeout=5)
+        upstream.sendall(opening)
+        return _pipe(conn, upstream)
+    while b"\r\n\r\n" not in opening:
+        more = conn.recv(65536)
+        if not more:
+            break
+        opening += more
+    _respond(conn, "200 OK", b"connect-saw=" + _x_headers(head) + b"|inner-saw=" + _x_headers(opening))
 
 
 def _stalls(conn, head):
@@ -334,7 +364,7 @@ def world(request, tmp_path_factory):
         ("proxy_403", _proxy(connect_status="403 Forbidden")),
         ("proxy_502", _proxy(connect_status="502 Bad Gateway", plain_status="502 Bad Gateway")),
         ("proxy_drops", _proxy(drop_connect=True)),
-        ("echo", _echo), ("stalls", _stalls), ("longer_than_said", _longer_than_said), ("sixty_k", _sixty_k),
+        ("echo", _echo), ("header_proxy", _header_proxy), ("stalls", _stalls), ("longer_than_said", _longer_than_said), ("sixty_k", _sixty_k),
         ("no_colon", _no_colon), ("plain_at_once", _plain_at_once), ("range_ignored", _range_ignored), ("range_416", _range_416),
         ("bad_gzip", _bad_gzip), ("unknown_encoding", _unknown_encoding), ("many_headers", _many_headers),
         ("huge_header", _huge_header), ("big_body", _big_body), ("closes_on_upload", _closes_on_upload),
@@ -471,6 +501,19 @@ SCENARIOS = [
     ("-0 sends HTTP/1.0", lambda w: ["-0", w["echo"] + "/v"], {}, False, {}),
     ("-0 with -w", lambda w: ["-0", "-w", "[%{http_version} %{http_code}]", w["origin"] + "/"], {}, False, {}),
     ("-0 upload", lambda w: ["-0", "-T", str(w["tmp"] / "partial"), w["echo"] + "/up"], {}, False, {}),
+    # --proxy-header: to the proxy only -- the plain request to it, or the CONNECT.
+    ("--proxy-header, plain proxying", lambda w: ["-x", P(w, "header_proxy"), "--proxy-header", "X-P: 1", "-H",
+                                                  "X-O: 2", X], {}, False, {}),
+    ("--proxy-header on the CONNECT (-p)", lambda w: ["-p", "-x", P(w, "header_proxy"), "--proxy-header", "X-P: 1",
+                                                      "-H", "X-O: 2", w["echo"] + "/x"], {}, False, {}),
+    ("--proxy-header never reaches the origin", lambda w: w["ca"] + ["-x", P(w, "header_proxy"), "--proxy-header",
+                                                                     "X-Proxy-Token: t", S(w)], {}, True, {}),
+    ("--proxy-header, bypassed host", lambda w: ["-x", P(w, "header_proxy"), "--noproxy", "127.0.0.1",
+                                                 "--proxy-header", "X-P: 1", w["echo"] + "/b"], {}, False, {}),
+    ("--proxy-header empty and from a file", lambda w: ["-x", P(w, "header_proxy"), "--proxy-header", "X-E;",
+                                                        "--proxy-header", "@" + _write(w, "ph.txt", "X-F: 3\n"), X],
+     {}, False, {}),
+    ("--proxy-basic", lambda w: ["-x", P(w, "proxy"), "--proxy-basic", "-U", "agent:s3cret", X], {}, False, {}),
     ("--request-target *", lambda w: ["--request-target", "*", "-X", "OPTIONS", w["echo"] + "/x"], {}, False, {}),
     ("--request-target", lambda w: ["--request-target", "/other?q=1", w["echo"] + "/x"], {}, False, {}),
     ("-p tunnels http", lambda w: ["-p", "-x", P(w, "open_proxy"), w["echo"] + "/tunnelled"], {}, False, {}),
@@ -589,6 +632,12 @@ SCENARIOS = [
      True, {}),
     ("agent proxy dropped CONNECT", lambda w: w["ca"] + [S(w)], {"AGENTS_PROXY": "@proxy_drops"}, False, {}),
 ]
+
+
+def _write(world, name, text):
+    path = world["tmp"] / name
+    path.write_text(text, encoding="ascii")
+    return str(path)
 
 
 def _copy(world, name):

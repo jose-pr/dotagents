@@ -67,9 +67,10 @@ class AgentProxyHandler(urllib.request.BaseHandler):
 
     handler_order = 90  # before the (empty) ProxyHandler at 100
 
-    def __init__(self, plan, tunnel_http=False):
+    def __init__(self, plan, tunnel_http=False, headers=None):
         self.plan = plan
         self.tunnel_http = tunnel_http  # -p: CONNECT for http URLs too
+        self.headers = dict(headers or {})  # --proxy-header: to the proxy only
 
     def _apply(self, req):
         plan = self.plan
@@ -87,11 +88,14 @@ class AgentProxyHandler(urllib.request.BaseHandler):
                 req.set_proxy(proxy_parts.netloc, proxy_parts.scheme)
         elif not req.full_url.startswith(plan.gateway_base):
             req.full_url = agent_proxy.prefix_url(req.full_url, plan.proxy, plan.endpoint)
+        for_proxy = dict(self.headers)
         if plan.authorization:
-            if plan.endpoint is None and getattr(req, '_tunnel_host', None):
-                req.tunnel_headers = {plan.auth_header: plan.authorization}
-            else:
-                req.add_unredirected_header(plan.auth_header, plan.authorization)
+            for_proxy[plan.auth_header] = plan.authorization
+        if plan.endpoint is None and getattr(req, '_tunnel_host', None):
+            req.tunnel_headers = for_proxy  # on the CONNECT alone
+        else:
+            for name, value in for_proxy.items():
+                req.add_unredirected_header(name, value)
         return req
 
     http_request = _apply

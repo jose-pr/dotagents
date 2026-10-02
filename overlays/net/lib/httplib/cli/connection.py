@@ -60,6 +60,14 @@ class ConnectionArgs(Group):
     "Proxy user and password"
     ("-U", "--proxy-user")
 
+    proxy_header: Arg[Optional[List[str]], NS(metavar='HEADER')] = None
+    "Header for the proxy only (Name: value, Name; for empty, @file); repeatable"
+    ("--proxy-header",)
+
+    proxy_basic: bool = False
+    "Use Basic for -U (the default; a no-op)"
+    ("--proxy-basic",)
+
     noproxy: Arg[Optional[str], NS(metavar='HOSTS')] = None
     "Hosts that bypass the proxy (* for all); replaces NO_PROXY"
     ("--noproxy",)
@@ -245,6 +253,23 @@ class ConnectionArgs(Group):
             except LocalError:
                 context = build_ssl_context(self.doh_insecure)
         return DnsOverride(servers, sources, self.doh_url, context, self.connect_timeout or self.max_time)
+
+    def proxy_headers(self):
+        """``{name: value}`` for --proxy-header (``@file`` read, ``Name;`` empty);
+        a removal (``Name:``) has no internal header to remove here."""
+        from .request import _header_lines
+
+        out = {}
+        for header in _header_lines(self.proxy_header or []):
+            if ':' in header:
+                name, value = header.split(':', 1)
+                if value.strip():
+                    out[name.strip()] = value.strip()
+            elif header.endswith(';') and header[:-1].strip():
+                out[header[:-1].strip()] = ''
+            else:
+                self.usage_error('Invalid header: %s' % header)
+        return out
 
     def connector(self):
         """The :class:`Connector` the transfer's connections share; an

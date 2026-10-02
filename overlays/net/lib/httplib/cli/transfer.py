@@ -218,7 +218,7 @@ def build_opener(args, plan, context, transfer, removed):
         ConnectHTTPHandler(args.connection), ConnectHTTPSHandler(args.connection, context)]
     handlers.append(urllib.request.ProxyHandler({}))
     if plan is not None:
-        handlers.append(AgentProxyHandler(plan, tunnel_http=args.proxytunnel))
+        handlers.append(AgentProxyHandler(plan, tunnel_http=args.proxytunnel, headers=args.proxy_headers()))
     if args.request_target:
         handlers.append(RequestTarget(args.request_target))
     handlers.append(RequestLog(transfer))

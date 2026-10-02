@@ -24,11 +24,11 @@ UNSUPPORTED_ARGS = [
     'mail_rcpt_allowfails', 'mail_rcpt', 'metalink', 'negotiate', 'next',
     'no_progress_bar', 'ntlm_wb', 'ntlm', 'parallel_immediate', 'parallel_max',
     'parallel', 'path_as_is', 'preproxy', 'proto_default', 'proto_redir',
-    'proto', 'proxy_anyauth', 'proxy_basic', 'proxy_cacert', 'proxy_capath',
+    'proto', 'proxy_anyauth', 'proxy_cacert', 'proxy_capath',
     'proxy_cert_type', 'proxy_cert', 'proxy_ciphers', 'proxy_crlfile',
-    'proxy_digest', 'proxy_header', 'proxy_insecure', 'proxy_key_type',
-    'proxy_key', 'proxy_negotiate', 'proxy_ntlm', 'proxy_pass',
-    'proxy_pinnedpubkey', 'proxy_service_name', 'proxy_ssl_allow_beast',
+    'proxy_digest', 'proxy_insecure', 'proxy_key_type', 'proxy_key',
+    'proxy_negotiate', 'proxy_ntlm', 'proxy_pass', 'proxy_pinnedpubkey',
+    'proxy_service_name', 'proxy_ssl_allow_beast',
     'proxy_ssl_auto_client_cert', 'proxy_tls13_ciphers', 'proxy_tlsauthtype',
     'proxy_tlspassword', 'proxy_tlsuser', 'proxy_tlsv1', 'pubkey', 'quote',
     'random_file', 'raw', 'sasl_authzid', 'sasl_ir', 'service_name', 'socks4',
@@ -233,8 +233,6 @@ class UnsupportedArgs(Group):
     proxy_anyauth: Arg[bool, _HIDDEN] = False
     ('--proxy-anyauth',)
 
-    proxy_basic: Arg[bool, _HIDDEN] = False
-    ('--proxy-basic',)
 
     proxy_cacert: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
     ('--proxy-cacert',)
@@ -257,8 +255,6 @@ class UnsupportedArgs(Group):
     proxy_digest: Arg[bool, _HIDDEN] = False
     ('--proxy-digest',)
 
-    proxy_header: Arg[Optional[List[str]], _HIDDEN] = None
-    ('--proxy-header',)
 
     proxy_insecure: Arg[bool, _HIDDEN] = False
     ('--proxy-insecure',)
