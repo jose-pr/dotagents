@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 import curl  # noqa: E402  (bin/, via conftest)
-from test_curl_options import pki  # noqa: F401  (fixture reused)
+from test_curl_options import _openssl, pki  # noqa: F401  (fixture reused)
 
 SHIM = Path(curl.__file__).resolve()
 REAL_CURL = curl.find_real_curl()
@@ -119,6 +119,32 @@ def _plain_at_once(conn, head):
 
 
 _plain_at_once.eager = True
+
+
+def _echo(conn, head):
+    """Answers with what it was asked: the request line, Host, Authorization
+    and the client's address -- a 401 first for /auth without credentials."""
+    lines = head.split(b"\r\n")
+    if b"/auth" in lines[0] and not _header(head, "Authorization"):
+        return _respond(conn, "401 Unauthorized", b"", ['WWW-Authenticate: Basic realm="x"'])
+    peer = conn.getpeername()
+    body = b"%s|host=%s|auth=%s|from=%s:%d" % (lines[0], (_header(head, "Host") or "").encode(),
+                                               (_header(head, "Authorization") or "").encode(), peer[0].encode(),
+                                               peer[1] if b"/port" in lines[0] else 0)
+    _respond(conn, "200 OK", body)
+
+
+def _stalls(conn, head):
+    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n")
+    time.sleep(6)
+
+
+def _longer_than_said(conn, head):
+    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nokEXTRA")
+
+
+def _sixty_k(conn, head):
+    _respond(conn, "200 OK", b"z" * 60000)
 
 
 def _no_colon(conn, head):
@@ -253,6 +279,32 @@ class _Servers(object):
             s.close()
 
 
+def _revocation_and_pins(certs, tmp):
+    """CRLs from the test CA -- one revoking the server's certificate (serial
+    2), one revoking nothing -- and the server key as a pin and a file."""
+    openssl = _openssl()
+    work = tmp / "ca"
+    work.mkdir()
+
+    def run(*argv, **kwargs):
+        return subprocess.run([openssl, *argv], cwd=str(work), check=True, capture_output=True, **kwargs).stdout
+
+    (work / "ca.cnf").write_text("[ca]\ndefault_ca = d\n[d]\ndatabase = index.txt\ncrlnumber = crlnumber\n"
+                                 "default_md = sha256\ndefault_crl_days = 30\n", encoding="ascii")
+    out = {}
+    for name, index in (("crl_clean", ""), ("crl_revoked", "R\t351231000000Z\t260101000000Z\t02\tunknown\t/CN=127.0.0.1\n")):
+        (work / "index.txt").write_text(index, encoding="ascii")
+        (work / "crlnumber").write_text("01\n", encoding="ascii")
+        run("ca", "-gencrl", "-config", "ca.cnf", "-keyfile", str(certs / "ca.key"), "-cert", str(certs / "ca.pem"),
+            "-out", name + ".pem")
+        out[name] = str(work / (name + ".pem"))
+    run("x509", "-in", str(certs / "server.pem"), "-pubkey", "-noout", "-out", "server-pub.pem")
+    der = run("pkey", "-pubin", "-in", "server-pub.pem", "-outform", "DER")
+    out["pin"] = "sha256//" + base64.b64encode(__import__("hashlib").sha256(der).digest()).decode()
+    out["pubkey"] = str(work / "server-pub.pem")
+    return out
+
+
 def _closed_port():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -275,6 +327,7 @@ def world(request, tmp_path_factory):
         ("proxy_403", _proxy(connect_status="403 Forbidden")),
         ("proxy_502", _proxy(connect_status="502 Bad Gateway", plain_status="502 Bad Gateway")),
         ("proxy_drops", _proxy(drop_connect=True)),
+        ("echo", _echo), ("stalls", _stalls), ("longer_than_said", _longer_than_said), ("sixty_k", _sixty_k),
         ("no_colon", _no_colon), ("plain_at_once", _plain_at_once), ("range_ignored", _range_ignored), ("range_416", _range_416),
         ("bad_gzip", _bad_gzip), ("unknown_encoding", _unknown_encoding), ("many_headers", _many_headers),
         ("huge_header", _huge_header), ("big_body", _big_body), ("closes_on_upload", _closes_on_upload),
@@ -300,8 +353,10 @@ def world(request, tmp_path_factory):
         mutual.load_verify_locations(str(certs / "ca.pem"))
         mutual.verify_mode = ssl.CERT_REQUIRED
         w["tls_mutual"] = servers.serve(_origin, tls=mutual).replace("http://", "https://")
+        w.update(_revocation_and_pins(certs, w["tmp"]))
     else:
         w["tls"], w["ca"], w["certs"], w["tls_mutual"] = None, [], None, None
+        w.update(crl_revoked=None, crl_clean=None, pin=None, pubkey=None)
     yield w
     servers.close()
 
@@ -404,6 +459,31 @@ SCENARIOS = [
     ("150 headers", lambda w: ["-w", "[%{num_headers}]", w["many_headers"] + "/"], {}, False, {}),
     ("100: a 200 KB header", lambda w: [w["huge_header"] + "/"], {}, False, {}),
     ("3: no host", lambda w: ["-w", "[%{exitcode}]", "http:///x"], {}, False, {}),
+    # Flags the fallback took on from curl's list (one request each, so what
+    # the server saw is compared too).
+    ("--request-target *", lambda w: ["--request-target", "*", "-X", "OPTIONS", w["echo"] + "/x"], {}, False, {}),
+    ("--request-target", lambda w: ["--request-target", "/other?q=1", w["echo"] + "/x"], {}, False, {}),
+    ("-p tunnels http", lambda w: ["-p", "-x", P(w, "open_proxy"), w["echo"] + "/tunnelled"], {}, False, {}),
+    ("-p, proxy refuses", lambda w: ["-p", "-x", P(w, "proxy_403"), w["echo"] + "/t"], {}, False, {}),
+    ("-p with a credential", lambda w: ["-p", "-x", P(w, "proxy"), "-U", "agent:s3cret", w["echo"] + "/t"],
+     {}, False, {}),
+    ("--anyauth", lambda w: ["--anyauth", "-u", "a:b", w["echo"] + "/auth"], {}, False, {}),
+    ("--anyauth, no challenge", lambda w: ["--anyauth", "-u", "a:b", w["echo"] + "/open"], {}, False, {}),
+    ("--interface IP", lambda w: ["--interface", "127.0.0.1", w["echo"] + "/i"], {}, False, {}),
+    ("--interface no such name", lambda w: ["--interface", "nosuchif0", w["echo"] + "/i"], {}, False, {}),
+    ("--local-port", lambda w: ["--local-port", "47310-47330", w["echo"] + "/port"], {}, False, {}),
+    ("--local-port bad", lambda w: ["--local-port", "x", w["echo"] + "/i"], {}, False, {}),
+    ("--limit-rate", lambda w: ["--limit-rate", "40K", w["sixty_k"] + "/"], {}, False, {}),
+    ("--speed-limit", lambda w: ["--speed-limit", "1000", "--speed-time", "2", w["stalls"] + "/"], {}, False, {}),
+    ("--ignore-content-length", lambda w: ["--ignore-content-length", w["longer_than_said"] + "/"], {}, False, {}),
+    ("--crlfile, not revoked", lambda w: w["ca"] + ["--crlfile", w["crl_clean"], S(w)], {}, True, {}),
+    ("--crlfile, revoked", lambda w: w["ca"] + ["--crlfile", w["crl_revoked"], S(w)], {}, True, {}),
+    ("--crlfile missing", lambda w: w["ca"] + ["--crlfile", str(w["tmp"] / "missing.crl"), S(w)], {}, True, {}),
+    ("--pinnedpubkey match", lambda w: w["ca"] + ["--pinnedpubkey", w["pin"], S(w)], {}, True, {}),
+    ("--pinnedpubkey file", lambda w: w["ca"] + ["--pinnedpubkey", w["pubkey"], S(w)], {}, True, {}),
+    ("--pinnedpubkey mismatch", lambda w: w["ca"] + ["--pinnedpubkey", "sha256//" + "A" * 43 + "=", S(w)],
+     {}, True, {}),
+    ("--pinnedpubkey with -k", lambda w: ["-k", "--pinnedpubkey", "sha256//" + "A" * 43 + "=", S(w)], {}, True, {}),
     # The URL and local files.
     ("malformed URL", lambda w: ["-w", "[%{exitcode}]", "http://[::1/"], {}, False, {}),
     ("malformed URL -g", lambda w: ["-g", "-w", "[%{exitcode}]", "http://[::1/"], {}, False, {}),
@@ -515,6 +595,7 @@ def _copy(world, name):
 SCHANNEL_OWN = {
     "77: --cacert not a bundle": "it ignores a CA file it cannot read and fails verification (60)",
     "client certificate given": "it cannot load a PEM client certificate (58)",
+    "--crlfile, revoked": "the --ssl-no-revoke this harness needs for it turns revocation checks off",
 }
 
 

@@ -53,23 +53,24 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
 - **`-q` / `--disable`** must be curl's FIRST argument to skip `.curlrc`, so
   the shim keeps a leading one first when it adds the proxy options.
 - Supported (`curl -h` lists them): request `-X -G --url --url-query -H -A -e
-  -r --compressed`; auth `-u --basic --digest --oauth2-bearer -n --netrc-file
+  -r --compressed --request-target`; auth `-u --basic --digest --anyauth --oauth2-bearer -n --netrc-file
   --netrc-optional` and `user:pw@` in the URL; body `-d --data-ascii --data-raw
   --data-binary --data-urlencode --json -F --form-string -T`; output `-o -O
   --remote-name-all --output-dir --create-dirs -D -i --show-headers -I -s -S -v
   -f --fail-with-body -w --stderr`; downloads `-C -J -R -z --etag-save
   --etag-compare --no-clobber --skip-existing --remove-on-error --max-filesize`;
   TLS `-k --cacert --capath -E/--cert --cert-type --key --key-type --pass
-  -1/--tlsv1 --tlsv1.0 --tlsv1.1 --tlsv1.2 --tlsv1.3 --tls-max --ciphers`;
-  connection `-x -U --noproxy -L --max-redirs --location-trusted --post301
-  --post302 --post303 -m --connect-timeout --timeout -4 -6 --resolve
-  --connect-to --unix-socket --retry --retry-delay --retry-max-time
+  -1/--tlsv1 --tlsv1.0 --tlsv1.1 --tlsv1.2 --tlsv1.3 --tls-max --ciphers --crlfile
+  --pinnedpubkey`; connection `-x -U -p --noproxy -L --max-redirs --location-trusted
+  --post301 --post302 --post303 -m --connect-timeout --timeout -4 -6 --resolve
+  --connect-to --unix-socket --interface --local-port --limit-rate -Y/--speed-limit
+  -y/--speed-time --ignore-content-length --retry --retry-delay --retry-max-time
   --retry-connrefused --retry-all-errors`; cookies `-b -c`; and the no-ops `-q -g
   --http1.1 -N -# --no-progress-meter --styled-output --no-keepalive
   --keepalive-time --tcp-nodelay --ssl-no-revoke --ssl-revoke-best-effort
   --ca-native --proxy-ca-native --no-alpn --no-npn --no-sessionid`, each true of
-  this client (no config file read, no progress shown, no keepalive, revocation
-  check, session reuse or ALPN). `-g` sends a URL's `{}` / `[]` as typed;
+  this client (no config file read, no progress shown, no keepalive, session
+  reuse or ALPN, and no revocation check but `--crlfile`'s). `-g` sends a URL's `{}` / `[]` as typed;
   without it a glob pattern (one transfer per expansion in curl) is refused,
   exit 2, and a broken one is curl's exit 3. A URL with no scheme is
   `http://`, as in curl; an option value may start with `-` (`-z -DATE`, `-d
@@ -91,6 +92,18 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     and an unmet condition or a 304 writes no file; `--no-clobber` writes
     `name.1`..`name.100`; `--max-filesize` over the limit is exit 63 with nothing
     written.
+  - **Shaping a connection**: `--interface` takes an IP address, a host
+    (`host!NAME`) or an interface (`if!NAME`, or a bare name; by name only with
+    netimps installed), `--local-port N[-M]` the first port of the range that
+    binds (none: exit 45). `-p` tunnels an `http://` URL through the proxy with
+    CONNECT too. `--limit-rate RATE[k|m|g]` paces the body both ways;
+    `--speed-limit`/`--speed-time` (30 s, 1 B/s when only one is given) end a
+    slower transfer with exit 28. `--anyauth` sends no credentials until the
+    server's 401 says which (Digest, else Basic). `--request-target` replaces
+    the first request's target (`*` for `OPTIONS`). `--crlfile` checks the
+    server's chain against a PEM list (revoked: 60); `--pinnedpubkey
+    sha256//BASE64[;...]` or a public-key file requires the server's key (exit
+    90), checked even with `-k`.
   - **Connections**: `-4`/`-6`, `--resolve HOST:PORT:ADDR` and `--connect-to
     HOST1:PORT1:HOST2:PORT2` steer only name resolution, so the `Host` header,
     TLS name and certificate check stay the URL's; `--unix-socket PATH` needs a

@@ -9,7 +9,16 @@ from httplib.retry import TRANSIENT_STATUSES
 from ._duho import NS, Arg
 from .args import Group
 from .errors import EXIT_CONNECT, EXIT_TIMEOUT
+from .connector import Connector, parse_local_port, parse_pins, resolve_interface
 from .netconn import resolving, unix_socket_handlers
+
+
+def parse_rate(spec, flag):
+    """curl's ``RATE[k|m|g]`` (bytes per second, 1024-based suffixes)."""
+    m = __import__('re').match(r'^\s*(\d+(?:\.\d+)?)\s*([kKmMgG]?)\s*$', spec or '')
+    if not m:
+        raise ValueError('%s: expected a number with an optional k/m/g suffix, got %r' % (flag, spec))
+    return float(m.group(1)) * 1024 ** ' kmg'.index(m.group(2).lower() or ' ')
 
 #: curl's longest backoff between retries, in seconds.
 MAX_RETRY_SLEEP = 600
@@ -35,6 +44,34 @@ class ConnectionArgs(Group):
     noproxy: Arg[Optional[str], NS(metavar='HOSTS')] = None
     "Hosts that bypass the proxy (* for all); replaces NO_PROXY"
     ("--noproxy",)
+
+    proxytunnel: bool = False
+    "Tunnel through the proxy with CONNECT for http URLs too"
+    ("-p", "--proxytunnel")
+
+    interface: Arg[Optional[str], NS(metavar='NAME')] = None
+    "Connect from this IP address, interface (if!NAME) or host (host!NAME)"
+    ("--interface",)
+
+    local_port: Arg[Optional[str], NS(metavar='PORT[-PORT]')] = None
+    "Connect from this local port, or the first free one of a range"
+    ("--local-port",)
+
+    limit_rate: Arg[Optional[str], NS(metavar='RATE')] = None
+    "Transfer at most RATE bytes per second (k, m, g suffixes)"
+    ("--limit-rate",)
+
+    speed_limit: Arg[Optional[int], NS(metavar='BYTES')] = None
+    "Abort below this many bytes per second for --speed-time seconds (exit 28)"
+    ("-Y", "--speed-limit")
+
+    speed_time: Arg[Optional[int], NS(metavar='SECONDS')] = None
+    "How long the transfer may stay below --speed-limit (default 30)"
+    ("-y", "--speed-time")
+
+    ignore_content_length: bool = False
+    "Read the body until the server closes, whatever Content-Length says"
+    ("--ignore-content-length",)
 
     location: bool = False
     "Follow redirects"
@@ -143,14 +180,37 @@ class ConnectionArgs(Group):
         family = socket.AF_INET if self.ipv4 else socket.AF_INET6 if self.ipv6 else 0
         return resolving(family, self.resolve or (), self.connect_to or ())
 
+    def connector(self):
+        """The :class:`Connector` the transfer's connections share; an
+        ``--interface`` that names nothing usable is curl's 45."""
+        source = resolve_interface(self.interface) if self.interface else None
+        ports = parse_local_port(self.local_port) if self.local_port else None
+        pins = parse_pins(self.pinnedpubkey) if getattr(self, 'pinnedpubkey', None) else None
+        return Connector(source, ports, pins)
+
+    def rate(self):
+        """--limit-rate in bytes per second, or ``None``."""
+        return parse_rate(self.limit_rate, '--limit-rate') if self.limit_rate else None
+
+    def low_speed(self):
+        """``(bytes per second, seconds)`` for --speed-limit / --speed-time
+        (either alone implies the other's default: 1 B/s, 30 s), or ``None``."""
+        if self.speed_limit is None and self.speed_time is None:
+            return None
+        return (self.speed_limit if self.speed_limit is not None else 1,
+                self.speed_time if self.speed_time is not None else 30)
+
     def connection_handlers(self, context):
         """urllib handlers replacing the TCP ones (--unix-socket), or []."""
         return unix_socket_handlers(self.unix_socket, context) if self.unix_socket else []
 
     def request_timeout(self):
         """One timeout, as urllib has one: -m wins, then --connect-timeout,
-        then the shim's own --timeout."""
-        return self.max_time or self.connect_timeout or self.timeout
+        then the shim's own --timeout; --speed-time caps it, so a stalled
+        read ends as curl's low-speed abort."""
+        timeout = self.max_time or self.connect_timeout or self.timeout
+        low = self.low_speed()
+        return min(timeout, low[1]) if low and timeout else (low[1] if low else timeout)
 
     def retry_reason_for_error(self, code, reason):
         """curl's wording when a transport failure is worth another attempt,

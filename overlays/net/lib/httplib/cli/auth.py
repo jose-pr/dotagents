@@ -102,6 +102,10 @@ class AuthArgs(Group):
     "Use HTTP Digest for -u / netrc / URL credentials"
     ("--digest",)
 
+    anyauth: bool = False
+    "Ask first, then answer the server's challenge with Digest or Basic"
+    ("--anyauth",)
+
     oauth2_bearer: Arg[Optional[str], NS(metavar='TOKEN')] = None
     "Send Authorization: Bearer TOKEN"
     ("--oauth2-bearer",)
@@ -161,7 +165,7 @@ class AuthArgs(Group):
         if self.oauth2_bearer:
             return 'Bearer ' + self.oauth2_bearer
         creds = self.credentials()
-        if creds is None or self.digest:
+        if creds is None or self.digest or self.anyauth:
             return None
         token = base64.b64encode(('%s:%s' % creds).encode('utf-8')).decode('ascii')
         return 'Basic ' + token

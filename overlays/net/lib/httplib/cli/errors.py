@@ -23,6 +23,7 @@ EXIT_CLIENT_CERT = 58
 EXIT_SSL_CONNECT = 35
 EXIT_SSL = 60
 EXIT_CACERT = 77
+EXIT_CRL = 82
 
 
 class LocalError(Exception):

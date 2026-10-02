@@ -10,7 +10,7 @@ from httplib.tls import new_os_context
 from ._duho import NS, Arg
 from .args import Group
 from . import compat
-from .errors import EXIT_CACERT, EXIT_CLIENT_CERT, EXIT_USAGE, EarlyExit, LocalError
+from .errors import EXIT_CACERT, EXIT_CRL, EXIT_CLIENT_CERT, EXIT_USAGE, EarlyExit, LocalError
 
 EXIT_CIPHER = 59
 #: --tls-max values -> the highest version allowed.
@@ -46,7 +46,7 @@ CA_BUNDLE_VAR = 'CURL_CA_BUNDLE'
 
 
 def build_ssl_context(insecure, cacert=None, capath=None, cert=None, key=None, passphrase=None,
-                      min_version=None, max_version=None, ciphers=None):
+                      min_version=None, max_version=None, ciphers=None, crlfile=None):
     """An SSL context. The server is verified against ``cacert`` / ``capath``
     when given, else ``$CURL_CA_BUNDLE`` (both replace the trust store, as in
     curl), else the OS trust store -- ``httplib.tls``, the store the requests
@@ -73,6 +73,14 @@ def build_ssl_context(insecure, cacert=None, capath=None, cert=None, key=None, p
                 cacert or 'none', capath or 'none', exc))
     else:
         ctx = new_os_context()
+    if crlfile and not insecure:
+        # curl's --crlfile: the chain is checked against these lists (82 when
+        # the file cannot be loaded; a revoked certificate fails as 60).
+        try:
+            ctx.load_verify_locations(cafile=crlfile)
+        except (OSError, ssl.SSLError) as exc:
+            raise LocalError(EXIT_CRL, 'failed to load CRL file: %s (%s)' % (crlfile, exc))
+        ctx.verify_flags |= ssl.VERIFY_CRL_CHECK_CHAIN
     if min_version is not None:
         ctx.minimum_version = min_version
     if max_version is not None:
@@ -114,6 +122,14 @@ class UnusableContext(object):
 
 class TLSArgs(Group):
     """Server verification and the client certificate."""
+
+    crlfile: Arg[Optional[str], NS(metavar='FILE')] = None
+    "Check the server's chain against this certificate revocation list (PEM)"
+    ("--crlfile",)
+
+    pinnedpubkey: Arg[Optional[str], NS(metavar='HASHES|FILE')] = None
+    "Require the server key: sha256//BASE64[;...] or a public key file (exit 90)"
+    ("--pinnedpubkey",)
 
     insecure: bool = False
     "Allow insecure server connections"
@@ -223,13 +239,15 @@ class TLSArgs(Group):
         return floor, getattr(ssl.TLSVersion, top) if top else None
 
     def check_files(self):
-        """curl's parse-time check: a ``--cacert`` / ``--netrc-file`` naming
+        """curl's parse-time check: a ``--cacert`` / ``--crlfile`` / ``--netrc-file`` naming
         no file is exit 2 before anything else -- from curl 8.18 on
         (``compat``); before, each fails where it is used."""
-        missing = [p for p in (self.cacert, getattr(self, 'netrc_file', None)) if p and not os.path.exists(p)]
+        missing = [p for p in (self.cacert, self.crlfile, getattr(self, 'netrc_file', None))
+                   if p and not os.path.exists(p)]
         if not missing or not compat.checks_files_first():
             return
-        for flag, path in (('--cacert', self.cacert), ('--netrc-file', getattr(self, 'netrc_file', None))):
+        for flag, path in (('--cacert', self.cacert), ('--crlfile', self.crlfile),
+                           ('--netrc-file', getattr(self, 'netrc_file', None))):
             if path and not os.path.exists(path):
                 raise EarlyExit(EXIT_USAGE, "The file '%s' provided to %s does not exist" % (path, flag))
 
@@ -237,4 +255,5 @@ class TLSArgs(Group):
         floor, top = self.tls_versions()
         return build_ssl_context(self.insecure, cacert=self.cacert, capath=self.capath,
                                  cert=self.cert, key=self.key, passphrase=self.pass_,
-                                 min_version=floor, max_version=top, ciphers=self.ciphers)
+                                 min_version=floor, max_version=top, ciphers=self.ciphers,
+                                 crlfile=self.crlfile)

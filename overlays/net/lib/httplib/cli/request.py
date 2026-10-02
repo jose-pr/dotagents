@@ -167,6 +167,10 @@ class RequestArgs(Group):
     "Ask for a compressed response and decode it"
     ("--compressed",)
 
+    request_target: Arg[Optional[str], NS(metavar='TARGET')] = None
+    "Send this request target (e.g. '*' for OPTIONS) instead of the URL's path"
+    ("--request-target",)
+
     def target_url(self):
         """The URL to request: ``--url`` or the positional, ``http://`` when
         it names no scheme (as curl), ``--url-query`` appended. Any scheme but

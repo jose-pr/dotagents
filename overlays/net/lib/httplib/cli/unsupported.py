@@ -13,19 +13,18 @@ _HIDDEN = NS(help=argparse.SUPPRESS)
 
 #: The fields below; a set one is refused.
 UNSUPPORTED_ARGS = [
-    'any', 'append', 'cert_status', 'config', 'crlf', 'crlfile', 'delegation',
-    'disable_eprt', 'disable_epsv', 'dns_interface', 'dns_ipv4_addr',
-    'dns_ipv6_addr', 'dns_servers', 'doh_url', 'egd_file', 'engine',
-    'expect100_timeout', 'fail_early', 'false_start', 'ftp_account',
-    'ftp_alternative_to_user', 'ftp_create_dirs', 'ftp_method', 'ftp_pasv',
-    'ftp_skip_pasv_ip', 'ftp_ssl_ccc_mode', 'ftp_ssl_ccc', 'ftp_ssl_control',
+    'append', 'cert_status', 'config', 'crlf', 'delegation', 'disable_eprt',
+    'disable_epsv', 'dns_interface', 'dns_ipv4_addr', 'dns_ipv6_addr',
+    'dns_servers', 'doh_url', 'egd_file', 'engine', 'expect100_timeout',
+    'fail_early', 'false_start', 'ftp_account', 'ftp_alternative_to_user',
+    'ftp_create_dirs', 'ftp_method', 'ftp_pasv', 'ftp_skip_pasv_ip',
+    'ftp_ssl_ccc_mode', 'ftp_ssl_ccc', 'ftp_ssl_control',
     'happy_eyeballs_timeout_ms', 'haproxy_protocol', 'hostpubmd5', 'http1_0',
-    'http2_prior_knowledge', 'http2', 'http3', 'ignore_content_length',
-    'interface', 'ip_resolve', 'junk_session_cookies', 'krb', 'libcurl',
-    'limit_rate', 'list_only', 'local_port', 'login_options', 'mail_auth',
-    'mail_from', 'mail_rcpt_allowfails', 'mail_rcpt', 'metalink', 'negotiate',
-    'next', 'no_progress_bar', 'ntlm_wb', 'ntlm', 'parallel_immediate',
-    'parallel_max', 'parallel', 'path_as_is', 'pinnedpubkey', 'preproxy',
+    'http2_prior_knowledge', 'http2', 'http3', 'ip_resolve',
+    'junk_session_cookies', 'krb', 'libcurl', 'list_only', 'login_options',
+    'mail_auth', 'mail_from', 'mail_rcpt_allowfails', 'mail_rcpt', 'metalink',
+    'negotiate', 'next', 'no_progress_bar', 'ntlm_wb', 'ntlm',
+    'parallel_immediate', 'parallel_max', 'parallel', 'path_as_is', 'preproxy',
     'proto_default', 'proto_redir', 'proto', 'proxy_anyauth', 'proxy_basic',
     'proxy_cacert', 'proxy_capath', 'proxy_cert_type', 'proxy_cert',
     'proxy_ciphers', 'proxy_crlfile', 'proxy_digest', 'proxy_header',
@@ -33,24 +32,21 @@ UNSUPPORTED_ARGS = [
     'proxy_ntlm', 'proxy_pass', 'proxy_pinnedpubkey', 'proxy_service_name',
     'proxy_ssl_allow_beast', 'proxy_ssl_auto_client_cert',
     'proxy_tls13_ciphers', 'proxy_tlsauthtype', 'proxy_tlspassword',
-    'proxy_tlsuser', 'proxy_tlsv1', 'proxytunnel', 'pubkey', 'quote',
-    'random_file', 'raw', 'request_target', 'sasl_authzid', 'sasl_ir',
-    'service_name', 'socks4', 'socks4a', 'socks5_basic', 'socks5_gssapi_nec',
-    'socks5_gssapi_service', 'socks5_gssapi', 'socks5_hostname', 'socks5',
-    'speed_limit', 'speed_time', 'ssl_allow_beast', 'ssl_auto_client_cert',
-    'ssl_reqd', 'ssl', 'sslv2', 'sslv3', 'suppress_connect_headers',
-    'tcp_fastopen', 'telnet_option', 'tftp_blksize', 'tftp_no_options',
-    'tls13_ciphers', 'tlsauthtype', 'tlspassword', 'tlsuser', 'tr_encoding',
-    'trace_ascii', 'trace_time', 'trace', 'use_ascii', 'variable', 'vsock',
-    'xattr',
+    'proxy_tlsuser', 'proxy_tlsv1', 'pubkey', 'quote', 'random_file', 'raw',
+    'sasl_authzid', 'sasl_ir', 'service_name', 'socks4', 'socks4a',
+    'socks5_basic', 'socks5_gssapi_nec', 'socks5_gssapi_service',
+    'socks5_gssapi', 'socks5_hostname', 'socks5', 'ssl_allow_beast',
+    'ssl_auto_client_cert', 'ssl_reqd', 'ssl', 'sslv2', 'sslv3',
+    'suppress_connect_headers', 'tcp_fastopen', 'telnet_option',
+    'tftp_blksize', 'tftp_no_options', 'tls13_ciphers', 'tlsauthtype',
+    'tlspassword', 'tlsuser', 'tr_encoding', 'trace_ascii', 'trace_time',
+    'trace', 'use_ascii', 'variable', 'vsock', 'xattr',
 ]
 
 
 class UnsupportedArgs(Group):
     """Recognised-but-unsupported flags, refused by ``_check``."""
 
-    any: Arg[bool, _HIDDEN] = False
-    ('--any',)
 
     append: Arg[bool, _HIDDEN] = False
     ('-a', '--append',)
@@ -66,8 +62,6 @@ class UnsupportedArgs(Group):
     crlf: Arg[bool, _HIDDEN] = False
     ('--crlf',)
 
-    crlfile: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
-    ('--crlfile',)
 
 
     delegation: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='LEVEL')] = None
@@ -158,11 +152,7 @@ class UnsupportedArgs(Group):
     http3: Arg[bool, _HIDDEN] = False
     ('--http3',)
 
-    ignore_content_length: Arg[bool, _HIDDEN] = False
-    ('--ignore-content-length',)
 
-    interface: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='INTERFACE')] = None
-    ('--interface',)
 
     ip_resolve: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='RESOLVE')] = None
     ('--ip-resolve',)
@@ -179,14 +169,10 @@ class UnsupportedArgs(Group):
     libcurl: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
     ('--libcurl',)
 
-    limit_rate: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='RATE')] = None
-    ('--limit-rate',)
 
     list_only: Arg[bool, _HIDDEN] = False
     ('-l', '--list-only',)
 
-    local_port: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='RANGE')] = None
-    ('--local-port',)
 
 
     login_options: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='OPTIONS')] = None
@@ -242,8 +228,6 @@ class UnsupportedArgs(Group):
     path_as_is: Arg[bool, _HIDDEN] = False
     ('--path-as-is',)
 
-    pinnedpubkey: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='HASHES')] = None
-    ('--pinnedpubkey',)
 
 
 
@@ -335,8 +319,6 @@ class UnsupportedArgs(Group):
     proxy_tlsv1: Arg[bool, _HIDDEN] = False
     ('--proxy-tlsv1',)
 
-    proxytunnel: Arg[bool, _HIDDEN] = False
-    ('-p', '--proxytunnel',)
 
     pubkey: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='KEY')] = None
     ('--pubkey',)
@@ -352,8 +334,6 @@ class UnsupportedArgs(Group):
 
 
 
-    request_target: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='PATH')] = None
-    ('--request-target',)
 
 
     sasl_authzid: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='IDENTITY')] = None
@@ -390,11 +370,7 @@ class UnsupportedArgs(Group):
     socks5: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='HOST[:PORT]')] = None
     ('--socks5',)
 
-    speed_limit: Arg[Optional[int], _HIDDEN] = None
-    ('-Y', '--speed-limit',)
 
-    speed_time: Arg[Optional[int], _HIDDEN] = None
-    ('-y', '--speed-time',)
 
     ssl_allow_beast: Arg[bool, _HIDDEN] = False
     ('--ssl-allow-beast',)

@@ -25,7 +25,8 @@ from .errors import (EXIT_CONNECT, EXIT_EMPTY_REPLY, EXIT_HTTP, EXIT_PARTIAL, EX
                      LocalError, Retry)
 from .request import has_header
 from .redirects import CurlRedirectHandler
-from .routing import AgentProxyHandler, TunnelHTTPSHandler, check_proxy_syntax
+from .connector import ConnectHTTPHandler, ConnectHTTPSHandler
+from .routing import AgentProxyHandler, check_proxy_syntax
 from .tls import UnusableContext
 
 #: The shim's own version line (``-V``); real curl answers when it is present.
@@ -75,6 +76,75 @@ class RequestLog(urllib.request.BaseHandler):
 
     http_request = _record
     https_request = _record
+
+
+class RequestTarget(urllib.request.BaseHandler):
+    """--request-target: the first request's target as given (``*`` for
+    OPTIONS), whatever the URL's path; a redirect's hop uses its own."""
+
+    handler_order = 95  # after AgentProxyHandler (90), which may rewrite the selector
+
+    def __init__(self, target):
+        self.target = target
+        self.used = False
+
+    def _apply(self, req):
+        if not self.used:
+            self.used = True
+            req.selector = self.target
+        return req
+
+    http_request = _apply
+    https_request = _apply
+
+
+class TooSlow(Exception):
+    """--speed-limit / --speed-time: the transfer stayed too slow."""
+
+
+class Pace(object):
+    """One body's reading: sleeps to keep --limit-rate, raises
+    :class:`TooSlow` when a --speed-time window ends under --speed-limit."""
+
+    def __init__(self, rate=None, low_speed=None):
+        self.rate = rate
+        self.low_speed = low_speed
+        self.start = self.window = time.monotonic()
+        self.total = self.window_total = 0
+
+    def __call__(self, count):
+        self.total += count
+        now = time.monotonic()
+        if self.rate:
+            ahead = self.total / self.rate - (now - self.start)
+            if ahead > 0:
+                sleep(ahead)
+                now = time.monotonic()
+        if self.low_speed:
+            limit, seconds = self.low_speed
+            if now - self.window >= seconds:
+                if (self.total - self.window_total) / (now - self.window) < limit:
+                    raise TooSlow('Operation too slow. Less than %d bytes/sec transferred the last %d seconds'
+                                  % (limit, seconds))
+                self.window, self.window_total = now, self.total
+
+
+class PacedBody(object):
+    """An upload under --limit-rate: the bytes in pieces, paced; iterable
+    again for a redirect that resends it."""
+
+    PIECE = 16384
+
+    def __init__(self, data, rate):
+        self.data = data
+        self.rate = rate
+
+    def __iter__(self):
+        pace = Pace(self.rate)
+        for offset in range(0, len(self.data), self.PIECE):
+            piece = self.data[offset:offset + self.PIECE]
+            yield piece
+            pace(len(piece))
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -144,17 +214,23 @@ def build_opener(args, plan, context, transfer, removed):
     NO_PROXY and, on Windows, the registry's bypass list -- and silently go
     direct where we decided to proxy. ``AgentProxyHandler`` applies the plan
     per hop instead."""
-    handlers = args.connection_handlers(context) or [TunnelHTTPSHandler(context=context)]
+    handlers = args.connection_handlers(context) or [
+        ConnectHTTPHandler(args.connection), ConnectHTTPSHandler(args.connection, context)]
     handlers.append(urllib.request.ProxyHandler({}))
     if plan is not None:
-        handlers.append(AgentProxyHandler(plan))
+        handlers.append(AgentProxyHandler(plan, tunnel_http=args.proxytunnel))
+    if args.request_target:
+        handlers.append(RequestTarget(args.request_target))
     handlers.append(RequestLog(transfer))
-    creds = args.credentials() if args.digest else None
+    creds = args.credentials() if args.digest or args.anyauth else None
     if creds is not None:
-        # --digest: urllib answers the server's challenge; nothing is sent up front.
+        # --digest / --anyauth: urllib answers the server's challenge (Digest
+        # before Basic); nothing is sent up front.
         passwords = urllib.request.HTTPPasswordMgrWithDefaultRealm()
         passwords.add_password(None, transfer.target, creds[0], creds[1])
         handlers.append(urllib.request.HTTPDigestAuthHandler(passwords))
+        if args.anyauth:
+            handlers.append(urllib.request.HTTPBasicAuthHandler(passwords))
     if args.location:
         redirects = CurlRedirectHandler(args, plan)  # curl's rules for what each hop carries
         if args.max_redirs is not None and args.max_redirs >= 0:
@@ -241,7 +317,7 @@ def transport_error(args, reason, transfer, may_retry):
         else:
             code, message = compat.connect_refused_code(), 'CONNECT tunnel failed, response %d' % status
     elif via_proxy and isinstance(reason, (http.client.RemoteDisconnected, ConnectionResetError)) \
-            and urllib.parse.urlsplit(_hop_url(transfer)).scheme == 'https':
+            and (urllib.parse.urlsplit(_hop_url(transfer)).scheme == 'https' or args.proxytunnel):
         code, message = EXIT_RECV, 'Proxy CONNECT aborted'
     elif isinstance(reason, (ConnectionRefusedError, socket.timeout)) or not isinstance(reason, ConnectionError):
         host, port = _host_port(transfer.plan.proxy if via_proxy else _hop_url(transfer))
@@ -297,7 +373,7 @@ def _bad_chunk(exc):
     return False
 
 
-def read_body(response):
+def read_body(response, pace=None, ignore_length=False):
     """``(body, error)``: the body as far as it came, and the exception that
     cut it short -- an ``IncompleteRead`` for a body shorter than its
     Content-Length or a broken chunked encoding, else the socket's error --
@@ -306,6 +382,8 @@ def read_body(response):
     raw = response.fp if isinstance(response, urllib.error.HTTPError) else response
     if raw is None:
         return b'', None
+    if ignore_length and getattr(raw, 'length', None) is not None:
+        raw.length = None  # --ignore-content-length: read until the server closes
     parts = []
     # read1: what has arrived, without waiting for a full buffer -- a plain
     # read() loses the bytes it buffered when the connection resets.
@@ -316,6 +394,10 @@ def read_body(response):
             if not chunk:
                 break
             parts.append(chunk)
+            if pace is not None:
+                pace(len(chunk))
+    except TooSlow as exc:
+        return b''.join(parts), exc
     except http.client.IncompleteRead as exc:
         parts.append(exc.partial or b'')
         return b''.join(parts), exc
@@ -330,7 +412,13 @@ def read_body(response):
 
 def body_error(args, exc, transfer, chunked):
     """curl's exit for a body cut short: 18 a body shorter than promised,
-    56 a malformed chunk or a broken connection, 28 timed out."""
+    56 a malformed chunk or a broken connection, 28 timed out or too slow."""
+    if isinstance(exc, TooSlow):
+        return fail(args, transfer, EXIT_TIMEOUT, str(exc))
+    low = args.low_speed()
+    if low and isinstance(exc, (socket.timeout, TimeoutError)):
+        return fail(args, transfer, EXIT_TIMEOUT, 'Operation too slow. Less than %d bytes/sec transferred the last %d seconds'
+                    % low)
     if isinstance(exc, http.client.IncompleteRead):
         if chunked and _bad_chunk(exc):
             return fail(args, transfer, EXIT_RECV, 'chunk hex-length char not a hex digit')
@@ -392,7 +480,8 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
     if not args.head and args.too_big(header_items):
         resp.close()
         return fail(args, transfer, EXIT_FILESIZE, 'Maximum file size exceeded')
-    content, cut = (b'', None) if args.head else read_body(resp)
+    pace = Pace(args.rate(), args.low_speed()) if args.limit_rate or args.low_speed() else None
+    content, cut = (b'', None) if args.head else read_body(resp, pace, args.ignore_content_length)
     transfer.size_download = len(content)  # as it came over the wire, before --compressed
     if cut is None and args.too_big(header_items, len(content)):
         return fail(args, transfer, EXIT_FILESIZE, 'Maximum file size exceeded')
@@ -483,6 +572,12 @@ def run(args):
         args.output_target(url)
         if args.prepare_download(headers):
             return 0  # --skip-existing: the file is there
+        args.connection = args.connector()  # --interface / --local-port / --pinnedpubkey
+        if args.limit_rate:
+            limited = args.rate()
+            if data is not None and limited:
+                headers.setdefault('Content-Length', str(len(data)))
+                data = PacedBody(data, limited)
         try:
             context = args.ssl_context()
         except LocalError as exc:
