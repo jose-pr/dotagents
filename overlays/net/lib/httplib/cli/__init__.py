@@ -38,8 +38,13 @@ def main(argv=None):
     except ImportError as exc:
         print('curl: (2) %s' % exc, file=sys.stderr)
         return 2
+    from .errors import EarlyExit
+
     try:
         return run_fallback(argv)
+    except EarlyExit as exc:
+        print('curl: %s' % exc, file=sys.stderr)
+        return exc.code
     except (ValueError, NotImplementedError) as exc:
         print('curl: (2) %s' % exc, file=sys.stderr)
         return 2

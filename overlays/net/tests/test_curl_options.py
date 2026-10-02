@@ -410,9 +410,18 @@ def test_client_certificate(flags, pki, tls_origin, monkeypatch, capsysbinary):
     assert _seen(out)["client"] == "net-test-client"
 
 
-def test_unusable_tls_files_are_curls_codes(pki, tls_origin, monkeypatch, capsysbinary):
+def test_unusable_tls_files_are_curls_codes(pki, tls_origin, echo, monkeypatch, capsysbinary, tmp_path):
+    # A --cacert naming nothing is refused before anything else (curl 8.18+): 2, no -w.
     rc, out = _fallback(monkeypatch, capsysbinary, ["-sS", "-w", "%{exitcode}", "--cacert", str(pki / "nope.pem"), tls_origin])
+    assert rc == 2 and out.out == b""
+    assert out.err.strip() == ("curl: The file '%s' provided to --cacert does not exist" % (pki / "nope.pem")).encode()
+    # One that is not a CA bundle fails at the handshake: 77, -w written.
+    (tmp_path / "garbage.pem").write_text("not a certificate\n")
+    rc, out = _fallback(monkeypatch, capsysbinary, ["-sS", "-w", "%{exitcode}", "--cacert", str(tmp_path / "garbage.pem"), tls_origin])
     assert rc == 77 and out.out == b"77" and out.err.startswith(b"curl: (77)")
+    # ...and never fails a plain-http transfer, which has no handshake.
+    rc, out = _fallback(monkeypatch, capsysbinary, ["-sS", "--cacert", str(tmp_path / "garbage.pem"), echo + "/plain"])
+    assert rc == 0, out.err
     rc, out = _fallback(monkeypatch, capsysbinary, ["-sS", "--capath", str(pki / "nope"), tls_origin])
     assert rc == 77
     rc, out = _fallback(monkeypatch, capsysbinary, ["-sS", "--cacert", str(pki / "ca.pem"), "--cert", str(pki / "nope.pem"), tls_origin])

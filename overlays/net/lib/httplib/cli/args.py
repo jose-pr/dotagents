@@ -14,6 +14,7 @@ import sys
 import urllib.parse
 
 from ._duho import duho
+from .errors import EXIT_READ, EarlyExit
 
 
 class Group(duho.Args):
@@ -34,12 +35,12 @@ class Group(duho.Args):
         duho.parser(type(self)).error(message)
 
     def read_data(self, path):
-        """An ``@``-source's bytes for a data option; a missing file is a usage
-        error (exit 2)."""
+        """An ``@``-source's bytes for a data option; a missing file is curl's
+        exit 26, before anything is sent."""
         try:
             return read_source(path)
         except OSError:
-            self.usage_error('Data file not found: %s' % path)
+            raise EarlyExit(EXIT_READ, 'Failed to open %s' % path)
 
 
 def first_header(header_items, name):

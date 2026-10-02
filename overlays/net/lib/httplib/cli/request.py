@@ -1,14 +1,96 @@
 """Request options: the URL and its query, the method, and the headers --
 the ones options imply, then ``-H`` on top."""
+import re
+import urllib.parse
 from typing import List, Optional
 
 from ._duho import NS, Arg
-from .args import Group, url_encoded
+from .args import Group, read_source, url_encoded
+from .errors import EXIT_PROTOCOL, EXIT_READ, EXIT_URL, EXIT_USAGE, EarlyExit, LocalError
 
 USER_AGENT = "Python-curl/1.0"
 
 #: The schemes the fallback speaks.
 SCHEMES = ('http', 'https')
+#: Schemes curl speaks and the fallback does not: refused out loud (exit 2),
+#: as any flag it lacks. A scheme curl does not know either is curl's own
+#: exit 1.
+CURL_SCHEMES = frozenset([
+    'dict', 'file', 'ftp', 'ftps', 'gopher', 'gophers', 'imap', 'imaps', 'ipfs', 'ipns', 'ldap', 'ldaps', 'mqtt',
+    'pop3', 'pop3s', 'rtmp', 'rtsp', 'scp', 'sftp', 'smb', 'smbs', 'smtp', 'smtps', 'telnet', 'tftp', 'ws', 'wss',
+])
+
+
+#: An IPv6 literal host, which curl does not take for a glob range.
+_IPV6_HOST = re.compile(r'^[a-zA-Z][a-zA-Z0-9+.-]*://(?:[^/@]*@)?\[[0-9a-fA-F:.]+(?:%[^\]]*)?\]')
+
+
+def check_glob(url):
+    """curl expands ``{a,b}`` and ``[1-3]`` in a URL into one transfer each
+    unless ``-g``; the fallback makes one transfer, so a pattern is refused
+    out loud (exit 2) rather than sent as typed. A broken one is curl's own
+    exit 3 at parse time (no ``-w``). An IPv6 literal host is not a range."""
+    host = _IPV6_HOST.match(url)
+    start = host.end() if host else 0
+    depth = None
+    for index in range(start, len(url)):
+        char = url[index]
+        if char in '{[':
+            if depth is not None:
+                raise EarlyExit(EXIT_URL, '(3) nested brace in position %d:' % (index + 1))
+            depth = (char, index)
+        elif char in '}]':
+            if depth is None or '{['.index(depth[0]) != '}]'.index(char):
+                raise EarlyExit(EXIT_URL, '(3) unmatched close brace/bracket in position %d:' % (index + 1))
+            if char == ']' and not re.match(r'^(?:[a-zA-Z]-[a-zA-Z]|\d+-\d+)(?::\d+)?$', url[depth[1] + 1:index]):
+                raise EarlyExit(EXIT_URL, '(3) bad range in position %d:' % (depth[1] + 2))
+            raise NotImplementedError(
+                'URL globbing (%s in the URL) makes several transfers, which the fallback does not do: '
+                'pass -g to send the URL as typed' % url[depth[1]:index + 1])
+    if depth is not None:
+        if depth[0] == '{':
+            raise EarlyExit(EXIT_URL, '(3) unmatched brace in position %d:' % (len(url) + 1))
+        raise EarlyExit(EXIT_URL, '(3) bad range specification in position %d:' % (depth[1] + 2))
+
+
+def check_url(url):
+    """curl's verdict on a URL before anything is sent: 1 for a scheme
+    curl does not speak, 3 for one it cannot parse (a broken IPv6 literal, a
+    port out of range, no host). A scheme curl speaks and the fallback does
+    not raises ``NotImplementedError``."""
+    scheme = url.split('://', 1)[0].lower()
+    if scheme not in SCHEMES:
+        if scheme in CURL_SCHEMES:
+            raise NotImplementedError('Unsupported protocol: %s' % scheme)
+        raise LocalError(EXIT_PROTOCOL, 'Protocol "%s" not supported' % scheme)
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError as exc:
+        raise LocalError(EXIT_URL, 'URL rejected: %s' % (
+            'Bad IPv6 address' if 'IPv6' in str(exc) else 'Malformed input to a URL function'))
+    try:
+        parts.port
+    except ValueError:
+        raise LocalError(EXIT_URL, 'URL rejected: Port number was not a decimal number between 0 and 65535')
+    if not parts.hostname:
+        raise LocalError(EXIT_URL, 'URL rejected: No host part in the URL')
+
+
+def _header_lines(values):
+    """``-H`` values with each ``@file`` replaced by its lines (curl's
+    header file: one header per line, blank lines skipped). A file that is
+    not there is curl's exit 26, before anything is sent."""
+    for value in values:
+        if not value.startswith('@'):
+            yield value
+            continue
+        try:
+            text = read_source(value[1:]).decode('utf-8', errors='replace')
+        except OSError:
+            raise EarlyExit(EXIT_READ, 'Failed to open %s' % value[1:])
+        for line in text.splitlines():
+            if line.strip():
+                yield line
 
 
 def default_scheme(url):
@@ -84,14 +166,16 @@ class RequestArgs(Group):
     def target_url(self):
         """The URL to request: ``--url`` or the positional, ``http://`` when
         it names no scheme (as curl), ``--url-query`` appended. Any scheme but
-        http/https is refused."""
+        http/https is refused (:func:`check_url`); no URL at all is curl's
+        usage error."""
         url = self.url or self.url_positional
         if not url:
-            self.usage_error('URL is required')
-        url = self.remember_auth_url(default_scheme(url))  # user:pw@ -> credentials
-        scheme = url.split('://', 1)[0].lower()
-        if scheme not in SCHEMES:
-            raise NotImplementedError('Unsupported protocol: %s' % scheme)
+            raise EarlyExit(EXIT_USAGE, "(2) no URL specified\ncurl: try 'curl --help' or 'curl --manual' for more information")
+        url = default_scheme(url)
+        if not self.globoff:
+            check_glob(url)
+        check_url(url)
+        url = self.remember_auth_url(url)  # user:pw@ -> credentials
         return add_query(url, [url_encoded(q, self.read_data, raw_plus=True) for q in self.url_query or []])
 
     def request_method(self, has_body, uploading):
@@ -112,7 +196,8 @@ class RequestArgs(Group):
         the ``Authorization`` the auth options imply (``AuthArgs``), -e's
         Referer, --compressed's Accept-Encoding, -r's Range, the body's
         (``--json``) -- then ``-H`` on top: ``Name: v`` sets, ``Name:`` removes
-        the header (a default included), ``Name;`` sends it empty."""
+        the header (a default included), ``Name;`` sends it empty; ``@file``
+        (``@-`` stdin) is one header per line of the file."""
         headers = {'User-Agent': self.user_agent or USER_AGENT}
         authorization = self.authorization()
         if authorization:
@@ -125,7 +210,7 @@ class RequestArgs(Group):
             headers['Range'] = 'bytes=' + self.range
         headers.update(self.body_headers())
         removed = set()
-        for header in self.header or []:
+        for header in _header_lines(self.header or []):
             if ':' in header:
                 key, value = header.split(':', 1)
                 key, value = key.strip(), value.strip()

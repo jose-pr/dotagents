@@ -15,7 +15,7 @@ from typing import Optional
 
 from ._duho import NS, Arg
 from .args import Group
-from .errors import EXIT_READ, LocalError
+from .errors import EXIT_READ, EXIT_USAGE, EarlyExit, LocalError
 
 
 def read_netrc(path):
@@ -128,7 +128,7 @@ class AuthArgs(Group):
     def _netrc_credentials(self):
         if self.netrc_file:
             if not os.path.isfile(self.netrc_file):
-                raise ValueError('--netrc-file: no such file: %s' % self.netrc_file)
+                raise EarlyExit(EXIT_USAGE, "The file '%s' provided to --netrc-file does not exist" % self.netrc_file)
             path = self.netrc_file
         elif self.netrc or self.netrc_optional:
             path = default_netrc()

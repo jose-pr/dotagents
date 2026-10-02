@@ -9,7 +9,7 @@ from httplib.tls import new_os_context
 
 from ._duho import NS, Arg
 from .args import Group
-from .errors import EXIT_CACERT, EXIT_CLIENT_CERT, LocalError
+from .errors import EXIT_CACERT, EXIT_CLIENT_CERT, EXIT_USAGE, EarlyExit, LocalError
 
 EXIT_CIPHER = 59
 #: --tls-max values -> the highest version allowed.
@@ -91,6 +91,24 @@ def build_ssl_context(insecure, cacert=None, capath=None, cert=None, key=None, p
             raise LocalError(EXIT_CLIENT_CERT, 'could not load PEM client certificate %s%s (%s)' % (
                 certfile, ', key %s' % key if key else '', exc))
     return ctx
+
+
+class UnusableContext(object):
+    """Stands in for the SSL context when its files could not be loaded.
+    urllib builds HTTPS connections with it as with any context; the
+    handshake -- after the TCP connect and any CONNECT, where curl loads
+    them -- raises the :class:`LocalError` (77 / 58). A plain-http transfer
+    never touches it."""
+
+    verify_mode = ssl.CERT_REQUIRED
+    check_hostname = True
+    post_handshake_auth = None
+
+    def __init__(self, error):
+        self.error = error
+
+    def wrap_socket(self, sock, *args, **kwargs):
+        raise self.error
 
 
 class TLSArgs(Group):
@@ -202,6 +220,13 @@ class TLSArgs(Group):
                 break
         top = TLS_MAX.get(self.tls_max) if self.tls_max else None
         return floor, getattr(ssl.TLSVersion, top) if top else None
+
+    def check_files(self):
+        """curl's parse-time check: a ``--cacert`` / ``--netrc-file`` naming
+        no file is exit 2 before anything else (curl 8.18 and later)."""
+        for flag, path in (('--cacert', self.cacert), ('--netrc-file', getattr(self, 'netrc_file', None))):
+            if path and not os.path.exists(path):
+                raise EarlyExit(EXIT_USAGE, "The file '%s' provided to %s does not exist" % (path, flag))
 
     def ssl_context(self):
         floor, top = self.tls_versions()

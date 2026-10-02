@@ -45,6 +45,15 @@ def _form_quote(text):
     return text.replace('"', '%22').replace('\r', '%0D').replace('\n', '%0A')
 
 
+def _form_file(path):
+    """A ``-F`` part's file: curl reads it during the transfer, so a missing
+    one is ``curl: (26)`` (``-w`` still written)."""
+    try:
+        return read_source(path)
+    except OSError:
+        raise LocalError(EXIT_READ, 'Failed to open/read local data from file/application')
+
+
 class BodyArgs(Group):
     """What the request carries."""
 
@@ -158,9 +167,9 @@ class BodyArgs(Group):
         if value.startswith('@'):
             path = value[1:]
             ctype = params.get('type') or _FORM_TYPES.get(os.path.splitext(path)[1].lower(), 'application/octet-stream')
-            return name, self.read_data(path), params.get('filename', os.path.basename(path)), ctype
+            return name, _form_file(path), params.get('filename', os.path.basename(path)), ctype
         if value.startswith('<'):
-            return name, self.read_data(value[1:]), params.get('filename'), params.get('type')
+            return name, _form_file(value[1:]), params.get('filename'), params.get('type')
         return name, value.encode('utf-8'), params.get('filename'), params.get('type')
 
     def build_upload(self, url):

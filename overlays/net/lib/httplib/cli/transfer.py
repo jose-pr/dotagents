@@ -2,11 +2,14 @@
 options, run it -- again, under ``--retry`` -- and answer as curl does:
 the same output, the same one-line errors, the same exit codes."""
 import gzip
+import http.client
+import re
 import socket
 import ssl
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from httplib import proxy as agent_proxy
@@ -15,11 +18,13 @@ from httplib.retry import retry_after
 from .body import FORM_CONTENT_TYPE
 from .download import EXIT_FILESIZE
 from .connection import MAX_RETRY_SLEEP
-from .errors import (EXIT_CONNECT, EXIT_HTTP, EXIT_REDIRECTS, EXIT_RESOLVE, EXIT_SSL, EXIT_SSL_CONNECT, EXIT_TIMEOUT,
-                     EXIT_WRITE, LocalError, Retry)
+from .errors import (EXIT_CONNECT, EXIT_EMPTY_REPLY, EXIT_HTTP, EXIT_PARTIAL, EXIT_PROTOCOL, EXIT_RECV,
+                     EXIT_REDIRECTS, EXIT_RESOLVE, EXIT_RESOLVE_PROXY, EXIT_SEND, EXIT_SSL, EXIT_SSL_CONNECT,
+                     EXIT_TIMEOUT, EXIT_WEIRD_REPLY, EXIT_WRITE, LocalError, Retry)
 from .request import has_header
 from .redirects import CurlRedirectHandler
-from .routing import AgentProxyHandler
+from .routing import AgentProxyHandler, check_proxy_syntax
+from .tls import UnusableContext
 
 #: The shim's own version line (``-V``); real curl answers when it is present.
 SHIM_VERSION = 'curl 0.0.0-dotagents-shim (python %d.%d, urllib) -- the net overlay fallback' % sys.version_info[:2]
@@ -148,69 +153,213 @@ def fail(args, transfer, code, message):
     return code
 
 
+def _hop_url(transfer):
+    """The URL of the request that failed: the last hop sent."""
+    return transfer.sent[-1][0] if transfer.sent else transfer.target
+
+
+def _via_proxy(transfer):
+    """Whether the failed hop went to the proxy (or prefix gateway) rather
+    than straight to the origin."""
+    plan = transfer.plan
+    return plan is not None and not plan.bypasses(_hop_url(transfer))
+
+
+def _host_port(url):
+    parts = urllib.parse.urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    return parts.hostname or '', port or (443 if parts.scheme == 'https' else 80)
+
+
+def _elapsed_ms(transfer):
+    return int((time.monotonic() - transfer.started) * 1000)
+
+
+#: http.client's words for a CONNECT the proxy answered with a status.
+_TUNNEL_FAILED = re.compile(r'Tunnel connection failed: (\d{3})')
+
+
 def transport_error(args, reason, transfer, may_retry):
-    """A failure before any response: curl's exit code -- 6 could not
-    resolve, 28 timed out, 35 a failed TLS handshake, 60 a certificate that
-    does not verify, else 7 could not connect -- or
-    :class:`Retry` when ``--retry`` covers it."""
+    """A failure before any response -- connecting, the proxy's CONNECT,
+    the TLS handshake, sending: curl's exit code -- 5/6 could not resolve
+    the proxy/host, 7 could not connect, 28 timed out, 35 a failed TLS
+    handshake, 60 a certificate that does not verify, 56 a CONNECT the proxy
+    refused (22 under -f) or dropped -- or :class:`Retry` when ``--retry``
+    covers it."""
     text = str(reason)
+    via_proxy = _via_proxy(transfer)
+    tunnel = _TUNNEL_FAILED.search(text) if isinstance(reason, OSError) else None
     if isinstance(reason, socket.gaierror):
-        code, what = EXIT_RESOLVE, 'Could not resolve host'
+        if via_proxy:
+            code, message = EXIT_RESOLVE_PROXY, 'Could not resolve proxy: %s' % _host_port(transfer.plan.proxy)[0]
+        else:
+            code, message = EXIT_RESOLVE, 'Could not resolve host: %s' % _host_port(_hop_url(transfer))[0]
     elif isinstance(reason, (socket.timeout, TimeoutError)) or 'timed out' in text:
-        code, what = EXIT_TIMEOUT, 'Operation timed out'
+        code, message = EXIT_TIMEOUT, 'Operation timed out after %d milliseconds with 0 bytes received' % (
+            _elapsed_ms(transfer))
     elif isinstance(reason, ssl.SSLCertVerificationError):
-        code, what = EXIT_SSL, 'SSL certificate problem'
+        code, message = EXIT_SSL, 'SSL certificate problem: %s' % text
     elif isinstance(reason, ssl.SSLError):
-        code, what = EXIT_SSL_CONNECT, 'SSL connect error'
+        code, message = EXIT_SSL_CONNECT, 'SSL connect error: %s' % text
+    elif tunnel:
+        # The proxy answered the CONNECT with a status: curl's 56 (8.21 says
+        # 7), or under -f the status as an HTTP error, 22.
+        status = int(tunnel.group(1))
+        if args.fails_on(status):
+            code, message = EXIT_HTTP, 'The requested URL returned error: %d' % status
+        else:
+            code, message = EXIT_RECV, 'CONNECT tunnel failed, response %d' % status
+    elif via_proxy and isinstance(reason, (http.client.RemoteDisconnected, ConnectionResetError)) \
+            and urllib.parse.urlsplit(_hop_url(transfer)).scheme == 'https':
+        code, message = EXIT_RECV, 'Proxy CONNECT aborted'
+    elif isinstance(reason, (ConnectionRefusedError, socket.timeout)) or not isinstance(reason, ConnectionError):
+        host, port = _host_port(transfer.plan.proxy if via_proxy else _hop_url(transfer))
+        code, message = EXIT_CONNECT, 'Failed to connect to %s port %d after %d ms: %s' % (
+            host, port, _elapsed_ms(transfer), 'Could not connect to server' if isinstance(reason, ConnectionRefusedError) else text)
     else:
-        code, what = EXIT_CONNECT, 'Failed to connect'
+        code, message = EXIT_SEND, 'Send failure: %s' % text
     why = args.retry_reason_for_error(code, reason)
     if may_retry and why:
         raise Retry(why)
-    return fail(args, transfer, code, '%s: %s' % (what, text))
+    return fail(args, transfer, code, message)
+
+
+def reply_error(args, exc, transfer, may_retry):
+    """A failure reading the response's status line and headers: 52 nothing
+    came back, 1 not HTTP at all (curl's "HTTP/0.9") or an unusable status
+    line, 8 an unreadable reply, 56 the connection broke, 28 timed out."""
+    if isinstance(exc, http.client.RemoteDisconnected):
+        code, message = EXIT_EMPTY_REPLY, 'Empty reply from server'
+    elif isinstance(exc, http.client.BadStatusLine):
+        line = str(exc.args[0]) if exc.args else ''
+        code = EXIT_PROTOCOL
+        message = ('Unsupported HTTP/1 subversion in response' if line.startswith('HTTP/')
+                   else 'Received HTTP/0.9 when not allowed')
+    elif isinstance(exc, http.client.HTTPException):
+        code, message = EXIT_WEIRD_REPLY, 'Weird server reply: %s' % exc
+    elif isinstance(exc, (socket.timeout, TimeoutError)):
+        return transport_error(args, exc, transfer, may_retry)
+    elif isinstance(exc, ConnectionResetError):
+        code, message = EXIT_RECV, 'Recv failure: Connection reset by peer'
+    else:
+        code, message = EXIT_RECV, 'Recv failure: %s' % exc
+    why = args.retry_reason_for_error(code, exc)
+    if may_retry and why:
+        raise Retry(why)
+    return fail(args, transfer, code, message)
+
+
+def _bad_chunk(exc):
+    """Whether an ``IncompleteRead`` from a chunked body is a malformed chunk
+    size (curl's 56) rather than the connection closing early (18):
+    http.client reports both from a ``ValueError`` parsing the size line, an
+    empty line being the closed connection."""
+    seen = exc
+    while seen is not None:
+        if isinstance(seen, ValueError):
+            return not str(seen).endswith("b''")
+        seen = seen.__cause__ or seen.__context__
+    return False
+
+
+def read_body(response):
+    """``(body, error)``: the body as far as it came, and the exception that
+    cut it short -- an ``IncompleteRead`` for a body shorter than its
+    Content-Length or a broken chunked encoding, else the socket's error --
+    or ``None``. Read in pieces, so a reset keeps what arrived (curl writes
+    it before failing)."""
+    raw = response.fp if isinstance(response, urllib.error.HTTPError) else response
+    if raw is None:
+        return b'', None
+    parts = []
+    # read1: what has arrived, without waiting for a full buffer -- a plain
+    # read() loses the bytes it buffered when the connection resets.
+    read = getattr(raw, 'read1', raw.read)
+    try:
+        while True:
+            chunk = read(65536)
+            if not chunk:
+                break
+            parts.append(chunk)
+    except http.client.IncompleteRead as exc:
+        parts.append(exc.partial or b'')
+        return b''.join(parts), exc
+    except (OSError, http.client.HTTPException) as exc:
+        return b''.join(parts), exc
+    missing = getattr(raw, 'length', None)
+    if missing:
+        # read(amt) returns b'' at EOF however much Content-Length promised.
+        return b''.join(parts), http.client.IncompleteRead(b'', missing)
+    return b''.join(parts), None
+
+
+def body_error(args, exc, transfer, chunked):
+    """curl's exit for a body cut short: 18 a body shorter than promised,
+    56 a malformed chunk or a broken connection, 28 timed out."""
+    if isinstance(exc, http.client.IncompleteRead):
+        if chunked and _bad_chunk(exc):
+            return fail(args, transfer, EXIT_RECV, 'chunk hex-length char not a hex digit')
+        if chunked:
+            return fail(args, transfer, EXIT_PARTIAL, 'transfer closed with outstanding read data remaining')
+        return fail(args, transfer, EXIT_PARTIAL, 'end of response with %d bytes missing' % (exc.expected or 0))
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return fail(args, transfer, EXIT_TIMEOUT, 'Operation timed out after %d milliseconds with %d bytes received' % (
+            _elapsed_ms(transfer), transfer.size_download))
+    if isinstance(exc, ConnectionResetError):
+        return fail(args, transfer, EXIT_RECV, 'Recv failure: Connection reset by peer')
+    return fail(args, transfer, EXIT_RECV, 'Recv failure: %s' % exc)
 
 
 def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
     """Send ``req``, write what curl writes and return curl's exit code;
     ``transfer`` records the outcome for ``-w``. Raises :class:`Retry`
-    instead of answering when ``may_retry`` and the failure is transient."""
+    instead of answering when ``may_retry`` and the failure is transient.
+
+    A failure is classed by where it happened, as curl's codes are: urllib
+    wraps what goes wrong while connecting and sending in ``URLError``
+    (:func:`transport_error`); the status line and headers raise bare
+    (:func:`reply_error`); the body is read last (:func:`body_error`)."""
     transfer.started = time.monotonic()
     try:
         resp = opener.open(req, timeout=timeout)
         transfer.responded(resp)
         status = resp.getcode()
-        reason = getattr(resp, 'reason', '') or ''
-        header_items = list(resp.headers.items())
-        if not args.head and args.too_big(header_items):
-            resp.close()
-            transfer.status, transfer.header_items = status, header_items
-            return fail(args, transfer, EXIT_FILESIZE, 'Maximum file size exceeded')
-        content = b'' if args.head else resp.read()
     except urllib.error.HTTPError as exc:
         # An HTTP status is a response, not a transport error: curl prints it
         # and exits 0 -- unless -f, which is exit 22.
+        resp = exc
         transfer.responded(getattr(exc, 'fp', None))
         status = exc.code
-        reason = getattr(exc, 'reason', '') or ''
-        header_items = list(exc.headers.items()) if exc.headers else []
-        transfer.status, transfer.header_items = status, header_items
-        if args.location and 'infinite loop' in str(reason):
+        if args.location and 'infinite loop' in str(getattr(exc, 'reason', '') or ''):
             # urllib's redirect handler gave up (--max-redirs, or a loop):
             # curl's "(47) Maximum (N) redirects followed".
+            transfer.status = status
+            transfer.header_items = list(exc.headers.items()) if exc.headers else []
             if may_retry and args.retry_all_errors:
                 raise Retry(' (retrying all errors)')
             limit = args.max_redirs if args.max_redirs is not None else urllib.request.HTTPRedirectHandler.max_redirections
             return fail(args, transfer, EXIT_REDIRECTS, 'Maximum (%d) redirects followed' % limit)
-        content = b'' if args.head else (exc.read() or b'')
     except NotImplementedError:
         raise
+    except LocalError as exc:
+        # A TLS file the handshake needed and could not use (77 / 58).
+        return fail(args, transfer, exc.code, str(exc))
     except urllib.error.URLError as exc:
         return transport_error(args, exc.reason, transfer, may_retry)
-    except (socket.timeout, TimeoutError, OSError, ssl.SSLError) as exc:
-        return transport_error(args, exc, transfer, may_retry)
+    except (OSError, http.client.HTTPException) as exc:
+        return reply_error(args, exc, transfer, may_retry)
+    reason = getattr(resp, 'reason', '') or ''
+    header_items = list(resp.headers.items()) if resp.headers else []
     transfer.status, transfer.header_items = status, header_items
+    if not args.head and args.too_big(header_items):
+        resp.close()
+        return fail(args, transfer, EXIT_FILESIZE, 'Maximum file size exceeded')
+    content, cut = (b'', None) if args.head else read_body(resp)
     transfer.size_download = len(content)  # as it came over the wire, before --compressed
-    if args.too_big(header_items, len(content)):
+    if cut is None and args.too_big(header_items, len(content)):
         return fail(args, transfer, EXIT_FILESIZE, 'Maximum file size exceeded')
     why = args.retry_reason_for_status(status)
     if may_retry and why:
@@ -240,6 +389,10 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
                 transfer.size_download = 0
             return fail(args, transfer, EXIT_HTTP, 'The requested URL returned error: %s' % status)
         args.emit_output(header_bytes, content)
+        if cut is not None:
+            # What arrived is written, as curl writes it, then the failure.
+            raw = resp.fp if isinstance(resp, urllib.error.HTTPError) else resp
+            return body_error(args, cut, transfer, getattr(raw, 'chunked', False))
         args.finish_download(header_items)
     except OSError as exc:
         # -o / -D not writable, or stdout closed under us: curl's (23).
@@ -259,13 +412,15 @@ def run(args):
         return 0
     args.check()
     tokens = args.write_out_tokens()  # an unsupported -w variable fails before anything is sent
-    url = args.target_url()
+    args.check_files()  # --cacert / --netrc-file naming nothing: curl's 2, before anything else
     typed = args.url or args.url_positional
     body = args.build_body()
-    form = args.build_form()
 
-    transfer = Transfer(typed, url, 'GET', None)
+    transfer = Transfer(typed, typed or '', 'GET', None)
     try:
+        url = args.target_url()  # curl's 1 / 3 for a URL it cannot use, -w still written
+        transfer = Transfer(typed, url, 'GET', None)
+        form = args.build_form()
         headers, removed = args.request_headers()  # may read a netrc: exit 26
         url, upload = args.build_upload(url)
         if args.get:
@@ -283,12 +438,18 @@ def run(args):
         cookie_header = args.cookie_header(url)
         if cookie_header and not has_header(headers, 'cookie'):
             headers['Cookie'] = cookie_header
+        check_proxy_syntax(args.proxy or agent_proxy.proxy_url())  # curl's 5
         plan = agent_proxy.plan(proxy=args.proxy, noproxy=args.noproxy, proxy_user=args.proxy_user)
         transfer = Transfer(typed, url, method, plan)
         args.output_target(url)
         if args.prepare_download(headers):
             return 0  # --skip-existing: the file is there
-        context = args.ssl_context()
+        try:
+            context = args.ssl_context()
+        except LocalError as exc:
+            # curl loads these files during the TLS handshake: an http://
+            # transfer never notices, and an https one fails after connecting.
+            context = UnusableContext(exc)
     except LocalError as exc:
         rc = fail(args, transfer, exc.code, str(exc))
         args.report(tokens, transfer, rc)

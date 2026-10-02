@@ -11,6 +11,7 @@ from typing import Optional
 
 from ._duho import NS, Arg
 from .args import Group, first_header
+from .errors import EXIT_READ, EarlyExit
 from .routing import caller_url
 
 #: The ``--write-out`` variables the fallback reports, with curl's meaning and
@@ -43,7 +44,7 @@ def parse_write_out(fmt):
         try:
             fmt = sys.stdin.read() if source == '-' else Path(source).read_text(encoding='utf-8')
         except OSError as exc:
-            raise ValueError('--write-out: cannot read %s: %s' % (source, exc))
+            raise EarlyExit(EXIT_READ, 'Failed to open %s' % source)
     tokens, text, i = [], [], 0
 
     def take(kind, value):
@@ -124,7 +125,7 @@ def write_out_values(args, transfer, exitcode):
         'num_redirects': str(max(len(transfer.sent) - 1, 0)),
         'redirect_url': redirect,
         'response_code': '%03d' % transfer.status,
-        'scheme': urllib.parse.urlsplit(effective).scheme.lower(),
+        'scheme': effective.split('://', 1)[0].lower() if '://' in effective else '',
         'size_download': str(transfer.size_download),
         'size_upload': str(upload),
         'time_starttransfer': '%.6f' % first_byte,
