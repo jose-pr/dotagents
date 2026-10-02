@@ -4,6 +4,7 @@ cookie merging. The requests-free half (``CookieSpec``, ``load_netscape``,
 fallback's ``-b`` / ``-c`` run on."""
 from __future__ import annotations
 
+import ipaddress
 import time
 from dataclasses import dataclass
 from http.cookies import Morsel, SimpleCookie
@@ -78,20 +79,41 @@ def load_netscape(path: Path) -> List[CookieSpec]:
     return cookies
 
 
+#: Hosts curl treats as a secure context: ``Secure`` cookies go to them over
+#: plain http too.
+_SECURE_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _path_matches(cookie_path: str, path: str) -> bool:
+    """RFC 6265 path-match: ``/admin`` covers ``/admin`` and ``/admin/x``,
+    not ``/adminx``."""
+    if path == cookie_path or cookie_path == "/":
+        return True
+    return path.startswith(cookie_path) and (cookie_path.endswith("/") or path[len(cookie_path)] == "/")
+
+
 def cookie_applies(cookie: CookieSpec, url: str, now: Optional[float] = None) -> bool:
     """Does ``cookie`` go with a request to ``url``, as curl decides: the
     domain (the host itself, or a subdomain for a leading dot or the
-    include-subdomains flag), a path prefix, ``Secure`` only over https, and
-    not expired (``0`` / ``None`` is a session cookie)."""
+    include-subdomains flag -- never for an IP address, which only matches
+    itself), the path (RFC 6265 path-match), ``Secure`` only over https or to
+    localhost / a loopback address, and not expired (``0`` / ``None`` is a
+    session cookie)."""
     parts = urlparse(url)
+    host = (parts.hostname or "").lower()
     domain = cookie.domain
-    if cookie.subdomains and not domain.startswith("."):
-        domain = "." + domain
-    if not domain_covers(domain, parts.hostname or ""):
+    try:
+        ipaddress.ip_address(host)
+        if domain.lstrip(".").lower() != host:
+            return False
+    except ValueError:
+        if cookie.subdomains and not domain.startswith("."):
+            domain = "." + domain
+        if not domain_covers(domain, host):
+            return False
+    if not _path_matches(cookie.path or "/", parts.path or "/"):
         return False
-    if not (parts.path or "/").startswith(cookie.path or "/"):
-        return False
-    if cookie.secure and parts.scheme != "https":
+    if cookie.secure and parts.scheme != "https" and host not in _SECURE_HOSTS:
         return False
     if cookie.expires and cookie.expires <= (time.time() if now is None else now):
         return False

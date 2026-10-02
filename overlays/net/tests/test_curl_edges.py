@@ -216,7 +216,10 @@ def test_b_sends_only_the_rows_that_apply(origin, tmp_path, monkeypatch, capsysb
     rc, out = _fallback(monkeypatch, capsysbinary, ["-s", "-b", str(jar), origin + "/echo"])
     assert rc == 0
     cookie = _echo(out)["headers"]["cookie"]
-    assert cookie == "host=1; hidden=2; sub=7", cookie
+    # As curl 8.17 / 8.22 send this jar: a Secure cookie goes to 127.0.0.1 over
+    # http (a secure context), .0.0.1 does not cover an IP address, and the
+    # order is curl's (longest path, domain, name first).
+    assert cookie == "onlyhttps=5; hidden=2; host=1", cookie
 
 
 def test_c_writes_httponly_and_expiry_on_top_of_b(origin, tmp_path, monkeypatch, capsysbinary):
