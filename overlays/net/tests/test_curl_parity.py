@@ -110,6 +110,54 @@ def _chunks_cut(conn, head):
     conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n")
 
 
+def _plain_at_once(conn, head):
+    """Speaks HTTP the moment a client connects, whatever it sends (a TLS
+    ClientHello included)."""
+    conn.sendall(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+    time.sleep(0.5)
+
+
+_plain_at_once.eager = True
+
+
+def _no_colon(conn, head):
+    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nthis line has no colon\r\n\r\nok")
+
+
+def _range_ignored(conn, head):
+    """Answers every request with the whole body, Range or not."""
+    _respond(conn, "200 OK", b"0123456789")
+
+
+def _range_416(conn, head):
+    _respond(conn, "416 Range Not Satisfiable", extra=["Content-Range: bytes */10"])
+
+
+def _bad_gzip(conn, head):
+    _respond(conn, "200 OK", b"this is not gzip", ["Content-Encoding: gzip"])
+
+
+def _unknown_encoding(conn, head):
+    _respond(conn, "200 OK", b"plain", ["Content-Encoding: x-unknown"])
+
+
+def _many_headers(conn, head):
+    _respond(conn, "200 OK", b"ok", ["X-H%d: %d" % (i, i) for i in range(150)])
+
+
+def _huge_header(conn, head):
+    _respond(conn, "200 OK", b"ok", ["X-Huge: " + "a" * 200000])
+
+
+def _big_body(conn, head):
+    _respond(conn, "200 OK", b"x" * 100)
+
+
+def _closes_on_upload(conn, head):
+    """Reads the head of an upload, then resets: the body cannot be sent."""
+    _reset(conn)
+
+
 def _silent(conn, head):
     time.sleep(4)
 
@@ -179,7 +227,7 @@ class _Servers(object):
             try:
                 if tls is not None:
                     conn = tls.wrap_socket(conn, server_side=True)
-                handler(conn, _read_head(conn))
+                handler(conn, b"" if getattr(handler, "eager", False) else _read_head(conn))
             except (OSError, ValueError):
                 pass
             finally:
@@ -226,10 +274,16 @@ def world(request, tmp_path_factory):
         ("proxy_403", _proxy(connect_status="403 Forbidden")),
         ("proxy_502", _proxy(connect_status="502 Bad Gateway", plain_status="502 Bad Gateway")),
         ("proxy_drops", _proxy(drop_connect=True)),
+        ("no_colon", _no_colon), ("plain_at_once", _plain_at_once), ("range_ignored", _range_ignored), ("range_416", _range_416),
+        ("bad_gzip", _bad_gzip), ("unknown_encoding", _unknown_encoding), ("many_headers", _many_headers),
+        ("huge_header", _huge_header), ("big_body", _big_body), ("closes_on_upload", _closes_on_upload),
         ("token_proxy", _proxy(header="X-Proxy-Token")),
     )}
     w["dead"] = "http://127.0.0.1:%d" % _closed_port()
     w["tmp"] = tmp_path_factory.mktemp("parity")
+    (w["tmp"] / "partial").write_bytes(b"012")
+    (w["tmp"] / "garbage.pem").write_text("not a certificate\n")
+    (w["tmp"] / "upload.bin").write_bytes(b"u" * (8 << 20))
     try:
         certs = request.getfixturevalue("pki")
     except pytest.skip.Exception:
@@ -239,8 +293,14 @@ def world(request, tmp_path_factory):
         context.load_cert_chain(str(certs / "server.pem"), str(certs / "server.key"))
         w["tls"] = servers.serve(_origin, tls=context).replace("http://", "https://")
         w["ca"] = ["--cacert", str(certs / "ca.pem")]
+        w["certs"] = certs
+        mutual = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        mutual.load_cert_chain(str(certs / "server.pem"), str(certs / "server.key"))
+        mutual.load_verify_locations(str(certs / "ca.pem"))
+        mutual.verify_mode = ssl.CERT_REQUIRED
+        w["tls_mutual"] = servers.serve(_origin, tls=mutual).replace("http://", "https://")
     else:
-        w["tls"], w["ca"] = None, []
+        w["tls"], w["ca"], w["certs"], w["tls_mutual"] = None, [], None, None
     yield w
     servers.close()
 
@@ -319,6 +379,21 @@ SCENARIOS = [
     ("-w on empty reply", lambda w: ["-w", "[%{http_code} %{exitcode}]", w["empty"] + "/"], {}, False, {}),
     ("-w on truncated", lambda w: ["-w", "[%{http_code} %{exitcode} %{size_download}]", w["truncated"] + "/"],
      {}, False, {}),
+    # Every HTTP-relevant code in curl's exit-code list.
+    ("8: header line without a colon", lambda w: [w["no_colon"] + "/"], {}, False, {}),
+    ("33: resume, range ignored", lambda w: ["-C", "-", "-o", _copy(w, "partial"), w["range_ignored"] + "/"],
+     {}, False, {}),
+    ("36: resume past the end", lambda w: ["-C", "-", "-o", _copy(w, "partial"), w["range_416"] + "/"],
+     {}, False, {}),
+    ("55: upload reset", lambda w: ["-T", str(w["tmp"] / "upload.bin"), w["closes_on_upload"] + "/up"],
+     {}, False, {}),
+    ("61: bad gzip --compressed", lambda w: ["--compressed", w["bad_gzip"] + "/"], {}, False, {}),
+    ("61: bad gzip without --compressed", lambda w: [w["bad_gzip"] + "/"], {}, False, {}),
+    ("unknown encoding --compressed", lambda w: ["--compressed", w["unknown_encoding"] + "/"], {}, False, {}),
+    ("63: --max-filesize", lambda w: ["--max-filesize", "10", w["big_body"] + "/"], {}, False, {}),
+    ("150 headers", lambda w: ["-w", "[%{num_headers}]", w["many_headers"] + "/"], {}, False, {}),
+    ("100: a 200 KB header", lambda w: [w["huge_header"] + "/"], {}, False, {}),
+    ("3: no host", lambda w: ["-w", "[%{exitcode}]", "http:///x"], {}, False, {}),
     # The URL and local files.
     ("malformed URL", lambda w: ["-w", "[%{exitcode}]", "http://[::1/"], {}, False, {}),
     ("malformed URL -g", lambda w: ["-g", "-w", "[%{exitcode}]", "http://[::1/"], {}, False, {}),
@@ -340,6 +415,13 @@ SCENARIOS = [
     ("TLS trusted", lambda w: w["ca"] + [S(w)], {}, True, {}),
     ("TLS untrusted", lambda w: [S(w)], {}, True, {}),
     ("TLS -k", lambda w: ["-k", S(w)], {}, True, {}),
+    ("35: TLS to a plain-HTTP port", lambda w: ["-m", "10", w["plain_at_once"].replace("http://", "https://") + "/"],
+     {}, False, {}),
+    ("60: name does not match", lambda w: w["ca"] + [S(w).replace("127.0.0.1", "localhost")], {}, True, {}),
+    ("77: --cacert not a bundle", lambda w: ["--cacert", str(w["tmp"] / "garbage.pem"), S(w)], {}, True, {}),
+    ("client certificate required", lambda w: w["ca"] + [w["tls_mutual"] + "/"], {}, True, {}),
+    ("client certificate given", lambda w: w["ca"] + ["--cert", str(w["certs"] / "client.pem"), "--key",
+                                                     str(w["certs"] / "client.key"), w["tls_mutual"] + "/"], {}, True, {}),
     # A proxy, plain http: its answer is the response.
     ("proxy credential", lambda w: ["-x", P(w, "proxy"), "-U", "agent:s3cret", X], {}, False, {}),
     ("proxy credential in its URL", lambda w: ["-x", P(w, "proxy").replace("//", "//agent:s3cret@"), X],
@@ -406,6 +488,23 @@ SCENARIOS = [
 ]
 
 
+def _copy(world, name):
+    """A fresh copy of a prepared file (each run may rewrite it)."""
+    import shutil
+    import uuid
+    target = world["tmp"] / ("%s-%s" % (name, uuid.uuid4().hex[:8]))
+    shutil.copy(str(world["tmp"] / name), str(target))
+    return str(target)
+
+
+#: Where a Schannel curl answers for Schannel rather than for curl (the
+#: OpenSSL / LibreSSL builds agree with the fallback).
+SCHANNEL_OWN = {
+    "77: --cacert not a bundle": "it ignores a CA file it cannot read and fails verification (60)",
+    "client certificate given": "it cannot load a PEM client certificate (58)",
+}
+
+
 def _env(world, env):
     out = {}
     for key, value in env.items():
@@ -421,12 +520,16 @@ def _env(world, env):
 def test_the_fallback_answers_as_curl_does(world, name, argv, env, tls, allowed):
     if tls and not world["tls"]:
         pytest.skip("no openssl to make the TLS origin's certificate with")
-    args = ["-sS"] + argv(world)
-    if args[1:2] == ["-s"]:
-        args = args[1:]  # the scenario asked for -s alone
+    if SCHANNEL and name in SCHANNEL_OWN:
+        pytest.skip("Schannel's own behaviour: %s" % SCHANNEL_OWN[name])
+    def command():
+        # Built once per side: a scenario may prepare a file each run rewrites.
+        args = ["-sS"] + argv(world)
+        return args[1:] if args[1:2] == ["-s"] else args  # -s alone, when asked
+
     environment = _env(world, env)
-    real = _run(args, environment, real=True)
-    fallback = _run(args, environment, real=False)
+    real = _run(command(), environment, real=True)
+    fallback = _run(command(), environment, real=False)
     code, err_code, out = real[:3]
     if code in allowed:
         # A version difference: what the fallback answers instead.

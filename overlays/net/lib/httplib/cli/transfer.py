@@ -20,7 +20,8 @@ from .download import EXIT_FILESIZE
 from .connection import MAX_RETRY_SLEEP
 from .errors import (EXIT_CONNECT, EXIT_EMPTY_REPLY, EXIT_HTTP, EXIT_PARTIAL, EXIT_PROTOCOL, EXIT_RECV,
                      EXIT_REDIRECTS, EXIT_RESOLVE, EXIT_RESOLVE_PROXY, EXIT_SEND, EXIT_SSL, EXIT_SSL_CONNECT,
-                     EXIT_TIMEOUT, EXIT_WEIRD_REPLY, EXIT_WRITE, LocalError, Retry)
+                     EXIT_TIMEOUT, EXIT_WEIRD_REPLY, EXIT_WRITE, EXIT_BAD_ENCODING, EXIT_TOO_LARGE,
+                     LocalError, Retry)
 from .request import has_header
 from .redirects import CurlRedirectHandler
 from .routing import AgentProxyHandler, TunnelHTTPSHandler, check_proxy_syntax
@@ -88,26 +89,52 @@ def format_response_headers(status, reason, header_items):
     return ('%s\r\n%s\r\n' % (status_line, header_text)).encode('utf-8')
 
 
+class EncodingError(Exception):
+    """A ``Content-Encoding`` ``--compressed`` cannot undo: curl's 61."""
+
+
 def decode_body(content, header_items):
     """``--compressed``: the body decoded per ``Content-Encoding`` (gzip,
-    deflate -- zlib-wrapped or raw); anything else is returned as it came."""
+    deflate -- zlib-wrapped or raw -- each layer in turn; ``identity`` is
+    none). An encoding it does not know, or data that does not decode,
+    raises :class:`EncodingError`, as curl fails with 61."""
     import zlib
 
-    encoding = ''
+    encodings = []
     for name, value in header_items:
         if name.lower() == 'content-encoding':
-            encoding = value.strip().lower()
-    try:
-        if encoding in ('gzip', 'x-gzip'):
-            return gzip.decompress(content)
-        if encoding == 'deflate':
-            try:
-                return zlib.decompress(content)
-            except zlib.error:
-                return zlib.decompress(content, -zlib.MAX_WBITS)
-    except (OSError, EOFError, zlib.error):
-        pass
+            encodings += [e.strip().lower() for e in value.split(',') if e.strip()]
+    for encoding in reversed(encodings):  # the last applied is undone first
+        try:
+            if encoding in ('gzip', 'x-gzip'):
+                content = gzip.decompress(content)
+            elif encoding == 'deflate':
+                try:
+                    content = zlib.decompress(content)
+                except zlib.error:
+                    content = zlib.decompress(content, -zlib.MAX_WBITS)
+            elif encoding != 'identity':
+                raise EncodingError('Unrecognized content encoding type')
+        except (OSError, EOFError, zlib.error) as exc:
+            raise EncodingError('Error while processing content unencoding: %s' % exc)
     return content
+
+
+#: curl's limits on a response's headers: one header's size (100 KB, beyond
+#: which it fails with 100); http.client's own -- 100 headers, 64 KB a line --
+#: are lifted to it for the transfer, since curl takes any number of headers.
+MAX_HEADER_LINE = 100 * 1024
+MAX_HEADERS = 1 << 20
+
+
+def _header_defect(response):
+    """curl's 8 for a header line with no colon: http.client takes it as the
+    end of the headers (the rest becomes a defect) instead of refusing it."""
+    import email.errors
+
+    message = getattr(response, 'headers', None)
+    return any(isinstance(d, email.errors.MissingHeaderBodySeparatorDefect)
+               for d in getattr(message, 'defects', ()) or ())
 
 
 def build_opener(args, plan, context, transfer, removed):
@@ -219,6 +246,8 @@ def transport_error(args, reason, transfer, may_retry):
         host, port = _host_port(transfer.plan.proxy if via_proxy else _hop_url(transfer))
         code, message = EXIT_CONNECT, 'Failed to connect to %s port %d after %d ms: %s' % (
             host, port, _elapsed_ms(transfer), 'Could not connect to server' if isinstance(reason, ConnectionRefusedError) else text)
+    elif isinstance(reason, ConnectionResetError):
+        code, message = EXIT_RECV, 'Recv failure: Connection reset by peer'
     else:
         code, message = EXIT_SEND, 'Send failure: %s' % text
     why = args.retry_reason_for_error(code, reason)
@@ -233,6 +262,8 @@ def reply_error(args, exc, transfer, may_retry):
     line, 8 an unreadable reply, 56 the connection broke, 28 timed out."""
     if isinstance(exc, http.client.RemoteDisconnected):
         code, message = EXIT_EMPTY_REPLY, 'Empty reply from server'
+    elif isinstance(exc, http.client.LineTooLong) or str(exc).startswith('got more than'):
+        code, message = EXIT_TOO_LARGE, 'A value or data field grew larger than allowed'
     elif isinstance(exc, http.client.BadStatusLine):
         line = str(exc.args[0]) if exc.args else ''
         code = EXIT_PROTOCOL
@@ -353,6 +384,9 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
         return reply_error(args, exc, transfer, may_retry)
     reason = getattr(resp, 'reason', '') or ''
     header_items = list(resp.headers.items()) if resp.headers else []
+    if _header_defect(resp):
+        resp.close()
+        return fail(args, transfer, EXIT_WEIRD_REPLY, 'Header without colon')
     transfer.status, transfer.header_items = status, header_items
     if not args.head and args.too_big(header_items):
         resp.close()
@@ -368,8 +402,11 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
     if args.verbose and not args.silent:
         print('Response status: %s' % status, file=sys.stderr)
     args.save_cookies(url, header_items)
-    if args.compressed and not args.head:
-        content = decode_body(content, header_items)
+    if args.compressed and not args.head and cut is None:
+        try:
+            content = decode_body(content, header_items)
+        except EncodingError as exc:
+            return fail(args, transfer, EXIT_BAD_ENCODING, str(exc))
     header_bytes = format_response_headers(status, reason, header_items)
     try:
         outcome = args.download_outcome(status, header_items)
@@ -468,8 +505,13 @@ def run(args):
                   file=sys.stderr)
 
     timeout = args.request_timeout()
-    with args.resolution():
-        rc, transfer = _attempts(args, typed, url, method, plan, context, removed, data, headers, timeout)
+    limits = http.client._MAXLINE, http.client._MAXHEADERS
+    http.client._MAXLINE, http.client._MAXHEADERS = MAX_HEADER_LINE, MAX_HEADERS
+    try:
+        with args.resolution():
+            rc, transfer = _attempts(args, typed, url, method, plan, context, removed, data, headers, timeout)
+    finally:
+        http.client._MAXLINE, http.client._MAXHEADERS = limits
     args.cleanup_after(rc)
     args.report(tokens, transfer, rc)
     return rc

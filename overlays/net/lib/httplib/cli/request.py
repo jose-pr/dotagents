@@ -94,8 +94,12 @@ def _header_lines(values):
 
 
 def default_scheme(url):
-    """``url`` with curl's default scheme, ``http://``, when it names none."""
-    return url if '://' in url else 'http://' + url
+    """``url`` with curl's default scheme, ``http://``, when it names none;
+    ``scheme:///host/path`` read as ``scheme://host/path``, as curl does."""
+    if '://' not in url:
+        return 'http://' + url
+    scheme, rest = url.split('://', 1)
+    return '%s://%s' % (scheme, rest.lstrip('/')) if rest.startswith('/') else url
 
 
 def add_query(url, pieces):
