@@ -28,8 +28,10 @@ deviation triggers, and never defer questions to execution.
 > `[x]` when done); record blockers and continue independent work without asking the
 > user.
 
-Start every plan by **copying** `$ENGINEERING_OVERLAY_ROOT/references/plan_template.md`
-— imitating from memory or an old plan is how shapes drift. The shape reference
+Start every plan with `dotagents plans add <name> -t "<title>" -p "<phase>" ...`, which
+writes `$ENGINEERING_OVERLAY_ROOT/references/plan_template.md` filled with those phases
+— imitating from memory or an old plan is how shapes drift. Before setting a plan
+`ready`, `dotagents plans validate <name>` must pass. The shape reference
 `$ENGINEERING_OVERLAY_ROOT/references/master_refactoring_plan.md` illustrates tone and
 detail only; the template wins any disagreement.
 
@@ -41,8 +43,28 @@ the first write; move approved harness drafts there with `Status: ready` and del
 the scratch copy. Peer review uses `Status: review` and `REVIEW.md`.
 
 The `plans/` top level holds only live plans (`draft`/`ready`/`review`/`executing`);
-finished ones move to `plans/completed/` in the same edit that sets `Status: done`.
-A `done` plan at top level is drift — whoever sees one moves it.
+`completed/` holds finished ones and `on-hold/` parked ones. **The file moves when
+the status changes, and `dotagents plans status <name> <status>` does both at
+once**: `done` needs every phase checked and `-m` with the evidence; `on-hold`
+needs `-m` with the reason. Every change regenerates `plans/INDEX.md`, one line
+per plan. A `done` plan at top level is drift — whoever sees one moves it.
+
+## One tool for every plan
+
+`dotagents plans` is how a plan is created, read, updated, indexed and moved, so
+that every agent leaves the same shape behind:
+
+| Need | Command |
+| --- | --- |
+| what exists | `plans list` — one line per plan: status, progress, current phase |
+| what to do now | `plans next <name>` — the head, the progress list, one phase |
+| one part | `plans show <name> --section facts` / `--phase 3` |
+| a step | `plans start`, `check -m`, `block -m`, `uncheck` — one line changes |
+| a fact learned | `plans note <name> -m "..."` |
+| the shape | `plans validate <name>` |
+
+Do not read a whole plan to learn one thing, and do not rewrite a whole plan to
+change one line.
 
 ## Ready Checklist
 

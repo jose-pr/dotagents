@@ -1,5 +1,6 @@
-<!-- COPY this file to <project>/.agents/plans/<snake_case_name>.md and fill every
-     <placeholder>; delete these comments. This skeleton IS the required shape from
+<!-- `dotagents plans add <name>` copies this file to
+     <project>/.agents/plans/<snake_case_name>.md and removes these comments; fill
+     every <placeholder>. This skeleton IS the required shape from
      $ENGINEERING_OVERLAY_ROOT/flows/PLAN.md — do not add, drop, or reorder sections. If a filled
      example disagrees with this shape, this file wins. -->
 
@@ -10,9 +11,10 @@ Executor: <family/subrole from MODELS.md> — <one line: why this role>
 
 ## Progress
 
-<!-- [ ] pending · [/] active (set BEFORE writing code) · [x] done + short outcome ·
-     [!] blocked + reason. The box update is part of the step itself, made in the
-     same edit set as the work it reflects — never batched at the end. -->
+<!-- [ ] pending · [/] active (set BEFORE writing code) · [x] done — short outcome ·
+     [!] blocked — reason. One line per phase, `Phase <id>: <name>`; `dotagents plans
+     start|check|block` change it. The box update is part of the step itself —
+     never batched at the end. -->
 
 - [ ] Phase 1: <name>
 - [ ] Phase 2: <name>

@@ -17,7 +17,8 @@ Do not re-plan, second-guess recorded decisions, or silently downgrade required 
    different artifact (REPO.md meta-files): the shipped API header when consuming
    the library, an optional repo-root orientation file for a checkout. Follow
    matching routing lines only.
-4. Read the plan in full. For a sub-plan, read its parent first and the assigned
+4. Read the plan in full, once (`dotagents plans show <name>`); after that,
+   `dotagents plans next <name>` gives what the current step needs. For a sub-plan, read its parent first and the assigned
    sub-plan only; update both when phase status changes. **Reconcile before
    continuing**: fix Progress that disagrees with the working tree or git history,
    and move any `Status: done` plan still at `plans/` top level into `completed/`.
@@ -28,11 +29,25 @@ Do not re-plan, second-guess recorded decisions, or silently downgrade required 
    in the handoff which failures came from files you do not own. Parallel phases
    get a worktree each, started from the commit named for them: a harness worktree
    can begin at a stale commit, so check `git log -1` there before the first edit.
+   Fanning out, integrating and removing worktrees:
+   `$ENGINEERING_OVERLAY_ROOT/flows/PARALLEL.md`.
 
 ## Progress
 
 Use `[ ]` pending, `[/]` active, `[x]` done, `[!]` blocked. Mark a phase `[/]` before
-writing code and `[x]` immediately after, with a short outcome. The box update is part
+writing code and `[x]` immediately after, with a short outcome — with the tool, one
+call each, as the step happens and never batched at the end:
+
+```
+dotagents plans start <name> <phase>
+dotagents plans check <name> <phase> -m "<outcome>"
+dotagents plans block <name> <phase> -m "<reason and the failed command>"
+dotagents plans note  <name> -m "<fact learned, with its evidence>"
+```
+
+Where the harness has `dotagents` registered as an MCP server (`DOTAGENTS_MCP=stdio`
+in its environment), these are the tools `dotagents.plans.start`, `.check`, `.block`
+and `.note`: use them, a step is then a tool call and not a new process. The box update is part
 of the step, not bookkeeping about it — code whose box is stale is an incomplete step
 the next reader will treat as drift. Blockers keep their reason; continue independent
 items and never ask the user. Record key decisions and deviations in Progress.
@@ -43,8 +58,9 @@ Before a phase counts as done, update the same commit set as applicable: changel
 README, `.agents/AGENTS.md` working notes (repo-root or subtree), tests, and examples.
 Keep those notes lean; move topical detail to `.agents/{kb,flows,references}/` with a
 routing line. A public API change also updates the shipped `AGENTS.md` header in the
-same commit. Any run that commits or edits public-facing text runs
-your personal leak-scanning command against `<repo>` before handoff — routine hygiene, not only
+same commit. Any run that commits or edits public-facing text runs the leak scan
+(`dotagents leak-check <repo>`;
+`$ENGINEERING_OVERLAY_ROOT/kb/LEAKS.md`) before handoff — routine hygiene, not only
 release discipline; leaks are cheap to fix the day they appear and tedious by the
 hundreds.
 
@@ -61,5 +77,6 @@ Performance claims require baseline and final evidence; unrun checks are
 Reconcile Progress with the working tree. Existing code cannot remain `[ ]`; mark it
 done, active with `uncommitted: <files>`, or blocked. Report changed files, evidence,
 unverified items, dirty state, and resolved provider/model/settings. Only when no
-blocker remains: set `Status: done` and move the plan to `.agents/plans/completed/`
-in the same edit — never leave a `done` plan at the `plans/` top level.
+blocker remains: `dotagents plans status <name> done -m "<evidence>"`, which sets
+`Status: done` and moves the plan to `.agents/plans/completed/` together — never
+leave a `done` plan at the `plans/` top level.

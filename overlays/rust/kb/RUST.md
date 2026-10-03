@@ -110,8 +110,8 @@ applying; check the packaging output, not the ignore file.)
 
 ### Two leak classes worth naming (rule + tool live in REPO.md / EXEC.md)
 
-One workspace hit **271 leaks across 13 crates** before anyone ran a leak scan (your
-personal leak-scanning command), in two shapes:
+One workspace hit **271 leaks across 13 crates** before anyone ran the leak scan
+(`$ENGINEERING_OVERLAY_ROOT/kb/LEAKS.md`), in two shapes:
 
 - **`.agents/` citations in tracked source** — they accumulate honestly: while
   `.agents/AGENTS.md` is the *only* agent-facing file, deferring to it is correct. It

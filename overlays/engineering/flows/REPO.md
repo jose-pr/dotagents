@@ -111,7 +111,11 @@ release (so it stays current between them).
 ## Meta files (skeletons in `$ENGINEERING_OVERLAY_ROOT/references/`; language doc adds specifics on top)
 - `README.md`, `.gitignore`: from `references/`. `README.md` is the package
   long-description (`readme=` in the manifest) and MUST ship in the built package
-  (sdist + wheel). `.gitignore` opens with the root-anchored category rule
+  (sdist + wheel). **Every repo's README has the same shape**: the template's
+  badge row in the template's order, and its `##` sections with its spelling in
+  its order — fill it, never reorder or rename. The language doc supplies the
+  registry badges and where they sit in the row. Links are absolute: the README
+  is rendered on the registry, where a relative link is broken. `.gitignore` opens with the root-anchored category rule
   `/.*` + `!/.gitignore` + `!/.gitattributes` (re-include `!/.github/` only when
   CI exists) — a category beats a list, same philosophy as Cargo's
   `exclude = [".*"]` (decided 2026-08-02, first applied in one repo).
@@ -119,7 +123,8 @@ release (so it stays current between them).
   symlink, which a directory-only `.agents/` won't match), `CLAUDE*`, `.claude`
   for nested occurrences the root-anchored rule can't reach, plus the
   language's build output.
-- `.gitattributes`: from `references/` (`* text=auto eol=lf`), created WITH the repo —
+- `.gitattributes`: from `references/` (`* text=auto eol=lf`; exceptions and the
+  `dotagents eol` command in `$ENGINEERING_OVERLAY_ROOT/kb/EOL.md`), created WITH the repo —
   and added to an existing repo that lacks it before you edit it. It is what makes
   the LF-only rule hold for every tool, not just the careful ones. Verify git sees
   it: `git status --porcelain --ignored -- .gitattributes` must print `??`, `A` or
@@ -171,8 +176,9 @@ release (so it stays current between them).
   `AGENTS.md` IS listed and `AGENTS.local.md` is NOT, in the same run.
 - `CHANGELOG.md`: Keep a Changelog format (`references/CHANGELOG.md`) — `[Unreleased]`
   always at top, one `## [x.y.z] - <date>` heading per release. Release is the last
-  gate for your personal leak-scanning command (a personal command module in your
-  private `.agents/`, not part of dotagents), not the only one — it runs at every
+  gate for the leak scan (`dotagents leak-check <repo>`;
+  what it looks for and its machine-local pattern file:
+  `$ENGINEERING_OVERLAY_ROOT/kb/LEAKS.md`), not the only one — it runs at every
   publishing handoff (EXEC.md). It scans the **working tree** — tracked AND
   untracked-but-not-ignored, since a file an agent has just written is where a fresh
   leak actually is — for private-plan leaks (`.agents/` paths, plan basenames,

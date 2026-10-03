@@ -1,8 +1,9 @@
 # <project_name>
 
-<!-- EXECUTOR: badge row — registry badge per kb/<LANG>.md, keep CI + license badges. -->
+<!-- EXECUTOR: badge row — fixed order: Version, [language's extra registry badges per its
+     doc], License, Docs, CI. Never reorder, add or drop one; no license yet = no License badge. -->
 [![Version](https://img.shields.io/badge/<registry_badge>-blue.svg)](<registry_url>)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/<gh_org>/<project_name>/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://<gh_org>.github.io/<project_name>/)
 [![CI](https://img.shields.io/github/actions/workflow/status/<gh_org>/<project_name>/test.yml)](https://github.com/<gh_org>/<project_name>/actions/workflows/test.yml)
 
@@ -35,8 +36,18 @@ Optional features/extras:
 <minimal example>
 ```
 
+## Command line
+
+<!-- EXECUTOR: only when the project ships a command; delete the section otherwise.
+     Every command shown runs as written. -->
+```bash
+<command>
+```
+
 ## API overview
 
+<!-- EXECUTOR: project-specific sections go between "API overview" and "Development";
+     the headings above and below keep this spelling and this order. -->
 | Module | Purpose |
 | --- | --- |
 | `<module>` | <one-line purpose> |

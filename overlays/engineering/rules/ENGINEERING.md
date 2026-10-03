@@ -33,6 +33,24 @@ Everything from the first `## ` heading down is documentation, not merged.
   Repo `.gitignore` excludes `.agents` (slashless — the link is a symlink, which a
   directory-only `.agents/` won't match), `CLAUDE*`, `.claude`. Never print `DOTAGENTS_*`
   values (no bare `env`/`printenv`) — they hold secrets; test emptiness instead.
+- **Comments and doc comments**: say what the code cannot — the constraint, the
+  reason, the unit — in one to three lines, about the code as it is: no history, no
+  account of how it was found. Refer only to what a reader of the public repository
+  can open (a spec, a public issue, a file in the repo) — never `.agents/` paths,
+  plans, findings, decision ids, reviews or sessions. A project's exception is
+  recorded in its `.agents/AGENTS.md`. Full rule and the pre-commit check:
+  `$ENGINEERING_OVERLAY_ROOT/kb/COMMENTS.md`.
+- **Line endings**: every text file is LF, on every platform, and a repo's
+  `.gitattributes` says so (`* text=auto eol=lf`). Check and convert with
+  `dotagents eol check` / `dotagents eol fix`, never a hand-written one-liner — that
+  is how files get emptied. Bytes someone else chose (a recorded response, a copied
+  golden file) are marked `-text` and left alone. A script that writes a file opens
+  it with `newline=""` or writes bytes. `$ENGINEERING_OVERLAY_ROOT/kb/EOL.md`.
+- **Scratch**: throwaway files — probe scripts, captured output, one-off patches,
+  logs — go in `<project>/.agents/scratch/` (the store's own `scratch/` when there is
+  no project, or the harness's scratch directory), never in the repository tree and
+  never loose in the root of `.agents/`. Remove them when the task ends; what is
+  worth keeping moves to where it belongs (`tools/`, `references/`, a finding).
 - **Git**: logical commits (feature+tests / docs+config / CI split apart, never one
   monolith), `type: desc` format (`feat:`, `fix:`, `docs:`, `chore:`).
   **No agent attribution in commit messages** — strip any `Co-Authored-By:` naming a
@@ -75,14 +93,16 @@ Everything from the first `## ` heading down is documentation, not merged.
 - **Don't pay tokens for what a script can decide**: never dump a whole log into
   context to learn one bit ("did it pass?") — pipe it through something that prints a
   verdict, keeping the log on disk.
-  `$ENGINEERING_OVERLAY_ROOT/tools/summarize_run.py --log build.log -- <cmd>` does exactly
-  this (the flag is `--log`, not `--log-file`). Doing the same manual scan twice? Write
+  `dotagents summarize-run -o build.log -- <cmd>` does exactly this. Doing the same manual scan twice? Write
   the script.
 - **Draft follow-ups**: adjacent work found mid-execution gets a `Status: draft` plan
   (idea + scope + why) in the project's `.agents/plans/` — never executed in the same
   pass.
 - **Plans**: always `<project>/.agents/plans/<name>.md`, snake_case; sub-plans at
-  `.../<name>/<sub>.md`; finished → `plans/completed/` (preserve sub-tree).
+  `.../<name>/<sub>.md`; finished → `plans/completed/` (preserve sub-tree). Create,
+  read, step and close them with `dotagents plans` (`add`, `next`, `start`, `check`,
+  `status`), which keeps the shape, the index and the location right; update the
+  plan as each step happens, not at the end.
   **`~/.agents/plans/` is never a plan home** — re-home harness scratch into the
   project and delete the copy.
 

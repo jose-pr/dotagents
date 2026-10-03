@@ -1,18 +1,33 @@
 name = "engineering"
-description = "Opinionated engineering process, always-on: the discipline rules (commit shape, release-tag consent, benchmark evidence, token discipline, draft follow-ups), the plan/execute/review/repo workflows, model-selection guidance, language-neutral repo templates (README, CHANGELOG, LICENSE, .gitignore, docs-index, the plan template), and the summarize_run / compare_bench helper tools."
+description = "Opinionated engineering process, always-on: the discipline rules (commit shape, release-tag consent, benchmark evidence, token discipline, draft follow-ups), the plan/execute/review/repo workflows, model-selection guidance, language-neutral repo templates (README, CHANGELOG, LICENSE, .gitignore, docs-index, the plan template), and the commands `plans`, `leak-check`, `eol`, `summarize-run` and `compare-bench`."
 requires = []
 routing = [
   """- Write or revise a plan → $ENGINEERING_OVERLAY_ROOT/flows/PLAN.md (start by copying
   $ENGINEERING_OVERLAY_ROOT/references/plan_template.md)""",
   """- Execute a plan → $ENGINEERING_OVERLAY_ROOT/flows/EXEC.md""",
+  """- Create, read, step, index or move a plan → `dotagents plans` (`add`, `list`, `next`,
+  `start`, `check -m`, `block -m`, `note -m`, `status`, `validate`); never hand-edit a
+  progress box or read a whole plan for one section""",
   """- Assign a model to a plan / delegate to a subagent / judge if a task is worth an
   expensive model → $ENGINEERING_OVERLAY_ROOT/kb/MODELS.md""",
   """- Multi-architect plan review (as main or reviewer) → $ENGINEERING_OVERLAY_ROOT/flows/REVIEW.md""",
+  """- Several agents on one repository, worktrees, integrating or cleaning up after
+  them → $ENGINEERING_OVERLAY_ROOT/flows/PARALLEL.md""",
+  """- Line endings: check, convert, or exempt a file → `dotagents eol check|fix`
+  ($ENGINEERING_OVERLAY_ROOT/kb/EOL.md)""",
   """- Create a repo, bring one to standard, or touch CI/release/docs-site →
   $ENGINEERING_OVERLAY_ROOT/flows/REPO.md""",
-  """- Run a noisy build/test/lint command → `py -3 $ENGINEERING_OVERLAY_ROOT/tools/summarize_run.py -- <cmd>`
+  """- Write or review comments, docstrings, log or error messages →
+  $ENGINEERING_OVERLAY_ROOT/kb/COMMENTS.md""",
+  """- Before a handoff, a push to a public remote or a release tag: the leak scan →
+  `dotagents leak-check <repo>`
+  ($ENGINEERING_OVERLAY_ROOT/kb/LEAKS.md)""",
+  """- Deep review of a whole repository (goals, standards, soundness, lean code;
+  records findings, plans on request) → the `repo-review` skill,
+  $ENGINEERING_OVERLAY_ROOT/skills/repo-review/SKILL.md""",
+  """- Run a noisy build/test/lint command → `dotagents summarize-run -- <cmd>`
   (verdict + the lines that matter, full log on disk); compare benchmark JSONs →
-  `py -3 $ENGINEERING_OVERLAY_ROOT/tools/compare_bench.py <old.json> <new.json>`""",
+  `dotagents compare-bench <old.json> <new.json>`""",
 ]
 
 # Always-on RULES, not load-on-demand routing: `overlays add` merges each listed
