@@ -1,4 +1,4 @@
-"""Regression tests for the 2026-09-23 review's `init` / `launch` fixes:
+"""Regression tests for `init` / `launch` fixes:
 
 - `init --from` takes the documented URI, git and checkout forms (it crashed
   on every remote scheme and on a checkout root);

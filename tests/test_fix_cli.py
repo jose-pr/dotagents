@@ -1,4 +1,4 @@
-"""Regression tests for the CLI review fixes: command discovery that survives a
+"""Regression tests for CLI fixes: command discovery that survives a
 command whose parser cannot be built, the `findings` queue's encoding, naming
 and move-never-delete rules, and `launch`'s exit code, context file and
 cmd.exe argument handling.

@@ -1,4 +1,4 @@
-"""Hook fixes from the 2026-09-23 review: the PowerShell handlers' Git Bash
+"""Hook fixes: the PowerShell handlers' Git Bash
 gate, UTF-8 through the PowerShell pipe, the PreToolUse matcher, merging that
 keeps the user's keys, symlink-safe and non-ASCII-safe wrappers.
 

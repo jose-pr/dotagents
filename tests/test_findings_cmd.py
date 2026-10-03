@@ -284,13 +284,13 @@ def test_subcommands_are_nested_not_module_level(findings_mod):
 
 
 # --------------------------------------------------------------------------- #
-# Encodings and reserved names (review 2026-09-23). Cases the module still
-# gets wrong are strict xfails naming the issue: a fix flips them to XPASS
-# failures until the marker goes.
+# Encodings and reserved names. Cases the module still gets wrong are strict
+# xfails naming the issue: a fix flips them to XPASS failures until the
+# marker goes.
 # --------------------------------------------------------------------------- #
 
 def _open(issue, why):
-    return pytest.mark.xfail(strict=True, reason="open (review 2026-09-23 %s): %s" % (issue, why))
+    return pytest.mark.xfail(strict=True, reason="open (%s): %s" % (issue, why))
 
 
 def test_cmd_body_from_stdin_is_read_as_utf8_bytes(findings_mod, tmp_path, monkeypatch, capsys):

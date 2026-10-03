@@ -1,4 +1,4 @@
-"""Adapter fixes from the 2026-09-23 review: adapters are told the scope,
+"""Adapter fixes: adapters are told the scope,
 Claude honours CLAUDE_CONFIG_DIR, `init` writes the store's AGENTS.md itself,
 global harness configs are left alone by a project init, Cursor's rule file,
 Claude's import parsing, identity from runtime signals only, include dedupe.

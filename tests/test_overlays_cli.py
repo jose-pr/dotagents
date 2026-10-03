@@ -1,11 +1,11 @@
-"""`dotagents overlays` command behaviour fixed in the 2026-09-09 review:
-name normalization on add/remove, remove's un-merge, skills published from the
-INSTALLED copy, `sync --copy` and changed files, dry-run setup reporting, up-front
+"""`dotagents overlays` command behaviour fixes: name normalization on
+add/remove, remove's un-merge, skills published from the INSTALLED copy,
+`sync --copy` and changed files, dry-run setup reporting, up-front
 validation, `requires`, `show` and the manifest reader's comment handling --
 plus the failure modes found since:
 confinement of `requires`/`rules`, broken repos and registries, removing a
 linked overlay, and what `sync` takes from where. Those still open in the
-product are strict xfails naming the review issue.
+product are strict xfails naming the known issue.
 
 tmp dirs only, no network.
 """
@@ -492,7 +492,7 @@ def test_scratch_dir_is_one_dir_removed_at_exit():
 def _open(issue, why):
     """A regression test for a confirmed, still-open product bug: strict, so
     the fix turns it into an XPASS failure and the marker has to go."""
-    return pytest.mark.xfail(strict=True, reason="open (review 2026-09-23 %s): %s" % (issue, why))
+    return pytest.mark.xfail(strict=True, reason="open (%s): %s" % (issue, why))
 
 
 def test_requires_cannot_install_outside_the_overlays_dir(world, tmp_path):

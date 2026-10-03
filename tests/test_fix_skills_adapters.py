@@ -1,5 +1,5 @@
-"""Regression tests for the 2026-09-23 review's skills, adapter and hook-cost
-findings: Claude's per-skill links are refreshed and pruned, `overlays
+"""Regression tests for skills, adapter and hook-cost fixes: Claude's
+per-skill links are refreshed and pruned, `overlays
 add/sync/remove` keep a wired Claude skills dir current, project-scope skill
 links warn when git would commit them, pi gets a pointer to a project store,
 and the env loaders reuse a cached diff while the inputs are unchanged.

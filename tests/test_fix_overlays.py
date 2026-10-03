@@ -1,5 +1,5 @@
-"""Regression tests for the 2026-09-23 review's "Overlays, sources and skills"
-findings: typed source errors, registry parsing, credential handling, the spec
+"""Regression tests for "Overlays, sources and skills" fixes: typed source
+errors, registry parsing, credential handling, the spec
 grammar, manifest validation, overlay names, install records, and the
 add/remove/sync lifecycle.
 

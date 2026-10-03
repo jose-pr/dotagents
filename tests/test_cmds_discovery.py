@@ -297,8 +297,8 @@ def test_bad_source_is_skipped_not_fatal(monkeypatch, tmp_path):
     # at import time must not crash: discovery runs before EVERY invocation,
     # including `env`/`context` inside the SessionStart hooks, so one typo in a
     # personal cmds module used to take the whole session's env and context
-    # down (review 2026-09-09). duho propagates SyntaxError on purpose; the
-    # dotagents layer is where it must stop.
+    # down. duho propagates SyntaxError on purpose; the dotagents layer is
+    # where it must stop.
     good = tmp_path / "good"
     _write(good / "toy.py", TOY)
     broken = tmp_path / "broken"

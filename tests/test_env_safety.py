@@ -1,6 +1,5 @@
 """Env-chain safety: which files run, how a failed source is reported, and what
-bash itself adds to a sourced file's output (review 2026-09-09, findings 1.6 and
-the env/scope items).
+bash itself adds to a sourced file's output.
 
 tmp dirs only, no network. Run from repo root: ``python -m pytest tests/``.
 """

@@ -1,8 +1,8 @@
 """The last mile: does the config `init` writes actually reach a harness?
 
-Review 2026-09-09 (finding 1.5): `init` wrote `<store>/CLAUDE.md`, which Claude
-Code never reads, and `context` subtracted the store's AGENTS.md as "already
-loaded" on a static assumption. These tests pin the fix -- the include `init`
+`init` wrote `<store>/CLAUDE.md`, which Claude Code never reads, and
+`context` subtracted the store's AGENTS.md as "already loaded" on a static
+assumption. These tests pin the fix -- the include `init`
 writes where Claude reads it, the live include-based subtraction, and
 `--write-agent` landing in the harness's real file as a managed block -- plus
 the managed-block merge rules it relies on.

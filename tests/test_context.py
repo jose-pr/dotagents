@@ -116,7 +116,7 @@ def test_harness_loads_subtracts_user_agents_md(layout, monkeypatch):
 
     # Fresh install, no include yet: NOTHING loads the store's AGENTS.md, so
     # `context` must emit it (the old static assumption dropped it here, and
-    # the base rules never reached a session -- review 2026-09-09, 1.5).
+    # the base rules never reached a session at all).
     text = _context.assemble_context(claude, S(dotagents_dir, project_root, True))
     assert "# User rules" in text
 

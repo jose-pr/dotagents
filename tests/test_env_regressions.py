@@ -1,9 +1,9 @@
-"""Env-assembly regressions from the 2026-09-23 review, each a repro turned
-into a test: malformed env.py output, relative PATH entries, a session whose
-project root is the home directory, and the PowerShell rendering of
-typographic quotes and non-ASCII values through the real loader pipe.
+"""Env-assembly regressions, each a repro turned into a test: malformed
+env.py output, relative PATH entries, a session whose project root is the
+home directory, and the PowerShell rendering of typographic quotes and
+non-ASCII values through the real loader pipe.
 
-A case the product still gets wrong is a strict xfail naming the review
+A case the product still gets wrong is a strict xfail naming the known
 issue, so fixing it turns the test into an XPASS failure until the marker
 goes. tmp dirs only, no network.
 """
@@ -22,7 +22,7 @@ from dotagents._scope import Scope
 
 def _open(issue, why, condition=True):
     return pytest.mark.xfail(
-        condition, strict=True, reason="open (review 2026-09-23 %s): %s" % (issue, why)
+        condition, strict=True, reason="open (%s): %s" % (issue, why)
     )
 
 

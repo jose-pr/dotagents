@@ -1,5 +1,4 @@
-"""Regressions for the scope-resolution and context-assembly review fixes
-(2026-09-23 review, "Scope resolution and context assembly").
+"""Regressions for the scope-resolution and context-assembly fixes.
 
 tmp dirs only. The user store is redirected with `$AGENTS_HOME`, the system
 store with `$AGENTS_SYSTEM_ROOT` (a path that does not exist), and the project

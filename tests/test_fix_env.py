@@ -1,5 +1,4 @@
-"""Regression tests for the env assembly and rendering review fixes
-(review 2026-09-23, "Env assembly and rendering").
+"""Regression tests for env assembly and rendering fixes.
 
 tmp dirs only, no network. Run from repo root: ``python -m pytest tests/``.
 """
