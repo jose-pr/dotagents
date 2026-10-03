@@ -3,6 +3,11 @@
 Python-specific extras/overrides on top of the generic repo standard in
 `$ENGINEERING_OVERLAY_ROOT/flows/REPO.md` — read that first. Only Python-specific content here.
 
+This file is packaging, tooling, CI and release. **How a library is designed,
+named, documented and commented is in `$PYTHON_OVERLAY_ROOT/standards/`** —
+start at its `README.md`, which says which standard applies to the work. A
+project's recorded exceptions to them are in its `.agents/AGENTS.md`.
+
 ## Packaging and Layout
 
 - **Source Layout**: `src/<package_name>/` — never a flat top-level package (keeps
@@ -56,10 +61,10 @@ Python-specific extras/overrides on top of the generic repo standard in
   - "Update to the latest" means move the range to the latest *series*, not pin the
     latest patch. The floors are tested: the `floors` job of the reference
     `test.yml` installs every declared dependency AT its floor.
-- **README badges** (fill the template's badge row): version
-  `img.shields.io/pypi/v/<project_name>.svg` → `pypi.org/project/<project_name>/`;
-  pythons `img.shields.io/pypi/pyversions/<project_name>.svg`. PyPI badges 404 until
-  first publish — fine to include early.
+- **README badges**: the exact row, its order and the README section order are
+  fixed in `$PYTHON_OVERLAY_ROOT/standards/base/DOCS.md` — Version, Python
+  versions, License, Docs, CI. Copy the row from there; do not compose one. PyPI
+  badges 404 until first publish — fine to include early.
 
 ## Testing and Development
 

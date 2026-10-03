@@ -3,5 +3,9 @@ description = "Python repo conventions: kb, pyproject/mkdocs templates, CI workf
 requires = ["engineering"]
 routing = [
   """- Python work → $PYTHON_OVERLAY_ROOT/kb/PYTHON.md""",
+  """- Design, name or document a Python library (public API, exceptions, sync/async,
+  README and AGENTS.md format, comments, preferred libraries, a library's CLI, a
+  protocol library) →
+  $PYTHON_OVERLAY_ROOT/standards/README.md, then the file it names""",
   """- Need a shared, version-pinned venv (not a per-project one) → `dotagents pyvenv [version]`""",
 ]
