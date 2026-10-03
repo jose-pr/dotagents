@@ -11,17 +11,20 @@ and static Linux builds (8.5-8.17; no 8.6 was measured):
 - a proxy refusing the CONNECT: 56 before 8.20, 7 from 8.20 on;
 - a response header over curl's limit: 27 ("Out of memory") before 8.6, 100
   from 8.6 on;
-- ``%{scheme}`` upper case (``HTTP``) before 8.8; the ports with no connection 0 before 8.10
-  (-1 from 8.10 on);
+- the ports with no connection 0 before 8.10 (-1 from 8.10 on);
 - ``--proxy-pinnedpubkey`` ignored under ``--proxy-insecure`` before 8.10;
 - a ``--netrc-file`` naming no file ignored before 8.12;
-- a SOCKS proxy whose name does not resolve: 6 before 8.14, 5 from 8.14 on;
+- a SOCKS proxy whose name does not resolve: 6 before 8.14, 5 from 8.14 on.
+
+Distributions patch their curl: Ubuntu 24.04's 8.5 answers ``--proto =bogus``
+and ``%{scheme}`` as 8.7 / 8.8 do (a vanilla 8.5 drops the whole token and
+writes ``HTTP``). The fallback follows the patched one, the 8.5 agents run;
 - a ``--cacert`` / ``--netrc-file`` naming no file: refused before anything
   else (exit 2) from 8.18 on; before, the CA file fails at the TLS handshake
   (77) and the netrc file when it is read (26);
 - an unknown protocol name in ``--proto`` / ``--proto-redir``: a usage error
-  (exit 2) from 8.18 on; before, the name is ignored -- and before 8.7 its
-  ``=`` / ``-`` with it, so ``=bogus`` changes nothing;
+  (exit 2) from 8.18 on; before, the name is ignored (its ``=`` / ``-`` still
+  applied);
 - a ``-w`` variable newer than the version (``WRITE_OUT_SINCE``): a warning
   ("unknown --write-out variable") and nothing written;
 - a name a ``socks5://`` / ``socks4://`` proxy needs resolved here and that
@@ -158,11 +161,6 @@ def too_large():
     return 27, 'Out of memory'
 
 
-def upper_scheme():
-    """Whether ``%{scheme}`` is written upper case (``HTTP``)."""
-    return version() < (8, 8, 0)
-
-
 def pins_proxy_when_insecure():
     """Whether --proxy-pinnedpubkey holds under --proxy-insecure."""
     return version() >= (8, 10, 0)
@@ -176,11 +174,6 @@ def ignores_missing_netrc_file():
 def socks_proxy_unresolved_code():
     """curl's exit when a SOCKS proxy's own name does not resolve."""
     return 5 if version() >= (8, 14, 0) else 6
-
-
-def drops_unknown_protocol_token():
-    """Whether an unknown --proto name takes its ``=`` / ``-`` with it."""
-    return version() < (8, 7, 0)
 
 
 def rejects_unknown_protocols():

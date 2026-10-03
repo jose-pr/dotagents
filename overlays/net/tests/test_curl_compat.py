@@ -32,16 +32,15 @@ def test_the_measured_boundaries(monkeypatch, version, code, first):
     assert compat.rejects_unknown_protocols() is first
 
 
-@pytest.mark.parametrize("version,large,upper,pins,ignores_netrc,socks,drops", [
-    ("8.5", 27, True, False, True, 6, True), ("8.7.1", 100, True, False, True, 6, False),
-    ("8.8", 100, False, False, True, 6, False), ("8.10", 100, False, True, True, 6, False),
-    ("8.12", 100, False, True, False, 6, False), ("8.14", 100, False, True, False, 5, False),
+@pytest.mark.parametrize("version,large,pins,ignores_netrc,socks,port", [
+    ("8.5", 27, False, True, 6, 0), ("8.7.1", 100, False, True, 6, 0), ("8.10", 100, True, True, 6, -1),
+    ("8.12", 100, True, False, 6, -1), ("8.14", 100, True, False, 5, -1),
 ])
-def test_the_older_boundaries(monkeypatch, version, large, upper, pins, ignores_netrc, socks, drops):
+def test_the_older_boundaries(monkeypatch, version, large, pins, ignores_netrc, socks, port):
     monkeypatch.setenv(compat.VAR, version)
-    assert compat.too_large()[0] == large and compat.upper_scheme() is upper
+    assert compat.too_large()[0] == large and compat.no_port() == port
     assert compat.pins_proxy_when_insecure() is pins and compat.ignores_missing_netrc_file() is ignores_netrc
-    assert compat.socks_proxy_unresolved_code() == socks and compat.drops_unknown_protocol_token() is drops
+    assert compat.socks_proxy_unresolved_code() == socks
 
 
 def test_auto_is_the_installed_curl_else_the_newest(monkeypatch):

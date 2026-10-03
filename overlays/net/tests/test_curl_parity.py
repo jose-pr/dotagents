@@ -501,7 +501,7 @@ def _run(argv, env, real):
     e.update(env)
     e["PATH"] = (os.path.dirname(REAL_CURL) + os.pathsep + os.environ.get("PATH", "")) if real else EMPTY_PATH
     if not real:
-        e.setdefault("NET_CURL_COMPAT", REAL_VERSION)
+        e["NET_CURL_COMPAT"] = REAL_VERSION  # the fallback answers as this real curl
     if real and SCHANNEL:
         # Schannel cannot check revocation for a private test CA: a
         # certificate the CA signs would fail as "revocation status unknown".
