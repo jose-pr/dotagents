@@ -326,7 +326,10 @@ class TLSArgs(Group):
             context = UnusableContext(exc)
         from .connector import parse_pins
 
-        return ProxyTLS(context, parse_pins(self.proxy_pinnedpubkey) if self.proxy_pinnedpubkey else None)
+        pins = parse_pins(self.proxy_pinnedpubkey) if self.proxy_pinnedpubkey else None
+        if self.proxy_insecure and not compat.pins_proxy_when_insecure():
+            pins = None  # before curl 8.10, --proxy-insecure turns the pin off too
+        return ProxyTLS(context, pins)
 
     def ssl_context(self):
         floor, top = self.tls_versions()

@@ -100,7 +100,11 @@ def parse_protocols(spec, flag, start):
             from .compat import rejects_unknown_protocols
 
             if not rejects_unknown_protocols():
-                names = set()  # curl before 8.18 ignores the name
+                from .compat import drops_unknown_protocol_token
+
+                if drops_unknown_protocol_token():
+                    continue  # before curl 8.7: the whole token, its = / - too
+                names = set()  # before 8.18: the name, its = / - still applied
             else:
                 raise EarlyExit(EXIT_USAGE, "unrecognized protocol '%s'\ncurl: option %s: is badly used here\n"
                                             "curl: try 'curl --help' or 'curl --manual' for more information"

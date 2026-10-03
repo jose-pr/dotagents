@@ -620,8 +620,10 @@ SCENARIOS = [
                                              "--proxy-cacert", _ca(w), X], {}, True, {}),
     ("https proxy, https target", lambda w: w["ca"] + ["-x", w["https_proxy"], "--proxy-cacert", _ca(w), S(w)],
      {}, True, {}),
+    # Ubuntu's curl 8.5 reports 35 ("SSL_ERROR_SYSCALL") for this, newer ones 60;
+    # where it changed was not measured.
     ("https proxy, https target untrusted", lambda w: ["-x", w["https_proxy"], "--proxy-cacert", _ca(w), S(w)],
-     {}, True, {}),
+     {}, True, {35: 60}),
     ("https proxy, -k is not for it", lambda w: ["-k", "-x", w["https_proxy"], S(w)], {}, True, {}),
     ("https proxy, both insecure", lambda w: ["-k", "--proxy-insecure", "-x", w["https_proxy"], S(w)], {}, True, {}),
     ("https proxy, -p http target", lambda w: ["-p", "-x", w["https_proxy"], "--proxy-cacert", _ca(w),
@@ -646,7 +648,7 @@ SCENARIOS = [
                                 str(w["certs"] / "client.pem"), "--proxy-key", str(w["certs"] / "client.key"), X],
      {}, True, {}),
     ("https proxy wants a client certificate", lambda w: ["-x", w["https_proxy_mutual"], "--proxy-cacert", _ca(w), X],
-     {}, True, {}),
+     {}, True, {55: 56}),  # the same race as "client certificate required"
     ("agent proxy over https", lambda w: ["--proxy-insecure", X], {"AGENTS_PROXY": "@https_proxy"}, True, {}),
     # Proxy Digest: nothing up front, the 407 answered once.
     ("--proxy-digest", lambda w: ["-x", P(w, "digest_proxy"), "--proxy-digest", "-U", "agent:s3cret", X],
@@ -974,9 +976,12 @@ def test_write_out_timings_and_addresses(world, name, argv, tls):
     real = dict(zip(names, _run(args, {}, real=True)[2].decode().split("|")))
     fallback = dict(zip(names, _run(args, {}, real=False)[2].decode().split("|")))
     assert set(real) == set(fallback) == set(names), (real, fallback)
+    for key in _TIMES:
+        if real[key] == "":  # a variable this curl does not know yet: empty on both sides
+            assert fallback[key] == "", (key, fallback[key])
     for side in (real, fallback):
         for key in _TIMES:
-            assert re.match(r"^\d+\.\d{6}$", side[key]), (key, side[key])
+            assert real[key] == "" or re.match(r"^\d+\.\d{6}$", side[key]), (key, side[key])
         for key in _NUMBERS:
             assert re.match(r"^-?\d+$", side[key]), (key, side[key])
         if side["exitcode"] == "0":

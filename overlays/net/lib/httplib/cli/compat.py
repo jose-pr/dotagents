@@ -5,14 +5,23 @@
 prefix-gateway request from the fallback even when curl is installed -- else
 :data:`NEWEST`. Read lazily: only a version-dependent answer asks for it.
 
-The differences, measured against curl's own builds (8.17-8.22):
+The differences, measured against curl's own builds (8.17-8.22, Windows)
+and static Linux builds (8.5-8.17; no 8.6 was measured):
 
 - a proxy refusing the CONNECT: 56 before 8.20, 7 from 8.20 on;
+- a response header over curl's limit: 27 ("Out of memory") before 8.6, 100
+  from 8.6 on;
+- ``%{scheme}`` upper case (``HTTP``) before 8.8; the ports with no connection 0 before 8.10
+  (-1 from 8.10 on);
+- ``--proxy-pinnedpubkey`` ignored under ``--proxy-insecure`` before 8.10;
+- a ``--netrc-file`` naming no file ignored before 8.12;
+- a SOCKS proxy whose name does not resolve: 6 before 8.14, 5 from 8.14 on;
 - a ``--cacert`` / ``--netrc-file`` naming no file: refused before anything
   else (exit 2) from 8.18 on; before, the CA file fails at the TLS handshake
   (77) and the netrc file when it is read (26);
 - an unknown protocol name in ``--proto`` / ``--proto-redir``: a usage error
-  (exit 2) from 8.18 on; before, the name is ignored;
+  (exit 2) from 8.18 on; before, the name is ignored -- and before 8.7 its
+  ``=`` / ``-`` with it, so ``=bogus`` changes nothing;
 - a ``-w`` variable newer than the version (``WRITE_OUT_SINCE``): a warning
   ("unknown --write-out variable") and nothing written;
 - a name a ``socks5://`` / ``socks4://`` proxy needs resolved here and that
@@ -127,13 +136,51 @@ def socks_unresolved(host, proxy_host):
 
 
 #: The curl release that added a -w variable, where it is newer than 8.17.
-WRITE_OUT_SINCE = {'size_delivered': (8, 20, 0)}
+WRITE_OUT_SINCE = {'size_delivered': (8, 20, 0), 'time_posttransfer': (8, 10, 0), 'proxy_used': (8, 7, 0),
+                   'num_retries': (8, 9, 0)}
 
 
 def knows_write_out(name):
     """Whether the curl answered as knows the -w variable ``name``."""
     since = WRITE_OUT_SINCE.get(name)
     return since is None or version() >= since
+
+
+def no_port():
+    """%{remote_port} / %{local_port} with no connection: -1 from curl 8.10, 0 before."""
+    return -1 if version() >= (8, 10, 0) else 0
+
+
+def too_large():
+    """``(exit code, message)`` for a response header over curl's limit."""
+    if version() >= (8, 6, 0):
+        return 100, 'A value or data field grew larger than allowed'
+    return 27, 'Out of memory'
+
+
+def upper_scheme():
+    """Whether ``%{scheme}`` is written upper case (``HTTP``)."""
+    return version() < (8, 8, 0)
+
+
+def pins_proxy_when_insecure():
+    """Whether --proxy-pinnedpubkey holds under --proxy-insecure."""
+    return version() >= (8, 10, 0)
+
+
+def ignores_missing_netrc_file():
+    """Whether a --netrc-file naming no file is silently ignored."""
+    return version() < (8, 12, 0)
+
+
+def socks_proxy_unresolved_code():
+    """curl's exit when a SOCKS proxy's own name does not resolve."""
+    return 5 if version() >= (8, 14, 0) else 6
+
+
+def drops_unknown_protocol_token():
+    """Whether an unknown --proto name takes its ``=`` / ``-`` with it."""
+    return version() < (8, 7, 0)
 
 
 def rejects_unknown_protocols():

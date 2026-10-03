@@ -321,7 +321,11 @@ def transport_error(args, reason, transfer, may_retry):
     tunnel = _TUNNEL_FAILED.search(text) if isinstance(reason, OSError) else None
     if isinstance(reason, socket.gaierror):
         if via_proxy:
-            code, message = EXIT_RESOLVE_PROXY, 'Could not resolve proxy: %s' % _host_port(transfer.plan.proxy)[0]
+            proxy_host = _host_port(transfer.plan.proxy)[0]
+            code, message = EXIT_RESOLVE_PROXY, 'Could not resolve proxy: %s' % proxy_host
+            if transfer.plan.proxy.split('://', 1)[0].lower().startswith('socks') \
+                    and compat.socks_proxy_unresolved_code() == EXIT_RESOLVE:
+                code, message = EXIT_RESOLVE, 'Could not resolve host: %s' % proxy_host  # before curl 8.14
         else:
             code, message = EXIT_RESOLVE, 'Could not resolve host: %s' % _host_port(_hop_url(transfer))[0]
     elif isinstance(reason, (socket.timeout, TimeoutError)) or 'timed out' in text:
@@ -367,7 +371,7 @@ def reply_error(args, exc, transfer, may_retry):
     if isinstance(exc, http.client.RemoteDisconnected):
         code, message = EXIT_EMPTY_REPLY, 'Empty reply from server'
     elif isinstance(exc, http.client.LineTooLong) or str(exc).startswith('got more than'):
-        code, message = EXIT_TOO_LARGE, 'A value or data field grew larger than allowed'
+        code, message = compat.too_large()  # 100, or 27 before curl 8.6
     elif isinstance(exc, http.client.BadStatusLine):
         line = str(exc.args[0]) if exc.args else ''
         code = EXIT_PROTOCOL

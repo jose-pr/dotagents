@@ -124,8 +124,10 @@ def write_out_values(args, transfer, exitcode):
         return 0.0 if moment is None else max(moment - transfer.started, 0.0)
 
     redirects = max(len(transfer.sent) - 1, 0)
-    remote = transfer.remote or ('', -1)
-    local = transfer.local or ('', -1)
+    from . import compat
+
+    remote = transfer.remote or ('', compat.no_port())
+    local = transfer.local or ('', compat.no_port())
     typed = transfer.typed_url
     times = {
         'time_namelookup': since(transfer.t_namelookup), 'time_connect': since(transfer.t_connect),
@@ -165,7 +167,7 @@ def write_out_values(args, transfer, exitcode):
         'num_redirects': str(max(len(transfer.sent) - 1, 0)),
         'redirect_url': redirect,
         'response_code': '%03d' % transfer.status,
-        'scheme': effective.split('://', 1)[0].lower() if '://' in effective else '',
+        'scheme': _scheme(effective),
         'size_download': str(transfer.size_download),
         'size_upload': str(upload),
         'time_starttransfer': '%.6f' % first_byte,
@@ -181,6 +183,14 @@ def write_out_values(args, transfer, exitcode):
 #: %{json}'s keys whose curl value is a number, or null when empty.
 _JSON_INTEGERS = ('exitcode', 'http_code', 'response_code', 'num_headers', 'num_redirects', 'size_download',
                   'size_upload', 'urlnum')
+
+
+def _scheme(url):
+    """%{scheme}: lower case, upper before curl 8.8 (``compat``)."""
+    from . import compat
+
+    scheme = url.split('://', 1)[0].lower() if '://' in url else ''
+    return scheme.upper() if compat.upper_scheme() else scheme
 
 
 def _url_parts(prefix, url):
