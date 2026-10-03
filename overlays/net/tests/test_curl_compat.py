@@ -39,6 +39,7 @@ def test_the_measured_boundaries(monkeypatch, version, code, first):
 def test_the_older_boundaries(monkeypatch, version, large, pins, ignores_netrc, socks, port):
     monkeypatch.setenv(compat.VAR, version)
     assert compat.too_large()[0] == large and compat.no_port() == port
+    assert compat.upper_scheme() is (version in ("8.5", "8.7.1"))
     assert compat.pins_proxy_when_insecure() is pins and compat.ignores_missing_netrc_file() is ignores_netrc
     assert compat.socks_proxy_unresolved_code() == socks
 

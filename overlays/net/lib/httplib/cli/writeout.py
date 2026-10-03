@@ -186,8 +186,11 @@ _JSON_INTEGERS = ('exitcode', 'http_code', 'response_code', 'num_headers', 'num_
 
 
 def _scheme(url):
-    """%{scheme}, lower case."""
-    return url.split('://', 1)[0].lower() if '://' in url else ''
+    """%{scheme}: lower case, upper before curl 8.8 (``compat``)."""
+    from . import compat
+
+    scheme = url.split('://', 1)[0].lower() if '://' in url else ''
+    return scheme.upper() if compat.upper_scheme() else scheme
 
 
 def _url_parts(prefix, url):

@@ -11,14 +11,15 @@ and static Linux builds (8.5-8.17; no 8.6 was measured):
 - a proxy refusing the CONNECT: 56 before 8.20, 7 from 8.20 on;
 - a response header over curl's limit: 27 ("Out of memory") before 8.6, 100
   from 8.6 on;
-- the ports with no connection 0 before 8.10 (-1 from 8.10 on);
+- ``%{scheme}`` upper case (``HTTP``) before 8.8; the ports with no
+  connection 0 before 8.10 (-1 from 8.10 on);
 - ``--proxy-pinnedpubkey`` ignored under ``--proxy-insecure`` before 8.10;
 - a ``--netrc-file`` naming no file ignored before 8.12;
 - a SOCKS proxy whose name does not resolve: 6 before 8.14, 5 from 8.14 on.
 
 Distributions patch their curl: Ubuntu 24.04's 8.5 answers ``--proto =bogus``
-and ``%{scheme}`` as 8.7 / 8.8 do (a vanilla 8.5 drops the whole token and
-writes ``HTTP``). The fallback follows the patched one, the 8.5 agents run;
+as 8.7 does (a vanilla 8.5 drops the whole token). The fallback follows the
+patched one, the 8.5 agents run;
 - a ``--cacert`` / ``--netrc-file`` naming no file: refused before anything
   else (exit 2) from 8.18 on; before, the CA file fails at the TLS handshake
   (77) and the netrc file when it is read (26);
@@ -152,6 +153,11 @@ def knows_write_out(name):
 def no_port():
     """%{remote_port} / %{local_port} with no connection: -1 from curl 8.10, 0 before."""
     return -1 if version() >= (8, 10, 0) else 0
+
+
+def upper_scheme():
+    """Whether ``%{scheme}`` is written upper case (``HTTP``)."""
+    return version() < (8, 8, 0)
 
 
 def too_large():
