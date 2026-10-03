@@ -34,8 +34,8 @@ the store can live anywhere (`$AGENTS_HOME`) and nothing breaks when it moves. S
 
 | Overlay | What it carries |
 | --- | --- |
-| `engineering` | One opinionated engineering process. `rules/ENGINEERING.md` — always-on discipline merged into `AGENTS.md` (commit shape, release-tag consent, benchmark-as-evidence, token discipline, draft follow-ups). `flows/` — `PLAN.md` (a strong model writes precise, autonomous plans), `EXEC.md` (a cheaper model executes them without re-deriving context), `REVIEW.md` (file-threaded multi-agent plan review), `REPO.md` (the repo standard); `kb/MODELS.md` (executor/model selection). `references/` — language-neutral repo-file templates (README, CHANGELOG, LICENSE, `.gitignore`, docs-index, the plan template). `tools/` — `summarize_run` (command → verdict) and `compare_bench` (diff benchmark JSONs). The language overlays require it. |
-| `python`, `node`, `rust` | Per-language `kb/` conventions + manifest templates + CI workflow templates (test / release / docs). |
+| `engineering` | One opinionated engineering process. `rules/ENGINEERING.md` — always-on discipline merged into `AGENTS.md` (commit shape, release-tag consent, benchmark-as-evidence, token discipline, draft follow-ups). `flows/` — `PLAN.md` (a strong model writes precise, autonomous plans), `EXEC.md` (a cheaper model executes them without re-deriving context), `REVIEW.md` (file-threaded multi-agent plan review), `REPO.md` (the repo standard); `kb/MODELS.md` (executor/model selection), `kb/COMMENTS.md` (what a comment may say and refer to). `references/` — language-neutral repo-file templates (README, CHANGELOG, LICENSE, `.gitignore`, docs-index, the plan template). `cmds/` — `dotagents plans` (create, read a part of, step, index and move plans), `leak-check` (scan a tree and its commit messages for private material; `kb/LEAKS.md`), `eol` (check and fix line endings; `kb/EOL.md`), `summarize-run` (command → verdict) and `compare-bench` (diff benchmark JSONs). `flows/PARALLEL.md` — several agents on one repository. `skills/repo-review` — a periodic whole-repository review that records verified findings and, on request, plans. The language overlays require it. |
+| `python`, `node`, `rust` | Per-language `kb/` conventions + manifest templates + CI workflow templates (test / release / docs). `python` also carries `standards/`: a base standard every library follows (public API, README and `AGENTS.md` format, preferred libraries) and specialized ones for protocol libraries and a library's command line. |
 | `release` | A host-agnostic release helper: an agent-driven commit-plan loop plus tag/CI monitoring across GitHub (`gh`) and GitLab. |
 | `private-sync` | The one-private-repo, per-project `.agents` model (`kb/PRIVATE_SYNC.md` + cloud hooks). |
 | `net` | Dependency-free HTTP tooling (a drop-in `curl` shim, an OS-trust-store `certifi` shim, an `httplib` session toolkit). Speaks the agent proxy `AGENTS_PROXY` with its credential (`AGENTS_PROXY_AUTH`, a `Proxy-Authorization` value) and kind (`AGENTS_PROXY_TYPE=connect` or a `prefix[:/endpoint]` gateway); the curl shim hands the same to real curl. |
@@ -101,11 +101,17 @@ same relative path in your scope. Minimal shape:
   rules/, flows/, references/, tools/   # other content, one category dir per kind -- never <name>/<name>/
   bin/, lib/       # optional; put on PATH / PYTHONPATH by `dotagents env`
   cmds/            # optional duho command modules, discovered as `dotagents <name>`
+                   #   and served as MCP tools by `DOTAGENTS_MCP=stdio dotagents`
   env.py           # optional; run by `dotagents env`, prints a JSON object of env changes
   CONTEXT.md       # optional; emitted by `dotagents context` (<NAME_OVERLAY_ROOT> expands)
   skills/<skill>/  # optional skills, published to the shared skills dir
   setup.py         # optional idempotent install-time script -- only for real install work
 ```
+
+**Ship a command module, not a loose script**, when an overlay has something to run:
+a module in `cmds/` is discovered, documented by `--help`, and callable as an MCP tool
+(`dotagents.<command>`) with no extra code. A skill says which commands it uses and
+that they are available as tools.
 
 Reference another overlay's file as `$<NAME>_OVERLAY_ROOT/<path>` (e.g.
 `$ENGINEERING_OVERLAY_ROOT/flows/REPO.md`), never `~/.agents/<path>`: overlays install under
