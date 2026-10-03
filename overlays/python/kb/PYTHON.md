@@ -25,7 +25,7 @@ project's recorded exceptions to them are in its `.agents/AGENTS.md`.
   (`dotagents-cli` ships `dotagents`), set
   `[tool.hatch.build.targets.wheel] packages = ["src/<package_name>"]` — the reference
   `pyproject.toml` always does, so a copy works either way.
-- **Ship the consumer's docs in the package** [D40]: `README.md` (`readme = "README.md"`
+- **Ship the consumer's docs in the package**: `README.md` (`readme = "README.md"`
   → long-description) and `src/<pkg>/AGENTS.md` (the agent-facing library-interface
   doc, see REPO.md) must land in the built sdist AND wheel.
 
@@ -33,7 +33,9 @@ project's recorded exceptions to them are in its `.agents/AGENTS.md`.
   `src/<pkg>/` only, so the API header lives **inside the package dir** — a
   repo-root file would not ship. (Contrast Rust, where the crate root *is* the
   shipped root.) The optional repo-root `AGENTS.md` is REPO.md's contributor-
-  orientation file — layout, venvs, CI, release — never the API header.
+  orientation file — layout, venvs, CI, release — never the API header. It ships
+  in neither the wheel nor the sdist: the reference manifest excludes `/AGENTS.md`
+  from the sdist.
 
   Because `src/<pkg>/AGENTS.md` ships, it must be **self-contained**: no
   repo-relative links (`src/...`, `CHANGELOG.md`, `LICENSE`), since an installed
@@ -161,12 +163,16 @@ project's recorded exceptions to them are in its `.agents/AGENTS.md`.
 
 ## CI/CD: Implementing the Three-Workflow Split
 
-Templates: `$PYTHON_OVERLAY_ROOT/references/workflows/python/{test,release,docs}.yml` (D52 —
-test, release, and docs are three separate workflows; docs deploys on its own so a
+Templates: `$PYTHON_OVERLAY_ROOT/references/workflows/python/{test,release,docs}.yml` — test,
+release, and docs are three separate workflows; docs deploys on its own so a
 release is never the first exercise of the docs build, and the site can be
 redeployed without cutting a release).
 - test + release both install `pip install -e ".[dev,<extras-with-tests>]"` and run
   `pytest -q`.
+- `release.yml` gates the build on the same `floors` job `test.yml` runs, and the
+  GitHub release on `wheel-smoke`: the built wheel installed into a clean venv on
+  the oldest and newest Python, imported, and checked for `py.typed` and the
+  shipped `AGENTS.md`.
 - `release.yml` keeps a `docs-gate` job that runs `mkdocs build --strict` but does
   **not** deploy — verify locally first (`pip install -e ".[docs]"`). Only `docs.yml`
   deploys to Pages: on a push to `main` touching docs sources (latest between
