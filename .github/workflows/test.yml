@@ -128,7 +128,9 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install the package with the dev extra
-        run: python -m pip install -e ".[dev]"
+        # netimps: the net overlay's DNS flags (--dns-servers, --doh-url, ...)
+        # need it, and their tests skip without it.
+        run: python -m pip install -e ".[dev]" "netimps>=0.3.3"
       - name: Run the overlays' test suites
         # An empty config file keeps main's own pytest settings out of the
         # overlays' run; each overlay brings its own conftest.
