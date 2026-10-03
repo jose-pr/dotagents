@@ -1367,7 +1367,7 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
 
 ### Changed
 
-- Migrate the CLI to `duho>=0.3.3` (was `>=0.1.1`). duho's Plan-13 `Args`/`Cmd`
+- Migrate the CLI to `duho>=0.3.3` (was `>=0.1.1`). duho's `Args`/`Cmd`
   split means commands are now `class X(LoggingArgs, Cmd)` with a `__call__` entrypoint
   (was a bare `LoggingArgs` with `__run__`) and the umbrella root is
   `class Dotagents(LoggingArgs, Cli)`. Field declarations (annotation + help string +
