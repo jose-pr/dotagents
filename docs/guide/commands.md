@@ -59,6 +59,38 @@ into `<store>/dotagents/cmds/` (create the dir — `init` does not) and it becom
 subcommand, no registration needed; see
 [Authoring → Custom commands](authoring.md#custom-commands).
 
+## As tools for an agent
+
+Every command above except `env`, and every discovered one, is also an **MCP tool**.
+Start `dotagents` with `DOTAGENTS_MCP=stdio` in its environment and it serves that
+command set over stdio instead of running a command:
+
+```sh
+DOTAGENTS_MCP=stdio dotagents        # register this as a stdio MCP server in your agent
+```
+
+- One tool per leaf command, named with dots: `dotagents.findings.add`,
+  `dotagents.overlays.list`, and for an overlay's commands `dotagents.<command>`.
+- A tool's input schema is generated from the command's fields; its result is what
+  the command prints.
+- The command set is discovered once, when the server starts, for the directory it
+  starts in. Restart it after installing an overlay or changing project.
+
+Use it for a command an agent calls many times in a session — a findings queue, a
+plan's progress, a lookup. A tool call skips the interpreter start-up and the
+command discovery that every `dotagents <command>` process pays, and its arguments
+are typed values, not strings quoted through a shell.
+
+`env` is not served: it prints resolved values, which can be secrets. Everything
+else is, including the commands that change the store (`init`, `overlays add`,
+`overlays remove`). Register the server only where the agent is meant to be able to
+run them.
+
+For a machine-readable description without a server, set `AGENT_HELP=1` and ask for
+`--help`: `dotagents findings --help` then prints one JSON document for that command
+tree. It is complete and long; a single subcommand's plain `--help` is shorter when
+that is all that is needed.
+
 ## init
 
 See [Install](install.md) for the full walkthrough. In brief:

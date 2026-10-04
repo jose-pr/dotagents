@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The command guide and the shipped API header now say that every command except
+  `env`, built-in or discovered, is served as an MCP tool when `dotagents` starts with
+  `DOTAGENTS_MCP=stdio`, and that `AGENT_HELP=1` turns `--help` into a JSON document.
+  The authoring guide asks overlays to ship command modules rather than loose
+  scripts, and skills to name the tools they use.
+
 ## [0.7.2] - 2026-10-03
 
 ### Added

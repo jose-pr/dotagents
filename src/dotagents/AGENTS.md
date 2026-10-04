@@ -44,6 +44,16 @@ and an error saying a command is required, and exits 2.
 | `about [--json]` | `dotagents-cli <version>`, then `<distribution> <version>` per bundled (`.pyz`) or installed package. |
 | `build-pyz [--out P] [--python SHEBANG] [--duho-version V] [--pathlib-next-version V] [--extras a,b]` | Build a zipapp from a source checkout; errors elsewhere. |
 
+**Every command but `env` is also an MCP tool.** With `DOTAGENTS_MCP=stdio` in its
+environment, `dotagents` serves the command set — built-in, bundled and discovered —
+over stdio instead of running one: a tool per leaf command, named with dots
+(`dotagents.findings.add`, `dotagents.overlays.list`), its input schema generated from
+the command's fields, its result the command's output. `env` is not served: it prints
+resolved, possibly secret values. The set is fixed when the server starts, for the
+scope it starts in. With `AGENT_HELP=1`, `--help` prints one
+JSON document (`duho/agent-help@1`) for the command tree it is asked about, in place
+of the human text.
+
 Scope flags: `-g` / `--global` selects the user store; `--agents-dir D` overrides the
 store the command resolves to (the project store for `init` / `overlays` / `findings`
 without `-g`, the user store otherwise). For `env`, `context` and `launch`, `-g` means

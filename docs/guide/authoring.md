@@ -149,7 +149,26 @@ parser cannot be built. The bundled `findings` and `launch` are ordinary command
 modules discovered from the package, and the private-sync overlay ships
 `link-project` / `sync-project` from its own `cmds/` the same way.
 
+**Prefer a command module to a loose script.** A script under `tools/` is something
+an agent has to find, quote and spawn. A command module is discovered, shows up in
+`dotagents --help`, and is served as an MCP tool with a typed schema when `dotagents`
+runs with `DOTAGENTS_MCP=stdio` (see
+[Commands → As tools for an agent](commands.md#as-tools-for-an-agent)). Write it to be
+a good tool:
+
+- the logic lives in the command class — `__call__` and its methods — not in one
+  function that `__call__` forwards every field to;
+- each field's help says what the value is, since it becomes the schema's description;
+- the output is short: one line for a change, the smallest useful part for a read,
+  `--json` for a program;
+- it never prompts, and a command that deletes or publishes needs an explicit flag.
+
 ## Skills
 
 Put `skills/<skill-name>/` directories in your overlay to publish shared skills into
 the scope on install. See [Overlays → Skills](overlays.md#skills).
+
+A skill that relies on commands says so, in its own text: which `dotagents` commands
+it uses, that they are available as MCP tools (`dotagents.<command>`) when the
+server is registered, and the command-line form to fall back to when it is not. An
+agent reading the skill should not have to discover either.
