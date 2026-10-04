@@ -501,13 +501,13 @@ There is no `dotagents audit`. The dotagents source repo has its own
 it is not a validator for an installed `~/.agents` and is deliberately not shipped
 in the package or the `.pyz`.
 
-### Personal pre-push scanning (not in this repo)
+### Pre-push scanning (an overlay's command)
 
-Scanning a repo for personal leaks before publishing it — machine paths, private
-plan names, `.agents/` refs, agent-session trailers in commit messages — enforces
-personal conventions rather than dotagents' own mechanism, so no such tool is
-shipped here. Keep one as a discovered command module in your own private
-`<scope>/dotagents/cmds/` and run it locally before a push.
+Scanning a repo for leaks before publishing it — machine paths, private plan names,
+`.agents/` refs, agent-session trailers in commit messages — enforces a convention
+rather than dotagents' own mechanism, so the package ships no such command. The
+opt-in `engineering` overlay does: `dotagents leak-check <repo>`. Its patterns for
+what is personal to you stay in a machine-local file, never in a repository.
 
 ## link-project / sync-project
 
