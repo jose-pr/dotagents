@@ -49,6 +49,14 @@ leaves the machine is a perfectly valid setup.
   links the store instead.
 - **Copy mode** (`--copy`) makes `.agents` a real directory rather than a symlink;
   `sync-project` copies edits back into the store.
+- **Default ignore rules.** A project's `.agents/scratch/` lives inside the store, so
+  the built-in git path would commit it. The first `sync-project` on that path
+  appends a block to the store's `.gitignore` that leaves out `scratch/`, `tmp/`,
+  `__pycache__/`, hidden files (`.*`, keeping `.gitignore`, `.gitattributes`,
+  `.gitkeep`, `.ignore` and `.dotagents-install.json`) and the machine-local
+  overrides (`*.local.*`, `local.env`). It is written once, under a marker line:
+  edit the block freely and keep that line. The overlay's `kb/PRIVATE_SYNC.md` has
+  the block in full.
 
 ## Cloud sessions
 

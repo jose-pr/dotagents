@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The private-sync guide describes the default ignore rules the overlay's
+  `sync-project` now writes, once, into the `.gitignore` of a store kept in git:
+  `scratch/`, `tmp/`, `__pycache__/`, hidden files and the machine-local overrides
+  stay out of the private repository.
+
 ## [0.7.3] - 2026-10-04
 
 ### Changed
