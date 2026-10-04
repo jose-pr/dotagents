@@ -60,6 +60,42 @@ touch a project directory.
     `origin`) in one command; `--no-pull` / `--no-push` apply to this path only.
   - `-m <msg>` / `--dry-run` as expected (`--dry-run` never executes the hook).
 
+## What the store's repository leaves out
+
+A linked project's `.agents/scratch/` is `~/.agents/projects/<name>/scratch/`, inside
+the private repo, and the built-in git path commits everything it is not told to
+ignore. So the first `dotagents sync-project` on that path appends a block of default
+rules to `~/.agents/.gitignore` (creating the file if there is none):
+
+```
+# dotagents private-sync: defaults for a store kept in git
+scratch/
+tmp/
+__pycache__/
+.*
+!.gitignore
+!.gitattributes
+!.gitkeep
+!.ignore
+!.dotagents-install.json
+*.local.*
+local.env
+```
+
+- `scratch/` and `tmp/` are throwaway directories, at the store's root and in every
+  project store.
+- `.*` leaves out hidden files and directories (tool caches, the overlay source
+  cache). The `!` lines keep the dot-files a store and its installed overlays need.
+- `*.local.*` and `local.env` are the machine-local overrides (`AGENTS.local.md`, a
+  project's `local.env`), which are never shared.
+
+The block is written **once**: a `.gitignore` that already has its first line is left
+alone. Delete a rule from it, or add a `!` exception below it, to opt out of one;
+keep the first line so the block is not written again. Rules you already had are
+kept, above the block. A rule only affects files git does not track yet: `git rm
+--cached` one that was committed before. A `hooks/sync` script owns transport and
+gets no block.
+
 ## First-time setup
 
 ```bash
