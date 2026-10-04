@@ -24,6 +24,8 @@ are **conventions, not requirements**:
   adopting an existing real ``.agents/`` into the store on the first link.
 - ``sync_agents`` — reconcile a copy-mode project, then hand off to ``hooks/sync``
   or the built-in git path.
+- ``ensure_store_gitignore`` — the default ignore rules of a store kept in git,
+  written once by the built-in git path.
 
 Kept out of the command modules (which only wire args to these). **Pure stdlib**
 (``os``/``shutil``/``subprocess``) -- no ``duho``/``pathlib_next`` -- so the
@@ -330,6 +332,67 @@ def _warn_gitignore(project_dir: Path, log) -> None:
         )
 
 
+#: First line of the block ``ensure_store_gitignore`` writes. Its presence is
+#: what stops the block being written again, so the rest can be edited freely.
+STORE_IGNORE_MARK = "# dotagents private-sync: defaults for a store kept in git"
+
+#: What a store's own repository should not carry: throwaway directories (in
+#: the store and in every project store), caches, hidden files, and the
+#: machine-local override files. The ``!`` lines keep the dot-files a store
+#: and its installed overlays need tracked.
+STORE_IGNORE_DEFAULTS = (
+    "scratch/",
+    "tmp/",
+    "__pycache__/",
+    ".*",
+    "!.gitignore",
+    "!.gitattributes",
+    "!.gitkeep",
+    "!.ignore",
+    "!.dotagents-install.json",
+    "*.local.*",
+    "local.env",
+)
+
+
+def ensure_store_gitignore(agents_dir: Path, *, dry_run: bool = False, log=None) -> bool:
+    """Give a git-kept store its default ignore rules, once. True when written.
+
+    The block is appended to ``<agents_dir>/.gitignore`` (created if absent)
+    under ``STORE_IGNORE_MARK``. A file that already carries that line is left
+    alone, whatever its other lines say: removing a rule from the block, or
+    adding a ``!`` exception after it, is how a store opts out of one. Rules
+    already in the file are kept, and the block follows them, so it wins where
+    the two disagree. The file keeps the line ending it has.
+    """
+    path = Path(agents_dir) / ".gitignore"
+    try:
+        existing = path.read_bytes().decode("utf-8")
+    except FileNotFoundError:
+        existing = ""
+    if any(line.strip() == STORE_IGNORE_MARK for line in existing.splitlines()):
+        return False
+    if log:
+        log("gitignore: adding the store defaults to %s", path)
+    if dry_run:
+        return True
+    newline = "\r\n" if "\r\n" in existing else "\n"
+    block = [
+        STORE_IGNORE_MARK,
+        "# Written once by `dotagents sync-project`. Edit it as you like; keep the",
+        "# line above so it is not written again.",
+        *STORE_IGNORE_DEFAULTS,
+    ]
+    prefix = existing
+    if prefix and not prefix.endswith(("\n", "\r")):
+        prefix += newline
+    if prefix:
+        prefix += newline
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(prefix + newline.join(block) + newline)
+    return True
+
+
 def _git(
     agents_dir: Path,
     *args: str,
@@ -579,6 +642,7 @@ def sync_agents(
             _git(agents_dir, "remote", "add", "origin", remote)
 
     if dry_run:
+        ensure_store_gitignore(agents_dir, dry_run=True, log=log)
         log("[dry-run] would git add -A && commit -m %r%s", message,
             " && push" if push else "")
         return 0
@@ -596,6 +660,9 @@ def sync_agents(
                 log("note: pull skipped/failed (%s)", (res.stderr or "").strip().splitlines()[-1:]
                     and (res.stderr or "").strip().splitlines()[-1] or "no upstream yet")
 
+        # After the pull, so a block another machine already pushed is seen
+        # and not written twice; before the add, so it shapes this commit.
+        ensure_store_gitignore(agents_dir, log=log)
         _git(agents_dir, "add", "-A")
         status = _git(agents_dir, "status", "--porcelain", capture=True)
         if (status.stdout or "").strip():
