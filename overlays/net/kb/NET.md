@@ -234,8 +234,9 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     Lines without a code are wrapped at the terminal's width (79 with none),
     as curl wraps them. What `-w` would then have written to stdout is dropped;
     when only `-w` had stdout (the body went to `-o`), the exit code stays the
-    transfer's. Curls before 8.9 word some of this differently
-    (`NET_CURL_COMPAT`).
+    transfer's. Older curls differ (`NET_CURL_COMPAT`): before 8.17 a line
+    without a code is not printed under `-s` even with `-S`, and before 8.9
+    the wording itself is older (Ubuntu 24.04's 8.5 was measured).
 - **Unsupported flags fail loud** (`curl: (2) Unsupported options: --http2`, exit
   2) rather than silently do the wrong thing — that guard is deliberate. If you
   hit one, call real `curl`.
