@@ -71,7 +71,8 @@ class DnsOverride(object):
 
     def _lookup(self, name, rdtype):
         if self.doh_url:
-            return self.netimps.resolve_doh(name, self.doh_url, rdtype, timeout=self.timeout, fetch=self._fetch)
+            return self.netimps.resolve_doh(name, self.doh_url, rdtype=rdtype, timeout=self.timeout,
+                                            fetch=self._fetch)
         return self.netimps.resolve(name, rdtype, ns=self.servers, source=self.sources, timeout=self.timeout,
                                     backends=['dnspython', 'wire'])
 
