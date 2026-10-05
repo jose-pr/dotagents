@@ -562,11 +562,10 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
         # -o / -D not writable, or stdout closed under us: curl's 23, in the
         # words curl has for where the write failed.
         transfer.errormsg = exc.message
-        if args.should_print_error():
-            if exc.notice:
-                print('\n'.join(notice_lines(exc.notice)), file=sys.stderr)
-            if exc.coded:
-                print('curl: (%d) %s' % (EXIT_WRITE, exc.message), file=sys.stderr)
+        if exc.notice and (not args.silent or (args.show_error and compat.shows_notices_when_silent())):
+            print('\n'.join(notice_lines(exc.notice)), file=sys.stderr)
+        if exc.coded and args.should_print_error():
+            print('curl: (%d) %s' % (EXIT_WRITE, exc.message), file=sys.stderr)
         return EXIT_WRITE
     except OSError as exc:
         # What follows the body (-R, --etag-save) could not be written.

@@ -33,17 +33,22 @@ patched one, the 8.5 agents run;
   proxy>"), 6 from 8.20 on.
 
 The wording of an output that cannot be written (exit 23 in every version)
-was measured on 8.18 (Linux) and 8.21 (Windows, two builds), which agree.
-Where older versions differ is read from curl's source at its release tags,
-not measured:
+was measured on Ubuntu 24.04's 8.5, on 8.18 (Linux) and on 8.21 (Windows, two
+builds). The versions between are read from curl's source at its release
+tags, not measured:
 
 - a write the destination took only part of: "Failure writing output to
-  destination", with ", passed N returned M" from 8.7 on;
+  destination", with ", passed N returned M" from 8.7 on; before 8.7 a header
+  line that could not be written is "Failed writing header";
 - an output file that cannot be opened: "client returned ERROR on write of N
   bytes" from 8.8 on; in 8.7 the message above with M as 4294967295, before
   that without numbers;
 - ``-D -`` to a stdout that is gone: noticed at the first header line from 8.9
-  on ("Failed writing headers to -"); before, only when the body is written.
+  on ("Failed writing headers to -"); before, only when the body is written;
+- the tool's own messages, the ones with no exit code ("Failed writing body",
+  "Failed to open <file>"): under ``-s`` they are printed with ``-S`` from
+  8.17 on, and not at all before; wrapped to the terminal's width from 8.9
+  on, to 79 columns before.
 """
 import os
 import re
@@ -201,25 +206,36 @@ def rejects_unknown_protocols():
     return version() >= (8, 18, 0)
 
 
-def short_write(passed, returned):
+def short_write(passed, returned, header=False):
     """curl's text for a write of ``passed`` bytes the destination took
-    ``returned`` of."""
+    ``returned`` of; ``header`` when it was a header line."""
     if version() >= (8, 7, 0):
         return 'Failure writing output to destination, passed %d returned %d' % (passed, returned)
-    return 'Failure writing output to destination'
+    return 'Failed writing header' if header else 'Failure writing output to destination'
 
 
-def refused_write(passed):
+def refused_write(passed, header=False):
     """curl's text for a write of ``passed`` bytes its own output callback
     refused: the output file could not be opened."""
     if version() >= (8, 8, 0):
         return 'client returned ERROR on write of %d bytes' % passed
-    return short_write(passed, 0xFFFFFFFF)  # the callback's error value, printed as a count
+    return short_write(passed, 0xFFFFFFFF, header)  # the callback's error value, printed as a count
 
 
 def checks_header_dump():
     """Whether a ``-D`` stream that cannot be written fails the transfer at
     the header line (else it goes unnoticed until the body)."""
+    return version() >= (8, 9, 0)
+
+
+def shows_notices_when_silent():
+    """Whether ``-S`` brings back, under ``-s``, the tool's own messages (the
+    ones with no exit code)."""
+    return version() >= (8, 17, 0)
+
+
+def wraps_to_terminal():
+    """Whether those messages wrap to the terminal's width (else to 79)."""
     return version() >= (8, 9, 0)
 
 

@@ -110,7 +110,9 @@ def notice_lines(text, prefix='curl: '):
     """A message of the tool's own (one with no exit code) as curl prints
     it: wrapped to the terminal's width at a blank, or cut where there is
     none, every line under the prefix."""
-    width = max(terminal_columns() - len(prefix), 1)
+    from . import compat
+
+    width = max((terminal_columns() if compat.wraps_to_terminal() else 79) - len(prefix), 1)
     lines = []
     while len(text) > width:
         cut = width - 1
@@ -297,7 +299,8 @@ class OutputArgs(Group):
         stdout. A failure is curl's :class:`WriteFailure`."""
         from . import compat
 
-        writes = (header_lines(header_bytes) if self.include or self.head else []) + body_chunks(content)
+        headers = header_lines(header_bytes) if self.include or self.head else []
+        writes = headers + body_chunks(content)
         if self.body_target:
             # 'ab': a 206 answering a resume (-C) continues the file.
             mode = 'ab' if getattr(self, 'append_output', False) else 'wb'
@@ -310,14 +313,14 @@ class OutputArgs(Group):
                     # curl opens the file at its first write; with none, it
                     # only warns that the file could not be created.
                     raise WriteFailure(WRITE_ERROR_TEXT, coded=False)
-                raise WriteFailure(compat.refused_write(len(writes[0])))
+                raise WriteFailure(compat.refused_write(len(writes[0]), header=bool(headers)))
             if not self.silent:
                 print('Output written to %s' % self.body_target, file=sys.stderr)
             return
         out = self.stdout()
-        for data in writes:
+        for index, data in enumerate(writes):
             taken = out.write(data)
             if taken != len(data):
-                raise WriteFailure(compat.short_write(len(data), taken))
+                raise WriteFailure(compat.short_write(len(data), taken, header=index < len(headers)))
         if not out.flush():
             raise WriteFailure(WRITE_ERROR_TEXT, notice='Failed writing body', coded=False)
