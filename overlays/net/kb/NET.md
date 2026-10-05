@@ -223,10 +223,19 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     leaks one host's cookies to another. `-c` writes the origin's cookies with
     their expiry and `HttpOnly`, on top of what `-b` read.
   - `-I` prints the headers by itself; `-i` adds them to a body.
-  - **A reader that goes away** (`curl … | head -c 16`) is exit 23 with curl's
-    one line, for the body, `-i` headers and `-D -` alike; what `-w` would then
-    have written to stdout is dropped. When only `-w` had stdout (the body went
-    to `-o`), it is dropped and the exit code stays the transfer's.
+  - **An output that cannot be written** is exit 23 in curl's words, which
+    depend on where the write failed, and `%{errormsg}` follows them. A stdout
+    whose reader went away (`curl … | head -c 16`): `Failure writing output to
+    destination, passed N returned M` when the write overflowed the 4096 bytes
+    the C library holds for a pipe, `Failed writing body` (no code on that
+    line) when it failed only at the final flush. `-o` naming what cannot be
+    opened: `client returned ERROR on write of N bytes`. `-D` likewise: `Failed
+    to open <path>`; `-D -` to a dead stdout: `Failed writing headers to -`.
+    Lines without a code are wrapped at the terminal's width (79 with none),
+    as curl wraps them. What `-w` would then have written to stdout is dropped;
+    when only `-w` had stdout (the body went to `-o`), the exit code stays the
+    transfer's. Curls before 8.9 word some of this differently
+    (`NET_CURL_COMPAT`).
 - **Unsupported flags fail loud** (`curl: (2) Unsupported options: --http2`, exit
   2) rather than silently do the wrong thing — that guard is deliberate. If you
   hit one, call real `curl`.
