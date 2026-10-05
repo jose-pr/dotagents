@@ -18,6 +18,40 @@ def output_path(name):
     return os.devnull if name == '/dev/null' else name
 
 
+def discard_stdout():
+    """Point stdout at the null device, once a write to it has failed (the
+    reader of a pipe went away). Nothing more can be delivered there, and a
+    later write, or the flush at interpreter exit, would fail again: a
+    traceback and Python's exit 120 in place of curl's 23."""
+    try:
+        fd = sys.stdout.fileno()
+    except (AttributeError, OSError, ValueError):  # not a real file: a captured stream
+        fd = None
+    if fd is not None:
+        try:
+            null = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(null, fd)
+            finally:
+                os.close(null)
+            return
+        except OSError:
+            pass
+    sys.stdout = open(os.devnull, 'w', encoding='utf-8')
+
+
+def write_stdout(*chunks):
+    """Bytes to stdout, flushed. A failure discards stdout
+    (:func:`discard_stdout`) and is raised: the transfer's exit 23."""
+    try:
+        for chunk in chunks:
+            sys.stdout.buffer.write(chunk)
+        sys.stdout.buffer.flush()
+    except OSError:
+        discard_stdout()
+        raise
+
+
 class OutputArgs(Group):
     """Body and header destinations, verbosity, and failure on HTTP errors."""
 
@@ -150,8 +184,7 @@ class OutputArgs(Group):
         if not self.dump_header:
             return
         if self.dump_header == '-':
-            sys.stdout.buffer.write(header_bytes)
-            sys.stdout.buffer.flush()
+            write_stdout(header_bytes)
             return
         with open(output_path(self.dump_header), 'wb') as handle:
             handle.write(header_bytes)
@@ -167,8 +200,7 @@ class OutputArgs(Group):
             if not self.silent:
                 print('Output written to %s' % self.body_target, file=sys.stderr)
             return
-        if self.include or self.head:
-            sys.stdout.buffer.write(header_bytes)
+        chunks = [header_bytes] if self.include or self.head else []
         if not self.head:
-            sys.stdout.buffer.write(content)
-        sys.stdout.buffer.flush()
+            chunks.append(content)
+        write_stdout(*chunks)

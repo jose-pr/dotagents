@@ -234,15 +234,23 @@ def _json(values, times, numbers, texts, transfer, exitcode):
 
 
 def _write_stream(name, text):
-    """``text`` to stdout or stderr as UTF-8, after whatever is already buffered."""
+    """``text`` to stdout or stderr as UTF-8, after whatever is already buffered.
+    A stream that cannot be written is skipped, as curl skips it: the exit
+    code stays the transfer's."""
     stream = sys.stderr if name == 'stderr' else sys.stdout
-    stream.flush()
-    raw = getattr(stream, 'buffer', None)
-    if raw is None:
-        stream.write(text)
-    else:
-        raw.write(text.encode('utf-8'))
-        raw.flush()
+    try:
+        stream.flush()
+        raw = getattr(stream, 'buffer', None)
+        if raw is None:
+            stream.write(text)
+        else:
+            raw.write(text.encode('utf-8'))
+            raw.flush()
+    except OSError:
+        if name != 'stderr':
+            from .output import discard_stdout
+
+            discard_stdout()
 
 
 def emit_write_out(tokens, values, header_items, exitcode):
