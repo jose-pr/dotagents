@@ -8,7 +8,7 @@ from typing import Optional
 
 from ._duho import NS, Arg
 from .args import Group
-from .errors import EXIT_WRITE, LocalError
+from .errors import EXIT_WRITE, WRITE_ERROR_TEXT, LocalError, WriteFailure
 
 
 def output_path(name):
@@ -40,16 +40,98 @@ def discard_stdout():
     sys.stdout = open(os.devnull, 'w', encoding='utf-8')
 
 
-def write_stdout(*chunks):
-    """Bytes to stdout, flushed. A failure discards stdout
-    (:func:`discard_stdout`) and is raised: the transfer's exit 23."""
+#: The C library's buffer for a stdout that is not a terminal, and the most
+#: curl hands its write callback at once. Together they decide which of
+#: curl's messages a stdout that went away produces.
+STDIO_BUFFER = 4096
+WRITE_CHUNK = 16384
+
+
+class Stdout(object):
+    """stdout written the way the C library under curl writes it, so that a
+    reader that went away is reported in curl's words.
+
+    A write that fits the buffer is kept; it reaches the pipe, and can fail,
+    only when a later write overflows the buffer or at the final flush. One
+    that does not fit tops the buffer up and sends it, then sends its whole
+    blocks directly. Which of the two a failure meets is the difference
+    between ``passed N returned M`` and ``Failed writing body``."""
+
+    def __init__(self):
+        self.pending = b''
+        self.gone = False
+
+    def _send(self, data):
+        if not self.gone:
+            try:
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
+            except OSError:
+                self.gone = True
+                discard_stdout()
+        return not self.gone
+
+    def write(self, data):
+        """One write of curl's. Returns the bytes taken: ``len(data)`` when
+        all were, fewer when the pipe refused what had to be sent."""
+        held = len(self.pending)
+        if (held + len(data) <= STDIO_BUFFER) if held else (len(data) < STDIO_BUFFER):
+            self.pending += data
+            return len(data)
+        took = STDIO_BUFFER - held if held else 0
+        block, rest = self.pending + data[:took], data[took:]
+        self.pending = b''
+        whole = len(rest) - len(rest) % STDIO_BUFFER
+        if (block and not self._send(block)) or (whole and not self._send(rest[:whole])):
+            return took
+        self.pending = rest[whole:]
+        return len(data)
+
+    def flush(self):
+        """Send what is held. False when it could not be."""
+        pending, self.pending = self.pending, b''
+        return not pending or self._send(pending)
+
+
+def terminal_columns():
+    """The width curl wraps its own messages to: ``$COLUMNS``, else the
+    terminal's (read where curl reads it: stdin, stderr on Windows), else 79."""
+    raw = os.environ.get('COLUMNS', '')
+    if raw.isdigit() and 20 < int(raw) < 10000:
+        return int(raw)
     try:
-        for chunk in chunks:
-            sys.stdout.buffer.write(chunk)
-        sys.stdout.buffer.flush()
-    except OSError:
-        discard_stdout()
-        raise
+        columns = os.get_terminal_size(2 if os.name == 'nt' else 0).columns
+    except (OSError, ValueError):
+        columns = 0
+    return columns if 0 < columns < 10000 else 79
+
+
+def notice_lines(text, prefix='curl: '):
+    """A message of the tool's own (one with no exit code) as curl prints
+    it: wrapped to the terminal's width at a blank, or cut where there is
+    none, every line under the prefix."""
+    width = max(terminal_columns() - len(prefix), 1)
+    lines = []
+    while len(text) > width:
+        cut = width - 1
+        while cut and text[cut] not in ' \t':
+            cut -= 1
+        if not cut:
+            cut = width - 1
+        lines.append(prefix + text[:cut + 1])
+        text = text[cut + 1:]
+    lines.append(prefix + text)
+    return lines
+
+
+def header_lines(header_bytes):
+    """The header block as curl writes it: a line at a time."""
+    return header_bytes.splitlines(True)
+
+
+def body_chunks(content):
+    """The body as curl's write callback gets it."""
+    return [content[i:i + WRITE_CHUNK] for i in range(0, len(content), WRITE_CHUNK)]
 
 
 class OutputArgs(Group):
@@ -57,6 +139,9 @@ class OutputArgs(Group):
 
     #: The -o / -O file once resolved (``output_target``).
     body_target = None
+
+    #: stdout once this run has written to it (``stdout``).
+    _out = None
 
     output: Optional[str] = None
     "Write the body to this file (- for stdout)"
@@ -180,27 +265,59 @@ class OutputArgs(Group):
     def should_print_error(self):
         return (not self.silent) or self.show_error
 
+    def stdout(self):
+        """This run's stdout (:class:`Stdout`): ``-D -`` and the body share it."""
+        if self._out is None:
+            self._out = Stdout()
+        return self._out
+
     def write_header_dump(self, header_bytes):
+        """``-D``: the response headers to a file, or to stdout a line at a
+        time, each sent at once, as curl writes them. A failure is curl's
+        :class:`WriteFailure`."""
         if not self.dump_header:
             return
         if self.dump_header == '-':
-            write_stdout(header_bytes)
+            from . import compat
+
+            out = self.stdout()
+            for line in header_lines(header_bytes):
+                out.write(line)
+                if not out.flush() and compat.checks_header_dump():
+                    raise WriteFailure(compat.refused_write(len(line)), notice='Failed writing headers to -')
             return
-        with open(output_path(self.dump_header), 'wb') as handle:
-            handle.write(header_bytes)
+        try:
+            with open(output_path(self.dump_header), 'wb') as handle:
+                handle.write(header_bytes)
+        except OSError:
+            raise WriteFailure(WRITE_ERROR_TEXT, notice='Failed to open %s' % self.dump_header)
 
     def emit_output(self, header_bytes, content):
+        """The body, after the headers with -i / -I, to the -o file or to
+        stdout. A failure is curl's :class:`WriteFailure`."""
+        from . import compat
+
+        writes = (header_lines(header_bytes) if self.include or self.head else []) + body_chunks(content)
         if self.body_target:
             # 'ab': a 206 answering a resume (-C) continues the file.
             mode = 'ab' if getattr(self, 'append_output', False) else 'wb'
-            with open(output_path(self.body_target), mode) as handle:
-                if self.include or self.head:
-                    handle.write(header_bytes)
-                handle.write(content)
+            try:
+                with open(output_path(self.body_target), mode) as handle:
+                    for data in writes:
+                        handle.write(data)
+            except OSError:
+                if not writes:
+                    # curl opens the file at its first write; with none, it
+                    # only warns that the file could not be created.
+                    raise WriteFailure(WRITE_ERROR_TEXT, coded=False)
+                raise WriteFailure(compat.refused_write(len(writes[0])))
             if not self.silent:
                 print('Output written to %s' % self.body_target, file=sys.stderr)
             return
-        chunks = [header_bytes] if self.include or self.head else []
-        if not self.head:
-            chunks.append(content)
-        write_stdout(*chunks)
+        out = self.stdout()
+        for data in writes:
+            taken = out.write(data)
+            if taken != len(data):
+                raise WriteFailure(compat.short_write(len(data), taken))
+        if not out.flush():
+            raise WriteFailure(WRITE_ERROR_TEXT, notice='Failed writing body', coded=False)

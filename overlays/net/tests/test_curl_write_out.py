@@ -139,7 +139,7 @@ def test_fail_reports_the_status_and_22(origin, monkeypatch, capsysbinary):
 def test_unwritable_output_is_exit_23(origin, tmp_path, monkeypatch, capsysbinary):
     rc, out = _fallback(monkeypatch, capsysbinary, ["-sS", "-o", str(tmp_path), "-w", "%{exitcode}", origin + "/x"])
     assert rc == 23 and out.out == b"23"
-    assert out.err.startswith(b"curl: (23) Failure writing output to destination")
+    assert out.err.strip() == b"curl: (23) client returned ERROR on write of 5 bytes"
 
 
 # --------------------------------------------------------------------------- #

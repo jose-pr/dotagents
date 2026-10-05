@@ -31,6 +31,19 @@ patched one, the 8.5 agents run;
 - a name a ``socks5://`` / ``socks4://`` proxy needs resolved here and that
   does not resolve: 97 before 8.20 (worded "Could not resolve proxy: <the
   proxy>"), 6 from 8.20 on.
+
+The wording of an output that cannot be written (exit 23 in every version)
+was measured on 8.18 (Linux) and 8.21 (Windows, two builds), which agree.
+Where older versions differ is read from curl's source at its release tags,
+not measured:
+
+- a write the destination took only part of: "Failure writing output to
+  destination", with ", passed N returned M" from 8.7 on;
+- an output file that cannot be opened: "client returned ERROR on write of N
+  bytes" from 8.8 on; in 8.7 the message above with M as 4294967295, before
+  that without numbers;
+- ``-D -`` to a stdout that is gone: noticed at the first header line from 8.9
+  on ("Failed writing headers to -"); before, only when the body is written.
 """
 import os
 import re
@@ -186,6 +199,28 @@ def rejects_unknown_protocols():
     """Whether an unknown name in --proto / --proto-redir is exit 2 (else it
     is ignored)."""
     return version() >= (8, 18, 0)
+
+
+def short_write(passed, returned):
+    """curl's text for a write of ``passed`` bytes the destination took
+    ``returned`` of."""
+    if version() >= (8, 7, 0):
+        return 'Failure writing output to destination, passed %d returned %d' % (passed, returned)
+    return 'Failure writing output to destination'
+
+
+def refused_write(passed):
+    """curl's text for a write of ``passed`` bytes its own output callback
+    refused: the output file could not be opened."""
+    if version() >= (8, 8, 0):
+        return 'client returned ERROR on write of %d bytes' % passed
+    return short_write(passed, 0xFFFFFFFF)  # the callback's error value, printed as a count
+
+
+def checks_header_dump():
+    """Whether a ``-D`` stream that cannot be written fails the transfer at
+    the header line (else it goes unnoticed until the body)."""
+    return version() >= (8, 9, 0)
 
 
 def checks_files_first():

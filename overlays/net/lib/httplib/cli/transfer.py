@@ -22,7 +22,8 @@ from .connection import MAX_RETRY_SLEEP
 from .errors import (EXIT_CONNECT, EXIT_EMPTY_REPLY, EXIT_HTTP, EXIT_PARTIAL, EXIT_PROTOCOL, EXIT_RECV,
                      EXIT_REDIRECTS, EXIT_RESOLVE, EXIT_RESOLVE_PROXY, EXIT_SEND, EXIT_SSL, EXIT_SSL_CONNECT,
                      EXIT_TIMEOUT, EXIT_WEIRD_REPLY, EXIT_WRITE, EXIT_BAD_ENCODING, EXIT_TOO_LARGE,
-                     LocalError, Retry)
+                     LocalError, Retry, WriteFailure)
+from .output import notice_lines
 from .request import has_header
 from .redirects import CurlRedirectHandler
 from .connector import ConnectHTTPHandler, ConnectHTTPSHandler, ProxyAuth, Socks
@@ -557,8 +558,18 @@ def exchange(args, opener, req, timeout, url, transfer, may_retry=False):
             raw = resp.fp if isinstance(resp, urllib.error.HTTPError) else resp
             return body_error(args, cut, transfer, getattr(raw, 'chunked', False))
         args.finish_download(header_items)
+    except WriteFailure as exc:
+        # -o / -D not writable, or stdout closed under us: curl's 23, in the
+        # words curl has for where the write failed.
+        transfer.errormsg = exc.message
+        if args.should_print_error():
+            if exc.notice:
+                print('\n'.join(notice_lines(exc.notice)), file=sys.stderr)
+            if exc.coded:
+                print('curl: (%d) %s' % (EXIT_WRITE, exc.message), file=sys.stderr)
+        return EXIT_WRITE
     except OSError as exc:
-        # -o / -D not writable, or stdout closed under us: curl's (23).
+        # What follows the body (-R, --etag-save) could not be written.
         return fail(args, transfer, EXIT_WRITE, 'Failure writing output to destination: %s' % exc)
     return 0
 

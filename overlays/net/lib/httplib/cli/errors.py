@@ -36,6 +36,23 @@ class LocalError(Exception):
         self.code = code
 
 
+#: libcurl's own text for exit 23, what ``%{errormsg}`` holds when the failure
+#: was the tool's and no transfer message was set.
+WRITE_ERROR_TEXT = 'Failed writing received data to disk/application'
+
+
+class WriteFailure(Exception):
+    """An output curl could not write: exit 23. ``message`` is ``%{errormsg}``
+    and the text of the ``curl: (23)`` line, printed unless ``coded`` is
+    false; ``notice`` is a line curl prints before it, with no code."""
+
+    def __init__(self, message, notice=None, coded=True):
+        Exception.__init__(self, message)
+        self.message = message
+        self.notice = notice
+        self.coded = coded
+
+
 class EarlyExit(Exception):
     """A failure curl reports before any transfer, as ``curl: message`` with
     no ``(N)`` -- a file named on the command line that is not there (2 for
