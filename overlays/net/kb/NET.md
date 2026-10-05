@@ -223,6 +223,10 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     leaks one host's cookies to another. `-c` writes the origin's cookies with
     their expiry and `HttpOnly`, on top of what `-b` read.
   - `-I` prints the headers by itself; `-i` adds them to a body.
+  - **A reader that goes away** (`curl … | head -c 16`) is exit 23 with curl's
+    one line, for the body, `-i` headers and `-D -` alike; what `-w` would then
+    have written to stdout is dropped. When only `-w` had stdout (the body went
+    to `-o`), it is dropped and the exit code stays the transfer's.
 - **Unsupported flags fail loud** (`curl: (2) Unsupported options: --http2`, exit
   2) rather than silently do the wrong thing — that guard is deliberate. If you
   hit one, call real `curl`.
