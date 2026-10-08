@@ -113,7 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
@@ -183,7 +183,7 @@ jobs:
       id-token: write   # required for Trusted Publishing; nothing else is needed
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
