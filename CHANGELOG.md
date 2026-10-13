@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-10-14
+
 ### Added
 
 - `findings index --requote` quotes, in the findings already on disk, the frontmatter
@@ -1415,7 +1417,8 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
   before dispatch; a no-op for a plain install.
 
-[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/jose-pr/dotagents/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/jose-pr/dotagents/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/jose-pr/dotagents/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/jose-pr/dotagents/compare/v0.7.0...v0.7.1
