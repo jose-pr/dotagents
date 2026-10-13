@@ -211,31 +211,6 @@ def test_a_command_clashing_with_an_umbrella_flag_is_skipped(monkeypatch, tmp_pa
     assert cli.main(["about"]) == 0
 
 
-def test_moved_duho_internals_are_reported_not_silent(monkeypatch, tmp_path, caplog):
-    import builtins
-
-    cmds = tmp_path / "cmds"
-    cmds.mkdir()
-    (cmds / "good.py").write_text(GOOD, encoding="utf-8")
-    real_import = builtins.__import__
-
-    def renamed(name, globals=None, locals=None, fromlist=(), level=0):
-        # What a duho release that renamed its remaining private helper looks
-        # like to `from duho.discovery import _commands_in_module, ...` --
-        # and only to it. `import_from_path` is duho's public counterpart
-        # (duho >= 0.6.0) and stays importable; `_commands_in_module` has no
-        # public counterpart yet, so it is the one still exposed to this risk.
-        if name == "duho.discovery" and "_commands_in_module" in (fromlist or ()):
-            raise ImportError("cannot import name '_commands_in_module'")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", renamed)
-    with caplog.at_level(logging.WARNING):
-        commands = cli._discover_modules(cmds)
-    assert "good" in _names(commands)
-    assert any("internals moved" in r.getMessage() for r in caplog.records)
-
-
 # --------------------------------------------------------------------------- #
 # The zipapp-repointed module list is derived, not hand-kept
 # --------------------------------------------------------------------------- #

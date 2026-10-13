@@ -224,8 +224,7 @@ class LeakCheck(LoggingArgs, Cmd):
 
 
 def test_a_command_without_parsername_gets_its_kebab_class_name(monkeypatch, tmp_path, capsys):
-    """`_parsername_` is optional: duho >= 0.6.0 names such a class `LeakCheck`,
-    dotagents gives it `leak-check` (what duho < 0.6 derived)."""
+    """`_parsername_` is optional: such a class is named `leak-check`."""
     cmds = tmp_path / "extra"
     _write(cmds / "leak_check.py", UNNAMED)
     _write(cmds / "toy.py", TOY)

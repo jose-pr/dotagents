@@ -30,6 +30,7 @@ from pathlib import Path
 
 import duho
 from duho import Cli, LoggingArgs
+from duho.text import kebabcase
 
 from dotagents import __version__
 
@@ -207,18 +208,14 @@ def _buildable(commands, file=None) -> "list":
 def kebab_name(class_name: str) -> str:
     """A command class's default subcommand name: ``LeakCheck`` ->
     ``leak-check``, ``HTTPServer`` -> ``http-server``, ``my_cmd`` -> ``my-cmd``."""
-    import re
-
-    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "-", class_name)
-    return re.sub(r"[-_]+", "-", spaced).strip("-").lower()
+    return kebabcase(class_name)
 
 
 def _named(commands) -> "list":
     """``commands``, each discovered class that declares no ``_parsername_``
-    of its own given the kebab-case of its class name (:func:`kebab_name`).
-    ``_parsername_`` is optional in a command module: duho < 0.6 derived that
-    name itself, and from 0.6.0 it uses the class name as it is (``LeakCheck``),
-    which broke ``dotagents leak-check`` for a module that relied on it."""
+    of its own given the kebab-case of its class name (:func:`kebab_name`),
+    which is also the name duho gives it. Setting it makes the name readable as
+    an attribute, which the command-set keys and the tests rely on."""
     for command in commands:
         if isinstance(command, type) and "_parsername_" not in vars(command):
             command._parsername_ = kebab_name(command.__name__)
@@ -228,46 +225,19 @@ def _named(commands) -> "list":
 def _discover_modules(directory: Path) -> "list":
     """duho's per-directory discovery, made resilient per MODULE.
 
-    duho's own loop catches only ImportError/NotImplementedError per file and
-    lets anything else propagate. Discovery runs before EVERY dotagents
-    invocation (including `env`/`context` inside the SessionStart hooks), so
-    one broken user module must not take down every command: the loop is
-    mirrored here with a catch-all per file -- the bad module is named, with
-    its exception, and skipped; the rest of the directory still loads.
-    SystemExit is included because a module that `sys.exit()`s at import is
-    not an Exception. A command that imports but cannot build its parser is
-    skipped the same way (`_buildable`). Falls back to duho's own
-    per-directory unit, with a warning, if a duho release moves these
-    helpers.
+    Discovery runs before EVERY dotagents invocation (including `env`/`context`
+    inside the SessionStart hooks), so one broken user module must not take
+    down every command. `on_error` is called for any exception raised importing
+    one file, `SystemExit` included (a module that `sys.exit()`s at import is
+    not an Exception): the bad module is named, with its exception, and skipped;
+    the rest of the directory still loads. A command that imports but cannot
+    build its parser is skipped the same way (`_buildable`)."""
 
-    Uses duho's PUBLIC `import_from_path` (duho >= 0.6.0) for the file
-    import; `_commands_in_module` has no public counterpart yet, so it stays
-    a private import (see `duho.discovery.import_from_path`'s own docstring:
-    it is the public counterpart of the `_unique_module_name` +
-    `_import_from_path` pair this module used to call directly)."""
-    try:
-        from duho.discovery import _commands_in_module, import_from_path
-    except ImportError:  # pragma: no cover -- a later duho without these internals
-        from duho.discovery import discover_commands
+    def skip(source, exc) -> None:
+        _LOGGER.warning("skipping command module %s: %s", source, _describe(exc))
 
-        _LOGGER.warning(
-            "duho's discovery internals moved; a broken module in %s now skips "
-            "the whole directory, not just itself",
-            directory,
-        )
-        return _named(_buildable(discover_commands(directory)))
-    commands = []
-    for file in sorted(directory.glob("*.py")):
-        if file.name.startswith("_"):
-            continue
-        try:
-            module = import_from_path("duho._discovered." + file.stem, file)
-            found = _commands_in_module(module, stem=file.stem)
-        except (Exception, SystemExit) as exc:  # noqa: BLE001 -- see docstring
-            _LOGGER.warning("skipping command module %s: %s", file, _describe(exc))
-            continue
-        commands.extend(_named(_buildable(found, file)))
-    return commands
+    found = duho.discover_commands(directory, on_error=skip)
+    return _named(_buildable(found))
 
 
 def _discover_dir(source, by_name: dict) -> None:

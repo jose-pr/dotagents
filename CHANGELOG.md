@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The `duho` floor moves to `>=0.7.3,<0.8` (from `>=0.6.0,<0.7`); the vendored
   `.pyz` pin (`build-pyz --duho-version`) moves with it. No flag, exit status or
   output changes.
+- Command modules are loaded with duho's own `discover_commands(on_error=...)`
+  instead of a copy of its loop built on a private duho name. A module that fails
+  to import is still named in a warning and skipped, and a directory's commands
+  now load in subcommand-name order. A command module may now import a sibling
+  helper file by its bare name.
+- `kebab_name` delegates to `duho.text.kebabcase`; its results are unchanged.
 
 ## [0.7.4] - 2026-10-14
 
