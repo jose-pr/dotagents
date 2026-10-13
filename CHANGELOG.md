@@ -7,12 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `findings index --requote` quotes, in the findings already on disk, the frontmatter
+  values YAML cannot read as they stand. Only those lines change: bodies, the other
+  lines and line endings are kept.
+
 ### Changed
 
 - The private-sync guide describes the default ignore rules the overlay's
   `sync-project` now writes, once, into the `.gitignore` of a store kept in git:
   `scratch/`, `tmp/`, `__pycache__/`, hidden files and the machine-local overrides
   stay out of the private repository.
+
+### Fixed
+
+- `findings` writes frontmatter any YAML parser reads. A description that opens with
+  `[` or a backtick, or holds `: `, was written bare, and a markdown viewer or any
+  other tool reading the frontmatter rejected the file. Such a value is now a
+  double-quoted string; a plain one is still written bare, and a finding written
+  before reads as it did.
 
 ## [0.7.3] - 2026-10-04
 

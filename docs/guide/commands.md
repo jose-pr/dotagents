@@ -442,6 +442,7 @@ dotagents findings done <name> -r "fixed in _context; test added"
 dotagents findings reopen <name>
 dotagents findings remove <name>            # an active finding recorded by mistake
 dotagents findings index                    # regenerate INDEX.md after hand edits
+dotagents findings index --requote          # ...and quote frontmatter values YAML cannot read
 dotagents findings path                     # where this scope's queue lives
 ```
 
@@ -463,6 +464,11 @@ dotagents findings path                     # where this scope's queue lives
   without a frontmatter is still listed (name = file stem, description = its
   first heading or line) and gains one the first time the command rewrites it;
   a note that is not UTF-8 is skipped with a warning and never rewritten.
+- The frontmatter is YAML a viewer or another tool can parse: a value is written
+  bare when YAML reads it back as the same text, and double-quoted otherwise (a
+  description that opens with `[` or a backtick, or holds `: `). `index --requote`
+  does the same for findings an earlier version wrote, and for hand-written ones,
+  changing only the lines that need it.
 - `add` refuses the names `index` and `readme` (on a case-insensitive
   filesystem they are `INDEX.md` / `README.md`). `done` and `reopen` refuse to
   move onto an existing file, and `remove` deletes active findings only: reopen
