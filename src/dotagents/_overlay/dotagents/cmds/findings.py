@@ -37,6 +37,10 @@ line, the details in the body::
 
     <the decision, evidence, or why no action was needed>
 
+The frontmatter is YAML a viewer or another tool can parse: a value is written
+bare when YAML reads it back as the same text, and as a double-quoted string
+otherwise (a description that opens with ``[`` or a backtick, or holds ``: ``).
+
 ``INDEX.md`` is one line per finding, active first, then processed -- the cheap
 thing to read at session start. Hand-written notes without frontmatter are
 still listed (name = file stem, description = first heading or line), and gain
@@ -88,6 +92,69 @@ def slugify(text: str) -> str:
     if len(slug) > _MAX_SLUG:
         slug = slug[:_MAX_SLUG].rstrip("-")
     return slug
+
+
+#: A value cannot be written bare when it opens with one of these: YAML reads
+#: ``[`` as a list, a quote as a quoted string, a backtick as reserved.
+_YAML_INDICATORS = frozenset("-?:,[]{}#&*!|>'\"%@`")
+#: Bare words YAML reads as a boolean or as nothing rather than as text.
+_YAML_WORDS = frozenset(("true", "false", "yes", "no", "on", "off", "null", "~"))
+#: Line breaks to YAML that JSON leaves as they are, escaped inside a quoted value.
+_YAML_BREAKS = {"\x85": "\\u0085", " ": "\\u2028", " ": "\\u2029"}
+
+
+def _yaml_scalar(value: str) -> str:
+    """``value`` as a one-line YAML scalar: bare when YAML reads it back as the
+    same text, double-quoted when it would read something else (a list, a
+    mapping, a comment) or nothing at all."""
+    plain = (
+        value == value.strip()
+        and value[:1] not in _YAML_INDICATORS
+        and ": " not in value
+        and " #" not in value
+        and not value.endswith(":")
+        and value.lower() not in _YAML_WORDS
+        and not any(ord(c) < 32 or c == "\x7f" or c in _YAML_BREAKS for c in value)
+    )
+    if plain and value:
+        return value
+    quoted = json.dumps(value, ensure_ascii=False)  # a JSON string is a YAML one
+    for char, escape in _YAML_BREAKS.items():
+        quoted = quoted.replace(char, escape)
+    return quoted
+
+
+def _yaml_text(scalar: str) -> str:
+    """The text of a one-line scalar as :func:`_yaml_scalar` writes it. Anything
+    that is not one whole quoted string is its own text, which is how a value
+    this command wrote bare, before it quoted, still reads as it did."""
+    if len(scalar) >= 2 and scalar[0] == scalar[-1] == '"':
+        try:
+            value = json.loads(scalar)
+        except ValueError:
+            return scalar
+        return value if isinstance(value, str) else scalar
+    if len(scalar) >= 2 and scalar[0] == scalar[-1] == "'":
+        inner = scalar[1:-1]
+        if "'" not in inner.replace("''", ""):
+            return inner.replace("''", "'")
+    return scalar
+
+
+def _requoted(block: str) -> str:
+    """A frontmatter block with every bare value YAML would misread quoted.
+    A value that is already one quoted string, or reads back as itself, keeps
+    its line as it is; so do keys, order, line endings and any line that is
+    not ``key: value``."""
+    out = []
+    for line in block.splitlines(True):
+        text = line.rstrip("\r\n")
+        key, sep, value = text.partition(":")
+        bare = value.strip()
+        if sep and key.strip() and bare and _yaml_text(bare) == bare and _yaml_scalar(bare) != bare:
+            text = "%s: %s" % (key, _yaml_scalar(bare))
+        out.append(text + line[len(line.rstrip("\r\n")):])
+    return "".join(out)
 
 
 def _today() -> str:
@@ -153,7 +220,7 @@ class Finding:
             for line in m.group(1).splitlines():
                 key, sep, value = line.partition(":")
                 if sep and key.strip():
-                    meta[key.strip()] = value.strip()
+                    meta[key.strip()] = _yaml_text(value.strip())
             body = text[m.end():]
         else:
             body = text
@@ -178,10 +245,10 @@ class Finding:
         lines = ["---"]
         for key in _META_KEYS:
             if self.meta.get(key):
-                lines.append("%s: %s" % (key, self.meta[key]))
+                lines.append("%s: %s" % (key, _yaml_scalar(self.meta[key])))
         for key, value in self.meta.items():
             if key not in _META_KEYS and value:
-                lines.append("%s: %s" % (key, value))
+                lines.append("%s: %s" % (key, _yaml_scalar(value)))
         lines.append("---")
         body = self.body.rstrip("\r\n")
         return "\n".join(lines) + "\n\n" + (body + "\n" if body else "")
@@ -371,6 +438,26 @@ class FindingsStore:
         path.unlink()
         self.write_index()
         return path
+
+    def requote(self) -> "list[Path]":
+        """Write again every frontmatter whose values are not in the form this
+        command writes now: a description an earlier version left bare where
+        YAML needs it quoted. Only those lines change; the body, the other
+        lines and the line endings stay byte for byte. Returns the files
+        changed."""
+        changed = []
+        for finding in self.all():
+            text = finding.path.read_bytes().decode("utf-8")
+            m = _FRONTMATTER_RE.match(text[1:] if text.startswith("﻿") else text)
+            if not m:
+                continue
+            shift = 1 if text.startswith("﻿") else 0
+            start, end = m.start(1) + shift, m.end(1) + shift
+            block = _requoted(text[start:end])
+            if block != text[start:end]:
+                write_text_lf(finding.path, text[:start] + block + text[end:])
+                changed.append(finding.path)
+        return changed
 
     # -- index ---------------------------------------------------------------
 
@@ -605,12 +692,24 @@ class Findings(LoggingArgs, Cli):
             return 0
 
     class Index(_Base):
-        """Regenerate INDEX.md from the files (after hand edits)."""
+        """Regenerate INDEX.md from the files (after hand edits).
+
+        `--requote` first quotes any frontmatter value YAML cannot read as it
+        stands: what an earlier version wrote for a description opening with
+        `[` or a backtick, or holding `: `."""
 
         _parsername_ = "index"
 
+        requote: bool = False
+        "Also quote frontmatter values YAML cannot read bare (bodies are not touched)."
+        ("--requote",)
+
         def __call__(self) -> int:
-            _write_stdout("%s\n" % (self.store().write_index(),))
+            store = self.store()
+            if self.requote:
+                changed = store.requote()
+                self._logger_.info("requoted the frontmatter of %d finding(s)", len(changed))
+            _write_stdout("%s\n" % (store.write_index(),))
             return 0
 
     class PathCmd(_Base):

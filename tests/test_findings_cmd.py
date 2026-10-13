@@ -336,3 +336,84 @@ def test_a_finding_named_like_the_index_is_refused(findings_mod, tmp_path):
         with pytest.raises(SystemExit, match="reserved"):
             store.add(title, body="important details")
     assert not root.exists() or not [p for p in root.iterdir() if p.suffix == ".md"]
+
+
+# --------------------------------------------------------------------------- #
+# The frontmatter is YAML another tool can read
+# --------------------------------------------------------------------------- #
+
+AWKWARD = [
+    "[low][correctness] off Linux, sniff with an interface name raises",
+    "`dotagents pyvenv` broken on the new machine",
+    "perf rule: two hosted-runner runs are not a before/after",
+    '"It compiles" is not evidence',
+    "'first', 'second' and a third",
+    '"quoted"',
+    "ends with a colon:",
+    "a marker # that starts a comment",
+    "*starred* and &anchored",
+    'a back\\slash and a "quote": both',
+    "- a leading dash",
+    "{braces} and a percent %",
+    "em dash — and an accent: é",
+    "true",
+]
+
+
+@pytest.mark.parametrize("text", AWKWARD)
+def test_any_description_is_frontmatter_yaml_can_read(findings_mod, tmp_path, text):
+    yaml = pytest.importorskip("yaml")
+    store = findings_mod.FindingsStore(tmp_path / "findings")
+    finding = store.add(text, name="x")
+    front = yaml.safe_load(finding.path.read_text(encoding="utf-8").split("---\n")[1])
+    assert front["name"] == "x" and str(front["description"]) == text
+    assert findings_mod.Finding.load(finding.path).description == text
+    assert "— %s\n" % text in store.index_path.read_text(encoding="utf-8")
+
+
+def test_a_plain_description_is_written_bare(findings_mod, tmp_path):
+    store = findings_mod.FindingsStore(tmp_path / "findings")
+    text = "bare kb/X.md refs were never inlined (3 files, 2026-09-09)"
+    raw = store.add(text).path.read_text(encoding="utf-8")
+    assert "\ndescription: %s\n" % text in raw
+
+
+@pytest.mark.parametrize("text", [
+    "[low][api] a consumer: rewrites `x`",
+    '"It compiles" is not evidence',
+    "'one', 'two'",
+    '"a" and "b"',
+])
+def test_a_finding_written_bare_still_reads_as_it_did(findings_mod, tmp_path, text):
+    """What an earlier version wrote: the description as typed, whatever it held."""
+    path = tmp_path / "findings" / "old.md"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(("---\nname: old\ndescription: %s\nstatus: active\n---\n\nbody\n" % text).encode("utf-8"))
+    assert findings_mod.Finding.load(path).description == text
+
+
+def test_index_requote_changes_only_the_values_yaml_cannot_read(findings_mod, tmp_path, capsys):
+    yaml = pytest.importorskip("yaml")
+    root = tmp_path / "findings"
+    (root / "processed").mkdir(parents=True)
+    bad = root / "processed" / "bad.md"  # CRLF, odd spacing, blank lines: all kept
+    bad.write_bytes(b"---\r\nname: bad\r\ndescription: [low][api] a: b\r\nstatus: processed\r\n---\r\n\r\n\r\nbody kept  \r\n\r\n\r\n")
+    kept = {
+        root / "quoted.md": b'---\nname: quoted\ndescription: "already: quoted"\n---\nbody\n',
+        root / "plain.md": b"---\nname: plain\ndescription:   nothing to do\nextra: 1\n---\n\nbody\n",
+        root / "note.md": b"# a hand note\n\n---\nnot: [frontmatter\n---\n",
+    }
+    for path, data in kept.items():
+        path.write_bytes(data)
+
+    assert _run(findings_mod.Findings.Index, dir=root, requote=True) == 0
+    assert capsys.readouterr().out.strip() == str(root / "INDEX.md")
+
+    assert bad.read_bytes() == (
+        b'---\r\nname: bad\r\ndescription: "[low][api] a: b"\r\nstatus: processed\r\n---\r\n\r\n\r\nbody kept  \r\n\r\n\r\n')
+    assert yaml.safe_load(bad.read_bytes().decode().split("---\r\n")[1])["description"] == "[low][api] a: b"
+    for path, data in kept.items():
+        assert path.read_bytes() == data, path.name
+    assert "— [low][api] a: b" in (root / "INDEX.md").read_text(encoding="utf-8")
+    # A second pass has nothing left to do.
+    assert findings_mod.FindingsStore(root).requote() == []
