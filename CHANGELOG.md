@@ -14,9 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   output changes.
 - Command modules are loaded with duho's own `discover_commands(on_error=...)`
   instead of a copy of its loop built on a private duho name. A module that fails
-  to import is still named in a warning and skipped, and a directory's commands
-  now load in subcommand-name order. A command module may now import a sibling
-  helper file by its bare name.
+  to import is still named in a warning and skipped, and the listing order is
+  unchanged. A command module may now import a sibling helper file by its bare
+  name.
 - `kebab_name` delegates to `duho.text.kebabcase`; its results are unchanged.
 
 ## [0.7.4] - 2026-10-14

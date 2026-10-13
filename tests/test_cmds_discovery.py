@@ -435,3 +435,17 @@ def test_a_module_failing_at_parser_build_does_not_take_the_cli_down(monkeypatch
     except SystemExit as exc:
         rc = exc.code
     assert rc == 0
+
+
+def test_a_directory_lists_its_commands_by_file_then_definition_order(tmp_path):
+    """The `--help` listing follows the files, not the subcommand names."""
+    template = (
+        "from duho import Cmd, LoggingArgs\n\n"
+        "class {a}(LoggingArgs, Cmd):\n    _parsername_ = '{a}'\n\n"
+        "    def __call__(self) -> int:\n        return 0\n\n"
+        "class {b}(LoggingArgs, Cmd):\n    _parsername_ = '{b}'\n\n"
+        "    def __call__(self) -> int:\n        return 0\n"
+    )
+    _write(tmp_path / "aa_first.py", template.format(a="zulu", b="alpha"))
+    _write(tmp_path / "bb_second.py", template.format(a="mike", b="bravo"))
+    assert _names(cli._discover_modules(tmp_path)) == ["zulu", "alpha", "mike", "bravo"]
