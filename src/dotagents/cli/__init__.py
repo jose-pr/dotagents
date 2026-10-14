@@ -30,6 +30,7 @@ from pathlib import Path
 
 import duho
 from duho import Cli, LoggingArgs
+from duho.runtime import build_command_parser
 from duho.text import kebabcase
 
 from dotagents import __version__
@@ -165,18 +166,7 @@ def _check_buildable(command) -> None:
     fields claiming the same flag, a flag the umbrella already owns) would
     otherwise fail every invocation. The parents are the umbrella's options,
     as in `duho.app`, so a clash with them surfaces here too."""
-    import argparse
-
-    base = Dotagents._parser_(add_help=False)
-    subparsers = argparse.ArgumentParser(add_help=False).add_subparsers()
-    if isinstance(command, type):
-        command._parser_(subparsers, parents=[base])
-        return
-    try:
-        from duho.runtime import _register_module_command
-    except ImportError:  # pragma: no cover -- a later duho without this helper
-        return
-    _register_module_command(subparsers, command, base, None, Dotagents)
+    build_command_parser(command, Dotagents)
 
 
 def _source_of(command) -> str:
@@ -222,18 +212,6 @@ def _named(commands) -> "list":
     return commands
 
 
-def _load_position(command) -> "tuple[str, int]":
-    """Sort key: the command's file name, then its place in that module."""
-    module = getattr(command, "module", None) or sys.modules.get(
-        getattr(command, "__module__", ""), None
-    )
-    name = Path(str(getattr(module, "__file__", None) or "")).name
-    for index, value in enumerate(list(vars(module).values()) if module else ()):
-        if value is command:
-            return name, index
-    return name, 0
-
-
 def _discover_modules(directory: Path) -> "list":
     """duho's per-directory discovery, made resilient per MODULE.
 
@@ -248,11 +226,7 @@ def _discover_modules(directory: Path) -> "list":
     def skip(source, exc) -> None:
         _LOGGER.warning("skipping command module %s: %s", source, _describe(exc))
 
-    found = duho.discover_commands(directory, on_error=skip)
-    # duho returns them sorted by subcommand name; the listing in `--help` has
-    # always followed the files (by file name) and, within a file, the order the
-    # classes are defined in, so that order is restored.
-    found.sort(key=_load_position)
+    found = duho.discover_commands(directory, on_error=skip, sort=False)
     return _named(_buildable(found))
 
 

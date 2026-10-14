@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   unchanged. A command module may now import a sibling helper file by its bare
   name.
 - `kebab_name` delegates to `duho.text.kebabcase`; its results are unchanged.
+- Discovered commands are listed in discovery order with `discover_commands(sort=False)`
+  instead of being re-sorted here, and a command that cannot build its parser is
+  found out with `duho.runtime.build_command_parser` instead of a private duho
+  helper. Output, exit statuses and which commands are skipped are unchanged.
 
 ## [0.7.4] - 2026-10-14
 
