@@ -22,10 +22,12 @@ _NETIMPS_FLOOR = (0, 4, 1)
 
 def _too_old(netimps):
     """Whether ``netimps`` reports a release older than the floor. One that
-    reports no readable version (a source checkout may not) is let through:
-    the names ``_netimps`` checks still have to be there."""
+    reports no usable version is let through, and the names ``_netimps``
+    checks still have to be there: imported from a source tree with no
+    package metadata, netimps reports ``0.0.0+unknown``."""
     found = re.match(r'(\d+)\.(\d+)\.(\d+)', str(getattr(netimps, '__version__', '') or ''))
-    return bool(found) and tuple(int(part) for part in found.groups()) < _NETIMPS_FLOOR
+    version = tuple(int(part) for part in found.groups()) if found else None
+    return version is not None and version != (0, 0, 0) and version < _NETIMPS_FLOOR
 
 
 def _netimps(flag, needs):

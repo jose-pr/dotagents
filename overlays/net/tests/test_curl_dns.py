@@ -173,6 +173,7 @@ def test_an_older_netimps_is_refused(world, monkeypatch, capsysbinary):
     assert netconn._too_old(types.SimpleNamespace(__version__="0.4.1")) is False
     assert netconn._too_old(types.SimpleNamespace(__version__="0.5.0.dev3")) is False
     assert netconn._too_old(types.SimpleNamespace()) is False  # no version: the names decide
+    assert netconn._too_old(types.SimpleNamespace(__version__="0.0.0+unknown")) is False  # a source tree
 
 
 # --------------------------------------------------------------------------- #
