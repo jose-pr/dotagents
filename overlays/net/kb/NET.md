@@ -139,8 +139,8 @@ composed in `options.CurlCmd`; the refused flags live in `unsupported`.
     server's chain against a PEM list (revoked: 60); `--pinnedpubkey
     sha256//BASE64[;...]` or a public-key file requires the server's key (exit
     90), checked even with `-k`.
-  - **Name resolution by netimps** (`pip install 'netimps>=0.3.3'`; without it
-    these flags are refused, exit 2): `--dns-servers IP[:PORT],...` asks those
+  - **Name resolution by netimps** (`pip install 'netimps>=0.4.1'`; without it,
+    or with an older one, these flags are refused, exit 2): `--dns-servers IP[:PORT],...` asks those
     nameservers (UDP, TCP when truncated), `--dns-ipv4-addr` /
     `--dns-ipv6-addr` / `--dns-interface` send the queries from that address,
     `--doh-url https://...` asks a DNS-over-HTTPS endpoint, verified as the
