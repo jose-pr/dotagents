@@ -6,7 +6,7 @@ import sys
 import urllib.parse
 from typing import Optional
 
-from ._duho import NS, Arg
+from ._duho import Meta, Arg
 from .args import Group
 from .errors import EXIT_WRITE, WRITE_ERROR_TEXT, LocalError, WriteFailure
 
@@ -157,7 +157,7 @@ class OutputArgs(Group):
     "-O for every URL (there is one here)"
     ("--remote-name-all",)
 
-    output_dir: Arg[Optional[str], NS(metavar='DIR')] = None
+    output_dir: Arg[Optional[str], Meta(metavar='DIR')] = None
     "Directory for -o / -O files"
     ("--output-dir",)
 
@@ -165,7 +165,7 @@ class OutputArgs(Group):
     "Create the output file's missing directories"
     ("--create-dirs",)
 
-    dump_header: Arg[Optional[str], NS(metavar='FILE')] = None
+    dump_header: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Write response headers to file (or - for stdout)"
     ("-D", "--dump-header")
 
@@ -214,7 +214,7 @@ class OutputArgs(Group):
     "Styled header output (a no-op: none is styled)"
     ("--styled-output",)
 
-    stderr: Arg[Optional[str], NS(metavar='FILE')] = None
+    stderr: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Write what goes to stderr to FILE instead (- for stdout)"
     ("--stderr",)
 

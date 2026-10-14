@@ -18,7 +18,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Optional
 
-from ._duho import NS, Arg
+from ._duho import Meta, Arg
 from .args import Group, first_header
 from .errors import EXIT_WRITE, LocalError
 
@@ -78,7 +78,7 @@ class DownloadArgs(Group):
     _time_value = None
     _created = False
 
-    continue_at: Arg[Optional[str], NS(metavar='OFFSET')] = None
+    continue_at: Arg[Optional[str], Meta(metavar='OFFSET')] = None
     "Resume at OFFSET bytes, or - for the output file's size (Range: bytes=OFFSET-)"
     ("-C", "--continue-at")
 
@@ -90,15 +90,15 @@ class DownloadArgs(Group):
     "Give the file the server's Last-Modified time"
     ("-R", "--remote-time")
 
-    time_cond: Arg[Optional[str], NS(metavar='TIME')] = None
+    time_cond: Arg[Optional[str], Meta(metavar='TIME')] = None
     "Only if modified since TIME (a date or a file's mtime); -TIME: only if not"
     ("-z", "--time-cond")
 
-    etag_save: Arg[Optional[str], NS(metavar='FILE')] = None
+    etag_save: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Write the response's ETag to FILE"
     ("--etag-save",)
 
-    etag_compare: Arg[Optional[str], NS(metavar='FILE')] = None
+    etag_compare: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Only if the ETag differs from the one in FILE (If-None-Match)"
     ("--etag-compare",)
 
@@ -114,7 +114,7 @@ class DownloadArgs(Group):
     "Remove the output file when the transfer fails"
     ("--remove-on-error",)
 
-    max_filesize: Arg[Optional[str], NS(metavar='BYTES')] = None
+    max_filesize: Arg[Optional[str], Meta(metavar='BYTES')] = None
     "Refuse a download larger than BYTES (k/M/G suffixes), exit 63"
     ("--max-filesize",)
 

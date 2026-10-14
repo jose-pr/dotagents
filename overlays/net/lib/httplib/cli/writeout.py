@@ -9,7 +9,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional
 
-from ._duho import NS, Arg
+from ._duho import Meta, Arg
 from .args import Group, first_header
 from .errors import EXIT_READ, EarlyExit
 from .routing import caller_url
@@ -276,7 +276,7 @@ def emit_write_out(tokens, values, header_items, exitcode):
 class WriteOutArgs(Group):
     """``-w``."""
 
-    write_out: Arg[Optional[str], NS(metavar='FORMAT')] = None
+    write_out: Arg[Optional[str], Meta(metavar='FORMAT')] = None
     "Write FORMAT after the transfer (@file / @- read it); see httplib.cli.writeout.WRITE_OUT_VARIABLES"
     ("-w", "--write-out")
 

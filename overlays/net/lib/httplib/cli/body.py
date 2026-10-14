@@ -7,7 +7,7 @@ import re
 import urllib.parse
 from typing import List, Optional
 
-from ._duho import NS, Arg
+from ._duho import Meta, Arg
 from .args import Group, read_source, url_encoded
 from .errors import EXIT_READ, LocalError
 
@@ -61,35 +61,35 @@ class BodyArgs(Group):
     body_parts = None
     form_parts = None
 
-    data: Arg[Optional[List[str]], NS(action=_InOrder)] = None
+    data: Arg[Optional[List[str]], Meta(action=_InOrder)] = None
     "HTTP POST data (repeatable, joined with &; @file, @- for stdin)"
     ("-d", "--data", "--data-ascii")
 
-    data_raw: Arg[Optional[List[str]], NS(action=_InOrder)] = None
+    data_raw: Arg[Optional[List[str]], Meta(action=_InOrder)] = None
     "HTTP POST data without @file expansion"
     ("--data-raw",)
 
-    data_binary: Arg[Optional[List[str]], NS(action=_InOrder)] = None
+    data_binary: Arg[Optional[List[str]], Meta(action=_InOrder)] = None
     "HTTP POST data as is (@file, @- for stdin)"
     ("--data-binary",)
 
-    data_urlencode: Arg[Optional[List[str]], NS(action=_InOrder, metavar='DATA')] = None
+    data_urlencode: Arg[Optional[List[str]], Meta(action=_InOrder, metavar='DATA')] = None
     "HTTP POST data, URL-encoded: content, =content, name=content, @file, name@file"
     ("--data-urlencode",)
 
-    json_data: Arg[Optional[List[str]], NS(action=_InOrder, metavar='DATA')] = None
+    json_data: Arg[Optional[List[str]], Meta(action=_InOrder, metavar='DATA')] = None
     "JSON body (@file, @- for stdin; repeats concatenate); sends Content-Type and Accept: application/json"
     ("--json",)
 
-    form: Arg[Optional[List[str]], NS(action=_InFormOrder, metavar='NAME=CONTENT')] = None
+    form: Arg[Optional[List[str]], Meta(action=_InFormOrder, metavar='NAME=CONTENT')] = None
     "multipart field: name=value, name=@file (upload), name=<file (its content); ;type= and ;filename= may follow"
     ("-F", "--form")
 
-    form_string: Arg[Optional[List[str]], NS(action=_InFormOrder, metavar='NAME=STRING')] = None
+    form_string: Arg[Optional[List[str]], Meta(action=_InFormOrder, metavar='NAME=STRING')] = None
     "multipart field, the value taken literally"
     ("--form-string",)
 
-    upload_file: Arg[Optional[str], NS(metavar='FILE')] = None
+    upload_file: Arg[Optional[str], Meta(metavar='FILE')] = None
     "PUT this file (- for stdin); a URL ending in / gets its name"
     ("-T", "--upload-file")
 

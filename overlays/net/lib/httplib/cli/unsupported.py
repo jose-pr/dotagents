@@ -6,10 +6,10 @@ real curl runs the command."""
 import argparse
 from typing import List, Optional
 
-from ._duho import NS, Arg, duho
+from ._duho import Meta, Arg, duho
 from .args import Group
 
-_HIDDEN = NS(help=argparse.SUPPRESS)
+_HIDDEN = Meta(help=argparse.SUPPRESS)
 
 #: The fields below; a set one is refused.
 UNSUPPORTED_ARGS = [
@@ -45,7 +45,7 @@ class UnsupportedArgs(Group):
     ('--cert-status',)
 
 
-    config: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='CONFIG')] = None
+    config: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='CONFIG')] = None
     ('-K', '--config',)
 
 
@@ -54,7 +54,7 @@ class UnsupportedArgs(Group):
 
 
 
-    delegation: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='LEVEL')] = None
+    delegation: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='LEVEL')] = None
     ('--delegation',)
 
 
@@ -70,22 +70,22 @@ class UnsupportedArgs(Group):
 
 
 
-    engine: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='ENGINE')] = None
+    engine: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='ENGINE')] = None
     ('--engine',)
 
 
 
 
-    ftp_account: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='DATA')] = None
+    ftp_account: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='DATA')] = None
     ('--ftp-account',)
 
-    ftp_alternative_to_user: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='COMMAND')] = None
+    ftp_alternative_to_user: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='COMMAND')] = None
     ('--ftp-alternative-to-user',)
 
     ftp_create_dirs: Arg[bool, _HIDDEN] = False
     ('--ftp-create-dirs',)
 
-    ftp_method: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='METHOD')] = None
+    ftp_method: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='METHOD')] = None
     ('--ftp-method',)
 
     ftp_pasv: Arg[bool, _HIDDEN] = False
@@ -94,7 +94,7 @@ class UnsupportedArgs(Group):
     ftp_skip_pasv_ip: Arg[bool, _HIDDEN] = False
     ('--ftp-skip-pasv-ip',)
 
-    ftp_ssl_ccc_mode: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='MODE')] = None
+    ftp_ssl_ccc_mode: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='MODE')] = None
     ('--ftp-ssl-ccc-mode',)
 
     ftp_ssl_ccc: Arg[bool, _HIDDEN] = False
@@ -107,7 +107,7 @@ class UnsupportedArgs(Group):
     haproxy_protocol: Arg[bool, _HIDDEN] = False
     ('--haproxy-protocol',)
 
-    hostpubmd5: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='MD5')] = None
+    hostpubmd5: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='MD5')] = None
     ('--hostpubmd5',)
 
 
@@ -122,17 +122,17 @@ class UnsupportedArgs(Group):
 
 
 
-    ip_resolve: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='RESOLVE')] = None
+    ip_resolve: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='RESOLVE')] = None
     ('--ip-resolve',)
 
 
 
 
 
-    krb: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='LEVEL')] = None
+    krb: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='LEVEL')] = None
     ('--krb',)
 
-    libcurl: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
+    libcurl: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='FILE')] = None
     ('--libcurl',)
 
 
@@ -141,19 +141,19 @@ class UnsupportedArgs(Group):
 
 
 
-    login_options: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='OPTIONS')] = None
+    login_options: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='OPTIONS')] = None
     ('--login-options',)
 
-    mail_auth: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='AUTH')] = None
+    mail_auth: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='AUTH')] = None
     ('--mail-auth',)
 
-    mail_from: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FROM')] = None
+    mail_from: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='FROM')] = None
     ('--mail-from',)
 
     mail_rcpt_allowfails: Arg[bool, _HIDDEN] = False
     ('--mail-rcpt-allowfails',)
 
-    mail_rcpt: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='RCPT')] = None
+    mail_rcpt: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='RCPT')] = None
     ('--mail-rcpt',)
 
 
@@ -221,7 +221,7 @@ class UnsupportedArgs(Group):
 
 
 
-    proxy_service_name: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='NAME')] = None
+    proxy_service_name: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='NAME')] = None
     ('--proxy-service-name',)
 
     proxy_ssl_allow_beast: Arg[bool, _HIDDEN] = False
@@ -230,21 +230,21 @@ class UnsupportedArgs(Group):
     proxy_ssl_auto_client_cert: Arg[bool, _HIDDEN] = False
     ('--proxy-ssl-auto-client-cert',)
 
-    proxy_tls13_ciphers: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='CIPHERS')] = None
+    proxy_tls13_ciphers: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='CIPHERS')] = None
     ('--proxy-tls13-ciphers',)
 
-    proxy_tlsauthtype: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='TYPE')] = None
+    proxy_tlsauthtype: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='TYPE')] = None
     ('--proxy-tlsauthtype',)
 
-    proxy_tlspassword: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='STRING')] = None
+    proxy_tlspassword: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='STRING')] = None
     ('--proxy-tlspassword',)
 
-    proxy_tlsuser: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='USER')] = None
+    proxy_tlsuser: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='USER')] = None
     ('--proxy-tlsuser',)
 
 
 
-    pubkey: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='KEY')] = None
+    pubkey: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='KEY')] = None
     ('--pubkey',)
 
     quote: Arg[Optional[List[str]], _HIDDEN] = None
@@ -258,13 +258,13 @@ class UnsupportedArgs(Group):
 
 
 
-    sasl_authzid: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='IDENTITY')] = None
+    sasl_authzid: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='IDENTITY')] = None
     ('--sasl-authzid',)
 
     sasl_ir: Arg[bool, _HIDDEN] = False
     ('--sasl-ir',)
 
-    service_name: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='NAME')] = None
+    service_name: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='NAME')] = None
     ('--service-name',)
 
 
@@ -274,7 +274,7 @@ class UnsupportedArgs(Group):
     socks5_gssapi_nec: Arg[bool, _HIDDEN] = False
     ('--socks5-gssapi-nec',)
 
-    socks5_gssapi_service: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='NAME')] = None
+    socks5_gssapi_service: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='NAME')] = None
     ('--socks5-gssapi-service',)
 
     socks5_gssapi: Arg[bool, _HIDDEN] = False
@@ -320,16 +320,16 @@ class UnsupportedArgs(Group):
 
 
 
-    tls13_ciphers: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='CIPHERS')] = None
+    tls13_ciphers: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='CIPHERS')] = None
     ('--tls13-ciphers',)
 
-    tlsauthtype: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='TYPE')] = None
+    tlsauthtype: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='TYPE')] = None
     ('--tlsauthtype',)
 
-    tlspassword: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='STRING')] = None
+    tlspassword: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='STRING')] = None
     ('--tlspassword',)
 
-    tlsuser: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='USER')] = None
+    tlsuser: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='USER')] = None
     ('--tlsuser',)
 
 
@@ -340,13 +340,13 @@ class UnsupportedArgs(Group):
     tr_encoding: Arg[bool, _HIDDEN] = False
     ('--tr-encoding',)
 
-    trace_ascii: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
+    trace_ascii: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='FILE')] = None
     ('--trace-ascii',)
 
     trace_time: Arg[bool, _HIDDEN] = False
     ('--trace-time',)
 
-    trace: Arg[Optional[str], NS(help=argparse.SUPPRESS, metavar='FILE')] = None
+    trace: Arg[Optional[str], Meta(help=argparse.SUPPRESS, metavar='FILE')] = None
     ('--trace',)
 
 

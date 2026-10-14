@@ -4,7 +4,7 @@ import re
 import urllib.parse
 from typing import List, Optional
 
-from ._duho import NS, Arg
+from ._duho import Meta, Arg
 from .args import Group, read_source, url_encoded
 from .errors import EXIT_PROTOCOL, EXIT_READ, EXIT_URL, EXIT_USAGE, EarlyExit, LocalError
 
@@ -196,7 +196,7 @@ def _set_header(headers, key, value):
 class RequestArgs(Group):
     """URL, method and headers."""
 
-    url_positional: Arg[Optional[str], NS(metavar='URL', nargs='?')] = None
+    url_positional: Arg[Optional[str], Meta(metavar='URL', nargs='?')] = None
     "URL to fetch"
     ("url_positional",)
 
@@ -204,7 +204,7 @@ class RequestArgs(Group):
     "URL to fetch (option)"
     ("--url",)
 
-    request: Arg[Optional[str], NS(metavar='METHOD')] = None
+    request: Arg[Optional[str], Meta(metavar='METHOD')] = None
     "Request method (default GET; POST with a body, PUT with -T, HEAD with -I)"
     ("-X", "--request")
 
@@ -212,7 +212,7 @@ class RequestArgs(Group):
     "Send the -d / --data-urlencode data as the query of a GET"
     ("-G", "--get")
 
-    url_query: Arg[Optional[List[str]], NS(metavar='DATA')] = None
+    url_query: Arg[Optional[List[str]], Meta(metavar='DATA')] = None
     "Add to the URL query (the --data-urlencode forms; +DATA as it stands)"
     ("--url-query",)
 
@@ -224,11 +224,11 @@ class RequestArgs(Group):
     "Set User-Agent"
     ("-A", "--user-agent")
 
-    referer: Arg[Optional[str], NS(metavar='URL')] = None
+    referer: Arg[Optional[str], Meta(metavar='URL')] = None
     "Referer header"
     ("-e", "--referer")
 
-    range: Arg[Optional[str], NS(metavar='RANGE')] = None
+    range: Arg[Optional[str], Meta(metavar='RANGE')] = None
     "Ask for a byte range (Range: bytes=RANGE)"
     ("-r", "--range")
 
@@ -236,15 +236,15 @@ class RequestArgs(Group):
     "Ask for a compressed response and decode it"
     ("--compressed",)
 
-    proto: Arg[Optional[str], NS(metavar='PROTOCOLS')] = None
+    proto: Arg[Optional[str], Meta(metavar='PROTOCOLS')] = None
     "Allow only these protocols (+name, -name, =name, all; comma-separated)"
     ("--proto",)
 
-    proto_redir: Arg[Optional[str], NS(metavar='PROTOCOLS')] = None
+    proto_redir: Arg[Optional[str], Meta(metavar='PROTOCOLS')] = None
     "Allow only these protocols on a redirect (default http,https,ftp,ftps)"
     ("--proto-redir",)
 
-    proto_default: Arg[Optional[str], NS(metavar='PROTOCOL')] = None
+    proto_default: Arg[Optional[str], Meta(metavar='PROTOCOL')] = None
     "The scheme of a URL that names none (default http)"
     ("--proto-default",)
 
@@ -252,7 +252,7 @@ class RequestArgs(Group):
     "Send /../ and /./ in the path as typed (default: resolved, as curl does)"
     ("--path-as-is",)
 
-    request_target: Arg[Optional[str], NS(metavar='TARGET')] = None
+    request_target: Arg[Optional[str], Meta(metavar='TARGET')] = None
     "Send this request target (e.g. '*' for OPTIONS) instead of the URL's path"
     ("--request-target",)
 

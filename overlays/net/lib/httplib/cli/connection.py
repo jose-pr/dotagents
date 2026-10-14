@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from httplib.retry import TRANSIENT_STATUSES
 
-from ._duho import NS, Arg
+from ._duho import Meta, Arg
 from .args import Group
 from .errors import EXIT_CONNECT, EXIT_TIMEOUT
 from .connector import Connector, parse_local_port, parse_pins, resolve_interface
@@ -56,23 +56,23 @@ class ConnectionArgs(Group):
     "Use proxy"
     ("-x", "--proxy")
 
-    proxy_user: Arg[Optional[str], NS(metavar='USER[:PASS]')] = None
+    proxy_user: Arg[Optional[str], Meta(metavar='USER[:PASS]')] = None
     "Proxy user and password"
     ("-U", "--proxy-user")
 
-    socks4: Arg[Optional[str], NS(metavar='HOST[:PORT]')] = None
+    socks4: Arg[Optional[str], Meta(metavar='HOST[:PORT]')] = None
     "Use this SOCKS4 proxy (overrides -x)"
     ("--socks4",)
 
-    socks4a: Arg[Optional[str], NS(metavar='HOST[:PORT]')] = None
+    socks4a: Arg[Optional[str], Meta(metavar='HOST[:PORT]')] = None
     "Use this SOCKS4a proxy, which resolves the name (overrides -x)"
     ("--socks4a",)
 
-    socks5: Arg[Optional[str], NS(metavar='HOST[:PORT]')] = None
+    socks5: Arg[Optional[str], Meta(metavar='HOST[:PORT]')] = None
     "Use this SOCKS5 proxy, resolving the name here (overrides -x)"
     ("--socks5",)
 
-    socks5_hostname: Arg[Optional[str], NS(metavar='HOST[:PORT]')] = None
+    socks5_hostname: Arg[Optional[str], Meta(metavar='HOST[:PORT]')] = None
     "Use this SOCKS5 proxy, which resolves the name (overrides -x)"
     ("--socks5-hostname",)
 
@@ -80,11 +80,11 @@ class ConnectionArgs(Group):
     "Offer SOCKS5 username/password auth (what the fallback does; a no-op)"
     ("--socks5-basic",)
 
-    preproxy: Arg[Optional[str], NS(metavar='[PROTOCOL://]HOST[:PORT]')] = None
+    preproxy: Arg[Optional[str], Meta(metavar='[PROTOCOL://]HOST[:PORT]')] = None
     "Reach the -x proxy through this SOCKS proxy"
     ("--preproxy",)
 
-    proxy_header: Arg[Optional[List[str]], NS(metavar='HEADER')] = None
+    proxy_header: Arg[Optional[List[str]], Meta(metavar='HEADER')] = None
     "Header for the proxy only (Name: value, Name; for empty, @file); repeatable"
     ("--proxy-header",)
 
@@ -100,7 +100,7 @@ class ConnectionArgs(Group):
     "Answer the proxy's 407 with what it asks: Digest, else Basic"
     ("--proxy-anyauth",)
 
-    noproxy: Arg[Optional[str], NS(metavar='HOSTS')] = None
+    noproxy: Arg[Optional[str], Meta(metavar='HOSTS')] = None
     "Hosts that bypass the proxy (* for all); replaces NO_PROXY"
     ("--noproxy",)
 
@@ -112,43 +112,43 @@ class ConnectionArgs(Group):
     "Send HTTP/1.0 requests"
     ("-0", "--http1.0")
 
-    interface: Arg[Optional[str], NS(metavar='NAME')] = None
+    interface: Arg[Optional[str], Meta(metavar='NAME')] = None
     "Connect from this IP address, interface (if!NAME) or host (host!NAME)"
     ("--interface",)
 
-    local_port: Arg[Optional[str], NS(metavar='PORT[-PORT]')] = None
+    local_port: Arg[Optional[str], Meta(metavar='PORT[-PORT]')] = None
     "Connect from this local port, or the first free one of a range"
     ("--local-port",)
 
-    limit_rate: Arg[Optional[str], NS(metavar='RATE')] = None
+    limit_rate: Arg[Optional[str], Meta(metavar='RATE')] = None
     "Transfer at most RATE bytes per second (k, m, g suffixes)"
     ("--limit-rate",)
 
-    speed_limit: Arg[Optional[int], NS(metavar='BYTES')] = None
+    speed_limit: Arg[Optional[int], Meta(metavar='BYTES')] = None
     "Abort below this many bytes per second for --speed-time seconds (exit 28)"
     ("-Y", "--speed-limit")
 
-    speed_time: Arg[Optional[int], NS(metavar='SECONDS')] = None
+    speed_time: Arg[Optional[int], Meta(metavar='SECONDS')] = None
     "How long the transfer may stay below --speed-limit (default 30)"
     ("-y", "--speed-time")
 
-    dns_servers: Arg[Optional[str], NS(metavar='ADDRESSES')] = None
+    dns_servers: Arg[Optional[str], Meta(metavar='ADDRESSES')] = None
     "Resolve names with these nameservers (IP[:PORT],...; needs netimps)"
     ("--dns-servers",)
 
-    dns_ipv4_addr: Arg[Optional[str], NS(metavar='ADDRESS')] = None
+    dns_ipv4_addr: Arg[Optional[str], Meta(metavar='ADDRESS')] = None
     "Send IPv4 DNS queries from this address (needs netimps)"
     ("--dns-ipv4-addr",)
 
-    dns_ipv6_addr: Arg[Optional[str], NS(metavar='ADDRESS')] = None
+    dns_ipv6_addr: Arg[Optional[str], Meta(metavar='ADDRESS')] = None
     "Send IPv6 DNS queries from this address (needs netimps)"
     ("--dns-ipv6-addr",)
 
-    dns_interface: Arg[Optional[str], NS(metavar='INTERFACE')] = None
+    dns_interface: Arg[Optional[str], Meta(metavar='INTERFACE')] = None
     "Send DNS queries from this interface's addresses (needs netimps)"
     ("--dns-interface",)
 
-    doh_url: Arg[Optional[str], NS(metavar='URL')] = None
+    doh_url: Arg[Optional[str], Meta(metavar='URL')] = None
     "Resolve names with DNS over HTTPS at this https URL (needs netimps)"
     ("--doh-url",)
 
@@ -163,7 +163,7 @@ class ConnectionArgs(Group):
     "Stop at the first failed transfer (a no-op: one transfer)"
     ("--fail-early",)
 
-    expect100_timeout: Arg[Optional[str], NS(metavar='SECONDS')] = None
+    expect100_timeout: Arg[Optional[str], Meta(metavar='SECONDS')] = None
     "Wait for 100-continue (a no-op: Expect: 100-continue is never sent)"
     ("--expect100-timeout",)
 
@@ -175,15 +175,15 @@ class ConnectionArgs(Group):
     "TLS False Start (a no-op)"
     ("--false-start",)
 
-    happy_eyeballs_timeout_ms: Arg[Optional[str], NS(metavar='MS')] = None
+    happy_eyeballs_timeout_ms: Arg[Optional[str], Meta(metavar='MS')] = None
     "Happy Eyeballs delay (a no-op: addresses are tried in turn)"
     ("--happy-eyeballs-timeout-ms",)
 
-    random_file: Arg[Optional[str], NS(metavar='FILE')] = None
+    random_file: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Entropy file (a no-op, as in curl itself)"
     ("--random-file",)
 
-    egd_file: Arg[Optional[str], NS(metavar='FILE')] = None
+    egd_file: Arg[Optional[str], Meta(metavar='FILE')] = None
     "EGD socket (a no-op, as in curl itself)"
     ("--egd-file",)
 
@@ -231,15 +231,15 @@ class ConnectionArgs(Group):
     "Connect timeout in seconds"
     ("--connect-timeout",)
 
-    retry: Arg[Optional[int], NS(metavar='NUM')] = None
+    retry: Arg[Optional[int], Meta(metavar='NUM')] = None
     "Retry a transient failure (timeout, HTTP 408/429/500/502/503/504) NUM times"
     ("--retry",)
 
-    retry_delay: Arg[Optional[float], NS(metavar='SECONDS')] = None
+    retry_delay: Arg[Optional[float], Meta(metavar='SECONDS')] = None
     "Wait this long between retries (default: 1s, doubling)"
     ("--retry-delay",)
 
-    retry_max_time: Arg[Optional[float], NS(metavar='SECONDS')] = None
+    retry_max_time: Arg[Optional[float], Meta(metavar='SECONDS')] = None
     "Retry only within this many seconds"
     ("--retry-max-time",)
 
@@ -259,15 +259,15 @@ class ConnectionArgs(Group):
     "Resolve names to IPv6 addresses only"
     ("-6", "--ipv6")
 
-    resolve: Arg[Optional[List[str]], NS(metavar='HOST:PORT:ADDR[,ADDR]')] = None
+    resolve: Arg[Optional[List[str]], Meta(metavar='HOST:PORT:ADDR[,ADDR]')] = None
     "Resolve HOST:PORT to these addresses (the Host header and TLS name stay HOST)"
     ("--resolve",)
 
-    connect_to: Arg[Optional[List[str]], NS(metavar='HOST1:PORT1:HOST2:PORT2')] = None
+    connect_to: Arg[Optional[List[str]], Meta(metavar='HOST1:PORT1:HOST2:PORT2')] = None
     "Connect to HOST2:PORT2 for requests to HOST1:PORT1 (empty parts: any / unchanged)"
     ("--connect-to",)
 
-    unix_socket: Arg[Optional[str], NS(metavar='PATH')] = None
+    unix_socket: Arg[Optional[str], Meta(metavar='PATH')] = None
     "Connect through this Unix domain socket instead of the network"
     ("--unix-socket",)
 
@@ -275,7 +275,7 @@ class ConnectionArgs(Group):
     "No TCP keepalive (a no-op: each transfer is one connection)"
     ("--no-keepalive",)
 
-    keepalive_time: Arg[Optional[int], NS(metavar='SECONDS')] = None
+    keepalive_time: Arg[Optional[int], Meta(metavar='SECONDS')] = None
     "TCP keepalive interval (a no-op)"
     ("--keepalive-time",)
 

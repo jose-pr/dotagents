@@ -13,7 +13,7 @@ import os
 import urllib.parse
 from typing import Optional
 
-from ._duho import NS, Arg
+from ._duho import Meta, Arg
 from .args import Group
 from . import compat
 from .errors import EXIT_READ, EXIT_USAGE, EarlyExit, LocalError
@@ -90,7 +90,7 @@ class AuthArgs(Group):
     url_credentials = None
     _auth_host = None
 
-    user: Arg[Optional[str], NS(metavar='USER[:PASS]')] = None
+    user: Arg[Optional[str], Meta(metavar='USER[:PASS]')] = None
     "Server user and password (Basic unless --digest)"
     ("-u", "--user")
 
@@ -106,7 +106,7 @@ class AuthArgs(Group):
     "Ask first, then answer the server's challenge with Digest or Basic"
     ("--anyauth",)
 
-    oauth2_bearer: Arg[Optional[str], NS(metavar='TOKEN')] = None
+    oauth2_bearer: Arg[Optional[str], Meta(metavar='TOKEN')] = None
     "Send Authorization: Bearer TOKEN"
     ("--oauth2-bearer",)
 
@@ -114,7 +114,7 @@ class AuthArgs(Group):
     "Take credentials from ~/.netrc (_netrc on Windows) for the host"
     ("-n", "--netrc")
 
-    netrc_file: Arg[Optional[str], NS(metavar='FILE')] = None
+    netrc_file: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Take credentials from this netrc file"
     ("--netrc-file",)
 

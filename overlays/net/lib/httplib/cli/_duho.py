@@ -32,5 +32,5 @@ def _load():
 
 
 duho = _load()
-NS = duho.NS
+Meta = duho.Meta
 Arg = duho.Arg

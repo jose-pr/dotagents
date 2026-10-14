@@ -7,7 +7,7 @@ from typing import Optional
 
 from httplib.tls import new_os_context
 
-from ._duho import NS, Arg
+from ._duho import Meta, Arg
 from .args import Group
 from . import compat
 from .errors import EXIT_CACERT, EXIT_CRL, EXIT_CLIENT_CERT, EXIT_USAGE, EarlyExit, LocalError
@@ -135,7 +135,7 @@ class UnusableContext(object):
 class TLSArgs(Group):
     """Server verification and the client certificate."""
 
-    crlfile: Arg[Optional[str], NS(metavar='FILE')] = None
+    crlfile: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Check the server's chain against this certificate revocation list (PEM)"
     ("--crlfile",)
 
@@ -144,43 +144,43 @@ class TLSArgs(Group):
     "Do not verify the https:// proxy's certificate"
     ("--proxy-insecure",)
 
-    proxy_cacert: Arg[Optional[str], NS(metavar='FILE')] = None
+    proxy_cacert: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Verify the https:// proxy against this CA bundle (PEM)"
     ("--proxy-cacert",)
 
-    proxy_capath: Arg[Optional[str], NS(metavar='DIR')] = None
+    proxy_capath: Arg[Optional[str], Meta(metavar='DIR')] = None
     "Verify the https:// proxy against this hashed CA directory"
     ("--proxy-capath",)
 
-    proxy_cert: Arg[Optional[str], NS(metavar='FILE[:PASSWORD]')] = None
+    proxy_cert: Arg[Optional[str], Meta(metavar='FILE[:PASSWORD]')] = None
     "Client certificate for the https:// proxy (PEM)"
     ("--proxy-cert",)
 
-    proxy_cert_type: Arg[Optional[str], NS(metavar='TYPE')] = None
+    proxy_cert_type: Arg[Optional[str], Meta(metavar='TYPE')] = None
     "--proxy-cert type: PEM only"
     ("--proxy-cert-type",)
 
-    proxy_key: Arg[Optional[str], NS(metavar='FILE')] = None
+    proxy_key: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Private key for --proxy-cert (PEM)"
     ("--proxy-key",)
 
-    proxy_key_type: Arg[Optional[str], NS(metavar='TYPE')] = None
+    proxy_key_type: Arg[Optional[str], Meta(metavar='TYPE')] = None
     "--proxy-key type: PEM only"
     ("--proxy-key-type",)
 
-    proxy_pass: Arg[Optional[str], NS(metavar='PHRASE')] = None
+    proxy_pass: Arg[Optional[str], Meta(metavar='PHRASE')] = None
     "Passphrase for --proxy-key"
     ("--proxy-pass",)
 
-    proxy_ciphers: Arg[Optional[str], NS(metavar='LIST')] = None
+    proxy_ciphers: Arg[Optional[str], Meta(metavar='LIST')] = None
     "OpenSSL cipher list for the https:// proxy"
     ("--proxy-ciphers",)
 
-    proxy_crlfile: Arg[Optional[str], NS(metavar='FILE')] = None
+    proxy_crlfile: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Check the https:// proxy's chain against this revocation list (PEM)"
     ("--proxy-crlfile",)
 
-    proxy_pinnedpubkey: Arg[Optional[str], NS(metavar='HASHES|FILE')] = None
+    proxy_pinnedpubkey: Arg[Optional[str], Meta(metavar='HASHES|FILE')] = None
     "Require the https:// proxy's key: sha256//BASE64[;...] or a key file (exit 90)"
     ("--proxy-pinnedpubkey",)
 
@@ -188,7 +188,7 @@ class TLSArgs(Group):
     "TLS 1.0 or later to the https:// proxy"
     ("--proxy-tlsv1",)
 
-    pinnedpubkey: Arg[Optional[str], NS(metavar='HASHES|FILE')] = None
+    pinnedpubkey: Arg[Optional[str], Meta(metavar='HASHES|FILE')] = None
     "Require the server key: sha256//BASE64[;...] or a public key file (exit 90)"
     ("--pinnedpubkey",)
 
@@ -196,31 +196,31 @@ class TLSArgs(Group):
     "Allow insecure server connections"
     ("-k", "--insecure")
 
-    cacert: Arg[Optional[str], NS(metavar='FILE')] = None
+    cacert: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Verify the server against this CA bundle (PEM) instead of the OS trust store"
     ("--cacert",)
 
-    capath: Arg[Optional[str], NS(metavar='DIR')] = None
+    capath: Arg[Optional[str], Meta(metavar='DIR')] = None
     "Verify the server against this hashed CA directory instead of the OS trust store"
     ("--capath",)
 
-    cert: Arg[Optional[str], NS(metavar='FILE[:PASSWORD]')] = None
+    cert: Arg[Optional[str], Meta(metavar='FILE[:PASSWORD]')] = None
     "Client certificate (PEM; may hold the key too)"
     ("-E", "--cert")
 
-    cert_type: Arg[Optional[str], NS(metavar='TYPE')] = None
+    cert_type: Arg[Optional[str], Meta(metavar='TYPE')] = None
     "Client certificate type: PEM only"
     ("--cert-type",)
 
-    key: Arg[Optional[str], NS(metavar='FILE')] = None
+    key: Arg[Optional[str], Meta(metavar='FILE')] = None
     "Private key for --cert (PEM)"
     ("--key",)
 
-    key_type: Arg[Optional[str], NS(metavar='TYPE')] = None
+    key_type: Arg[Optional[str], Meta(metavar='TYPE')] = None
     "Private key type: PEM only"
     ("--key-type",)
 
-    pass_: Arg[Optional[str], NS(metavar='PHRASE')] = None
+    pass_: Arg[Optional[str], Meta(metavar='PHRASE')] = None
     "Passphrase for the private key"
     ("--pass",)
 
@@ -244,11 +244,11 @@ class TLSArgs(Group):
     "TLS 1.3 or later"
     ("--tlsv1.3",)
 
-    tls_max: Arg[Optional[str], NS(metavar='VERSION')] = None
+    tls_max: Arg[Optional[str], Meta(metavar='VERSION')] = None
     "Highest TLS version: 1.0, 1.1, 1.2, 1.3 or default"
     ("--tls-max",)
 
-    ciphers: Arg[Optional[str], NS(metavar='LIST')] = None
+    ciphers: Arg[Optional[str], Meta(metavar='LIST')] = None
     "OpenSSL cipher list (TLS 1.2 and below)"
     ("--ciphers",)
 
