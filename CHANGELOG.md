@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- The `duho` floor moves to `>=0.7.3,<0.8` (from `>=0.6.0,<0.7`); the vendored
+- The `duho` floor moves to `>=0.7.4,<0.8` (from `>=0.6.0,<0.7`); the vendored
   `.pyz` pin (`build-pyz --duho-version`) moves with it. No flag, exit status or
   output changes.
 - Command modules are loaded with duho's own `discover_commands(on_error=...)`
