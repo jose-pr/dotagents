@@ -9,22 +9,34 @@ to a Unix domain socket (the Docker API's ``/var/run/docker.sock``)."""
 import contextlib
 import http.client
 import ipaddress
+import re
 import socket
 import threading
 import urllib.request
 
-#: The netimps release that has resolve_wire / resolve_doh / source=.
-NETIMPS_FOR_DNS = 'netimps>=0.3.3'
+#: The netimps release the DNS and interface flags are tested with: its
+#: keyword-only options are what the calls below pass.
+NETIMPS_FOR_DNS = 'netimps>=0.4.1'
+_NETIMPS_FLOOR = (0, 4, 1)
+
+
+def _too_old(netimps):
+    """Whether ``netimps`` reports a release older than the floor. One that
+    reports no readable version (a source checkout may not) is let through:
+    the names ``_netimps`` checks still have to be there."""
+    found = re.match(r'(\d+)\.(\d+)\.(\d+)', str(getattr(netimps, '__version__', '') or ''))
+    return bool(found) and tuple(int(part) for part in found.groups()) < _NETIMPS_FLOOR
 
 
 def _netimps(flag, needs):
-    """netimps, with ``needs`` on it, or ``NotImplementedError`` naming the
-    flag and the release to install (exit 2, like any flag not honoured)."""
+    """netimps, at least the release in ``NETIMPS_FOR_DNS`` and with ``needs``
+    on it, or ``NotImplementedError`` naming the flag and the release to
+    install (exit 2, like any flag not honoured)."""
     try:
         import netimps
     except ImportError:
         netimps = None
-    if netimps is None or not all(hasattr(netimps, name) for name in needs):
+    if netimps is None or _too_old(netimps) or not all(hasattr(netimps, name) for name in needs):
         raise NotImplementedError("%s needs netimps: pip install '%s'" % (flag, NETIMPS_FOR_DNS))
     return netimps
 

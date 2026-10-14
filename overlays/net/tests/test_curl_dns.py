@@ -5,7 +5,7 @@ and a fake DNS-over-HTTPS endpoint answer ``*.test`` with 127.0.0.1 and
 
 --doh-url is also compared with real curl (DoH is built in; the
 --dns-servers family needs c-ares, which no curl here has). Skipped without
-a netimps that has ``resolve_wire`` / ``resolve_doh`` (0.3.3)."""
+the netimps the flags require (0.4.1)."""
 import os
 import socket
 import ssl
@@ -22,8 +22,11 @@ import curl  # noqa: E402  (bin/, via conftest)
 from test_curl_options import pki  # noqa: F401  (fixture reused)
 from test_proxy_auth import _clean_env, _fallback  # noqa: F401  (autouse fixture reused)
 
+from httplib.cli import netconn  # noqa: E402  (lib/, via conftest)
+
 netimps = pytest.importorskip("netimps")
-pytestmark = pytest.mark.skipif(not hasattr(netimps, "resolve_doh"), reason="needs netimps >= 0.3.3")
+pytestmark = pytest.mark.skipif(netconn._too_old(netimps) or not hasattr(netimps, "resolve_doh"),
+                                reason="needs %s" % netconn.NETIMPS_FOR_DNS)
 
 
 def _name(data, pos):
@@ -155,7 +158,21 @@ def test_without_netimps_the_flag_is_refused(world, monkeypatch, capsysbinary):
     monkeypatch.setitem(sys.modules, "netimps", None)
     rc, out = _fallback(monkeypatch, capsysbinary, ["-sS", "--dns-servers", world["ns"],
                                                      "http://host.test:%d/" % world["port"]])
-    assert rc == 2 and b"needs netimps: pip install 'netimps>=0.3.3'" in out.err
+    assert rc == 2 and b"needs netimps: pip install 'netimps>=0.4.1'" in out.err
+
+
+def test_an_older_netimps_is_refused(world, monkeypatch, capsysbinary):
+    """A 0.3 has every name the flags call, with the old call shapes."""
+    import types
+
+    old = types.SimpleNamespace(__version__="0.3.4", resolve_wire=None, resolve_doh=None, resolve=None)
+    monkeypatch.setitem(sys.modules, "netimps", old)
+    rc, out = _fallback(monkeypatch, capsysbinary, ["-sS", "--dns-servers", world["ns"],
+                                                     "http://host.test:%d/" % world["port"]])
+    assert rc == 2 and b"needs netimps: pip install 'netimps>=0.4.1'" in out.err
+    assert netconn._too_old(types.SimpleNamespace(__version__="0.4.1")) is False
+    assert netconn._too_old(types.SimpleNamespace(__version__="0.5.0.dev3")) is False
+    assert netconn._too_old(types.SimpleNamespace()) is False  # no version: the names decide
 
 
 # --------------------------------------------------------------------------- #
