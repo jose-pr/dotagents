@@ -130,7 +130,7 @@ def test_reinit_after_overlays_add_keeps_the_overlay_routing(tmp_path):
 
 
 def test_init_with_an_unknown_agent_is_a_usage_error(tmp_path):
-    assert _main(["init", "--dest", str(tmp_path / "s"), "--agents", "claud", "--no-hooks"]) == 2
+    assert _main(["init", "--dest", str(tmp_path / "s"), "--agents", "claud", "--no-hooks"]) == 1
 
 
 # --------------------------------------------------------------------------

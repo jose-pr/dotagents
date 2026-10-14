@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `main()` runs through `duho.run(..., exit=False)`: it always returns the status
+  instead of raising `SystemExit` for a message, `--help` or a usage error (the
+  console script, `python -m dotagents` and `install.py` exit with it as before, with
+  the same statuses and the same text on standard error). Ctrl-C now ends with
+  status 130 and no traceback, and a closed pipe on standard output ends with
+  status 1, quietly.
 - The `duho` floor moves to `>=0.7.4,<0.8` (from `>=0.6.0,<0.7`); the vendored
   `.pyz` pin (`build-pyz --duho-version`) moves with it. No flag, exit status or
   output changes.

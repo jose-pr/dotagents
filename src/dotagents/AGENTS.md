@@ -74,7 +74,11 @@ are skipped.
 ## `dotagents.cli`
 
 - `main(argv=None) -> int` — the entry point (`dotagents` console script,
-  `python -m dotagents`, `install.py`).
+  `python -m dotagents`, `install.py`). It always returns the status and never
+  raises `SystemExit`: a `SystemExit` raised below it (a message, `--help`, a usage
+  error) comes back as its status, the message going to standard error. Ctrl-C
+  returns 130 and a closed pipe on standard output returns 1, both without a
+  traceback.
 - `class Dotagents(LoggingArgs, Cli)` — the umbrella; field `cmdspath: list[str]`.
 - `CMDS_PATH_ENV = "AGENTS_CMDS_PATH"`.
 - Re-exported for command modules: `DotAgentsArgs`, `_write_stdout` (see below).

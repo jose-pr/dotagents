@@ -246,16 +246,15 @@ def test_a_bom_in_settings_json_is_accepted_and_not_written_back(tmp_path):
 
 
 @pytest.mark.parametrize("content", [b"{not json", b"\xff\xfe{}"])
-def test_a_corrupt_settings_file_stops_init_before_anything_is_written(content):
+def test_a_corrupt_settings_file_stops_init_before_anything_is_written(content, capsys):
     """The error fired after AGENTS.md and the CLAUDE.md include were written,
     leaving a half-initialised store."""
     settings = Path.home() / ".claude" / "settings.json"
     settings.parent.mkdir(parents=True)
     settings.write_bytes(content)
 
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["init", "-g", "--agents", "claude"])
-    assert str(settings) in str(exc.value)
+    assert cli.main(["init", "-g", "--agents", "claude"]) == 1
+    assert str(settings) in capsys.readouterr().err
     assert not (Path.home() / ".agents").exists()
     assert not (Path.home() / ".claude" / "CLAUDE.md").exists()
     assert settings.read_bytes() == content

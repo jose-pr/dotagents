@@ -482,13 +482,14 @@ def _repoint_zipapp_sources() -> None:
 
 def main(argv=None) -> int:
     _repoint_zipapp_sources()
-    # `duho.app` (not `duho.main`) so command discovery runs; default dispatch
-    # calls each command's `__call__`. `commands=` is the resolved built-ins +
-    # discovered set.
-    return duho.app(
+    # `commands=` makes `run` use `duho.app` (not `duho.main`) so the resolved
+    # built-ins + discovered set are the commands; dispatch calls each command's
+    # `__call__`. `exit=False` returns the status, whatever ended the run.
+    return duho.run(
         Dotagents,
+        argv,
+        exit=False,
         commands=_discover(argv),
-        argv=argv,
         name="dotagents",
     )
 
