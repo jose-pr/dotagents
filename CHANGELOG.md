@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-10-14
+
 ### Changed
 
 - `main()` runs through `duho.run(..., exit=False)`: it always returns the status
@@ -1439,7 +1441,8 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
   before dispatch; a no-op for a plain install.
 
-[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.7.5...HEAD
+[0.7.5]: https://github.com/jose-pr/dotagents/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/jose-pr/dotagents/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/jose-pr/dotagents/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/jose-pr/dotagents/compare/v0.7.1...v0.7.2
