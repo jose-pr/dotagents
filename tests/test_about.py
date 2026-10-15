@@ -21,7 +21,7 @@ def test_plain_install_lists_the_cli_then_its_dependencies(capsys, monkeypatch):
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == "dotagents-cli %s" % __version__
     names = [line.split(" ")[0] for line in lines[1:]]
-    assert names[:2] == ["duho", "pathlib_next"], "the runtime dependencies, in order"
+    assert names[:2] == ["duho", "pathapi"], "the runtime dependencies, in order"
     for line in lines[1:]:
         name, version = line.split(" ", 1)
         assert version and version[0].isdigit(), line
@@ -29,12 +29,12 @@ def test_plain_install_lists_the_cli_then_its_dependencies(capsys, monkeypatch):
 
 def test_a_bundle_lists_exactly_what_was_vendored(capsys, monkeypatch):
     monkeypatch.setattr(about, "bundle_manifest", lambda: {
-        "packages": {"duho": "0.5.0", "pathlib_next": "0.9.0", "uritools": "5.0.0"},
+        "packages": {"duho": "0.5.0", "pathapi": "0.1.0", "uritools": "5.0.0"},
         "extras": "uri", "python": "3.14.7",
     })
     assert _run() == 0
     assert capsys.readouterr().out == (
-        "dotagents-cli %s\nduho 0.5.0\npathlib_next 0.9.0\nuritools 5.0.0\n" % __version__
+        "dotagents-cli %s\nduho 0.5.0\npathapi 0.1.0\nuritools 5.0.0\n" % __version__
     )
     assert _run(json=True) == 0
     payload = json.loads(capsys.readouterr().out)

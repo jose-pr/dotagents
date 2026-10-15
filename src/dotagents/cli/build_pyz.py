@@ -27,6 +27,24 @@ _VENDOR_PYTHON = "3.9"
 _UNSHIPPED_PATTERNS = ("__pycache__", "*.pyc", "*.local.*", "CLAUDE*")
 
 
+#: What each extra of pyproject.toml installs, a second copy kept equal to it
+#: (a test compares the two). `--extras` vendors the floor of each, as the
+#: pins below do for the core dependencies.
+EXTRA_REQUIREMENTS = {
+    "uri": ("pathapi-uri>=0.1.0,<0.2",),
+    "http": ("pathapi-uri>=0.1.0,<0.2",),
+    "sftp": ("pathapi-uri>=0.1.0,<0.2", "sftppath[paramiko]>=0.1.0,<0.2"),
+    "s3": ("pathapi-uri>=0.1.0,<0.2", "objpath[s3]>=0.1.0,<0.2"),
+    "repo": ("pathapi-uri>=0.1.0,<0.2", "repopath[uri]>=0.1.0,<0.2"),
+}
+
+
+def _floor_pin(requirement: str) -> str:
+    """``name[extra]>=1.0,<2`` -> ``name[extra]==1.0``."""
+    name, _, rest = requirement.partition(">=")
+    return "%s==%s" % (name, rest.split(",", 1)[0])
+
+
 def _ignore_unshipped(_directory: str, names: "list[str]") -> "set[str]":
     """``shutil.copytree`` ignore callback for :data:`_UNSHIPPED_PATTERNS`."""
     return {
@@ -77,9 +95,9 @@ class BuildPyz(LoggingArgs, Cmd):
     "Pinned duho version to vendor."
     ("--duho-version",)
 
-    pathlib_next_version: str = "0.9.0"
-    "Pinned pathlib_next version to vendor."
-    ("--pathlib-next-version",)
+    pathapi_version: str = "0.1.0"
+    "Pinned pathapi version to vendor (--pathlib-next-version is its old name)."
+    ("--pathapi-version", "--pathlib-next-version")
 
     # Declared only for Python < 3.11, but always vendored: the .pyz runs on
     # whatever interpreter launches it, and on 3.11+ `tomllib` wins anyway.
@@ -89,10 +107,10 @@ class BuildPyz(LoggingArgs, Cmd):
 
     extras: str = ""
     (
-        "pathlib_next extras to vendor too, comma-separated (uri, http, s3), "
-        "so the .pyz speaks those schemes for overlay sources; none by default. "
-        "Only pure-Python dependencies can be vendored, so sftp (cryptography, "
-        "bcrypt, pynacl) cannot."
+        "dotagents-cli extras to vendor too, comma-separated (uri, http, s3, "
+        "repo), so the .pyz speaks those schemes for overlay sources; none by "
+        "default. Only pure-Python dependencies can be vendored, so sftp "
+        "(cryptography, bcrypt, pynacl) cannot."
     )
     ("--extras",)
 
@@ -118,15 +136,24 @@ class BuildPyz(LoggingArgs, Cmd):
             stage = Path(tmp) / "stage"
             stage.mkdir()
 
-            extras = ",".join(e.strip() for e in self.extras.split(",") if e.strip())
-            extras_spec = "[%s]" % extras if extras else ""
-            self._logger_.info(
-                "vendoring duho==%s pathlib_next%s==%s tomli==%s via pip --target",
-                self.duho_version,
-                extras_spec,
-                self.pathlib_next_version,
-                self.tomli_version,
-            )
+            names = [e.strip() for e in self.extras.split(",") if e.strip()]
+            unknown = [name for name in names if name not in EXTRA_REQUIREMENTS]
+            if unknown:
+                raise SystemExit(
+                    "error: build-pyz --extras: unknown extra %s (known: %s)"
+                    % (", ".join(unknown), ", ".join(EXTRA_REQUIREMENTS))
+                )
+            extras = ",".join(names)
+            requirements = [
+                "duho==%s" % self.duho_version,
+                "pathapi==%s" % self.pathapi_version,
+                "tomli==%s" % self.tomli_version,
+            ]
+            for name in names:
+                for pin in map(_floor_pin, EXTRA_REQUIREMENTS[name]):
+                    if pin not in requirements:
+                        requirements.append(pin)
+            self._logger_.info("vendoring %s via pip --target", " ".join(requirements))
             rc = subprocess.call(
                 [
                     sys.executable,
@@ -144,18 +171,16 @@ class BuildPyz(LoggingArgs, Cmd):
                     "py",
                     "--python-version",
                     _VENDOR_PYTHON,
-                    "duho==%s" % self.duho_version,
-                    "pathlib_next%s==%s" % (extras_spec, self.pathlib_next_version),
-                    "tomli==%s" % self.tomli_version,
+                    *requirements,
                 ]
             )
             if rc != 0:
                 if extras:
                     self._logger_.error(
-                        "pip could not vendor pathlib_next%s; an extra whose "
+                        "pip could not vendor the extras %s; an extra whose "
                         "dependencies ship only native wheels (sftp) cannot go "
                         "into a zipapp",
-                        extras_spec,
+                        extras,
                     )
                 return rc
             # pip's console-script launchers: native executables for the build

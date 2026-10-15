@@ -100,7 +100,7 @@ def _stub_scheme(monkeypatch, served: Path, seen: list):
 
 
 def test_from_a_remote_scheme_goes_through_the_overlay_source_cache(tmp_path, monkeypatch, caplog):
-    """Every remote scheme crashed in `Path(UriPath(...))` (`fspath for https`);
+    """Every remote scheme crashed in `Path(URIPath(...))` (`fspath for https`);
     `--from` now materializes the way `overlays` sources do, into the user
     store's overlay cache, and records the location without its credentials."""
     served = _base(tmp_path / "served")
@@ -130,7 +130,7 @@ def test_an_unreachable_remote_is_a_one_line_error(tmp_path, monkeypatch, capsys
     assert message.startswith("error: --from stub://host/missing") and "pw" not in message
 
 
-needs_uri = pytest.mark.skipif(_sources.uri_path_class() is None, reason="needs pathlib_next[http]")
+needs_uri = pytest.mark.skipif(_sources.uri_path_class() is None, reason="needs pathapi-uri (the uri extra)")
 
 
 @needs_uri

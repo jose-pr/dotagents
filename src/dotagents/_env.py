@@ -61,7 +61,7 @@ The identity/proxy model is wired into the output around the file chain:
     the same name ``dotagents context`` expands as a placeholder), so an env
     file can reference an overlay's install dir by name. ``AGENTS_PYLIB``
     (:data:`PYLIB_VAR`) names the ``.pyz`` when dotagents runs from one --
-    where its own libraries (duho, pathlib_next) import from for an overlay
+    where its own libraries (duho, pathapi) import from for an overlay
     built on them; never put on ``PYTHONPATH``.
   * **Proxy** is normalized AFTER the file chain: ``AGENTS_PROXY`` is seeded if
     unset (from ``AGENTS_WEBFETCH_PROXY_URL`` else the global
@@ -1055,7 +1055,7 @@ def get_environment(
     # `sys.executable` is '' or None under an embedding host: then nothing is
     # exported rather than an empty command name.
     _seed("AGENTS_PYTHON", sys.executable)
-    # --- AGENTS_PYLIB --- where dotagents' own libraries (duho, pathlib_next)
+    # --- AGENTS_PYLIB --- where dotagents' own libraries (duho, pathapi)
     # import from for an overlay that builds on them. Set only when dotagents
     # runs from a .pyz: the archive, importable by zipimport. An installed
     # dotagents has them in AGENTS_PYTHON's site-packages already. Never put on

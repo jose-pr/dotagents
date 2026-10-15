@@ -1,4 +1,4 @@
-"""Overlay sources through pathlib_next: an http(s) directory listing is a
+"""Overlay sources through uripath: an http(s) directory listing is a
 directory of overlays (repo) or one overlay (source), a file at a URL is a
 registry whose relative entries resolve beside it, file:// is local; without
 the uri extra an http(s) registry still works through the stdlib and any
@@ -16,7 +16,7 @@ import pytest
 from dotagents import _sources
 from dotagents._sources import DirRepo, RegistryRepo, SourceCache, Spec
 
-needs_uri = pytest.mark.skipif(_sources.uri_path_class() is None, reason="needs pathlib_next[http]")
+needs_uri = pytest.mark.skipif(_sources.uri_path_class() is None, reason="needs pathapi-uri (the uri extra)")
 
 
 def _tree(root: Path):

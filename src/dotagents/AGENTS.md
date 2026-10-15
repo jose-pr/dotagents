@@ -42,7 +42,7 @@ and an error saying a command is required, and exits 2.
 | `launch [AGENT] [-g] [--command PROG] [--no-context] [--inline] [--write-agent] [--dry-run] [-- ARGS...]` | Run the agent's CLI with the env applied and the context handed over; the exit code is the harness's (`128+N` on signal N). |
 | `findings add\|list\|show\|done\|reopen\|remove\|index\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding, `done` moves it to `processed/` with a required resolution, `INDEX.md` regenerated on every change. The frontmatter is valid YAML (a value is double-quoted when it must be); `index --requote` fixes values written bare in existing files, touching nothing else. |
 | `about [--json]` | `dotagents-cli <version>`, then `<distribution> <version>` per bundled (`.pyz`) or installed package. |
-| `build-pyz [--out P] [--python SHEBANG] [--duho-version V] [--pathlib-next-version V] [--extras a,b]` | Build a zipapp from a source checkout; errors elsewhere. |
+| `build-pyz [--out P] [--python SHEBANG] [--duho-version V] [--pathapi-version V] [--extras a,b]` | Build a zipapp from a source checkout; errors elsewhere. |
 
 **Every command but `env` is also an MCP tool.** With `DOTAGENTS_MCP=stdio` in its
 environment, `dotagents` serves the command set — built-in, bundled and discovered —
@@ -146,7 +146,7 @@ The package's own data; library code, importing nothing from `dotagents.cli`.
   absolute POSIX path of `<dest>/AGENTS.md`.
 - `pyz_archive() -> str | None` — the `.pyz` this dotagents is imported from (the
   ancestor of the module's `__file__` that is a file), or `None` for a plain
-  install. The archive also holds the vendored duho and pathlib_next; `env`
+  install. The archive also holds the vendored duho and pathapi; `env`
   exports it as `AGENTS_PYLIB`.
 
 ## Commands — `dotagents.cli.init`, `dotagents.cli.overlays`, `dotagents.cli.context`, `dotagents.cli.env`, `dotagents.cli.path`, `dotagents.cli.about`, `dotagents.cli.build_pyz`
@@ -167,11 +167,16 @@ returns the exit code.
   `--diff --format export`, a `PATH` that is the caller's with entries in front is
   written as `export PATH='<prefix>'"${PATH:+:$PATH}"`.
 - `about`: `DISTRIBUTION = "dotagents-cli"`, `BUNDLE_FILE = "_bundle.json"` (written
-  by `build-pyz` into the package), `RUNTIME_PACKAGES = ("duho", "pathlib_next",
-  "uritools", "netimps", "requests")` (the only packages a plain install reports);
+  by `build-pyz` into the package), `RUNTIME_PACKAGES = ("duho", "pathapi",
+  "pathapi-uri", "netimps", "sftppath", "objpath", "repopath")` (the only packages a
+  plain install reports);
   `bundle_manifest() -> Optional[dict]`, `installed_packages() -> dict[str, str]`,
   `packages() -> tuple[dict[str, str], Optional[dict]]` (the bundle's packages, else
   the installed ones; the CLI itself in neither).
+- `build_pyz`: `EXTRA_REQUIREMENTS` — `{extra: (requirement, ...)}`, what each
+  dotagents-cli extra installs (`uri`, `http`, `sftp`, `s3`, `repo`), kept equal to
+  `pyproject.toml`; `--extras` vendors each requirement at its floor and refuses a
+  name not in it.
 
 ## `dotagents._scope`
 
@@ -318,7 +323,8 @@ a directory of overlays or a registry file (default: the root); for a **source**
 - `parse_spec(text) -> Spec` — `ValueError` when empty; `SourceError` when a git
   location or ref starts with `-`.
 - `redact(text) -> str` — URL userinfo removed, query values masked.
-- `uri_path_class()` — `pathlib_next.uri.UriPath`, or `None` without the `uri` extra.
+- `uri_path_class()` — `uripath.URIPath` (from `pathapi-uri`), or `None` without the
+  `uri` extra.
 - `url_scheme(location) -> str` — the lower-cased scheme.
 - `GIT_SSL_REVOKE_KEY = "git_ssl_revoke"`, `GIT_SSL_REVOKE_VALUES = ("best-effort",
   "true", "false")`, `GIT_SSL_REVOKE_DEFAULT = "best-effort"`;
@@ -383,7 +389,7 @@ proxy model.
   `scope.overlays` (a value pinned to the user store's copy is re-pointed when a
   project copy shadows it). `AGENTS_PYLIB` (`_env.PYLIB_VAR`): the `.pyz` when
   dotagents runs from one (`_resources.pyz_archive()`), else not set — where its
-  own libraries (duho, pathlib_next) import from by zipimport for an overlay
+  own libraries (duho, pathapi) import from by zipimport for an overlay
   built on them. Never added to `PYTHONPATH`: a consumer appends it to
   `sys.path` when its import fails.
 - `PATH`: every level's `bin` (contract A, not project-root, missing dirs included)
@@ -701,7 +707,7 @@ Read:
 - `AGENTS_HARNESS` — the running harness (registry name or harness id), for
   identity. `AGENTS_PYTHON` — the interpreter for `env.py`. `AGENTS_PYTHONPATH` —
   the overlay/store `lib` dirs `env` put on `PYTHONPATH`, highest precedence first.
-  `AGENTS_PYLIB` — the `.pyz` dotagents runs from (duho and pathlib_next import
+  `AGENTS_PYLIB` — the `.pyz` dotagents runs from (duho and pathapi import
   from it), unset for an installed dotagents.
 - Harness config dirs: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`.
   Harness markers: `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `GEMINI_CLI`,
@@ -727,7 +733,7 @@ Set for an overlay's `setup.py`: `AGENTS_HOME` (user store), `AGENTS_SCOPE_ROOT`
 
 - **Python 3.9 floor.** Runtime-evaluated annotations need `from __future__ import
   annotations` for `X | Y`; `Path.write_text(newline=)` is 3.10+ (use
-  `_fs.write_text_lf`). On 3.9, `pathlib_next` needs `typing_extensions` installed.
+  `_fs.write_text_lf`).
 - **Inside a `.pyz`** `Path(__file__)` is not a real file: package data is reached
   through `_resources._package_data_dir(name)` (extracted once to a per-process
   scratch dir removed at exit), and `cli.main()` repoints the built-in command

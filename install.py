@@ -5,7 +5,7 @@ Thin front over ``dotagents.cli.main()``, kept at this filename so existing
 muscle-memory/docs pointing at ``python install.py`` still work.
 
 Self-bootstrapping, inside a virtual environment: the CLI needs the
-``dotagents`` package and its ``duho``/``pathlib_next`` dependencies
+``dotagents`` package and its ``duho``/``pathapi`` dependencies
 importable. If they aren't -- e.g. a fresh venv with nothing installed yet --
 this shim installs this checkout **into the interpreter that is running it**
 (``sys.executable -m pip install -e .``) and retries, exactly once. When
@@ -49,7 +49,7 @@ def _import_main():
     """Return ``dotagents.cli.main`` if importable, else None.
 
     The ``src/`` fallback lets an un-pip-installed checkout resolve its
-    ``src/`` layout directly, provided ``duho``/``pathlib_next`` are importable
+    ``src/`` layout directly, provided ``duho``/``pathapi`` are importable
     some other way. A plain editable install makes all three importable without
     the fallback.
     """

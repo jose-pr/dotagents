@@ -3,7 +3,7 @@ package bundled with it.
 
     dotagents-cli <version>
     duho <version>
-    pathlib_next <version>
+    pathapi <version>
 
 One package per line, `<distribution> <version>`, the CLI first. From a
 built ``.pyz`` the list is what ``build-pyz`` vendored (recorded in
@@ -29,7 +29,7 @@ DISTRIBUTION = "dotagents-cli"
 #: Recorded by `build-pyz` next to the package, read here.
 BUNDLE_FILE = "_bundle.json"
 #: What a plain install reports, in this order, when importable.
-RUNTIME_PACKAGES = ("duho", "pathlib_next", "uritools", "netimps", "requests")
+RUNTIME_PACKAGES = ("duho", "pathapi", "pathapi-uri", "netimps", "sftppath", "objpath", "repopath")
 
 
 def bundle_manifest() -> "Optional[dict]":

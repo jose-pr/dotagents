@@ -36,19 +36,26 @@ classifiers = [
 # raise a floor and move its pin there in the same change.
 dependencies = [
     "duho>=0.7.5,<0.8",
-    "pathlib_next>=0.9.0,<0.10",
+    "pathapi>=0.1.0,<0.2",
     # overlay.toml manifests and TOML registries; tomllib is stdlib from 3.11.
     'tomli>=1.1.0; python_version < "3.11"',
 ]
 
+# Overlay sources at a URI. `pathapi-uri` (import name `uripath`) gives the
+# file:, http(s):, dav:, ftp:, zip: and tar: schemes on the standard library;
+# the other distributions add their schemes to it. `build-pyz --extras` vendors
+# the floor of each (EXTRA_REQUIREMENTS in src/dotagents/cli/build_pyz.py).
 [project.optional-dependencies]
-uri = ["pathlib_next[uri]"]
-http = ["pathlib_next[http]"]
-sftp = ["pathlib_next[sftp]"]
-s3 = ["pathlib_next[s3]"]
+uri = ["pathapi-uri>=0.1.0,<0.2"]
+# http(s) is part of `uri` now; kept so `dotagents-cli[http]` still installs.
+http = ["pathapi-uri>=0.1.0,<0.2"]
+sftp = ["pathapi-uri>=0.1.0,<0.2", "sftppath[paramiko]>=0.1.0,<0.2"]
+s3 = ["pathapi-uri>=0.1.0,<0.2", "objpath[s3]>=0.1.0,<0.2"]
+# github:, gitlab: and repo: (a repository's tree at a ref).
+repo = ["pathapi-uri>=0.1.0,<0.2", "repopath[uri]>=0.1.0,<0.2"]
 # YAML overlay-repo registries (dotagents.yaml / *.yml).
 yaml = ["pyyaml"]
-dev = ["build", "hatchling>=1.27", "pytest", "pyyaml", "pathlib_next[http]"]
+dev = ["build", "hatchling>=1.27", "pytest", "pyyaml", "pathapi-uri>=0.1.0,<0.2"]
 docs = [
     "mkdocs>=1.5",
     "mkdocs-material>=9.5",

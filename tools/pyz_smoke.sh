@@ -85,7 +85,7 @@ lacks "$h" "audit"
 a=$(pyz about)
 has_re "$(head -1 <<<"$a")" "^dotagents-cli "
 has_re "$a" "^duho "
-has_re "$a" "^pathlib_next "
+has_re "$a" "^pathapi "
 a=$(pyz about --json)
 "$PYTHON" -c "import sys, json; d = json.load(sys.stdin); assert d['bundle'] and 'duho' in d['packages'], d" <<<"$a"
 

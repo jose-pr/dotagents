@@ -42,7 +42,7 @@ def pyz_archive() -> "str | None":
     install. Inside a zipapp a module's ``__file__`` is a path INTO the
     archive (``.../dotagents.pyz/dotagents/_resources.py``), so the archive
     is the ancestor that is a file. It also holds the vendored runtime
-    dependencies (duho, pathlib_next), importable from it by zipimport."""
+    dependencies (duho, pathapi), importable from it by zipimport."""
     for parent in Path(__file__).parents:
         if parent.is_file():
             return str(parent)

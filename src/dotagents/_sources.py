@@ -26,9 +26,10 @@ directory (of overlays) or a registry file, the checkout root when absent;
 for a **source** it is the overlay's root directory, and when absent *the
 repository root is the overlay*.
 
-A ``scheme://`` location that is not git is a **pathlib_next** path. With
-the ``uri`` extra installed (``dotagents-cli[uri]``; ``[http]``, ``[sftp]``,
-``[s3]`` add the schemes' own clients) any scheme pathlib_next speaks works
+A ``scheme://`` location that is not git is a **uripath** path (pathapi's
+URI layer). With the ``uri`` extra installed (``dotagents-cli[uri]``;
+``[sftp]``, ``[s3]`` and ``[repo]`` add the ``sftp:``, ``s3:`` and
+``github:`` / ``gitlab:`` / ``repo:`` schemes) any scheme uripath speaks works
 the way a local path does: an ``http(s)://`` directory listing, an ``sftp``,
 ``s3``, ``dav`` or ``github`` tree is a directory of overlays (as a repo) or
 one overlay (as a source), a file is a registry; so is an archive --
@@ -188,14 +189,14 @@ def parse_spec(text: str) -> Spec:
 # --------------------------------------------------------------------------
 
 def uri_path_class() -> "Any":
-    """``pathlib_next.uri.UriPath`` when the ``uri`` extra is installed, else
-    ``None`` -- the switch between "any scheme pathlib_next speaks" and the
-    standard-library http(s) registry fetch."""
+    """``uripath.URIPath`` when the ``uri`` extra (``pathapi-uri``) is
+    installed, else ``None`` -- the switch between "any scheme uripath speaks"
+    and the standard-library http(s) registry fetch."""
     try:
-        from pathlib_next.uri import UriPath
+        from uripath import URIPath
     except ImportError:
         return None
-    return UriPath
+    return URIPath
 
 
 def _local_from_file_url(url: str) -> Path:
@@ -261,7 +262,7 @@ class SourceCache(object):
     location AND ref (two registry entries naming the same repository at
     different refs -- ``@main`` for one overlay, ``@dev`` for another -- must
     each see their own tree, since the commands resolve every source before
-    copying any), and materializations of pathlib_next paths under ``uri/``
+    copying any), and materializations of uripath paths under ``uri/``
     (a remote directory synced down, a remote file copied), each refreshed
     once per process."""
 
@@ -271,7 +272,7 @@ class SourceCache(object):
         self.ssl_revoke = ssl_revoke  # git's http.schannelCheckRevoke (GIT_SSL_REVOKE_KEY)
         self._fresh: "set[str]" = set()  # locations fetched during this process
 
-    # --- pathlib_next paths ----------------------------------------------
+    # --- uripath paths ---------------------------------------------------
 
     def materialize(self, spec: Spec) -> Path:
         """The local path a ``url`` spec resolves to: the path itself for
@@ -288,17 +289,17 @@ class SourceCache(object):
             if not target.exists():
                 raise SourceError("error: overlay source does not exist: %s" % target)
             return target
-        UriPath = uri_path_class()
-        if UriPath is None:
+        URIPath = uri_path_class()
+        if URIPath is None:
             raise SourceError(
-                "error: %s: a %s:// source needs the pathlib_next uri extra "
-                "(pip install 'dotagents-cli[uri]', or [http] / [sftp] / [s3] for the "
-                "scheme's own client)" % (redact(spec.location), url_scheme(spec.location))
+                "error: %s: a %s:// source needs the uri extra "
+                "(pip install 'dotagents-cli[uri]', or [sftp] / [s3] / [repo] for those "
+                "schemes)" % (redact(spec.location), url_scheme(spec.location))
             )
-        from pathlib_next import LocalPath
-        from pathlib_next.utils.sync import PathSyncer
+        from pathapi import LocalPath
+        from pathapi.sync import PathSyncer
 
-        remote = UriPath(spec.location)
+        remote = URIPath(spec.location)
         if spec.path:
             remote = remote / spec.path
         shown = redact(spec.display())

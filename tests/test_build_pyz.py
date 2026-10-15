@@ -53,12 +53,27 @@ def test_vendored_pins_are_the_declared_floors():
     pin ships a zipapp bundling a version `pip install dotagents-cli` refuses.
     """
     text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
-    floors = dict(re.findall(r"""["'](duho|pathlib_next|tomli)>=([^,;"'\s]+)""", text))
+    floors = dict(re.findall(r"""["'](duho|pathapi|tomli)>=([^,;"'\s]+)""", text))
     assert floors == {
         "duho": BuildPyz.duho_version,
-        "pathlib_next": BuildPyz.pathlib_next_version,
+        "pathapi": BuildPyz.pathapi_version,
         "tomli": BuildPyz.tomli_version,
     }
+
+
+def test_the_extras_build_pyz_vendors_are_pyprojects():
+    """`--extras NAME` vendors what `pip install dotagents-cli[NAME]` installs,
+    each at its floor; the two lists are kept by hand, so they are compared."""
+    try:
+        import tomllib
+    except ImportError:  # Python < 3.11
+        import tomli as tomllib
+    declared = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"]["optional-dependencies"]
+    for name, requirements in build_pyz.EXTRA_REQUIREMENTS.items():
+        assert list(requirements) == declared[name], name
+    for name in ("uri", "http", "sftp", "s3", "repo"):
+        assert name in build_pyz.EXTRA_REQUIREMENTS
+    assert build_pyz._floor_pin("objpath[s3]>=0.1.0,<0.2") == "objpath[s3]==0.1.0"
 
 
 def _copy_tree(dest: Path) -> Path:
@@ -90,7 +105,7 @@ def test_pyz_leaves_private_files_out(tmp_path, monkeypatch):
     """A locally built pyz never carries `*.local.*` or `CLAUDE*` files.
 
     The package is staged exactly as a real build does; only pip's vendoring
-    of duho/pathlib_next is stubbed, which touches nothing under test here.
+    of duho/pathapi is stubbed, which touches nothing under test here.
     """
     (tmp_path / "proj").mkdir()
     proj = _copy_tree(tmp_path / "proj")

@@ -8,7 +8,7 @@ Removing an overlay unpublishes only the skills **it** published (matched agains
 its own ``skills/`` source), never a skill another overlay or the user placed there,
 then sweeps any now-broken symlinks.
 
-Pure stdlib (``os``/``shutil``) -- no ``pathlib_next`` -- so it works in a plain
+Pure stdlib (``os``/``shutil``) -- no ``pathapi`` -- so it works in a plain
 ``pip install`` and inside the ``.pyz``. Symlink-preferred with a copy fallback is
 the contract (on Windows a directory junction is tried between the two: it
 needs no privilege and, like a symlink, is always current); ``--copy`` forces
