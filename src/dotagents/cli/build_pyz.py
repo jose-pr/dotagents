@@ -114,6 +114,13 @@ class BuildPyz(LoggingArgs, Cmd):
     )
     ("--extras",)
 
+    with_pip: bool = False
+    (
+        "Also vendor the pinned pip wheel, so the .pyz can set up a scope venv "
+        "where the interpreter has no ensurepip and no index is reachable."
+    )
+    ("--with-pip",)
+
     def __call__(self) -> int:
         import zipapp
 
@@ -198,6 +205,15 @@ class BuildPyz(LoggingArgs, Cmd):
             bundled = {}
             for path in sorted(stage.rglob("*.dist-info")):
                 bundled.update(_dist_info_name_version(path))
+            if self.with_pip:
+                # Kept a wheel (its license inside): pip runs from it as is.
+                from dotagents import _pipwheel
+
+                wheel = _pipwheel.pip_wheel(Path(tmp) / "pip", logger=self._logger_)
+                vendor = dotagents_pkg_dest.joinpath(*_pipwheel.VENDORED[:-1])
+                vendor.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(str(wheel), str(vendor / _pipwheel.PIP_WHEEL))
+                bundled["pip"] = _pipwheel.PIP_VERSION
             # Generated files are written LF, like every copied source, so the
             # artifact's bytes do not depend on the OS it was built on.
             write_text_lf(

@@ -185,6 +185,22 @@ def _run_setup(scope, dest_dir: Path, name: str, *, no_setup, dry_run, logger, s
     return rc or 0
 
 
+def _sync_venvs(scope, *, no_venv: bool, dry_run: bool, logger) -> bool:
+    """Bring the scope's Python venvs up to date (see `dotagents._pyvenv`):
+    every installed overlay's ``requirements.txt`` installed, the ``.pth``
+    layering rewritten. False, with the reason logged, when that failed."""
+    if no_venv:
+        return True
+    from dotagents import _pyvenv
+
+    try:
+        _pyvenv.sync_venvs(scope, dry_run=dry_run, logger=logger)
+    except SystemExit as exc:  # VenvError, PipUnavailable: the message is the code
+        logger.error("%s", exc.code)
+        return False
+    return True
+
+
 def _session_env(scope, logger) -> "dict[str, str]":
     """``os.environ`` with the scope's assembled ``dotagents env`` applied -- what
     a session in that scope sees, so a setup script run from a plain shell
@@ -272,11 +288,12 @@ def _log_install(logger, verb: str, name: str, result, dry_run: bool) -> None:
 
 def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: bool,
                  dry_run: bool, logger, setup_timeout: "Optional[int]" = None,
-                 prune: bool = False) -> "list[str]":
+                 prune: bool = False, no_venv: bool = False) -> "list[str]":
     """Install (or re-install) overlay ``name`` from ``src`` into the scope,
-    publish its skills and run its setup. A FRESH install is copied into a
-    staging dir that discovery ignores and moved into place whole, and is
-    rolled back (skills unpublished, dir removed) when its setup fails --
+    publish its skills, install its requirements into the scope's venv and run
+    its setup. A FRESH install is copied into a staging dir that discovery
+    ignores and moved into place whole, and is rolled back (skills
+    unpublished, dir removed) when its requirements or setup fail --
     never left installed but unconfigured. An EXISTING install is made to
     match the source (see `Overlay.install_to`; ``prune`` clears its ignored
     files too), local edits backed up first. Raises on setup failure. Returns
@@ -321,20 +338,25 @@ def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: b
         )
         if published:
             logger.info("published %d skill(s) from %s", published, name)
-    rc = _run_setup(scope, dest, name, no_setup=no_setup, dry_run=dry_run,
-                    logger=logger, source_dir=src, timeout=setup_timeout)
+    # Requirements before setup, so a setup script can import them.
+    what = "requirements"
+    rc = 0 if _sync_venvs(scope, no_venv=no_venv, dry_run=dry_run, logger=logger) else 1
+    if not rc:
+        what = "setup"
+        rc = _run_setup(scope, dest, name, no_setup=no_setup, dry_run=dry_run,
+                        logger=logger, source_dir=src, timeout=setup_timeout)
     if rc:
         if fresh and not dry_run:
             owned = _skills.owned_overlay_skills(dest, scope.shared_skills_dir)
             _remove_tree(dest)
             _skills.unpublish_skills(scope.shared_skills_dir, owned, logger=logger)
-            logger.error("setup for overlay %s failed; the install was rolled back", name)
+            logger.error("%s for overlay %s failed; the install was rolled back", what, name)
         else:
             logger.error(
-                "setup for overlay %s failed; it stays installed but is not set up "
-                "(fix it and run `overlays sync %s`)", name, name,
+                "%s for overlay %s failed; it stays installed but is not set up "
+                "(fix it and run `overlays sync %s`)", what, name, name,
             )
-        raise SystemExit("error: setup for overlay %r failed (exit %d)" % (name, rc))
+        raise SystemExit("error: %s for overlay %r failed (exit %d)" % (what, name, rc))
     return skills
 
 
@@ -435,6 +457,10 @@ class OverlayAdd(_RepoArgs):
     "Do not install the overlays each manifest's `requires` names."
     ("--no-requires",)
 
+    no_venv: bool = False
+    "Do not create or update the scope's Python venv (overlay requirements, duho, the .pth layering)."
+    ("--no-venv",)
+
     prune: bool = False
     "Re-adding an installed overlay: also clear its .gitignore/.ignore'd files and caches."
     ("--prune",)
@@ -475,7 +501,7 @@ class OverlayAdd(_RepoArgs):
                 skills += _install_one(
                     scope, name, src, origin, copy=self.copy, no_setup=self.no_setup,
                     dry_run=self.dry_run, logger=self._logger_, setup_timeout=self.setup_timeout,
-                    prune=self.prune,
+                    prune=self.prune, no_venv=self.no_venv,
                 )
         finally:
             # Recompose the whole managed block from the pristine base over ALL
@@ -516,6 +542,10 @@ class OverlayRemove(DotAgentsArgs):
     force: bool = False
     "Remove even when another installed overlay requires it."
     ("--force",)
+
+    no_venv: bool = False
+    "Do not create or update the scope's Python venv (overlay requirements, duho, the .pth layering)."
+    ("--no-venv",)
 
     dry_run: bool = False
     "Show what would happen without touching anything."
@@ -593,6 +623,12 @@ class OverlayRemove(DotAgentsArgs):
                 # Prune what the removed skills left in agents' own skills dirs.
                 _link_agent_skills(scope, self._logger_)
 
+        # The layering drops the removed overlays' libs. Their requirements
+        # stay installed: another overlay may need the same packages.
+        if removed_names and not _sync_venvs(
+            scope, no_venv=self.no_venv, dry_run=self.dry_run, logger=self._logger_
+        ):
+            raise SystemExit("error: the scope's Python venv could not be updated")
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
         return 0
@@ -825,6 +861,10 @@ class OverlaySync(_RepoArgs):
     "Skip running each overlay's idempotent `setup` script after sync."
     ("--no-setup",)
 
+    no_venv: bool = False
+    "Do not create or update the scope's Python venv (overlay requirements, duho, the .pth layering)."
+    ("--no-venv",)
+
     setup_timeout: Optional[int] = None
     "Seconds a setup script may run (default: its manifest's setup_timeout, else 300; 0 = no limit)."
     ("--setup-timeout",)
@@ -930,6 +970,10 @@ class OverlaySync(_RepoArgs):
                         dest_dir, scope.shared_skills_dir, copy=self.copy,
                         overwrite=True, logger=self._logger_,  # a published copy matches too
                     )
+                if not _sync_venvs(scope, no_venv=self.no_venv, dry_run=self.dry_run,
+                                   logger=self._logger_):
+                    failures.append(name)
+                    continue
                 rc = _run_setup(scope, dest_dir, name, no_setup=self.no_setup,
                                 dry_run=self.dry_run, logger=self._logger_,
                                 source_dir=overlay_src, timeout=self.setup_timeout)
@@ -960,6 +1004,7 @@ class OverlaySync(_RepoArgs):
                     skills += _install_one(
                         scope, dep, src, origin, copy=self.copy, no_setup=self.no_setup,
                         dry_run=self.dry_run, logger=self._logger_, setup_timeout=self.setup_timeout,
+                        no_venv=self.no_venv,
                     )
         finally:
             # Recompose over ALL installed overlays in (priority, name) order

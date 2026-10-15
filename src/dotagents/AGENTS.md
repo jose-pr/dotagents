@@ -30,10 +30,10 @@ and an error saying a command is required, and exits 2.
 
 | Command | Contract |
 | --- | --- |
-| `init [-g] [--dest D] [--from SRC] [--bin-dir D] [--agents a,b] [--no-hooks] [--powershell-env-hook] [--force] [--dry-run]` | Merge the base block into `<store>/AGENTS.md`, write `<store>/bin/dotagents[.cmd]`, and per active agent (`--agents`, else detected + `claude`) write its include and hooks. `--force` replaces `AGENTS.md`'s content, backed up under `<store>/install_backup/<timestamp>/`. `--from` records its base in `<store>/dotagents/config.toml`. |
-| `overlays add NAME... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--prune] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does; `--prune` clears its ignored files too), publish its skills, run its `setup.py`, recompose the managed block. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused; a fresh install whose setup fails is rolled back. No name: exit 2. |
-| `overlays remove NAME... [-g] [--force] [--dry-run]` | Delete the overlay dirs, unpublish the skills they published, recompose the block. Refuses an overlay another installed overlay requires unless `--force`. No name: exit 2. |
-| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--prune] [--no-setup] [--setup-timeout S] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it): the install is made to match the source exactly: new and changed files land, `overlay.toml` is refreshed, files the source does not ship are removed; a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. What the `.gitignore` / `.ignore` at the overlay's root match (setup output, local state) and tool caches are left alone; `--prune` clears them too. Installs new `requires`. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/`, or its setup fails. |
+| `init [-g] [--dest D] [--from SRC] [--bin-dir D] [--agents a,b] [--no-hooks] [--powershell-env-hook] [--no-venv] [--force] [--dry-run]` | Merge the base block into `<store>/AGENTS.md`, write `<store>/bin/dotagents[.cmd]`, and per active agent (`--agents`, else detected + `claude`) write its include and hooks. Then bring the scope's Python venvs up to date (`_pyvenv.sync_venvs`; a failure is a warning; not with `--dest` or `--no-venv`). `--force` replaces `AGENTS.md`'s content, backed up under `<store>/install_backup/<timestamp>/`. `--from` records its base in `<store>/dotagents/config.toml`. |
+| `overlays add NAME... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--no-venv] [--prune] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does; `--prune` clears its ignored files too), publish its skills, install every overlay's `requirements.txt` into the scope venv (`_pyvenv`; not with `--no-venv`), run its `setup.py`, recompose the managed block. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused; a fresh install whose requirements or setup fail is rolled back. No name: exit 2. |
+| `overlays remove NAME... [-g] [--force] [--no-venv] [--dry-run]` | Delete the overlay dirs, unpublish the skills they published, recompose the block, rewrite the venv layering (installed requirements stay). Refuses an overlay another installed overlay requires unless `--force`. No name: exit 2. |
+| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--prune] [--no-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it): the install is made to match the source exactly: new and changed files land, `overlay.toml` is refreshed, files the source does not ship are removed; a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. What the `.gitignore` / `.ignore` at the overlay's root match (setup output, local state) and tool caches are left alone; `--prune` clears them too. Installs new `requires`, then the venv requirements (when they changed) before each setup. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/`, or its requirements or setup fail. |
 | `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` flagged) and what the repos offer. |
 | `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; manifest, setup, skills, file count, recorded source. No name: exit 2. |
 | `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
@@ -42,7 +42,7 @@ and an error saying a command is required, and exits 2.
 | `launch [AGENT] [-g] [--command PROG] [--no-context] [--inline] [--write-agent] [--dry-run] [-- ARGS...]` | Run the agent's CLI with the env applied and the context handed over; the exit code is the harness's (`128+N` on signal N). |
 | `findings add\|list\|show\|done\|reopen\|remove\|index\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding, `done` moves it to `processed/` with a required resolution, `INDEX.md` regenerated on every change. The frontmatter is valid YAML (a value is double-quoted when it must be); `index --requote` fixes values written bare in existing files, touching nothing else. |
 | `about [--json]` | `dotagents-cli <version>`, then `<distribution> <version>` per bundled (`.pyz`) or installed package. |
-| `build-pyz [--out P] [--python SHEBANG] [--duho-version V] [--pathapi-version V] [--extras a,b]` | Build a zipapp from a source checkout; errors elsewhere. |
+| `build-pyz [--out P] [--python SHEBANG] [--duho-version V] [--pathapi-version V] [--extras a,b] [--with-pip]` | Build a zipapp from a source checkout; errors elsewhere. `--with-pip` vendors the pinned pip wheel (`_pipwheel`) as `dotagents/_vendor/`. |
 
 **Every command but `env` is also an MCP tool.** With `DOTAGENTS_MCP=stdio` in its
 environment, `dotagents` serves the command set — built-in, bundled and discovered —
@@ -387,8 +387,12 @@ proxy model.
 
 - Roots: `AGENTS_HOME` and `AGENTS_PROJECT_ROOT` name the stores walked, absolute —
   an inherited value naming the same directory holds, another is replaced; in a
-  user-scope walk `AGENTS_PROJECT_ROOT` is set only when unset. Only when unset:
-  `AGENTS_PYTHON` (`sys.executable`) and one `<NAME>_OVERLAY_ROOT` per
+  user-scope walk `AGENTS_PROJECT_ROOT` is set only when unset. `AGENTS_PYTHON`:
+  the active scope venv's interpreter (`_pyvenv.active_venv`), else
+  `sys.executable`; it replaces an inherited value equal to `sys.executable` or
+  naming another `.pyvenv` interpreter, and any other pin holds. `AGENTS_PYVENV`:
+  that venv's dir, removed when there is none. Only when unset: one
+  `<NAME>_OVERLAY_ROOT` per
   `scope.overlays` (a value pinned to the user store's copy is re-pointed when a
   project copy shadows it). `AGENTS_PYLIB` (`_env.PYLIB_VAR`): the `.pyz` when
   dotagents runs from one (`_resources.pyz_archive()`), else not set — where its
@@ -398,10 +402,11 @@ proxy model.
 - `PATH`: every level's `bin` (contract A, not project-root, missing dirs included)
   at the front in that order, whatever the caller's `PATH` held; empty and
   cwd-relative inherited entries are dropped.
-- `PYTHONPATH`: every existing level's `lib` at the front, highest precedence
-  first; the entries an inherited `AGENTS_PYTHONPATH` named (another scope's libs)
-  are removed first. `AGENTS_PYTHONPATH`: the same list, `os.pathsep`-joined;
-  removed when there are none.
+- `PYTHONPATH`: every existing level's `lib` the active venv's `.pth` does not
+  already layer, at the front, highest precedence first (with a venv synced for the
+  scope, none); the entries an inherited `AGENTS_PYTHONPATH` named (another scope's
+  libs) are removed first. `AGENTS_PYTHONPATH`: every existing `lib`,
+  `os.pathsep`-joined, layered or not; removed when there are none.
 - Env files: all `pre.env.py` / `pre.env` (+ the project store's `pre.local.env`),
   then all `env.py` / `env` (+ `local.env`), contract-A order, regular files only,
   each evaluated against everything before it. The project root contributes none.
@@ -447,7 +452,8 @@ API:
 - `ENV_CACHE_TTL = 300.0` (seconds). `env_cache_key(scope, base_env, *parts) -> str`
   — a digest of what an assembly reads without running it: roots, cwd, interpreter,
   package version, installed overlays, each env-file candidate's
-  existence/mtime/size, every file under an existing `lib`, the whole `base_env`,
+  existence/mtime/size, every file under an existing `lib`, each store's venv state
+  file, the whole `base_env`,
   and `parts` (format, mode). `read_env_cache(scope, key, *, now=None) ->
   Optional[str]` (None when absent or older than the TTL); `write_env_cache(scope,
   key, text) -> None` (owner-only, under `<user store>/.cache/env/`; never raises).
@@ -465,7 +471,9 @@ API:
   and `AGENTS.local.md` (project store and project root), each prefixed
   `<!-- Source: <path> -->`. Then a skills listing (`- **name** (`<SKILL.md>`):
   description`, from each skill's leading frontmatter; a project skill wins), then
-  a "Local additions to overlay files" section when `local_additions` finds any.
+  a "Local additions to overlay files" section when `local_additions` finds any,
+  then, with `expand_vars`, the line ``Python for skills (`$AGENTS_PYTHON`): `<path>` ``
+  (`skills_python`).
   `<PROJECT_ROOT>` and `<NAME_OVERLAY_ROOT>` placeholders expand; with
   `expand_vars` so do `$NAME_OVERLAY_ROOT` / `${NAME_OVERLAY_ROOT}`. `inline`
   appends the on-demand `.md` files the sources reference, each resolved against
@@ -473,8 +481,10 @@ API:
   system source never into the project).
 - `assemble_context_data(agent, scope, *, inline=False, expand_vars=True) -> dict`
   — `{"agent", "harness", "sources", "context", "skills": [{"name",
-  "description", "path"}], "local_additions": [{"overlay_file", "local": [...]}]}`;
-  `context` without the skills and local-additions listings.
+  "description", "path"}], "local_additions": [{"overlay_file", "local": [...]}],
+  "python"}`; `context` without the skills and local-additions listings.
+- `skills_python(scope) -> str` — the active scope venv's interpreter, else
+  `sys.executable`.
 - `local_additions(scope) -> list[tuple[Path, list[Path]]]` — the user's own
   additions to installed overlay files: for each `.md` an overlay in `scope.overlays`
   ships in a subdirectory other than `skills/`, every store's file at the same
@@ -678,6 +688,60 @@ objects `{"matcher"?: str, "hooks": [{"type": "command", "command": str, ...}]}`
 - `check_path_warning(bin_dir) -> Optional[str]` — a warning with the PATH line to
   add, or `None` when `bin_dir` is on `PATH`.
 
+## `dotagents._pyvenv`
+
+One venv per store, `<store>/.pyvenv/<X.Y.Z>-<os>-<arch>/`, made from the running
+interpreter; layered project > user > system through a `.pth`. `AGENTS_NO_PYVENV=1`
+(or `true`/`yes`/`on`) turns it all off.
+
+- `BASE_REQUIREMENTS = ("duho>=0.7.5,<0.8",)` — always in the user venv; dotagents'
+  own duho range. `REQUIREMENTS_FILE = "requirements.txt"` (at an overlay's root),
+  `PYVENV_DIR = ".pyvenv"`, `STATE_FILE = ".dotagents-venv.json"` (in the venv:
+  `{"digest", "requirements", "pth"}`), `PTH_FILE = "dotagents-layers.pth"` (in its
+  site-packages), `DISABLE_ENV = "AGENTS_NO_PYVENV"`.
+- `sync_venvs(scope, *, dry_run=False, logger=None) -> list[Path]` — the user venv
+  (base requirements + the user store's overlays' `requirements.txt`), then the
+  project's when `wants_venv` (its own overlays' requirements only). pip runs only
+  when the requirements' digest changed, in one `pip install -r ... -r ...` per
+  venv, with `--find-links` from `AGENTS_PIP_SOURCE`. The `.pth` is rewritten when
+  it differs: the store's own libs, then each lower store's venv site-packages and
+  libs, then `runtime_entry()`. Raises `VenvError` (a `SystemExit`) on failure.
+- `wants_venv(scope, level, store, libs) -> bool` — always for `user`; for `project`
+  when it has overlay requirements or libs; never for `system` (a venv an
+  administrator made there is still layered).
+- `ensure_venv(target, python=None, *, with_pip=None, dry_run=False, logger=None)
+  -> Optional[Path]` — the venv's interpreter, created when missing; `with_pip=None`
+  tries ensurepip and falls back to `--without-pip`, `False` never uses it.
+- `pip_command(vpy, *, cache_dir, logger=None) -> list[str]` — the venv's own
+  `-m pip`, else `[sys.executable, <pip wheel>/pip, "--python", <vpy>]`.
+- `active_venv(scope, environ=None) -> Optional[Path]` — the highest store's venv
+  that exists for the running interpreter.
+- `layers(scope) -> list[tuple[str, Path, list[Path]]]` — `(level, store, libs)`,
+  highest first. `requirement_files(scope, store) -> list[Path]`.
+  `runtime_entry() -> str` (the `.pyz`, else the dir holding `dotagents`).
+  `venv_dir(store)`, `venv_python(venv)`, `site_packages(venv)`, `triplet()`,
+  `os_bucket()`, `read_state(venv)`, `disabled(environ=None)`,
+  `is_pyvenv_python(path)`.
+
+## `dotagents._pipwheel`
+
+The pip wheel for a venv with no pip of its own.
+
+- `PIP_VERSION = "25.3"` (the last pip for Python 3.9), `PIP_WHEEL`, `PIP_SHA256` —
+  every source must match the hash. `PIP_SOURCE_ENV = "AGENTS_PIP_SOURCE"`.
+  `VENDORED = ("_vendor", PIP_WHEEL)` (inside the package),
+  `DEFAULT_INDEX = "https://pypi.org/simple"`.
+- `pip_wheel(cache_dir, *, logger=None, environ=None) -> Path` — from, in order: the
+  cache file, the vendored copy (`build-pyz --with-pip`), `AGENTS_PIP_SOURCE` and pip's
+  `find-links` (a dir, `file:`/`http(s):`, or a pathapi-uri URI), then the index
+  (`PIP_INDEX_URL`, else pip's config `index-url`, else PyPI; PEP 691 JSON, else PEP
+  503 HTML), honouring pip's `cert`, `trusted-host`, `proxy` and credentials in the
+  URL. Raises `PipUnavailable` (a `SystemExit`) naming every source, redacted.
+- `find_links(environ=None, *, cache_dir, logger=None) -> list[str]` —
+  `AGENTS_PIP_SOURCE` for pip's `--find-links`, a URI pip cannot read copied locally.
+- `pip_config(environ=None) -> dict[str, str]` — `index-url`, `find-links`, `cert`,
+  `trusted-host`, `proxy` from `PIP_*` over pip's config files.
+
 ## `dotagents._fs`
 
 - `write_text_lf(path, text, *, atomic=False) -> Path` — UTF-8, LF line endings on
@@ -708,8 +772,12 @@ Read:
 - `AGENTS_OVERLAYS_REPO`, `AGENTS_OVERLAYS_REPO_<KEY>` — overlay repos (after
   `--repo`). `AGENTS_CMDS_PATH` — extra command dirs.
 - `AGENTS_HARNESS` — the running harness (registry name or harness id), for
-  identity. `AGENTS_PYTHON` — the interpreter for `env.py`. `AGENTS_PYTHONPATH` —
-  the overlay/store `lib` dirs `env` put on `PYTHONPATH`, highest precedence first.
+  identity. `AGENTS_PYTHON` — the interpreter for `env.py` and `setup.py`.
+  `AGENTS_PYTHONPATH` — the overlay/store `lib` dirs, highest precedence first.
+  `AGENTS_NO_PYVENV` — turns the scope venvs off. `AGENTS_PIP_SOURCE` — a directory
+  of wheels (or a URI to one) for pip, before the index. `PIP_INDEX_URL`,
+  `PIP_CONFIG_FILE`, `PIP_FIND_LINKS`, `PIP_CERT`, `PIP_TRUSTED_HOST`, `PIP_PROXY` and
+  pip's config files — read to fetch the pip wheel.
   `AGENTS_PYLIB` — the `.pyz` dotagents runs from (duho and pathapi import
   from it), unset for an installed dotagents.
 - Harness config dirs: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`.
@@ -725,7 +793,7 @@ Read:
 
 Emitted by `env` (and applied by `launch`): `AGENTS_HARNESS`, `AGENTS_VENDOR`,
 `AGENT`, `AGENTS_MODEL`, `AGENTS_HOME`, `AGENTS_PROJECT_ROOT`, `AGENTS_PYTHON`,
-`AGENTS_PYLIB` (from a `.pyz` only), `<NAME>_OVERLAY_ROOT`, `PATH`, `AGENTS_PYTHONPATH`, `AGENTS_PROXY` and the mirrored
+`AGENTS_PYVENV` (with a scope venv), `AGENTS_PYLIB` (from a `.pyz` only), `<NAME>_OVERLAY_ROOT`, `PATH`, `AGENTS_PYTHONPATH`, `AGENTS_PROXY` and the mirrored
 proxy vars, plus whatever the env files set. `AGENTS_AGENT` is never emitted.
 `launch` also exports `AGENTS_CONTEXT_FILE`.
 
@@ -742,6 +810,9 @@ Set for an overlay's `setup.py`: `AGENTS_HOME` (user store), `AGENTS_SCOPE_ROOT`
   scratch dir removed at exit); `duho` reads the command modules' flags and help
   through the zip importer.
 - **Writes are LF-only.** Use `_fs.write_text_lf`, never `Path.write_text`.
+- **Skills run under `AGENTS_PYTHON`**, the scope venv: duho, every overlay's
+  requirements and libs, and dotagents import there. Its site-packages is never put
+  on `PYTHONPATH`, which every other Python in the session would read first.
 - **`env` output is sensitive**: it prints resolved values. Nothing in the package
   logs a value, only names.
 - **Credentials in a repo URL** are removed from every log line, cache dir name and

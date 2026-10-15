@@ -22,6 +22,8 @@ The autouse `_isolate` fixture below therefore, for EVERY test:
   and resets `_scope`'s per-value cache of it;
 - sets `PYTHONPATH` to this tree's `src/`, so a subprocess running
   `-m dotagents` tests the same code the in-process tests import;
+- sets `AGENTS_NO_PYVENV=1`, so `init` and `overlays` never build a venv or
+  run pip; the venv tests unset it;
 - chdirs into an empty per-test directory (the default project root);
 - stops `ClaudeAgent`'s upward AGENTS.md walk at pytest's base temp dir, so
   no CLAUDE.md or AGENTS.md above it on the developer's disk is consulted.
@@ -35,11 +37,13 @@ suite changed any of them.
 
 import hashlib
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from dotagents import _agents, _scope
+from dotagents import _agents, _pipwheel, _scope
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -87,12 +91,28 @@ def _isolate(tmp_path_factory, monkeypatch):
     monkeypatch.setenv(_scope.SYSTEM_ROOT_ENV, str(sandbox / "no-system-store"))
     monkeypatch.setattr(_scope, "_system_root_cache", {})
     monkeypatch.setenv("PYTHONPATH", str(SRC))
+    monkeypatch.setenv("AGENTS_NO_PYVENV", "1")
     monkeypatch.setattr(_agents.ClaudeAgent, "_walk_stop", tmp_path_factory.getbasetemp())
     monkeypatch.setattr(_scope, "_walk_stop", tmp_path_factory.getbasetemp())
     monkeypatch.chdir(cwd)
     saved_logging = _logging_state()
     yield home
     _restore_logging(saved_logging)
+
+
+@pytest.fixture(scope="session")
+def pip_wheel_file(tmp_path_factory) -> Path:
+    """The pinned pip wheel, from the developer's pip cache or the index."""
+    dest = tmp_path_factory.mktemp("pipwheel")
+    done = subprocess.run(
+        [sys.executable, "-m", "pip", "download", "pip==%s" % _pipwheel.PIP_VERSION,
+         "--no-deps", "--only-binary=:all:", "-d", str(dest)],
+        capture_output=True, text=True,
+    )
+    wheel = dest / _pipwheel.PIP_WHEEL
+    if done.returncode != 0 or not wheel.is_file():
+        pytest.skip("pip %s wheel not obtainable here: %s" % (_pipwheel.PIP_VERSION, done.stderr[-200:]))
+    return wheel
 
 
 def _loggers():

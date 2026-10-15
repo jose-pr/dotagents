@@ -395,7 +395,8 @@ class Overlay:
     MANIFEST_NAME = "overlay.toml"
 
     #: An overlay's optional idempotent setup script: ``setup.py``, run under
-    #: the interpreter that runs dotagents, so it works on every platform.
+    #: ``AGENTS_PYTHON`` (the scope venv), else the interpreter that runs
+    #: dotagents, so it works on every platform.
     #: Presence = opt-in; absence = nothing to run.
     SETUP_SCRIPT_NAMES = ("setup.py",)
 
@@ -695,7 +696,9 @@ class Overlay:
           ``.agents`` otherwise), ``AGENTS_SCOPE`` = ``user`` / ``project``
           (``scope_level``, when given) and ``AGENTS_OVERLAY_DIR`` = its own
           installed dir.
-        * the script runs under the interpreter running dotagents.
+        * the script runs under ``AGENTS_PYTHON`` from that env (the scope
+          venv, which has every overlay's requirements and libs), else the
+          interpreter running dotagents.
         * it is stopped after ``timeout`` seconds -- else the manifest's
           ``setup_timeout``, else :data:`DEFAULT_SETUP_TIMEOUT`; ``0`` means no
           limit -- and a stopped script is a failure (exit 124).
@@ -718,8 +721,11 @@ class Overlay:
             env["AGENTS_SCOPE"] = scope_level
         env["AGENTS_OVERLAY_DIR"] = str(self.path)
 
-        import sys
-        cmd = [sys.executable, str(script)]
+        from dotagents._env import interpreter
+
+        # AGENTS_PYTHON when the env names one (the scope venv: overlay libs
+        # and requirements importable), else the interpreter running dotagents.
+        cmd = [interpreter(env), str(script)]
 
         try:
             res = subprocess.run(cmd, cwd=str(self.path), env=env,

@@ -1054,7 +1054,24 @@ def get_environment(
     # a venv's, or absent, while this one demonstrably runs the CLI.
     # `sys.executable` is '' or None under an embedding host: then nothing is
     # exported rather than an empty command name.
-    _seed("AGENTS_PYTHON", sys.executable)
+    # With a scope venv (`_pyvenv`) it is that venv's interpreter instead: it
+    # sees every overlay lib and requirement through its .pth layering. It
+    # replaces an inherited value this code would have set (the bare
+    # interpreter, or another scope's venv); any other pin holds.
+    from dotagents import _pyvenv
+
+    venv = _pyvenv.active_venv(scope, osenv)
+    python = str(_pyvenv.venv_python(venv)) if venv is not None else sys.executable
+    pinned = osenv.get("AGENTS_PYTHON")
+    if python and pinned != python and (
+        not pinned or pinned == sys.executable or _pyvenv.is_pyvenv_python(pinned)
+    ):
+        _apply({"AGENTS_PYTHON": python})
+    if venv is not None:
+        if osenv.get("AGENTS_PYVENV") != str(venv):
+            _apply({"AGENTS_PYVENV": str(venv)})
+    elif "AGENTS_PYVENV" in osenv:
+        _apply(EnvChanges(removed=["AGENTS_PYVENV"]))
     # --- AGENTS_PYLIB --- where dotagents' own libraries (duho, pathapi)
     # import from for an overlay that builds on them. Set only when dotagents
     # runs from a .pyz: the archive, importable by zipimport. An installed
@@ -1117,8 +1134,15 @@ def get_environment(
         e for e in inherited.split(os.pathsep)
         if e and os.path.normcase(e) not in stale
     ]
+    # A lib the scope venv's .pth already layers stays off PYTHONPATH: the
+    # venv's interpreter (AGENTS_PYTHON) imports it anyway, and no other
+    # Python in the session should. AGENTS_PYTHONPATH still names them all.
+    layered = {
+        os.path.normcase(e) for e in (_pyvenv.read_state(venv).get("pth") or [] if venv else [])
+    }
+    on_path = [p for p in lib_paths if os.path.normcase(p) not in layered]
     pythonpath = _prepended_path_var({"PYTHONPATH": os.pathsep.join(kept)}, "PYTHONPATH",
-                                     list(reversed(lib_paths)))
+                                     list(reversed(on_path)))
     if pythonpath is None:
         pythonpath = os.pathsep.join(kept)
     if pythonpath != inherited:
@@ -1250,6 +1274,13 @@ def env_cache_key(scope: Scope, base_env: "dict[str, str]", *parts: str) -> str:
         items.append("lib %s %s" % (path, _stat_sig(path)))
         if path.is_dir():
             items += _tree_sig(path)
+    # A venv sync (`_pyvenv`) changes AGENTS_PYTHON and what stays off PYTHONPATH.
+    from dotagents import _pyvenv
+
+    items += [
+        "venv %s %s" % (store, _stat_sig(_pyvenv.venv_dir(store) / _pyvenv.STATE_FILE))
+        for store in scope.stores
+    ]
     items += sorted("%s=%s" % kv for kv in base_env.items())
     h = hashlib.sha256()
     for item in items:

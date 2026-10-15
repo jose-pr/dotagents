@@ -463,7 +463,21 @@ def assemble_context(
         return ""
     text += _get_skills_listing(scope)
     text += _get_local_additions_listing(scope)
+    if expand_vars:  # a machine path: never into a file that may be committed
+        text += "\n\nPython for skills (`$AGENTS_PYTHON`): `%s`\n" % skills_python(scope)
     return text
+
+
+def skills_python(scope: _scope.Scope) -> str:
+    """The interpreter skills run with: the scope venv's (`dotagents._pyvenv`),
+    which imports duho, every overlay's requirements and every overlay lib;
+    else the one running dotagents."""
+    import sys
+
+    from dotagents import _pyvenv
+
+    venv = _pyvenv.active_venv(scope)
+    return str(_pyvenv.venv_python(venv)) if venv is not None else sys.executable
 
 
 def assemble_context_data(
@@ -480,6 +494,7 @@ def assemble_context_data(
           "context": <assembled markdown text, minus the skills listing>,
           "skills": [{"name": ..., "description": ..., "path": <SKILL.md>}, ...],
           "local_additions": [{"overlay_file": ..., "local": [<path>, ...]}, ...],
+          "python": <the interpreter skills run with, see skills_python>,
         }
     ``context`` is the same assembled(+inlined, with ``inline=True``) text the
     markdown format emits, but WITHOUT the skills and local-additions listings
@@ -501,4 +516,5 @@ def assemble_context_data(
             {"overlay_file": str(path), "local": [str(p) for p in found]}
             for path, found in local_additions(scope)
         ],
+        "python": skills_python(scope),
     }

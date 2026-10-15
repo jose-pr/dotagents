@@ -75,9 +75,14 @@ class Init(DotAgentsArgs):
     )
     ("--powershell-env-hook",)
 
+    no_venv: bool = False
+    "Do not create or update the scope's Python venv (duho for skills, overlay requirements)."
+    ("--no-venv",)
+
     def __call__(self) -> int:
         project = False
         scope_level, project_root = None, None
+        scope = None
         if self.dest is not None:
             dest = Path(self.dest).expanduser().resolve()
         else:
@@ -165,6 +170,17 @@ class Init(DotAgentsArgs):
                 warning = check_path_warning(Path(self.bin_dir))
                 if warning:
                     self._logger_.warning(warning)
+
+        if scope is not None and not self.no_venv:
+            # A store without its venv still works (skills fall back to the
+            # session's PYTHONPATH), so a failure here -- offline, no pip -- is
+            # a warning, never a failed init.
+            from dotagents import _pyvenv
+
+            try:
+                _pyvenv.sync_venvs(scope, dry_run=self.dry_run, logger=self._logger_)
+            except SystemExit as exc:
+                self._logger_.warning("%s; `dotagents overlays sync` retries", exc.code)
 
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
