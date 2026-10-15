@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-10-15
+
 ### Added
 
 - A `repo` extra (`repopath[uri]`) for overlay sources at `github:`, `gitlab:` and
@@ -1468,7 +1470,8 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
   before dispatch; a no-op for a plain install.
 
-[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.7.6...HEAD
+[0.7.6]: https://github.com/jose-pr/dotagents/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/jose-pr/dotagents/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/jose-pr/dotagents/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/jose-pr/dotagents/compare/v0.7.2...v0.7.3
