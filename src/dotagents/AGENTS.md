@@ -691,8 +691,9 @@ objects `{"matcher"?: str, "hooks": [{"type": "command", "command": str, ...}]}`
 ## `dotagents._pyvenv`
 
 One venv per store, `<store>/.pyvenv/<X.Y.Z>-<os>-<arch>/`, made from the running
-interpreter; layered project > user > system through a `.pth`. `AGENTS_NO_PYVENV=1`
-(or `true`/`yes`/`on`) turns it all off.
+interpreter; layered project > user > system through a `.pth`. `.pyvenv/` holds the
+agents' venvs only (skills, overlay helpers, setup scripts), never a project's own
+code. `AGENTS_NO_PYVENV=1` (or `true`/`yes`/`on`) turns it all off.
 
 - `BASE_REQUIREMENTS = ("duho>=0.7.5,<0.8",)` — always in the user venv; dotagents'
   own duho range. `REQUIREMENTS_FILE = "requirements.txt"` (at an overlay's root),
@@ -715,7 +716,8 @@ interpreter; layered project > user > system through a `.pth`. `AGENTS_NO_PYVENV
 - `pip_command(vpy, *, cache_dir, logger=None) -> list[str]` — the venv's own
   `-m pip`, else `[sys.executable, <pip wheel>/pip, "--python", <vpy>]`.
 - `active_venv(scope, environ=None) -> Optional[Path]` — the highest store's venv
-  that exists for the running interpreter.
+  for the running interpreter that a sync completed (its `STATE_FILE` exists); a
+  venv made there any other way is never an agents venv.
 - `layers(scope) -> list[tuple[str, Path, list[Path]]]` — `(level, store, libs)`,
   highest first. `requirement_files(scope, store) -> list[Path]`.
   `runtime_entry() -> str` (the `.pyz`, else the dir holding `dotagents`).

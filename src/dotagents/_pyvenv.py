@@ -1,7 +1,9 @@
 """A Python venv per store, layered like every other walk.
 
 Each store gets ``<store>/.pyvenv/<X.Y.Z>-<os>-<arch>/``, made from the
-interpreter running dotagents. The user store's venv always holds
+interpreter running dotagents. ``.pyvenv/`` holds the agents' venvs only --
+where skills, overlay helpers and setup scripts run; a project's own code
+gets its venvs elsewhere (the python overlay's ``<root>/.venv/``). The user store's venv always holds
 :data:`BASE_REQUIREMENTS` (duho, for every skill) and the ``requirements.txt``
 of each overlay installed there. A project gets its own venv only when one of
 its overlays ships a ``requirements.txt`` or a ``lib/``; otherwise a project
@@ -264,13 +266,15 @@ def _install(scope, vpy: Path, reqs: "list[str]", files: "list[Path]", *, dry_ru
 
 
 def active_venv(scope, environ: "Optional[dict]" = None) -> "Optional[Path]":
-    """The venv a session in ``scope`` runs: the highest store's that exists
-    for the running interpreter, or None."""
+    """The venv a session in ``scope`` runs: the highest store's that a sync
+    completed (its :data:`STATE_FILE` exists) for the running interpreter, or
+    None. A venv anything else put there -- by hand, or a sync that failed
+    before installing -- is never an agents venv."""
     if disabled(environ):
         return None
     for store in reversed(scope.stores):
         venv = venv_dir(store)
-        if venv_python(venv).is_file():
+        if venv_python(venv).is_file() and (venv / STATE_FILE).is_file():
             return venv
     return None
 

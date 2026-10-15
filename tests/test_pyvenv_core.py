@@ -103,6 +103,16 @@ def test_env_runs_skills_under_the_venv_and_keeps_its_libs_off_pythonpath(tmp_pa
     assert str(lib) not in env.get("PYTHONPATH", "").split(os.pathsep)
 
 
+def test_a_venv_no_sync_made_is_never_the_agents_venv(tmp_path, monkeypatch):
+    # A project venv someone created in .pyvenv by hand (or a sync that failed
+    # before installing) has no state file: skills must not run in it.
+    monkeypatch.delenv("AGENTS_NO_PYVENV")
+    user = tmp_path / "home" / ".agents"
+    venv = _fake_venv(user, [])
+    (venv / _pyvenv.STATE_FILE).unlink()
+    assert _pyvenv.active_venv(Scope("user", user)) is None
+
+
 def test_env_without_a_venv_keeps_libs_on_pythonpath(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTS_NO_PYVENV")
     user = tmp_path / "home" / ".agents"

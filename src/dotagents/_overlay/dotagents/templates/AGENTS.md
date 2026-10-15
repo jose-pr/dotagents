@@ -34,8 +34,9 @@ Startup: annotate that you read `{{AGENTS_MD}}`.
   importing an overlay's `lib/` with `$AGENTS_PYTHON` (PowerShell
   `& $env:AGENTS_PYTHON`), never a bare `python`, `python3` or `py`. It is the scope's
   venv: duho, every overlay's requirements and every overlay `lib/` (project, then
-  user, then system) import there and nowhere else. `dotagents context` prints its
-  path; when the variable is unset, use `dotagents py -g -- <args>`.
+  user, then system) import there and nowhere else. When the variable is unset, use
+  the interpreter `dotagents context` prints. `.agents/.pyvenv/` holds only these
+  agents' venvs: never create, install into or test a project in one.
 - **This file**: everything between the `dotagents:begin`/`dotagents:end` markers is
   managed — `dotagents init` refreshes it and leaves anything outside untouched. Add
   your own rules and routing below the end marker, not inside.
