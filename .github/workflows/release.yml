@@ -66,7 +66,7 @@ jobs:
           ls -l dist/*.tar.gz dist/*.whl
           python -m twine check dist/*.tar.gz dist/*.whl
       # The pyz is a first-class release artifact -- the no-pip install path.
-      # `build-pyz` vendors duho/pathlib_next next to the package and runs from
+      # `build-pyz` vendors duho/pathapi next to the package and runs from
       # the checkout, so the package must be importable (editable install).
       - name: Build dotagents.pyz
         run: |
