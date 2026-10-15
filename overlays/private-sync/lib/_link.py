@@ -28,7 +28,7 @@ are **conventions, not requirements**:
   written once by the built-in git path.
 
 Kept out of the command modules (which only wire args to these). **Pure stdlib**
-(``os``/``shutil``/``subprocess``) -- no ``duho``/``pathlib_next`` -- so the
+(``os``/``shutil``/``subprocess``) -- no ``duho``/``pathapi`` -- so the
 command modules can load it by path with no dependency or PYTHONPATH setup.
 """
 
