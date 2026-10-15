@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   overlay's `requirements.txt` is installed (in one pip run, only when a file
   changed, before the overlay's `setup.py`). A project gets its own venv when one of
   its overlays ships requirements or a `lib/`. `--no-venv` skips it for a run;
-  `AGENTS_NO_PYVENV=1` turns it off.
+  `AGENTS_NO_PYVENV=1` turns it off. `.pyvenv/` holds the agents' venvs only: a
+  venv there that no sync completed is never used, and a project's own code keeps
+  its venvs in the project tree.
 - The venvs layer project > user > system through a `.pth` file in each: the store's
   own overlay libs, then each lower store's venv packages and libs, then dotagents
   itself. A project venv imports the project's packages first, then the user's.

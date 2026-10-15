@@ -230,7 +230,11 @@ only the skills it published, then sweeps any now-broken symlinks.
 
 Every store has a Python venv, `<store>/.pyvenv/<X.Y.Z>-<os>-<arch>/` (for example
 `~/.agents/.pyvenv/3.14.7-nt-arm64`), made from the Python that runs dotagents.
-`init` and every `overlays add` / `sync` / `remove` keep it current:
+`.pyvenv/` holds these **agents' venvs only**: skills, overlay helpers and setup
+scripts run there. A project's own code gets its own venv in the project tree
+(`<project>/.venv/`, which the python overlay's `dotagents pyvenv` creates); only a
+venv dotagents itself synced is ever used as an agents' venv. `init` and every
+`overlays add` / `sync` / `remove` keep it current:
 
 - The user store's venv always has **duho**, so any skill can build a command line
   on it, plus the packages each overlay installed there lists in a
