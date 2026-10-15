@@ -1187,6 +1187,12 @@ def get_diff(
 #: store, the clock), so its output is re-derived at least this often.
 ENV_CACHE_TTL = 300.0
 
+#: How far in the future a cache file's mtime may be and still count as fresh.
+#: On Windows before Python 3.13 ``time.time()`` reads a clock that ticks every
+#: ~15.6 ms while NTFS stamps files from a precise one, so a file read back at
+#: once can be dated slightly after "now". Beyond this, the clock moved back.
+_ENV_CACHE_CLOCK_SLACK = 2.0
+
 #: Every env-file name the two tiers resolve (see :func:`resolve_env_files`).
 _ENV_FILE_NAMES = (
     {"default": "pre.env.py", "project-root": ""},
@@ -1263,7 +1269,7 @@ def read_env_cache(scope: Scope, key: str, *, now: "Optional[float]" = None) -> 
     path = _env_cache_dir(scope) / key
     try:
         age = (time.time() if now is None else now) - os.stat(str(path)).st_mtime
-        if age < 0 or age >= ENV_CACHE_TTL:
+        if age < -_ENV_CACHE_CLOCK_SLACK or age >= ENV_CACHE_TTL:
             return None
         with open(str(path), encoding="utf-8", newline="") as fh:
             return fh.read()

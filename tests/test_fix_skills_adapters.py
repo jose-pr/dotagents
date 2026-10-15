@@ -400,6 +400,22 @@ def test_cached_env_expires(env_store, capsys, monkeypatch):
     assert _runs(env_store) == 2
 
 
+def test_cached_env_tolerates_a_file_dated_just_after_now(env_store):
+    # Windows before Python 3.13: time.time() ticks every ~15.6 ms while NTFS
+    # stamps files precisely, so a cache read back at once looks a little
+    # future-dated. Far in the future means the clock moved back: not reused.
+    import os
+    from types import SimpleNamespace
+
+    from dotagents import _env as env_mod
+
+    scope = SimpleNamespace(user_root=env_store)  # all the cache reads of a Scope
+    env_mod.write_env_cache(scope, "k", "cached")
+    mtime = os.stat(str(env_store / ".cache" / "env" / "k")).st_mtime
+    assert env_mod.read_env_cache(scope, "k", now=mtime - 0.001) == "cached"
+    assert env_mod.read_env_cache(scope, "k", now=mtime - 3600) is None
+
+
 def test_uncached_env_writes_no_cache(env_store, capsys):
     _env(capsys, cache=False)
     _env(capsys, cache=False)

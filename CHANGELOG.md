@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   absolute path as before. A store kept in git and used on machines whose home
   directories differ no longer shows `AGENTS.md` modified on all but one of them.
 
+### Fixed
+
+- `env --cache` on Windows with Python before 3.13 could miss a cache it had just
+  written: `time.time()` there lags the file's own timestamp by up to one clock
+  tick, and a cache file dated after "now" was treated as stale. A cache file
+  dated up to 2 s in the future now counts as fresh.
+
 ## [0.7.6] - 2026-10-15
 
 ### Added
