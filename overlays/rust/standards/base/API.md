@@ -149,6 +149,24 @@ name a module for what it owns.
 - **Every spawned task or thread has an owner** that joins it and sees its
   error or panic.
 
+## `core`, `alloc`, `std`
+
+- **A library names an item by the lowest crate that has it**: `core::`
+  first, then `alloc::` (with `extern crate alloc;` at the root), and `std::`
+  only for what needs the operating system: files, processes, threads,
+  dynamic loading, `catch_unwind`, the environment. A `std::` path left in
+  the source then marks exactly what a `no_std` build would have to give up.
+  (**house**)
+- **The lints hold it**: `#![warn(clippy::std_instead_of_core,
+  clippy::std_instead_of_alloc, clippy::alloc_instead_of_core)]` at every
+  library root, made errors by CI's `-D warnings`.
+- **Generated code follows the same rule**: a derive or `macro_rules!` emits
+  `::core::` paths; an `alloc` item it needs is reached through a
+  `#[doc(hidden)]` re-export in the crate that owns the macro, because the
+  consumer's crate may not declare `extern crate alloc`.
+- `impl core::error::Error` (stable since 1.81), `core::fmt`, `core::ptr`,
+  `core::mem`, `alloc::string::String`, `alloc::vec::Vec`.
+
 ## Process-wide state
 
 A library changes nothing outside its own values:

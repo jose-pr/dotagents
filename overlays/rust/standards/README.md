@@ -74,6 +74,9 @@ a precedent to copy.
   `std::error::Error` and never quote input.
 - A library keeps no process-global state, installs no logger, and neither
   prints nor exits.
+- Items are named from `core::` or `alloc::` wherever they live there, held by
+  the `std_instead_of_core`/`std_instead_of_alloc` lints, so every `std::`
+  path marks a real need for the operating system.
 - A library's default build pulls in no optional dependency; each feature is
   one capability, additive, and listed in the README and the shipped header.
 - Conversions use the standard traits; value types implement the common
