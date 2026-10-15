@@ -65,9 +65,9 @@ def test_a_store_under_home_is_named_from_home(tmp_path):
     home = tmp_path / "home"
     text = base_agents_text(BASE_ROOT, home / ".agents")
     assert "Startup: annotate that you read `~/.agents/AGENTS.md`." in text
-    project = home / "devel" / "proj" / ".agents"
+    project = home / "src" / "proj" / ".agents"
     text = base_agents_text(BASE_ROOT, project, project=True)
-    assert "annotate that you read `~/devel/proj/.agents/AGENTS.md`" in text
+    assert "annotate that you read `~/src/proj/.agents/AGENTS.md`" in text
 
 
 def test_init_writes_the_rendered_block_only(tmp_path):
