@@ -56,7 +56,7 @@ graph TD
   `mkdocs build --strict` should gate the release workflow so a stale module path fails
   loudly), README feature/API table, `CHANGELOG.md` `[Unreleased]`, root `AGENTS.md`.
 - **Verification**: name the actual local test command (e.g.
-  `.venv/<version>/bin/pytest`) and which platform-specific paths need real CI instead
+  `.pyvenv/<tag>/bin/pytest`) and which platform-specific paths need real CI instead
   of local mocking.
 
 ---

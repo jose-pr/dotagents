@@ -253,7 +253,7 @@ def test_venv_dir_is_named_for_the_target_interpreters_arch(tmp_path, monkeypatc
 
     venv_dir, interpreter = mod._venv_target(FakeScope(), "3.14")
     assert interpreter == target
-    assert venv_dir == tmp_path / ".venv" / "3.14.7-nt-arm64"
+    assert venv_dir == tmp_path / ".pyvenv" / "3.14.7-nt-arm64"
 
 
 def _py_scope(tmp_path, monkeypatch):
@@ -278,9 +278,9 @@ def test_venvs_live_in_the_project_tree_never_in_the_agents_store(tmp_path, monk
     # <store>/.pyvenv holds the agents' venvs, which dotagents builds itself.
     mod, scope = _py_scope(tmp_path, monkeypatch)
     venv, _ = mod._venv_target(scope, "3.14")
-    assert venv == tmp_path / "proj" / ".venv" / "3.14.7-nt-arm64"
+    assert venv == tmp_path / "proj" / ".pyvenv" / "3.14.7-nt-arm64"
     user = mod._run_target(scope, "3.14", logger=None)
-    assert mod._venv_target(user, "3.14")[0] == tmp_path / "home" / ".venv" / "3.14.7-nt-arm64"
+    assert mod._venv_target(user, "3.14")[0] == tmp_path / "home" / ".pyvenv" / "3.14.7-nt-arm64"
 
 
 def test_py_runs_the_user_venv_when_the_project_has_none(tmp_path, monkeypatch):

@@ -75,25 +75,20 @@ project's recorded exceptions to them are in its `.agents/AGENTS.md`.
   — that catches version-specific breakage (e.g. APIs added after the floor). Keep one
   venv per version you test against, named per the scheme below. CI runs the full matrix;
   locally, at minimum smoke-test latest + floor.
-- **Virtual Environments**: project-local `.venv/<version>-<os>-<arch>/`, gitignored,
-  where `<os>` is `os.name` (`nt`/`posix`) or `sys.platform` (`darwin`) and `<arch>` is
-  the machine (e.g. `.venv/3.9.10-nt-arm64`, `.venv/3.14.7-posix-x86_64`; `dotagents
-  pyvenv` below names and creates them for you). The os/arch suffix
-  lets multiple interpreters and platforms coexist under one `.venv/` (e.g. a 3.9 floor
-  and 3.14 side by side) — needed whenever a repo tests more than one Python. A bare
-  `.venv/<version>/` is acceptable only for a single-interpreter, single-platform repo.
-  **Never** install to system/user Python unless explicitly told. Create:
-  `python --version` then `python -m venv .venv/<version>-<os>-<arch>`; always invoke the
-  venv-scoped executables (Windows `.venv\<...>\Scripts\{python,pip,pytest}`, Unix `bin/`).
-- **Agents' venvs are not project venvs.** `.agents/.pyvenv/` (in any store) holds
-  the venvs dotagents builds for agents: skills, overlay helpers and setup scripts
-  run there (`$AGENTS_PYTHON`). Never create one, install into one or test a
-  project in one; a project's code gets its own `.venv/` as above.
-- **Project venvs: `dotagents pyvenv`** (this overlay's own command). Use it
-  instead of creating a `.venv/` by hand. It creates `<root>/.venv/<version>-<os>-<arch>/`,
-  `<root>` being the project root (`-g`: your home directory, a venv shared across
-  projects), and no-ops if it already exists, so re-running it is always safe. A
-  venv at the old place, `<root>/.pyvenv/`, is reported and left alone. `<os>`
+- **Project venvs live in `.pyvenv/<version>-<os>-<arch>/` at the project root**
+  (gitignored), one per interpreter, created with **`dotagents pyvenv [version]`**
+  (this overlay's own command) — never by hand, and never in `.venv/`. The tag
+  lets a 3.9 floor and 3.14 sit side by side (e.g. `.pyvenv/3.9.10-nt-arm64`,
+  `.pyvenv/3.14.7-posix-x86_64`). `-g` makes one in `~/.pyvenv/`, shared across
+  projects. Re-running it is safe: an existing venv is left as it is.
+  **Never** install to system/user Python unless explicitly told. A project that
+  already keeps its venvs elsewhere (its own `.venv/`, uv, poetry) records that in
+  its `.agents/AGENTS.md`; follow the record, and do not move them.
+- **Agents' venvs are not project venvs.** `.agents/.pyvenv/` (inside any store)
+  holds the venvs dotagents builds for agents: skills, overlay helpers and setup
+  scripts run there (`$AGENTS_PYTHON`). Never create one, install into one or test
+  a project in one.
+- **How `dotagents pyvenv` names a venv.** `<os>`
   is `nt`/`posix`/`darwin`, `<arch>` is what the chosen interpreter was **built**
   for (its `sysconfig.get_platform()` tail: `arm64`, `amd64`, `x86_64`; e.g.
   `3.14.7-nt-arm64`) — never `platform.machine()`, which reports the host and so
@@ -113,14 +108,14 @@ project's recorded exceptions to them are in its `.agents/AGENTS.md`.
     test suite against it. This is what actually catches version-specific
     breakage before it ships, not a per-commit ritual.
   - Always invoke venv-scoped executables from the created dir (Windows
-    `.venv\<tag>\Scripts\{python,pip,pytest}`, Unix `bin/`).
+    `.pyvenv\<tag>\Scripts\{python,pip,pytest}`, Unix `bin/`).
 - **Running one-off Python: `dotagents py`**. If you need to actually run
   something (not just create the venv), use `dotagents py`. It never creates a
-  venv in a project: it runs the project's `.venv/` for that version when one
-  exists, else the user one in `~/.venv/` (created there when missing; same naming
-  as `pyvenv`). Make a project venv deliberately, with `dotagents pyvenv [version]`,
-  when the project needs its own.
-  It passes everything after `--` straight through to that
+  venv in a project: it runs the project's `.pyvenv/` venv for that version when
+  one exists, else the user one in `~/.pyvenv/` (created there when missing; same
+  logic/naming as `pyvenv` above, not a second lookup). Make a project venv
+  deliberately, with `dotagents pyvenv [version]`. It passes everything after
+  `--` straight through to that
   interpreter, with real stdin/stdout/stderr (not captured) and the real exit
   code, so interactive input and streamed output both work as if you'd
   invoked python directly:
@@ -129,7 +124,7 @@ project's recorded exceptions to them are in its `.agents/AGENTS.md`.
   dotagents py 3.9 -- -m pytest -q    # the floor version, explicitly
   ```
   This is the one command for both finding/creating a shared interpreter AND
-  using it — do not separately locate `.venv/<tag>/.../python.exe` by hand
+  using it — do not separately locate `.pyvenv/<tag>/.../python.exe` by hand
   when `dotagents py` already resolves and runs it in one step.
 - **Interpreter management**: use the **Python Manager** (`py install <ver>`;
   `py -0p` lists installs with real paths) to add/select versions — the `py`
@@ -139,7 +134,7 @@ project's recorded exceptions to them are in its `.agents/AGENTS.md`.
   having installed nothing, no output past pip's startup line). A
   pymanager/python.org build under a real path (`py -0p` shows one) does not
   have this problem.
-- **Install**: `.venv/<tag>/<Scripts|bin>/pip install -e ".[dev,<extras-with-tests>]"`
+- **Install**: `.pyvenv/<tag>/<Scripts|bin>/python -m pip install -e ".[dev,<extras-with-tests>]"`
   — include every extra that has tests depending
   on it, or those tests silently skip instead of running.
 - **Test config**: `pythonpath = ["src"]` + `testpaths` under
@@ -160,9 +155,9 @@ project's recorded exceptions to them are in its `.agents/AGENTS.md`.
   the project deliberately opts in. (Formatting is the exception: black is standard.)
 - **`.gitignore` language block** (source for the template placeholder):
   `__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.hypothesis/`, `.mypy_cache/`,
-  `.ruff_cache/`, `.coverage*`, `htmlcov/`, `*.egg-info/`, `.venv/` (where
-  `dotagents pyvenv` puts project venvs; `-g` ones land in the home directory),
-  `.pyvenv/` (the old place, still ignored while one may linger).
+  `.ruff_cache/`, `.coverage*`, `htmlcov/`, `*.egg-info/`, `.pyvenv/` (project-scope
+  `dotagents pyvenv` output; `-g` ones land outside the repo), `.venv/` (other
+  tools' default).
   Include the **whole** list even when a tool is not in use yet: these dirs
   appear the first time anyone runs mypy/ruff/hypothesis, which is exactly when
   a hand-written `.gitignore` turns out to be missing them. A global
@@ -244,4 +239,4 @@ redeployed without cutting a release).
 - MkDocs strict-nav errors on repo-level markdown when snippets `base_path: ["."]` →
   set `docs_dir: docs` (the template does).
 - Windows/PowerShell venv console script resolving outside the venv →
-  `.\.venv\<tag>\Scripts\python.exe -m <module>` instead of the direct script.
+  `.\.pyvenv\<tag>\Scripts\python.exe -m <module>` instead of the direct script.

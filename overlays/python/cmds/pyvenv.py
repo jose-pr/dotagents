@@ -13,17 +13,15 @@ Discovered command module shipped BY THIS OVERLAY (D84 per-overlay ``cmds/``
 discovery, D85): plain dotagents ships no ``pyvenv`` command -- installing the
 ``python`` overlay is what makes it exist.
 
-**Where the venv lives**: ``<root>/.venv/<version>-<os>-<arch>/``, where
-``<root>`` is the project root, or the home directory for ``-g`` -- the
-project-venv convention ``kb/PYTHON.md`` sets out, gitignored and owned by the
-project. Never ``<store>/.pyvenv/``: that holds the agents' venvs, which
-dotagents itself builds and syncs (``dotagents._pyvenv``) for skills to run
-in. A venv at the old place (``<root>/.pyvenv``) is reported, never moved: a
-venv is not relocatable.
+**Where the venv lives**: ``<root>/.pyvenv/<version>-<os>-<arch>/``, where
+``<root>`` is the parent of the scope's store: the project root (a sibling of
+its ``.agents``), or the home directory for ``-g``. Never inside the store:
+``<store>/.pyvenv/`` holds the agents' venvs, which dotagents itself builds
+and syncs (``dotagents._pyvenv``) for skills to run in.
 
 **``py`` creates nothing in a project**: it runs the project's venv when one
-exists for the version, else the user one (``~/.venv``, created when missing).
-Only an explicit ``pyvenv`` creates a project venv.
+exists for the version, else the user one (``~/.pyvenv``, created when
+missing). Only an explicit ``pyvenv`` creates a project venv.
 
 ``<os>`` is ``os.name`` (``nt``/``posix``) EXCEPT macOS, which ``os.name``
 reports as ``posix`` same as Linux -- explicitly called out by the user as a
@@ -414,7 +412,7 @@ def _best_candidate(accept, logger) -> "Optional[Path]":
 def _venv_target(scope, py_version: "Optional[str]", logger=None) -> "tuple[Path, Path]":
     """The venv dir a given scope + version spec resolves to, whether or not it
     exists yet -- the single naming rule shared by ``pyvenv`` and ``py``."""
-    pyvenv_root = _root(scope) / ".venv"
+    pyvenv_root = scope.agents_root.parent / ".pyvenv"
     interpreter = _resolve_interpreter(py_version, logger=logger)
     probed = _probe_version(interpreter)
     version_str = "%d.%d.%d" % probed if probed else "unknown"
@@ -429,7 +427,6 @@ def _ensure_venv(scope, py_version: "Optional[str]", *, dry_run: bool, logger) -
     nothing exists yet (nothing to run against)."""
     target, interpreter = _venv_target(scope, py_version, logger)
     venv_python = _venv_python(target)
-    _warn_legacy(scope, logger)
 
     if venv_python.is_file():
         logger.info("pyvenv: exists, nothing to do: %s" % target)
@@ -454,28 +451,6 @@ def _ensure_venv(scope, py_version: "Optional[str]", *, dry_run: bool, logger) -
     return venv_python
 
 
-_WARNED: "set[str]" = set()
-
-
-def _root(scope) -> Path:
-    """Whose venvs these are: the project's root, or the home directory for the
-    user scope."""
-    if scope.global_scope:
-        return Path.home()
-    return Path(scope.project_root)
-
-
-def _warn_legacy(scope, logger) -> None:
-    """Say once that venvs exist at the old place, ``<root>/.pyvenv``."""
-    legacy = _root(scope) / ".pyvenv"
-    if legacy.is_dir() and str(legacy) not in _WARNED:
-        _WARNED.add(str(legacy))
-        logger.warning(
-            "pyvenv: venvs now live in %s; the ones in %s are no longer used "
-            "(delete them when nothing needs them)" % (_root(scope) / ".venv", legacy)
-        )
-
-
 def _run_target(scope, py_version: "Optional[str]", logger):
     """The scope ``py`` runs in: the project's when it has a venv for the
     version, else the user one."""
@@ -490,8 +465,8 @@ def _run_target(scope, py_version: "Optional[str]", logger):
 
 
 class Pyvenv(DotAgentsArgs):
-    """Create a venv for a Python version in ``<root>/.venv/`` (the project root,
-    or the home directory with ``-g``), once. If the target already looks like a real venv, do nothing --
+    """Create a venv for a Python version in ``<root>/.pyvenv/`` (the project
+    root, or the home directory with ``-g``), once. If the target already looks like a real venv, do nothing --
     this command is a create-if-missing operation, not an updater.
 
     Scope (``-g/--global``, ``--agents-dir``) comes from ``DotAgentsArgs`` --
@@ -517,8 +492,8 @@ class Pyvenv(DotAgentsArgs):
 
 
 class Py(DotAgentsArgs):
-    """Run Python in the project's ``.venv/`` for that version when it exists,
-    else the user one (``~/.venv``), created first if it doesn't exist yet
+    """Run Python in the project's ``.pyvenv/`` venv for that version when it
+    exists, else the user one (``~/.pyvenv``), created first if it doesn't exist yet
     (same logic as ``pyvenv`` -- this IS "the venv
     command and where you run things with it", not a separate lookup).
 
