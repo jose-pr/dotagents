@@ -3,6 +3,12 @@
 Rust-specific extras/overrides on top of the generic repo standard in
 `$ENGINEERING_OVERLAY_ROOT/flows/REPO.md` — read that first. Only Rust-specific content here.
 
+This file is packaging, tooling, CI, release and the traps already paid for.
+**How a crate is designed, named, documented and tested is in
+`$RUST_OVERLAY_ROOT/standards/`** — start at its `README.md`, which says which
+standard applies to the work. A project's recorded exceptions to them are in its
+`.agents/AGENTS.md`.
+
 Written 2026-07-27 from the first substantial Rust project under these rules: a
 14-crate workspace with a hand-written C ABI, three plugin backends, and a forked
 protocol library. Every rule below cost something to learn.
@@ -19,9 +25,9 @@ protocol library. Every rule below cost something to learn.
   mechanism is Cargo **features** (`[features]` + `dep:crate`), not runtime import
   fallbacks. Set `[package.metadata.docs.rs] all-features = true` so docs.rs
   documents every feature.
-- **README badges** (fill the template's badge row): version
-  `img.shields.io/crates/v/<project_name>.svg` → crates.io page; docs
-  `img.shields.io/docsrs/<project_name>` → `docs.rs/<project_name>`.
+- **README badges**: the exact row, its order and the README section order are
+  fixed in `$RUST_OVERLAY_ROOT/standards/base/DOCS.md` — Version, Rust version,
+  License, Docs (docs.rs), CI. Copy the row from there; do not compose one.
 
 ## Testing and Development
 
@@ -124,6 +130,9 @@ crates (it usually does); a crate gets its own `.agents/plans/` only when the wo
 genuinely contained.
 
 ## FFI: the rules that cost real bugs
+
+The rules themselves are `$RUST_OVERLAY_ROOT/standards/specialized/FFI.md`; this
+section is the account of what breaking them cost.
 
 ### `repr(C)`/`repr(transparent)` only on types that cross the ABI
 
@@ -304,10 +313,13 @@ just the one the launcher wraps. A project whose launcher pins one profile has t
 latent permanently — the wrapped profile stays fresh while the other silently rots,
 and which one a test *loads* is decided by `PATH`, not by how it was compiled.
 
-## `unsafe` belongs in one crate
+## `unsafe` belongs in named files, listed by a test
 
-Target: **`unsafe` appears only in the FFI crate**, with every other crate able to
-`#![forbid(unsafe_code)]`. That is checkable, unlike "improve ergonomics".
+Target: **`unsafe` appears only in the files a boundary needs** — the exports, the
+loader, the raw bindings — every other module carries `#![forbid(unsafe_code)]`,
+and a test lists the allowed files (`$RUST_OVERLAY_ROOT/standards/base/UNSAFE.md`).
+That is checkable, unlike "improve ergonomics", and it holds in a workspace where
+more than one crate meets a real OS or C boundary, which "one crate" does not.
 
 The measurable symptom of getting this wrong: in one workspace, frontends using the safe API had
 0 and 9 `unsafe` blocks; backends using the raw ABI had **~190 between them**, because

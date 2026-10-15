@@ -1,6 +1,10 @@
 name = "rust"
-description = "Rust repo conventions: kb, Cargo.toml template, CI workflows."
+description = "Rust repo conventions: kb, standards for crates, Cargo.toml template, CI workflows."
 requires = ["engineering"]
 routing = [
   """- Rust work → $RUST_OVERLAY_ROOT/kb/RUST.md""",
+  """- Design, name or document a Rust crate (public API, errors, unsafe, features,
+  conversions, README and AGENTS.md format, preferred crates, a C ABI, plugins, a
+  protocol crate, a binary) →
+  $RUST_OVERLAY_ROOT/standards/README.md, then the file it names""",
 ]
