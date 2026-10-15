@@ -86,9 +86,13 @@ project's recorded exceptions to them are in its `.agents/AGENTS.md`.
   venv-scoped executables (Windows `.venv\<...>\Scripts\{python,pip,pytest}`, Unix `bin/`).
 - **Shared venvs: `dotagents pyvenv`** (this overlay's own command). For a shared,
   version-pinned venv rather than a per-project one, use it instead of creating one
-  by hand. It creates `<scope>/.pyvenv/<version>-<os>-<arch>/` (a sibling of
-  `.agents`; project scope by default, `-g` for the user-wide store shared across
-  projects) and no-ops if it already exists, so re-running it is always safe. `<os>`
+  by hand. It creates `<store>/.pyvenv/<version>-<os>-<arch>/` inside the store
+  (`<project>/.agents/` by default, `-g` for `~/.agents/`, shared across projects)
+  and no-ops if it already exists, so re-running it is always safe. The version
+  dotagents itself runs on names the store's own venv, the one skills run in:
+  duho, every overlay's `requirements.txt` and every overlay `lib/` import there
+  (`$AGENTS_PYTHON`). A venv at the old place, beside the store, is reported and
+  left alone. `<os>`
   is `nt`/`posix`/`darwin`, `<arch>` is what the chosen interpreter was **built**
   for (its `sysconfig.get_platform()` tail: `arm64`, `amd64`, `x86_64`; e.g.
   `3.14.7-nt-arm64`) — never `platform.machine()`, which reports the host and so
@@ -110,9 +114,12 @@ project's recorded exceptions to them are in its `.agents/AGENTS.md`.
   - Always invoke venv-scoped executables from the created dir (Windows
     `.pyvenv\<tag>\Scripts\{python,pip,pytest}`, Unix `bin/`).
 - **Running one-off Python: `dotagents py`**. If you need to actually run
-  something (not just create the venv), use `dotagents py` — it creates the
-  venv first if missing (same logic/naming as `pyvenv` above, not a second
-  lookup) and passes everything after `--` straight through to that
+  something (not just create the venv), use `dotagents py`. It never creates a
+  venv in a project: it runs the project's venv for that version when one exists,
+  else the user store's (created there when missing; same naming as `pyvenv`),
+  and with no version the store venv skills run in. Make a project venv
+  deliberately, with `dotagents pyvenv [version]`, when the project needs its own.
+  It passes everything after `--` straight through to that
   interpreter, with real stdin/stdout/stderr (not captured) and the real exit
   code, so interactive input and streamed output both work as if you'd
   invoked python directly:

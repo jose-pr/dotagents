@@ -13,13 +13,19 @@ Discovered command module shipped BY THIS OVERLAY (D84 per-overlay ``cmds/``
 discovery, D85): plain dotagents ships no ``pyvenv`` command -- installing the
 ``python`` overlay is what makes it exist.
 
-**Where the venv lives**: ``<scope-root>/.pyvenv/<version>-<os>-<arch>/``, a
-SIBLING of the scope's own ``.agents`` dir, not inside it -- ``.pyvenv/`` is
-never overlay content and must not be swept by anything that walks
-``overlays/``/``skills/``/``dotagents/cmds/`` under the store. ``<scope-root>``
-is ``Scope.agents_root`` from ``dotagents._scope`` (the ``~/.agents`` store for
-``-g``, or ``<project>/.agents`` otherwise) -- so for the user scope this is
-``~/.pyvenv/<version>-<os>-<arch>/``, a sibling of ``~/.agents``.
+**Where the venv lives**: ``<store>/.pyvenv/<version>-<os>-<arch>/``, inside
+the scope's store (``Scope.agents_root``: ``~/.agents`` for ``-g``, else
+``<project>/.agents``), the same place dotagents keeps the store's own venv
+(``dotagents._pyvenv``) -- so a version matching the interpreter running
+dotagents IS that venv, with duho, every overlay's requirements and the
+overlay libs. The store's ignore rules keep ``.pyvenv/`` out of git. A venv at
+the old place (``<store>/../.pyvenv``) is reported, never moved: a venv is not
+relocatable.
+
+**``py`` creates nothing in a project**: it runs the project's venv when one
+exists for the version, else the user store's (created there when missing).
+Only an explicit ``pyvenv`` creates a project venv. With no version, ``py``
+runs the active store venv (``AGENTS_PYTHON``'s) when there is one.
 
 ``<os>`` is ``os.name`` (``nt``/``posix``) EXCEPT macOS, which ``os.name``
 reports as ``posix`` same as Linux -- explicitly called out by the user as a
@@ -410,7 +416,7 @@ def _best_candidate(accept, logger) -> "Optional[Path]":
 def _venv_target(scope, py_version: "Optional[str]", logger=None) -> "tuple[Path, Path]":
     """The venv dir a given scope + version spec resolves to, whether or not it
     exists yet -- the single naming rule shared by ``pyvenv`` and ``py``."""
-    pyvenv_root = scope.agents_root.parent / ".pyvenv"
+    pyvenv_root = scope.agents_root / ".pyvenv"
     interpreter = _resolve_interpreter(py_version, logger=logger)
     probed = _probe_version(interpreter)
     version_str = "%d.%d.%d" % probed if probed else "unknown"
@@ -425,6 +431,7 @@ def _ensure_venv(scope, py_version: "Optional[str]", *, dry_run: bool, logger) -
     nothing exists yet (nothing to run against)."""
     target, interpreter = _venv_target(scope, py_version, logger)
     venv_python = _venv_python(target)
+    _warn_legacy(scope, logger)
 
     if venv_python.is_file():
         logger.info("pyvenv: exists, nothing to do: %s" % target)
@@ -435,12 +442,54 @@ def _ensure_venv(scope, py_version: "Optional[str]", *, dry_run: bool, logger) -
         logger.info("dry-run: no venv created")
         return None
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run([str(interpreter), "-m", "venv", str(target)], check=True)
+    try:
+        from dotagents._pyvenv import ensure_venv
+    except ImportError:  # a dotagents older than its scope venvs
+        target.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([str(interpreter), "-m", "venv", str(target)], check=True)
+    else:
+        # Falls back to --without-pip where the interpreter has no ensurepip.
+        ensure_venv(target, interpreter, logger=logger)
     if not venv_python.is_file():
         raise SystemExit("error: venv creation reported success but %s is missing" % venv_python)
     logger.info("pyvenv: created %s" % target)
     return venv_python
+
+
+_WARNED: "set[str]" = set()
+
+
+def _warn_legacy(scope, logger) -> None:
+    """Say once that venvs exist at the old place, beside the store."""
+    legacy = scope.agents_root.parent / ".pyvenv"
+    if legacy.is_dir() and str(legacy) not in _WARNED:
+        _WARNED.add(str(legacy))
+        logger.warning(
+            "pyvenv: venvs now live in %s; the ones in %s are no longer used "
+            "(delete them when nothing needs them)" % (scope.agents_root / ".pyvenv", legacy)
+        )
+
+
+def _run_target(scope, py_version: "Optional[str]", logger):
+    """The scope ``py`` runs in: the active store venv for no version, else a
+    project's own venv when it exists, else the user store's."""
+    if not py_version:
+        try:
+            from dotagents._pyvenv import active_venv, venv_python
+        except ImportError:
+            pass
+        else:
+            venv = active_venv(scope)
+            if venv is not None:
+                return None, venv_python(venv)
+    if scope.global_scope:
+        return scope, None
+    target, _interpreter = _venv_target(scope, py_version, logger)
+    if _venv_python(target).is_file():
+        return scope, None
+    from dotagents._scope import Scope
+
+    return Scope("user", scope.user_root, system_root=scope.system_root), None
 
 
 class Pyvenv(DotAgentsArgs):
@@ -498,8 +547,9 @@ class Py(DotAgentsArgs):
     ("py_version",)
 
     def __call__(self) -> int:
-        scope = self.resolve_scope()
-        venv_python = _ensure_venv(scope, self.py_version, dry_run=False, logger=self._logger_)
+        scope, venv_python = _run_target(self.resolve_scope(), self.py_version, self._logger_)
+        if venv_python is None:
+            venv_python = _ensure_venv(scope, self.py_version, dry_run=False, logger=self._logger_)
         # `_ensure_venv` only returns None on dry_run, which this command never
         # sets -- but guard anyway rather than pass None to subprocess.
         if venv_python is None:
