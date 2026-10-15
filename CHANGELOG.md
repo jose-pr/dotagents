@@ -7,8 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Each store has a Python venv, `<store>/.pyvenv/<X.Y.Z>-<os>-<arch>/`, made from
+  the Python that runs dotagents, where skills run. `init` and `overlays add` /
+  `sync` / `remove` keep it current: the user venv always has duho, and every
+  overlay's `requirements.txt` is installed (in one pip run, only when a file
+  changed, before the overlay's `setup.py`). A project gets its own venv when one of
+  its overlays ships requirements or a `lib/`. `--no-venv` skips it for a run;
+  `AGENTS_NO_PYVENV=1` turns it off.
+- The venvs layer project > user > system through a `.pth` file in each: the store's
+  own overlay libs, then each lower store's venv packages and libs, then dotagents
+  itself. A project venv imports the project's packages first, then the user's.
+- `env` points `AGENTS_PYTHON` at the active venv and names it in `AGENTS_PYVENV`;
+  overlay `setup.py` scripts run under it. `context` prints it ("Python for
+  skills"), and its JSON form carries it as `python`. The managed block tells
+  agents to run skill scripts with `$AGENTS_PYTHON`.
+- pip without ensurepip: a venv where the interpreter has no ensurepip is created
+  without pip, and pip runs from its wheel (25.3, the last for Python 3.9, checked
+  against a pinned sha256). The wheel is found in the store's cache, in a `.pyz`
+  built with the new `build-pyz --with-pip`, in `AGENTS_PIP_SOURCE` (a directory of
+  wheels, or any URI pathapi-uri reads) or pip's `find-links`, or on your index
+  (`PIP_INDEX_URL`, or the mirror in `pip.ini` / `pip.conf`). `AGENTS_PIP_SOURCE`
+  is also passed to pip as `--find-links` for the requirements.
+
 ### Changed
 
+- With a scope venv, `env` no longer puts the overlay libs it layers on
+  `PYTHONPATH`: the venv's interpreter imports them, and no other Python in the
+  session should. Without a venv, `PYTHONPATH` carries them as before.
+  `AGENTS_PYTHONPATH` still lists every lib.
 - The base block's "Startup: annotate that you read `…`" line names a store under
   the home directory from there (`~/.agents/AGENTS.md`), and any other store by its
   absolute path as before. A store kept in git and used on machines whose home

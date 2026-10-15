@@ -160,6 +160,11 @@ store's shared `skills/` so every agent sees the same skills.
   `.ignore` at the overlay's root match (setup output, local state) and tool caches are left
   alone; `--prune` clears them too. A fresh `add` whose setup script fails is rolled
   back.
+- Each store has a Python venv, `<store>/.pyvenv/<version>-<os>-<arch>/`, where skills
+  run (`$AGENTS_PYTHON`): duho, every overlay's `requirements.txt` and every overlay
+  `lib/` import there, layered project > user > system. pip comes from the
+  interpreter, else its pinned wheel (cache, `AGENTS_PIP_SOURCE`, your index mirror,
+  or a `.pyz` built `--with-pip`).
 - `sync` refreshes each overlay from the repo it was installed from (`--repo` replaces
   that source), installs a `requires` added upstream, and re-merges the managed block.
 - `remove` deletes the overlay's directory, unpublishes only the skills **it**

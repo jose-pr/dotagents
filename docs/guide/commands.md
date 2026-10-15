@@ -100,9 +100,14 @@ dotagents init                          # base config into ./.agents (project sc
 dotagents init -g                       # ...into ~/.agents (user scope)
 dotagents init --bin-dir ~/.local/bin   # also write a `dotagents` command on PATH
 dotagents init --no-hooks               # skip agent hook wiring + the skills links
+dotagents init --no-venv                # skip the store's Python venv (duho for skills)
 dotagents init --agents claude,codex    # exactly these agents (default: detected + claude)
 dotagents init --dry-run
 ```
+
+`init` also creates or updates the store's Python venv, where skills run (see
+[the scope venv](overlays.md#python-dependencies-and-the-scope-venv)). Offline, or
+with no pip to be had, that is a warning; `overlays sync` retries.
 
 ### Hook wiring
 
@@ -213,8 +218,11 @@ dotagents overlays show python             # describe one: manifest, requires, s
   before touching anything — the first repo that offers a name wins — records where
   each overlay came from, and publishes skills from the installed copy, never
   replacing a skill already in the shared `skills/` dir (and links them into
-  Claude's skills dir when `init` wired Claude for the store). A fresh install whose setup
-  script fails is rolled back. A source inside the store's own `overlays/` directory
+  Claude's skills dir when `init` wired Claude for the store). Each overlay's
+  `requirements.txt` is installed into the scope venv before its setup script runs
+  (`--no-venv` skips it; see
+  [the scope venv](overlays.md#python-dependencies-and-the-scope-venv)). A fresh install
+  whose requirements or setup script fail is rolled back. A source inside the store's own `overlays/` directory
   is refused (by `sync` too): `remove` would delete the only copy.
 - `add`, `remove` and `show` without an overlay name are usage errors (exit 2), and
   a `--dry-run` says what it would write (`would recompose ...`) instead of reporting
@@ -590,6 +598,7 @@ is not listed.
 ```bash
 python -m dotagents build-pyz --out dist/dotagents.pyz
 python -m dotagents build-pyz --extras uri,repo     # also vendor what those extras install
+python -m dotagents build-pyz --with-pip            # also carry pip, for machines without it
 ```
 
 Builds a self-contained zipapp from a source checkout, with `duho` and `pathapi`
@@ -608,6 +617,9 @@ vendored (plus what the dotagents-cli extras named by `--extras` install), so it
   vendored as pure-Python wheels resolved for Python 3.9, so the file does not
   depend on the machine that built it; `sftp` needs native modules and fails the
   build with a message saying so. The archive is compressed.
+- `--with-pip` — also vendor the pinned pip wheel (about 1.8 MB), so the `.pyz` can
+  set up the scope venv where Python has no ensurepip and no index is reachable
+  (see [the scope venv](overlays.md#python-dependencies-and-the-scope-venv)).
 
 Each release attaches a built one:
 <https://github.com/jose-pr/dotagents/releases/latest/download/dotagents.pyz>.

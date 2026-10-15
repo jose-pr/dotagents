@@ -226,12 +226,44 @@ copies, where symlinks are unavailable) into the scope's shared skills dir, so e
 agent that reads that dir picks up the same skills. Removing the overlay unpublishes
 only the skills it published, then sweeps any now-broken symlinks.
 
+## Python dependencies and the scope venv
+
+Every store has a Python venv, `<store>/.pyvenv/<X.Y.Z>-<os>-<arch>/` (for example
+`~/.agents/.pyvenv/3.14.7-nt-arm64`), made from the Python that runs dotagents.
+`init` and every `overlays add` / `sync` / `remove` keep it current:
+
+- The user store's venv always has **duho**, so any skill can build a command line
+  on it, plus the packages each overlay installed there lists in a
+  **`requirements.txt`** at its root (pip's format). They are installed in one pip
+  run, so pip sees every constraint at once, and only when a file changed.
+- A project gets its own venv only when one of its overlays ships a
+  `requirements.txt` or a `lib/`; otherwise a project session uses the user venv.
+- The venvs **layer like everything else**. A `.pth` file in each venv lists, highest
+  precedence first: the store's own overlay libs, then the user venv's packages and
+  libs, then the system store's. dotagents itself comes last. So in a project venv,
+  the project's packages and libs win, then the user's, then the system's.
+- `dotagents env` points **`AGENTS_PYTHON`** at the active venv (and names it in
+  `AGENTS_PYVENV`). Overlay `setup.py` and `env.py` run under it, and the managed
+  block tells agents to run skill scripts with it. Libs the venv layers stay off
+  `PYTHONPATH`, so no other Python in the session, such as a project's own venv,
+  imports them by accident.
+
+**No ensurepip, no network?** pip runs from its wheel, pinned by version (25.3, the
+last for Python 3.9) and hash, found in this order: the store's cache, a copy
+vendored into the `.pyz` (`build-pyz --with-pip`), `AGENTS_PIP_SOURCE` (a directory
+of wheels, or any URI pathapi-uri reads: `file:`, `s3:`, `sftp:`, ...), pip's own
+`find-links`, then your index (`PIP_INDEX_URL` or the mirror in `pip.ini` /
+`pip.conf`). `AGENTS_PIP_SOURCE` is also handed to pip as `--find-links` for the
+requirements themselves.
+
+Opt out per run with `--no-venv`, or for good with `AGENTS_NO_PYVENV=1`.
+
 ## Setup scripts
 
 An overlay may ship an **idempotent** `setup.py` at its root — the recommended,
-OS-agnostic form: it runs under the same Python that runs dotagents, so it works on
-every platform. After `add` / `sync` copies the overlay
-in, dotagents runs the script automatically. Reserve it for real install-time work:
+OS-agnostic form: it runs under `AGENTS_PYTHON` (the scope venv above, with the
+overlay's requirements installed first), so it works on every platform. After
+`add` / `sync` copies the overlay in, dotagents runs the script automatically. Reserve it for real install-time work:
 `PATH`, `PYTHONPATH` and `$<NAME>_OVERLAY_ROOT` are `dotagents env`'s job
 (above), and an overlay's own env vars belong in its `env.py`, not in a script that
 writes one into the store — none of the example overlays ship a setup script any more.
@@ -242,8 +274,9 @@ Presence of a script is the opt-in; skip it with `--no-setup`. The author contra
 - **Environment** carries `AGENTS_HOME` (the user store), `AGENTS_SCOPE_ROOT` (the
   store the overlay is installed into), `AGENTS_SCOPE` (`user` or `project`) and
   `AGENTS_OVERLAY_DIR` (the overlay's own installed dir) — never hardcode a home path.
-- **Environment** is also the scope's assembled `dotagents env`: every overlay's `lib/`
-  on `PYTHONPATH`, its `bin/` on `PATH`.
+- **Environment** is also the scope's assembled `dotagents env`: every overlay's `bin/`
+  on `PATH`, and every overlay's `lib/` importable (through the venv's layering, or
+  `PYTHONPATH` without a venv).
 - **Time limit**: 300 seconds, or the manifest's `setup_timeout`, or the command's
   `--setup-timeout` (which wins); `0` means no limit. A script still running then is
   stopped, and that counts as a failure (exit 124).
