@@ -98,6 +98,30 @@ def test_fix_converts_to_what_the_attributes_expect(repo):
     assert not [p for p in repo.rglob(".eol-*")]
 
 
+def _git(root, *args):
+    subprocess.run(["git", "-C", str(root), *args], check=True, env=GIT_ENV,
+                   capture_output=True)
+
+
+def test_a_file_git_stores_as_non_text_is_left_alone(repo, capsys):
+    # A lone CR makes git store the file verbatim under text=auto; its CR LF
+    # pairs are tracked content, so converting them would change the blob.
+    (repo / "defect.md").write_bytes(b"shows a lone\rCR\r\nand a pair\r\n")
+    _git(repo, "add", "defect.md")
+    (repo / "untracked.md").write_bytes(b"lone\rCR\r\n")
+    assert run(eol.Eol.Fix, repo) == 0
+    assert (repo / "defect.md").read_bytes() == b"shows a lone\rCR\r\nand a pair\r\n"
+    assert (repo / "untracked.md").read_bytes() == b"lone\rCR\r\n"
+    assert "2 stored as non-text" in capsys.readouterr().out
+    assert run(eol.Eol.Check, repo) == eol.EXIT_OK
+
+
+def test_text_set_on_a_file_overrides_how_git_stores_it(repo):
+    (repo / ".gitattributes").write_bytes(b"* text=auto eol=lf\nforced.md text\n")
+    (repo / "forced.md").write_bytes(b"lone\rCR\r\n")
+    assert run(eol.Eol.Check, repo / "forced.md") == eol.EXIT_OFFENDERS
+
+
 def test_dry_run_changes_nothing(repo, capsys):
     assert run(eol.Eol.Fix, repo, "--dry-run") == 0
     assert (repo / "crlf.txt").read_bytes() == FILES["crlf.txt"]

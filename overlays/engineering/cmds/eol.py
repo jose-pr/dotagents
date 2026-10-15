@@ -7,7 +7,10 @@ Every text file is LF, unless the repository's own attributes say otherwise:
 
 * ``eol=crlf`` on a path means that file is expected to be CRLF (a ``.bat``);
 * ``-text`` or ``binary`` means the bytes are not ours to choose -- a recorded
-  response, a third party's golden file -- and the file is left alone.
+  response, a third party's golden file -- and the file is left alone;
+* a file git stores as non-text is left alone too, unless ``text`` is set on
+  it: under ``text=auto`` git keeps such a file's bytes verbatim (a lone CR is
+  enough to make it non-text), so converting it would change tracked content.
 
 A file is counted in bytes, never by a text tool: LF when it has no CR, CRLF
 when every newline is a CR LF pair, MIXED otherwise. ``fix`` reads the whole
@@ -100,7 +103,7 @@ class Eol(LoggingArgs, Cli):
         ("paths",)
 
         def targets(self) -> "list[tuple[Path, str]]":
-            """(file, expected ending or `EXEMPT`) for every file to examine."""
+            """(file, expected ending, `EXEMPT` or `STORED`) for every file to examine."""
             found: "list[tuple[Path, str]]" = []
             for given in (list(self.paths) or [Path(".")]):
                 path = Path(given)
@@ -134,6 +137,7 @@ class Eol(LoggingArgs, Cli):
         def _with_attributes(self, root: Path, names: "list[str]") -> "list[tuple[Path, str]]":
             """Pair each file with what its attributes expect of it."""
             expected = dict.fromkeys(names, "LF")
+            forced_text = set()
             try:
                 out = _git(["-C", str(root), "check-attr", "-z", "--stdin", "text", "eol"],
                            stdin="\0".join(names).encode("utf-8", "surrogateescape") + b"\0")
@@ -146,15 +150,43 @@ class Eol(LoggingArgs, Cli):
                         continue
                     if attr == "text" and value == "unset":
                         expected[name] = "EXEMPT"
+                    elif attr == "text" and value == "set":
+                        forced_text.add(name)
                     elif attr == "eol" and value == "crlf" and expected[name] != "EXEMPT":
                         expected[name] = "CRLF"
+            for name in self._stored_as_non_text(root):
+                if expected.get(name, "EXEMPT") != "EXEMPT" and name not in forced_text:
+                    expected[name] = "STORED"
             return [(root / name, expected[name]) for name in names]
+
+        @staticmethod
+        def _stored_as_non_text(root: Path) -> "set[str]":
+            """Files under `root` that git stores, or would store on `add`, as
+            non-text: `i/-text` for a tracked file, `w/-text` for an untracked one."""
+            try:
+                out = _git(["-C", str(root), "ls-files", "--eol", "--cached", "--others",
+                            "--exclude-standard", "-z"])
+            except (OSError, subprocess.TimeoutExpired):
+                return set()
+            if out.returncode != 0:
+                return set()
+            found = set()
+            for entry in out.stdout.decode("utf-8", "surrogateescape").split("\0"):
+                info, tab, name = entry.partition("\t")
+                fields = info.split()
+                if not tab or len(fields) < 2:
+                    continue
+                index, work = fields[0][2:], fields[1][2:]
+                if index == "-text" or (not index and work == "-text"):
+                    found.add(name)
+            return found
 
         def offenders(self) -> "tuple[list[tuple[Path, str, bytes]], dict[str, int]]":
             """(file, expected, its bytes) for every file that is not as expected,
             and how many files fell into each class."""
             wrong: "list[tuple[Path, str, bytes]]" = []
-            seen = {"text": 0, "binary": 0, "exempt": 0, "unreadable": 0}
+            seen = {"text": 0, "binary": 0, "exempt": 0, "stored as non-text": 0,
+                    "unreadable": 0}
             for path, expected in self.targets():
                 if path.is_symlink() or not path.is_file():
                     continue
@@ -168,6 +200,9 @@ class Eol(LoggingArgs, Cli):
                     continue
                 if is_binary(data):
                     seen["binary"] += 1
+                    continue
+                if expected == "STORED":
+                    seen["stored as non-text"] += 1
                     continue
                 seen["text"] += 1
                 if state_of(data) not in ("NONE", expected):
@@ -217,7 +252,7 @@ class Eol(LoggingArgs, Cli):
         def _control_bytes(self) -> "list[tuple[Path, int, int]]":
             found = []
             for path, expected in self.targets():
-                if expected == "EXEMPT" or path.is_symlink() or not path.is_file():
+                if expected in ("EXEMPT", "STORED") or path.is_symlink() or not path.is_file():
                     continue
                 try:
                     data = path.read_bytes()

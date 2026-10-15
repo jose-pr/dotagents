@@ -34,7 +34,11 @@ dotagents eol fix [path ...] [--dry-run]
 Over MCP: `dotagents.eol.check`, `dotagents.eol.fix`.
 
 The command reads the repository's attributes, so `eol=crlf` files are
-expected to be CRLF and `-text` files are left alone. It counts bytes, reads
+expected to be CRLF and `-text` files are left alone. So is a file git
+stores as non-text (`git ls-files --eol` shows `i/-text`; under `text=auto` a
+lone CR is enough), unless `text` is set on it: git keeps such a file's bytes
+verbatim, so converting it would change tracked content. If the file really is
+text, set `text` on it in `.gitattributes`. It counts bytes, reads
 all of a file before writing any of it, and replaces the file by rename.
 
 **Use it instead of a one-liner.** The obvious ones are wrong:
