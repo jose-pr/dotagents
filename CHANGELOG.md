@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The base block's "Startup: annotate that you read `…`" line names a store under
+  the home directory from there (`~/.agents/AGENTS.md`), and any other store by its
+  absolute path as before. A store kept in git and used on machines whose home
+  directories differ no longer shows `AGENTS.md` modified on all but one of them.
+
 ## [0.7.6] - 2026-10-15
 
 ### Added

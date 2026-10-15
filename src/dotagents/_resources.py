@@ -122,7 +122,9 @@ def base_agents_text(
     store when the base has one; falling back to ``<src>/AGENTS.md`` for a
     ``--from`` base that keeps it at its root) with ``{{AGENTS_MD}}`` rendered
     as the ACTUAL path of the file being written, so the block's "annotate that
-    you read `…`" line names this store's file."""
+    you read `…`" line names this store's file. Under the home directory it is
+    written ``~/…``, so a store synced between machines whose home directories
+    differ renders the same block on each."""
     src_path = Path(src)
     template = src_path / BASE_AGENTS_TEMPLATE
     if project and (src_path / BASE_PROJECT_TEMPLATE).is_file():
@@ -130,5 +132,16 @@ def base_agents_text(
     elif not template.is_file():
         template = src_path / "AGENTS.md"
     text = template.read_text(encoding="utf-8")
-    agents_md = (Path(dest).expanduser().resolve() / "AGENTS.md").as_posix()
-    return text.replace(AGENTS_MD_PLACEHOLDER, agents_md)
+    agents_md = Path(dest).expanduser().resolve() / "AGENTS.md"
+    return text.replace(AGENTS_MD_PLACEHOLDER, home_relative(agents_md))
+
+
+def home_relative(path: "str | os.PathLike[str]") -> str:
+    """``path`` as POSIX text, written ``~/<rest>`` when it is under the home
+    directory and absolute otherwise."""
+    path = Path(path)
+    try:
+        rest = path.relative_to(Path.home().resolve())
+    except (ValueError, RuntimeError):  # RuntimeError: no home directory
+        return path.as_posix()
+    return "~/" + rest.as_posix() if rest.parts else "~"

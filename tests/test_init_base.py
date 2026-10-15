@@ -13,6 +13,10 @@ from dotagents.cli.overlays import OverlayAdd
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "user"))
+    # A home beside the stores, not above them, so their paths render absolute.
+    # USERPROFILE is what Path.home() reads on Windows.
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
 
 
@@ -53,6 +57,17 @@ def test_block_names_the_actual_agents_md(tmp_path):
     old.mkdir()
     (old / "AGENTS.md").write_text("<!-- dotagents:begin -->\nread `{{AGENTS_MD}}`\n<!-- dotagents:end -->\n", encoding="utf-8")
     assert "read `%s`" % expected in base_agents_text(old, store)
+
+
+def test_a_store_under_home_is_named_from_home(tmp_path):
+    # The same block on every machine that keeps the store at the same place
+    # in its home, whatever the home directory is called there.
+    home = tmp_path / "home"
+    text = base_agents_text(BASE_ROOT, home / ".agents")
+    assert "Startup: annotate that you read `~/.agents/AGENTS.md`." in text
+    project = home / "devel" / "proj" / ".agents"
+    text = base_agents_text(BASE_ROOT, project, project=True)
+    assert "annotate that you read `~/devel/proj/.agents/AGENTS.md`" in text
 
 
 def test_init_writes_the_rendered_block_only(tmp_path):

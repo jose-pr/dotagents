@@ -142,8 +142,11 @@ The package's own data; library code, importing nothing from `dotagents.cli`.
   `AGENTS_MD_PLACEHOLDER = "{{AGENTS_MD}}"`.
 - `base_agents_text(src, dest, *, project=False) -> str` — the base block for the
   store at `dest`: the project template for a project store when the base has one,
-  else the user template, else `<src>/AGENTS.md`; `{{AGENTS_MD}}` rendered as the
-  absolute POSIX path of `<dest>/AGENTS.md`.
+  else the user template, else `<src>/AGENTS.md`; `{{AGENTS_MD}}` rendered as
+  `home_relative(<dest>/AGENTS.md)`, so a store synced between machines whose home
+  directories differ renders the same block.
+- `home_relative(path) -> str` — `path` as POSIX text, `~/<rest>` when it is under
+  `Path.home()`, absolute otherwise.
 - `pyz_archive() -> str | None` — the `.pyz` this dotagents is imported from (the
   ancestor of the module's `__file__` that is a file), or `None` for a plain
   install. The archive also holds the vendored duho and pathapi; `env`
