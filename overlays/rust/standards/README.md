@@ -34,7 +34,7 @@ which binds every change in every language and is not restated here.
 | [specialized/PLUGINS.md](specialized/PLUGINS.md) | the project loads providers from shared libraries, or ships one |
 | [specialized/PROTOCOL.md](specialized/PROTOCOL.md) | the crate speaks a wire protocol: client, server, codec |
 | [specialized/LOADERS.md](specialized/LOADERS.md) | the crate turns text or files into data: a format, a configuration loader, a path or expression grammar |
-| [specialized/APPLICATION.md](specialized/APPLICATION.md) | the package builds a binary: a daemon, a command, a worker |
+| [specialized/APPLICATION.md](specialized/APPLICATION.md) | the package builds a binary (a daemon, a command, a worker), or a library ships a command line |
 
 A crate can match several. It follows the base and each specialized standard
 that applies.
@@ -79,6 +79,8 @@ a precedent to copy.
 - Conversions use the standard traits; value types implement the common
   traits and a `Debug` that shows the value, never a pointer or a secret.
 - Environment variables are prefixed, read when needed, and documented.
+- A command line, if any, is built with `clap`'s derive API and holds no
+  logic the library lacks.
 - `cargo fmt --check`, clippy with `-D warnings` over all targets and
   features, and a strict `cargo doc` pass on stable and the MSRV.
 - `README.md` has the standard badge row and section order; the shipped

@@ -19,16 +19,30 @@ command, a worker another program starts. Adds to the base standards; index:
 
 ## Arguments
 
-- **The command line is declared in one place**, and its `--help` lists every
-  flag and every environment variable the program reads
-  ([CONFIG.md](../base/CONFIG.md)).
+- **The command line is built with `clap`, using its derive API**
+  (`#[derive(Parser)]`, `#[derive(Subcommand)]`, `#[derive(Args)]`).
+  (**house**; clap is what cargo, ripgrep and most of the ecosystem use.) No
+  hand-written parser, and no second framework. Take only the features the
+  command uses (`derive`, plus `env` where flags read the environment);
+  `default-features = false` with `std`, `help` and `usage` when the binary's
+  size matters.
+- **The arguments are a struct, and the struct is the command**: its fields
+  are the flags, its doc comments are the help, and `main` hands the parsed
+  struct to the library. A flag is not re-read from `std::env::args` anywhere
+  else.
+- **`--help` lists every flag and every environment variable the program
+  reads** ([CONFIG.md](../base/CONFIG.md)): a flag backed by a variable
+  declares it with `#[arg(env = "<PROJECT>_<SETTING>")]`, which puts it in the
+  help; a variable no flag backs is named in `after_help`.
 - **One flag per concept**: a file argument accepts `-` for standard input or
-  output; several text formats are one `--format <name>`.
-- Subcommands, when there are several, are one module each under `cli/`,
-  each a thin call into the library.
-- The argument parser is the project's choice, recorded in its root
-  `AGENTS.md`; a hand-written parser is acceptable for a flat command whose
-  usage text is a constant beside it.
+  output; several text formats are one `--format <name>` over a `ValueEnum`.
+- Subcommands, when there are several, are one module each under `cli/`, each
+  an `Args` struct and a thin call into the library.
+- A library that offers a command line as a feature puts it in a `[[bin]]`
+  behind a `cli` feature that pulls `clap` in, so a library user never
+  compiles it ([FEATURES.md](../base/FEATURES.md)).
+- A test calls `Cli::command().debug_assert()`, which checks the whole
+  definition (conflicting flags, missing values) in one go.
 
 ## Output
 
@@ -78,7 +92,8 @@ call `std::process::exit` past values that need dropping.
 
 ## Tests
 
-- Argument vectors go through the real parser.
+- Argument vectors go through the real parser (`Cli::try_parse_from`), and
+  `Cli::command().debug_assert()` runs once.
 - The built binary is run, with real arguments, by an integration test
   (`env!("CARGO_BIN_EXE_<name>")`), and its exit statuses are asserted,
   including for a missing argument.

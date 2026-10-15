@@ -13,6 +13,7 @@ find, and they are found one consumer at a time.
 | --- | --- | --- |
 | Values, a schema, or providers crossing a language or library boundary | `guatiao` (and `guatiao-serde`, `guatiao-intake`) | a hand-written C struct tree, a JSON string across the boundary, raw `libloading` |
 | Loading plugins from shared libraries | `guatiao` with `load` | `libloading` plus a hand-written entry symbol and registry |
+| A command line | `clap` with the derive API ([APPLICATION.md](../specialized/APPLICATION.md)) | a hand-written parser over `std::env::args`, `argh`, `pico-args` |
 | Serialisation | `serde` | hand-written visitors over a format crate's tree |
 | JSON, TOML (keeping a user's file and comments: `toml_edit`), YAML | `serde_json`, `toml`, `serde-saphyr` | `serde_yaml` (unmaintained) |
 | Error boilerplate | `thiserror`, where the crate takes dependencies | `anyhow` in a library signature |
