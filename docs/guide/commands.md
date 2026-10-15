@@ -203,6 +203,7 @@ Manages opt-in overlays **by name**. See [Overlays](overlays.md) for the full mo
 
 ```bash
 dotagents overlays add python engineering  # install into the scope, publish skills, merge rules/routing
+dotagents overlays add '*' -g              # everything the repos offer (a store registry: all it names)
 dotagents overlays list                    # installed (discovered) + available from the repos
 dotagents overlays sync 'py*'              # refresh installed overlays matching a glob
 dotagents overlays sync --prune            # also clear what .gitignore/.ignore protect: exactly upstream
@@ -210,7 +211,14 @@ dotagents overlays remove python           # delete the overlay dir, unpublish i
 dotagents overlays show python             # describe one: manifest, requires, setup, skills, source (--json)
 ```
 
-- **`add`** installs what each manifest's `requires` names first, each requirement
+- **`add`** takes names or globs: `'*'` is every overlay the repos offer, so with
+  a store registry it installs everything the registry names, and `'py*'` the ones
+  starting with `py`; a glob that matches nothing is an error. One overlay failing
+  (its copy, requirements or setup) does not stop the rest: it is logged, what
+  requires it is skipped, everything else installs, and the command exits 1 naming
+  each failure. A failed overlay this run was installing for the first time is
+  removed again; one that was already installed is left in place, not set up.
+  `add` installs what each manifest's `requires` names first, each requirement
   installed and set up before the overlay that needs it (`--no-requires` to skip); a
   requirement the scope already has, in its own store or the user store for a project,
   is satisfied and left alone, while a name you ask for explicitly is always

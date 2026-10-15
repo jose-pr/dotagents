@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `overlays add` takes globs: `overlays add '*' -g` installs every overlay the repos
+  offer, which for a store with a registry (`<store>/dotagents.toml`) is everything
+  it names. A glob matching nothing is an error.
+- `tools/cloud-setup.sh` installs every overlay the store's registry names
+  (`overlays add '*'`) before falling back to installing `private-sync` alone.
+
 - Each store has a Python venv, `<store>/.pyvenv/<X.Y.Z>-<os>-<arch>/`, made from
   the Python that runs dotagents, where skills run. `init` and `overlays add` /
   `sync` / `remove` keep it current: the user venv always has duho, and every
@@ -35,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `overlays add` no longer stops at the first overlay that fails. Each failure is
+  logged, the overlays that require the failed one are skipped, every other overlay
+  is installed, and the command exits 1 naming each failure. A failed overlay this
+  run was installing for the first time is removed again, as before; the ones that
+  installed stay.
 - With a scope venv, `env` no longer puts the overlay libs it layers on
   `PYTHONPATH`: the venv's interpreter imports them, and no other Python in the
   session should. Without a venv, `PYTHONPATH` carries them as before.

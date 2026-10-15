@@ -19,6 +19,16 @@ never lands in the public repo). `<name>` defaults to the project's basename, so
 local checkout and a cloud checkout of the same project resolve to the same store
 entry.
 
+The store's installed overlays can travel two ways:
+
+- **Tracked copies**: `overlays/` is committed. Every machine and cloud session has
+  them with the clone, offline; every `overlays sync` is a diff in the private repo.
+- **A registry**: `<store>/dotagents.toml` names one source per overlay and
+  `overlays/` is left out of the repo. `dotagents overlays add '*' -g` installs
+  everything it names, keeping going past one that fails; the bootstrap below runs
+  it in a cloud session. The repo stays small; each new machine fetches the
+  overlays once.
+
 ## Commands
 
 The overlay goes into the user store, since the store is what it syncs:
@@ -82,7 +92,8 @@ curl -fsSL https://raw.githubusercontent.com/<you>/dotagents/main/tools/cloud-se
     success. `&&` propagates the curl failure instead.
 
 The bootstrap authenticates (bypassing a hosted-runner `github.com` → proxy git
-rewrite), clones/pulls the store, installs the CLI, links the project, and wires the
+rewrite), clones/pulls the store, installs the CLI, installs every overlay the store's
+registry names (`overlays add '*'`, when it has one), links the project, and wires the
 hooks into `~/.claude/settings.json` — driven by `AGENTS_REMOTE` /
 `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL` environment variables (the token is
 never committed). `AGENTS_OVERLAYS_REMOTE` / `AGENTS_OVERLAYS_REF` choose where it
