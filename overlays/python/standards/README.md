@@ -72,7 +72,7 @@ a precedent to copy.
 - The library leaves signals, logging configuration and stdlib modules alone,
   and neither prints nor exits.
 - Network helpers come from `netimps` and remote-capable paths, copy and sync
-  from `pathlib_next`; no local reimplementation of either.
+  from `pathapi` (`pathapi-uri` for URIs); no local reimplementation of either.
 - `import <pkg>` works with no extra installed; a missing extra fails where
   it is used, naming the extra.
 - One name per conversion; value types are immutable, hashable and have a

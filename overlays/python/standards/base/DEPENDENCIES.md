@@ -13,7 +13,7 @@ one consumer at a time.
 | --- | --- | --- |
 | A command line | `duho` | hand-rolled `argparse`, `click`, `typer` |
 | Network utilities and the common network cases | `netimps` | a local `network.py`, `_sockets.py` or `utils/net.py` |
-| Paths that may not be local; copy, move, delete, walk, glob or sync of a tree | `pathlib_next` | hand-written transfer loops, `shutil` walks, per-protocol clients |
+| Paths that may not be local; copy, move, delete, walk, glob or sync of a tree | `pathapi`, and its scheme distributions for URIs | hand-written transfer loops, `shutil` walks, per-protocol clients |
 
 ### `netimps`
 
@@ -30,15 +30,19 @@ resolves a name, probes a port or sets socket options by hand is the signal.
 An existing local copy is replaced with the `netimps` call and deleted, not
 kept beside it.
 
-### `pathlib_next`
+### `pathapi`
 
-One `Path` interface over local files, in-memory trees, archive members and
-URI schemes (HTTP and WebDAV, SFTP and FTP, S3, Google Cloud Storage, Azure
-Blob), with shared `copy()`, `move()`, `rm()`, `walk()`, `glob()` and
-`PathSyncer` for one-way tree sync.
+One `Path` interface over local files, in-memory trees, archive members, FTP
+and HTTP, with shared `copy()`, `move()`, `rm()`, `walk()`, `glob()` and
+`pathapi.sync.PathSyncer` for one-way tree sync. A location written as a URI
+goes through `pathapi-uri` (imported as `uripath`: `file:`, `http(s):`, `dav:`,
+`ftp:`, `zip:`, `tar:`), and the other schemes are distributions of their own:
+`sftppath` (`sftp:`), `objpath` (`s3:`, `gs:`, `az:`) and `repopath`
+(`github:`, `gitlab:`, `repo:`). It was published as `pathlib_next` up to
+0.10.0; that name is a deprecated alias now.
 
 **Code that accepts a path a caller might point somewhere other than the
-local disk takes a `pathlib_next` path**, and copying or syncing a tree goes
+local disk takes a `pathapi` path**, and copying or syncing a tree goes
 through its `copy()` or `PathSyncer`, not through a loop written here. A
 function that only ever touches local files it created itself may stay on
 `pathlib`.
@@ -71,7 +75,7 @@ later. A gap that is specific to one consumer stays in that consumer.
 - The preferred library is a normal dependency, with the version range the
   packaging rules prescribe.
 - Where only an optional feature needs it, it goes in that feature's extra:
-  `duho` in `cli`, `pathlib_next` in the extra for the feature that takes
-  remote paths.
+  `duho` in `cli`, `pathapi-uri` and the scheme distributions in the extra for
+  the feature that takes remote paths.
 - The preferred libraries may use one another, never in a cycle, and never
   depend on a library that prefers them.
