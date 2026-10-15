@@ -7,13 +7,14 @@ any of it into the (often public) project repos.
 ## The model
 
 Your global `~/.agents` **is** a private git repo. Its root is the per-user config
-(`AGENTS.md`, the installed `overlays/`, the `findings/` queue). A new `projects/`
-tree holds each project's private `.agents` payload:
+(`AGENTS.md`, the installed `overlays/` or a registry naming them, the `findings/`
+queue). A new `projects/` tree holds each project's private `.agents` payload:
 
 ```
 ~/.agents/                       # = clone of your private repo
 ├── AGENTS.md                     # per-user config (dotagents-managed block + your edits)
-├── overlays/                     # your installed global overlays
+├── dotagents.toml                # (registry layout) one source per overlay
+├── overlays/                     # your installed global overlays (tracked, or not)
 ├── findings/                     # the user-scope findings queue — private + synced too
 └── projects/                     # per-project private .agents payloads
     ├── <project-a>/              # plans/  kb/  findings/  AGENTS.md (user-managed)
@@ -28,6 +29,23 @@ For each checked-out project, `<project>/.agents` is a **symlink** →
 `<name>` defaults to the project directory's basename, so a checkout at
 `~/code/app` and a cloud checkout at `/home/user/app` both resolve to
 `projects/app`. Override with `--name` when two different repos share a basename.
+
+### Two ways to keep the overlays
+
+- **Track the copies.** `overlays/` is committed like everything else. A clone,
+  a second machine or a cloud session has them at once, offline. The cost: every
+  `overlays sync` is a diff in the private repo, and the repo carries a second
+  copy of upstream's files.
+- **Name them in a registry.** `~/.agents/dotagents.toml` names one source per
+  overlay (`<name> = "<repo>@<ref>#<path>"`), and `overlays/` is left out of the
+  repo (an `overlays/` line in `.gitignore`). `dotagents overlays add '*' -g`
+  installs every overlay the registry names, and `overlays sync -g` refreshes
+  them. The repo stays small and its history is yours alone. The cost: each new
+  machine and each cloud session fetches them, so it needs the network once;
+  `tools/cloud-setup.sh` runs that `add` for you.
+
+`add '*'` keeps going when one overlay fails: the others are installed (except
+what requires the failed one), each failure is logged, and it exits non-zero.
 
 Everything below is **one way to use `link-project`/`sync-project`, not what
 dotagents requires**. Two knobs make that concrete: `--store-dir` /
@@ -112,7 +130,8 @@ dotagents link-project .
 dotagents sync-project -m "link some-project"
 ```
 
-On a second machine: `git clone git@github.com:<you>/.agents.git ~/.agents`, then
+On a second machine: `git clone git@github.com:<you>/.agents.git ~/.agents`,
+`dotagents init -g`, then (registry layout) `dotagents overlays add '*' -g`, and
 `dotagents link-project .` inside each project you check out.
 
 ## Cloud sessions
