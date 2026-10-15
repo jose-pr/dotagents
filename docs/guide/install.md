@@ -51,7 +51,8 @@ dotagents init --force                  # replace AGENTS.md's content wholesale 
 
 `--from <source>` selects another *base*: a base overlay directory, a dotagents
 checkout (its `src/dotagents/_overlay`), a `file:`, `http(s):`, `zip:`, `sftp:` or `s3:`
-URI (`pip install "dotagents-cli[uri]"` for all but `file:`), or a git repository
+URI (`pip install "dotagents-cli[uri]"` for all but `file:`, plus `[sftp]` or `[s3]`
+for those schemes), or a git repository
 (`repo[@ref][#path]`). A remote one is fetched into `<user store>/.cache/overlays/`.
 The bundled base ships inside the package, so `--from` is only for a base of your own.
 `init` records it in
