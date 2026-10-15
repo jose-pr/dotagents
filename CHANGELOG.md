@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A `repo` extra (`repopath[uri]`) for overlay sources at `github:`, `gitlab:` and
+  `repo:` URIs, which the `uri` extra no longer brings.
+
+### Changed
+
+- dotagents depends on `pathapi` (`>=0.1.0,<0.2`), the new name of `pathlib_next`,
+  instead of `pathlib_next`. The `.pyz` vendors it; `build-pyz --pathapi-version`
+  names its pin, and `--pathlib-next-version` still works. On Python 3.9 nothing
+  else has to be installed for it.
+- The extras install pathapi's own distributions: `uri` and `http` install
+  `pathapi-uri` (the URI layer, imported as `uripath`, with `file:`, `http(s):`,
+  `dav:`, `ftp:`, `zip:` and `tar:` on the standard library); `sftp` adds
+  `sftppath[paramiko]` and `s3` adds `objpath[s3]`. Overlay sources are read as
+  before. A `git:` URI is not a scheme any more; a repository tree is a `repo:` URI.
+- `build-pyz --extras` vendors what the named extras install, each distribution at
+  its floor, and refuses an extra it does not know.
+- `about` lists `pathapi`, `pathapi-uri`, `netimps` and the plugin distributions in
+  place of `pathlib_next`, `uritools` and `requests`.
+
 ## [0.7.5] - 2026-10-14
 
 ### Changed

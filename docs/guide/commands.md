@@ -359,7 +359,7 @@ form and drop names that are not shell identifiers.
    `<NAME_OVERLAY_ROOT>` placeholder, so an env file and a context file refer to an
    overlay's install dir by one name. When `dotagents` runs from a `.pyz`,
    `AGENTS_PYLIB` names that archive: the libraries it bundles (duho,
-   pathlib_next) import from it, so an overlay built on them appends it to
+   pathapi) import from it, so an overlay built on them appends it to
    `sys.path` when its own import fails. An installed `dotagents` sets nothing,
    since those libraries are already in `AGENTS_PYTHON`'s site-packages. It is
    never put on `PYTHONPATH`, where it would shadow a project's own copy.
@@ -572,35 +572,38 @@ See [Private sync](private-sync.md) for the full walkthrough.
 ## about
 
 ```bash
-dotagents about          # dotagents-cli <version>, then duho, pathlib_next, ...
+dotagents about          # dotagents-cli <version>, then duho, pathapi, ...
 dotagents about --json   # the same, plus where it runs from and the Python
 ```
 
 One `<distribution> <version>` per line, the CLI first. From a built `.pyz` the
 list is exactly what `build-pyz` vendored (it records the names and versions in
 `dotagents/_bundle.json` before stripping the `dist-info` dirs the zipapp would
-otherwise carry, so `--extras uri,http` shows up here as `uritools`, `requests`
-and friends). From a plain install it is whichever of a fixed set is installed:
-`duho`, `pathlib_next`, `uritools`, `netimps` and `requests`. A package outside that
-set, such as a client the `sftp` or `s3` extra pulls in, is not listed.
+otherwise carry, so `--extras uri` shows up here as `pathapi-uri` and `netimps`).
+From a plain install it is whichever of a fixed set is installed: `duho`, `pathapi`,
+`pathapi-uri`, `netimps`, `sftppath`, `objpath` and `repopath`. A package outside
+that set, such as a client the `sftp` or `s3` extra pulls in (`paramiko`, `boto3`),
+is not listed.
 
 ## build-pyz
 
 ```bash
 python -m dotagents build-pyz --out dist/dotagents.pyz
-python -m dotagents build-pyz --extras uri,http     # also vendor pathlib_next's extras
+python -m dotagents build-pyz --extras uri,repo     # also vendor what those extras install
 ```
 
-Builds a self-contained zipapp from a source checkout, with `duho` and `pathlib_next`
-vendored (plus the `pathlib_next` extras named by `--extras`), so it runs with no
+Builds a self-contained zipapp from a source checkout, with `duho` and `pathapi`
+vendored (plus what the dotagents-cli extras named by `--extras` install), so it runs with no
 `pip install`. The repo's `tools/` never ships in it. Flags:
 
 - `--out <path>` — where to write it (default `dist/dotagents.pyz`).
 - `--python <shebang>` — the interpreter line embedded in it (default
   `/usr/bin/env python3`).
-- `--duho-version`, `--pathlib-next-version` — the versions vendored (defaults: the
-  floors the package declares).
-- `--extras <a,b>` — `pathlib_next` extras to vendor too (`uri`, `http`, `s3`),
+- `--duho-version`, `--pathapi-version` — the versions vendored (defaults: the
+  floors the package declares). `--pathlib-next-version` is the old name of the
+  second.
+- `--extras <a,b>` — dotagents-cli extras to vendor too (`uri`, `http`, `s3`, `repo`),
+  each distribution they install at its floor,
   so the `.pyz` can read those overlay sources; none by default. Everything is
   vendored as pure-Python wheels resolved for Python 3.9, so the file does not
   depend on the machine that built it; `sftp` needs native modules and fails the

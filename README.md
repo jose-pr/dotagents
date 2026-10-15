@@ -189,7 +189,7 @@ authors:
 
 ### Downloadable `dotagents.pyz`
 
-A self-contained zipapp with `duho`, `pathlib_next` and `tomli` bundled in (pure
+A self-contained zipapp with `duho`, `pathapi` and `tomli` bundled in (pure
 Python, so one file runs on any OS and on Python 3.9+), so it needs no
 `pip install`. Each release attaches one:
 <https://github.com/jose-pr/dotagents/releases/latest/download/dotagents.pyz>.

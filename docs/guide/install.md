@@ -5,7 +5,9 @@ pip install dotagents-cli              # the `dotagents` command and `import dot
 pip install "dotagents-cli[uri]"       # + remote overlay sources beyond git and http(s) registries
 ```
 
-The `http`, `sftp` and `s3` extras add those schemes' own clients to `uri`. With no
+`uri` installs `pathapi-uri`: `file:`, `http(s):`, `dav:`, `ftp:`, `zip:` and `tar:` on
+the standard library. `sftp`, `s3` and `repo` add `sftp:`, `s3:` and `github:` /
+`gitlab:` / `repo:` to it; `http` installs the same as `uri`. With no
 `pip` at all, use the [downloadable `dotagents.pyz`](#downloadable-dotagentspyz).
 
 `dotagents init` then lays down the neutral **base config**. Opinionated content is
@@ -58,7 +60,7 @@ The bundled base ships inside the package, so `--from` is only for a base of you
 
 ## Downloadable `dotagents.pyz`
 
-A self-contained zipapp with `duho`, `pathlib_next` and `tomli` bundled in as
+A self-contained zipapp with `duho`, `pathapi` and `tomli` bundled in as
 pure-Python wheels (plus whatever `build-pyz --extras` added), so it needs no
 `pip install` and runs on any OS with Python 3.9+. Each release attaches one:
 <https://github.com/jose-pr/dotagents/releases/latest/download/dotagents.pyz>.

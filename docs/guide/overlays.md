@@ -124,9 +124,10 @@ in what the path names:
   `…/dotagents.git@repo#overlays/net` is the `net` overlay itself. Given as `--repo`,
   that form would list `net`'s own subdirectories as overlays.
 
-A `scheme://` location that is not git is a **pathlib_next path**. With the `uri`
-extra (`pip install 'dotagents-cli[uri]'`; `[http]`, `[sftp]`, `[s3]` add the schemes'
-own clients) any scheme pathlib_next speaks works like a local path: an `http(s)://`
+A `scheme://` location that is not git is a **uripath path** (pathapi's URI layer, the
+`pathapi-uri` distribution). With the `uri` extra (`pip install 'dotagents-cli[uri]'`;
+`[sftp]`, `[s3]` and `[repo]` add `sftp:`, `s3:` and `github:` / `gitlab:` / `repo:`)
+any scheme uripath speaks works like a local path: an `http(s)://`
 directory listing, an `sftp`, `s3`, `dav` or `github` tree is a directory of overlays
 as a repo or one overlay as a source, a file is a registry; an archive is a tree too —
 `zip:<archive-uri>!/<inner path>` (`tar:`, or `archive:` to auto-detect), the archive
@@ -135,7 +136,7 @@ materialized into `<user store>/.cache/overlays/uri/`, synced once per run, and 
 from there; `file://` is a local path, no copy. Without the extra, an `http(s)://`
 location can still be a registry file (fetched with the standard library), and
 anything else says which extra it needs. The `.pyz` vendors none of this unless built
-with `build-pyz --extras uri,http`.
+with `build-pyz --extras uri`.
 
 A source written as a **relative path** (`./python`, `../shared/net`, `overlays/rust`)
 is relative to the registry it is in: the registry file's directory for a local file,
