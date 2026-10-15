@@ -16,9 +16,10 @@
 #
 # It: (1) authenticates with a token and bypasses a github.com -> in-session-proxy
 # rewrite when present, (2) clones (with retry/backoff) or pulls the private repo
-# into ~/.agents, (3) ensures the dotagents CLI is installed, (4) installs the
-# private-sync OVERLAY (which supplies `link-project`/`sync-project` -- they are not
-# dotagents commands), (5) links the current project's .agents into the repo,
+# into ~/.agents, (3) ensures the dotagents CLI is installed, (4) installs every
+# overlay the store's registry names (`overlays add '*'`), then the private-sync
+# OVERLAY if still missing (it supplies `link-project`/`sync-project` -- they are
+# not dotagents commands), (5) links the current project's .agents into the repo,
 # (6) wires the private-sync hooks into ~/.claude/settings.json so per-session
 # pull/sync-back actually runs.
 # Safe to run at every container start; never fails hard. It never deletes a
@@ -290,7 +291,7 @@ dg_cli() {
     fi
 }
 
-# --- 4. Install the private-sync overlay (it SUPPLIES link-project). ----------
+# --- 4. Install the registry's overlays, and private-sync (it SUPPLIES link-project).
 # Ordering matters: `link-project` is not a dotagents command -- the private-sync
 # overlay ships it (with `sync-project` and their logic). This bootstrap IS the
 # private-sync bootstrap, so the overlay must be installed BEFORE step 5 links.
@@ -310,6 +311,19 @@ _dg_ovl_ref="${AGENTS_OVERLAYS_REF:-${DOTAGENTS_OVERLAYS_REF:-repo}}"
 _dg_have_link_project() {
     dg_cli --help 2>/dev/null | grep -q -- "link-project"
 }
+
+# A store that names its overlays in a registry (<store>/dotagents.toml, ...)
+# rather than tracking their copies gets every one of them: `add '*'` installs
+# what the repos offer, and keeps going past an overlay that fails. Whatever
+# is still missing afterwards, private-sync included, falls to the steps below.
+for _dg_f in dotagents.toml dotagents.json dotagents.yaml dotagents.yml; do
+    if [ -f "$AGENTS_DIR/$_dg_f" ]; then
+        echo "dotagents: installing the overlays $_dg_f names"
+        dg_cli overlays add '*' --agents-dir "$AGENTS_DIR" -g \
+            || echo "dotagents: some overlays did not install (see above); the others are in place"
+        break
+    fi
+done
 
 if [ -d "$AGENTS_DIR/overlays/private-sync" ]; then
     echo "dotagents: private-sync overlay already installed"
