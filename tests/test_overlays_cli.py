@@ -605,3 +605,64 @@ def test_sync_overwrite_drops_a_file_removed_upstream(world):
     installed = scope_root / "overlays" / "demo"
     assert (installed / "pre.env.py").is_file()
     assert not (installed / "env.py").exists()
+
+
+# --------------------------------------------------------------------------
+# add with globs, and add that keeps going past a failed overlay
+# --------------------------------------------------------------------------
+
+def _installed(scope_root):
+    root = scope_root / "overlays"
+    return sorted(p.name for p in root.iterdir() if not p.name.startswith(".")) if root.is_dir() else []
+
+
+def test_add_star_installs_everything_the_repo_offers(world):
+    src, scope_root = world
+    for name in ("alpha", "beta", "gamma"):
+        _overlay(src, name)
+    assert _add(src, scope_root, "*") == 0
+    assert _installed(scope_root) == ["alpha", "beta", "gamma"]
+    assert _add(src, scope_root, "*") == 0, "a second run re-syncs, nothing fails"
+
+
+def test_add_glob_mixes_with_names_and_a_glob_matching_nothing_fails(world):
+    src, scope_root = world
+    for name in ("py-one", "py-two", "rust"):
+        _overlay(src, name)
+    assert _add(src, scope_root, "rust", "py*") == 0
+    assert _installed(scope_root) == ["py-one", "py-two", "rust"]
+    with pytest.raises(SystemExit, match=r"matches 'nomatch\*'"):
+        _add(src, scope_root, "nomatch*")
+
+
+def test_add_star_installs_what_the_store_registry_names(world, tmp_path):
+    """The store-registry bootstrap: `add '*' -g` with no --repo installs
+    every entry of `<store>/dotagents.toml`, and nothing it does not name."""
+    src, scope_root = world
+    for name in ("named-one", "named-two", "unnamed"):
+        _overlay(src, name)
+    (scope_root / "dotagents.toml").write_text(
+        "[overlays]\n" + "".join(
+            '%s = %s\n' % (n, json.dumps((src / n).as_posix())) for n in ("named-one", "named-two")
+        ),
+        encoding="utf-8",
+    )
+    rc = _run(OverlayAdd, name=["*"], repo=[], global_scope=True, agents_dir=scope_root,
+              copy=True, dry_run=False)
+    assert rc == 0
+    assert _installed(scope_root) == ["named-one", "named-two"]
+
+
+def test_one_failed_overlay_does_not_stop_the_others(world, caplog):
+    """A failed setup rolls that overlay back and skips what requires it; every
+    other overlay is still installed, and the command fails at the end."""
+    src, scope_root = world
+    _overlay(src, "broken", files=[("setup.py", "import sys\nsys.exit(3)\n")])
+    _overlay(src, "needs-broken", requires=["broken"])
+    _overlay(src, "fine")
+    _overlay(src, "also-fine")
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        _add(src, scope_root, "*")
+    assert "broken" in str(exc.value.code) and "needs-broken" in str(exc.value.code)
+    assert _installed(scope_root) == ["also-fine", "fine"]
+    assert "needs-broken not installed: it requires broken, which failed" in caplog.text

@@ -28,6 +28,37 @@ def _redacted(spec) -> str:
     return spec.display() if isinstance(spec, Spec) else redact(str(spec))
 
 
+_GLOB_CHARS = frozenset("*?[")
+
+
+def _is_glob(raw: str) -> bool:
+    return any(c in _GLOB_CHARS for c in raw)
+
+
+def _expand_globs(raw_names, source) -> "list[str]":
+    """``raw_names`` with each glob (``*``, ``py*``) replaced by the names the
+    source offers that match it, in the order the repos offer them. A glob
+    matching nothing is an error: ``add 'pyhton*'`` should not quietly do
+    nothing."""
+    from dotagents import _scope
+    from dotagents._overlays import Overlay
+
+    offered = [Overlay.normalize_name(n) for n in source.available()]
+    out: "list[str]" = []
+    for raw in raw_names:
+        if not _is_glob(raw):
+            out.append(raw)
+            continue
+        matched = _scope.filter_names(offered, raw.lower())
+        if not matched:
+            raise SystemExit(
+                "error: no overlay offered by %s matches %r (offered: %s)"
+                % (source.root, raw, ", ".join(offered) or "none")
+            )
+        out += matched
+    return out
+
+
 def _validated_names(raw_names, what: str) -> "list[str]":
     """Validate + normalize every requested name up front with the shared
     overlay-name rule: `add My_Overlay` and `add my-overlay` resolve the
@@ -422,7 +453,9 @@ class OverlayAdd(_RepoArgs):
     """Install overlay(s) by name into a scope, and publish their skills.
 
     Resolves each ``<name>`` against the source (``--repo``, the env repos,
-    the stores' registries), installs what its manifest ``requires`` first,
+    the stores' registries); a glob (``'*'``, ``'py*'``) stands for every name
+    the source offers that matches it, so ``add '*'`` installs what a store's
+    registry names. Installs what each manifest ``requires`` first,
     copies it into ``<store>/overlays/<name>/`` with a record of the repo it
     came from, and publishes its ``skills/`` from the INSTALLED copy into the
     shared ``<store>/skills/``, linking them into each agent's own skills dir
@@ -430,15 +463,19 @@ class OverlayAdd(_RepoArgs):
     otherwise re-run ``init``). ``--copy`` mirrors skills as real dirs instead
     of symlinks (Windows / no-symlink). The ``AGENTS.md`` managed block is then
     rebuilt from the pristine base over every installed overlay's routing and
-    rules, in (priority, name) order. An overlay whose setup fails on a fresh
-    install is rolled back; the block is recomposed over whatever is installed
-    either way. Adding an overlay already installed makes it match its source
-    again, as ``sync`` does."""
+    rules, in (priority, name) order. When an overlay's requirements or setup
+    fail, only that overlay is affected: one this command was installing for
+    the first time is removed again, one that was already installed stays (not
+    set up). Every other overlay is still installed, except those that require
+    the failed one (directly or not), and the command exits 1 naming every
+    overlay that did not install. The block is recomposed over
+    whatever is installed either way. Adding an overlay already installed
+    makes it match its source again, as ``sync`` does."""
 
     _parsername_ = "add"
 
     name: "list[str]" = []
-    "Overlay name(s) to install (resolved against the source)."
+    "Overlay name(s) or glob(s) to install, resolved against the source ('*': every overlay it offers)."
     ("name",)
 
     copy: bool = False
@@ -470,15 +507,16 @@ class OverlayAdd(_RepoArgs):
     ("--dry-run",)
 
     def __call__(self) -> int:
-        from dotagents import _scope
+        from dotagents import _overlays, _scope
 
         if not self.name:
-            return _usage_error("overlays add needs at least one overlay name")
-        names = _validated_names(self.name, "add")
+            return _usage_error("overlays add needs at least one overlay name (or '*')")
+        _validated_names([n for n in self.name if not _is_glob(n)], "add")
 
         scope = self.resolve_scope()
         source = _scope.resolve_source(self.repo, scope=scope, logger=self._logger_)
         self._logger_.info("scope: %s (%s)", scope.level, scope.agents_root)
+        names = _validated_names(_expand_globs(self.name, source), "add")
 
         # Resolve every name (and its requires) against the source BEFORE the
         # first install, so `add good bad` fails on `bad` with nothing touched.
@@ -494,15 +532,39 @@ class OverlayAdd(_RepoArgs):
             if problem:
                 raise SystemExit("error: " + problem)
 
+        # One overlay failing (its copy, requirements or setup) does not stop
+        # the rest: each is tried in dependency order, and only what requires a
+        # failed one -- directly or through another -- is skipped.
+        requires = {
+            name: {
+                _overlays.Overlay.normalize_name(str(dep))
+                for dep in _overlays.Overlay(located[name][0]).read_manifest()["requires"]  # type: ignore[union-attr]
+            }
+            for name in order
+        }
+        failed: "dict[str, str]" = {}  # name -> why, in the order they failed
         skills: "list[str]" = []
         try:
             for name in order:
+                blocked = sorted(requires[name] & set(failed))
+                if blocked:
+                    why = "it requires %s, which failed" % ", ".join(blocked)
+                    self._logger_.error("overlay %s not installed: %s", name, why)
+                    failed[name] = why
+                    continue
                 src, origin = located[name]
-                skills += _install_one(
-                    scope, name, src, origin, copy=self.copy, no_setup=self.no_setup,
-                    dry_run=self.dry_run, logger=self._logger_, setup_timeout=self.setup_timeout,
-                    prune=self.prune, no_venv=self.no_venv,
-                )
+                try:
+                    skills += _install_one(
+                        scope, name, src, origin, copy=self.copy, no_setup=self.no_setup,
+                        dry_run=self.dry_run, logger=self._logger_,
+                        setup_timeout=self.setup_timeout, prune=self.prune,
+                        no_venv=self.no_venv,
+                    )
+                except (SystemExit, OSError) as exc:
+                    why = str(exc.code if isinstance(exc, SystemExit) else exc)
+                    why = why[len("error: "):] if why.startswith("error: ") else why
+                    self._logger_.error("overlay %s: %s", name, why)
+                    failed[name] = why
         finally:
             # Recompose the whole managed block from the pristine base over ALL
             # installed overlays in (priority, name) order (D68) -- also when an
@@ -515,6 +577,10 @@ class OverlayAdd(_RepoArgs):
             _link_agent_skills(scope, self._logger_, skills)
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
+        if failed:
+            raise SystemExit("error: add failed for: %s" % "; ".join(
+                "%s (%s)" % (name, why) for name, why in failed.items()
+            ))
         return 0
 
 
