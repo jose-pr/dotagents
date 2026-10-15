@@ -81,7 +81,7 @@ jobs:
         shell: bash
         run: bash tools/pyz_smoke.sh dist/dotagents.pyz overlays-src/overlays
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
