@@ -736,8 +736,8 @@ Set for an overlay's `setup.py`: `AGENTS_HOME` (user store), `AGENTS_SCOPE_ROOT`
   `_fs.write_text_lf`).
 - **Inside a `.pyz`** `Path(__file__)` is not a real file: package data is reached
   through `_resources._package_data_dir(name)` (extracted once to a per-process
-  scratch dir removed at exit), and `cli.main()` repoints the built-in command
-  modules' sources so `duho` still reads their flags and help.
+  scratch dir removed at exit); `duho` reads the command modules' flags and help
+  through the zip importer.
 - **Writes are LF-only.** Use `_fs.write_text_lf`, never `Path.write_text`.
 - **`env` output is sensitive**: it prints resolved values. Nothing in the package
   logs a value, only names.

@@ -212,34 +212,6 @@ def test_a_command_clashing_with_an_umbrella_flag_is_skipped(monkeypatch, tmp_pa
 
 
 # --------------------------------------------------------------------------- #
-# The zipapp-repointed module list is derived, not hand-kept
-# --------------------------------------------------------------------------- #
-
-
-def test_command_modules_cover_every_builtin_and_its_bases():
-    wanted = set()
-    pending = [cli.Dotagents, *cli._BUILTIN_COMMANDS]
-    while pending:
-        command = pending.pop()
-        wanted.update(
-            k.__module__ for k in command.__mro__
-            if k.__module__.startswith(("dotagents.", "duho."))
-        )
-        pending.extend(getattr(command, "_subcommands_", None) or [])
-    assert wanted <= set(cli._COMMAND_MODULES)
-    assert {"dotagents.cli", "dotagents.cli._common", "duho.presets"} <= set(cli._COMMAND_MODULES)
-
-
-def test_a_new_builtin_module_is_covered_without_a_second_list():
-    New = type("New", (cli.DotAgentsArgs,), {"__module__": "dotagents.cli.brand_new"})
-    Leaf = type("Leaf", (cli.DotAgentsArgs,), {"__module__": "dotagents.cli.leaf"})
-    New._subcommands_ = [Leaf]
-    modules = cli._command_modules([New])
-    assert {"dotagents.cli.brand_new", "dotagents.cli.leaf", "dotagents.cli._common",
-            "duho.presets"} <= set(modules)
-
-
-# --------------------------------------------------------------------------- #
 # Help summaries
 # --------------------------------------------------------------------------- #
 

@@ -9,8 +9,7 @@ they create for it) is discovered like any other.
 The per-command classes live in sibling modules (`cli/init.py`, `cli/overlays.py`,
 ...); this package base holds the shared helpers (in `cli/_common.py`, re-exported
 here), the `Dotagents(LoggingArgs, Cli)` umbrella, `main()` (the `install.py` shim +
-`python -m dotagents` entrypoint), `_discover` (command-source resolution), and
-`_repoint_zipapp_sources` (the zipapp source-extraction shim).
+`python -m dotagents` entrypoint) and `_discover` (command-source resolution).
 
 Dispatch: `main()` routes through `duho.app` (not `duho.main`) so command
 discovery runs; `app`'s default dispatch calls each command class's `__call__`.
@@ -35,7 +34,7 @@ from duho.text import kebabcase
 
 from dotagents import __version__
 
-from dotagents._resources import _package_data_dir, _scratch_dir
+from dotagents._resources import _package_data_dir
 from dotagents._scope import resolve_user_store
 
 # Names imported through the package by command modules (the bundled ones and
@@ -101,35 +100,6 @@ class Dotagents(LoggingArgs, Cli):
     ("--cmdspath",)
 
 
-def _command_modules(commands) -> "tuple[str, ...]":
-    """Every module duho reads a field definition from for ``commands``: the
-    module of each class in each command's MRO, and of its nested
-    ``_subcommands_``, restricted to ``dotagents.*`` / ``duho.*``.
-
-    duho walks the MRO and parses each BASE class's module too, so `_common`
-    (home of `DotAgentsArgs`) and `duho.presets` (`LoggingArgs`) belong here
-    although they ship no command of their own. Derived rather than listed, so a
-    new built-in cannot be left out: a module missing here keeps working in a
-    plain install and loses its flags and help only inside a `.pyz`."""
-    seen: "dict[str, None]" = {}
-    pending = list(commands)
-    while pending:
-        command = pending.pop(0)
-        for klass in getattr(command, "__mro__", ()):
-            module = getattr(klass, "__module__", "") or ""
-            if module == "dotagents" or module.startswith(("dotagents.", "duho.")):
-                seen.setdefault(module, None)
-        pending.extend(getattr(command, "_subcommands_", None) or [])
-    return tuple(seen)
-
-
-# The modules whose sources duho introspects for flag/help definitions; every
-# one is repointed inside a zipapp (see `_repoint_zipapp_sources`). Discovered
-# command modules never need repointing: their files are real on disk (see
-# `_bundled_cmds_dir`).
-_COMMAND_MODULES = _command_modules([Dotagents, *_BUILTIN_COMMANDS])
-
-
 def _bundled_cmds_dir() -> "Path | None":
     """The bundled command-module dir, `<package>/_overlay/dotagents/cmds`.
 
@@ -139,8 +109,7 @@ def _bundled_cmds_dir() -> "Path | None":
     modules would pin the first-installed version). Resolved via
     `_package_data_dir`, which extracts a zip-backed `_overlay` to a real temp
     dir once, so the modules imported from here always have an on-disk
-    `__file__` and `_repoint_zipapp_sources` need not cover them. Returns None
-    if the package bundles no cmds dir."""
+    `__file__`. Returns None if the package bundles no cmds dir."""
     base = _package_data_dir("_overlay")
     if base is None:
         return None
@@ -423,65 +392,7 @@ def _discover(argv=None) -> "list":
     return list(by_name.values())
 
 
-def _repoint_zipapp_sources() -> None:
-    """Make duho's AST field-introspection work when running from a zipapp.
-
-    duho discovers each command's flags + help by parsing its module source
-    (`_introspect.getclsdef` -> `Path(module.__file__).read_text()`). Inside a
-    `.pyz` the module `__file__` is a zip-internal path `read_text()` can't open,
-    and duho catches that `OSError` *before* its `inspect.getsource` fallback --
-    so every field silently loses its declared flags and help (the positional
-    `path` degrades to `--path`, `--from` to `--from-`, help text vanishes).
-    Extract the affected module sources to real temp files and repoint `__file__`
-    so the read succeeds. A no-op for a plain install, where `__file__` already
-    exists on disk.
-
-    Every module in `_COMMAND_MODULES` is repointed: each built-in command's
-    own `dotagents.cli.<x>` module and the modules of its base classes (duho's
-    `LoggingArgs` preset, `duho.presets`, among them). DISCOVERED command
-    modules do NOT need repointing: an
-    overlay's or a scope's cmds live on the real filesystem, and for the bundled
-    `_overlay/dotagents/cmds` dir `_package_data_dir` extracts a zip-backed
-    `_overlay` to real temp files before `discover_commands` imports from it, so
-    their `__file__` already exists on disk.
-
-    Tracked upstream: jose-pr/duho#1 -- drop this shim (and the build-pyz CI
-    guard) once duho's getclsdef falls through to inspect.getsource when
-    _module_index raises."""
-    import importlib.resources as _ir
-
-    for modname in _COMMAND_MODULES:
-        mod = sys.modules.get(modname)
-        if mod is None:
-            continue
-        current = getattr(mod, "__file__", None)
-        if current and Path(current).exists():
-            continue  # plain install: source already readable
-        top, _sep, rest = modname.partition(".")
-        # A package's source is its `__init__.py` (`dotagents.cli` ->
-        # `cli/__init__.py`), a plain module's is `<name>.py`. Getting this
-        # wrong is silent: the resource is simply not found and the module
-        # keeps its zip-internal `__file__`.
-        if hasattr(mod, "__path__"):
-            rel = (rest.replace(".", "/") + "/" if rest else "") + "__init__.py"
-        else:
-            rel = rest.replace(".", "/") + ".py"
-        try:
-            resource = _ir.files(top).joinpath(rel)
-            if not resource.is_file():
-                continue
-            text = resource.read_text(encoding="utf-8")
-        except (FileNotFoundError, ModuleNotFoundError, OSError, TypeError):
-            continue
-        # Under the one per-process scratch dir, removed at exit.
-        tmp = _scratch_dir() / "src" / (modname.replace(".", "_") + ".py")
-        tmp.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(text, encoding="utf-8")
-        mod.__file__ = str(tmp)
-
-
 def main(argv=None) -> int:
-    _repoint_zipapp_sources()
     # `commands=` makes `run` use `duho.app` (not `duho.main`) so the resolved
     # built-ins + discovered set are the commands; dispatch calls each command's
     # `__call__`. `exit=False` returns the status, whatever ended the run.

@@ -7,11 +7,11 @@
 # <overlays-dir> holds the example overlays (`overlays/` of a `repo` branch
 # checkout). PYTHON picks the interpreter (default: python).
 #
-# The main thing guarded is the zipapp shim: duho reads each flag's spelling and
-# help from its module's source, which a zipapp does not have on disk, so a
-# regression degrades `--from FROM` to a name-derived `--from-` and drops help
-# text -- in bundled command modules, in discovered overlay commands, and in a
-# base class from another module. Every run happens in a scratch HOME (and
+# The main thing guarded is flag fidelity: duho reads each flag's spelling and
+# help from its module's source, which inside a zipapp it reaches through the
+# zip importer rather than a file on disk, so a regression degrades `--from FROM`
+# to a name-derived `--from-` and drops help text -- in bundled command modules,
+# in discovered overlay commands, and in a base class from another module. Every run happens in a scratch HOME (and
 # USERPROFILE, which is what Path.home() reads on Windows) and a scratch
 # working directory, so nothing touches the real store or the checkout.
 #
@@ -203,8 +203,8 @@ mkdir -p "$pinit"
 [ -f "$pinit/.agents/AGENTS.md" ] || fail "project-scope init wrote no $pinit/.agents/AGENTS.md"
 
 # pyvenv/py come from the python overlay and INHERIT DotAgentsArgs from
-# dotagents.cli._common: that base class's module needs repointing too, or -g
-# vanishes and --global degrades to --global-scope.
+# dotagents.cli._common: if that base class's source is not read from the
+# archive, -g vanishes and --global degrades to --global-scope.
 pyz overlays add python --repo "$OVL" -g >/dev/null
 [ -f "$HOME/.agents/overlays/python/kb/PYTHON.md" ] || fail "python overlay not installed"
 h=$(pyz pyvenv --help)

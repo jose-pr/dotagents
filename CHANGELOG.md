@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `about` lists `pathapi`, `pathapi-uri`, `netimps` and the plugin distributions in
   place of `pathlib_next`, `uritools` and `requests`.
 
+### Removed
+
+- The `.pyz` no longer extracts the built-in command modules' sources to temporary
+  files at startup: duho reads a command's flags and help through the zip importer
+  when the module has no file on disk.
+
 ## [0.7.5] - 2026-10-14
 
 ### Changed
