@@ -24,16 +24,28 @@ behind these rules are in `../../kb/RUST.md`.
 
 ## The contract
 
-- **A safe function cannot reach undefined behaviour, for any input and any
-  sequence of safe calls.** That includes inputs built by safe code from
-  public fields, `Default`, `Clone` and other safe constructors. If it can,
-  the function is `unsafe fn`, or the inputs that would break it cannot be
-  built safely. (Rustonomicon, "How Safe and Unsafe Interact".)
-- **A type whose fields carry a safety invariant keeps them private.** A raw
-  pointer, a length, a code pointer or a context pointer that a safe method
-  later dereferences or calls is not a `pub` field. Construct it through an
-  `unsafe` constructor that states the invariant, or through code that
-  establishes it.
+- **A safe function cannot reach undefined behaviour from the inputs its
+  callers can reasonably hand it.** A function that takes a raw pointer
+  from anywhere is `unsafe fn` (`from_raw`). (Rustonomicon, "How Safe and
+  Unsafe Interact".)
+- **Trust is decided once, at the boundary, and then checked, not re-walled.**
+  Data a trusted producer wrote — a library the program chose to load, the
+  code its own macros and derives generate, its own builders — is checked
+  where it enters for everything that can be checked (null, version and
+  size floors, strides, lengths, alignment, table hashes, addresses inside
+  the image that produced them, text encoding) and is then read by safe
+  functions. The descriptor type documents its fields as the producer's
+  contract. Marking every door that reads such data `unsafe` marks the
+  whole loader and protects nothing a memory bug in safe code could not
+  break anyway; it is not required. (**house**)
+- **`unsafe` stays where Rust demands it or no producer stands behind the
+  memory**: a bare pointer from anywhere, an operation that invalidates
+  handles safe code holds (unmapping), helpers only generated code calls,
+  and traits whose implementations the generated code relies on.
+- **Fields a safe method dereferences are private when nothing external
+  needs to write them**, and a pairing the type system can check (a table
+  and the type it was built for) is checked by the type system, not by a
+  comment.
 - **`#[doc(hidden)]` does not make a function unsafe.** A hidden helper that
   generated code calls is still a safe function anyone can call; if it
   trusts its arguments, it is `unsafe fn`, and the macro writes the `unsafe`.
