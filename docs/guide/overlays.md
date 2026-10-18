@@ -48,7 +48,7 @@ or `--repo <checkout>/overlays` for a local checkout of the branch.
 | `python`, `node`, `rust` | Per-language `kb/` conventions + manifest templates + CI workflow templates. |
 | `release` | A host-agnostic release helper: an agent-driven commit-plan loop plus tag/CI monitoring across GitHub (`gh`) and GitLab. |
 | `private-sync` | The one-private-repo, per-project `.agents` model (`kb/PRIVATE_SYNC.md` + cloud hooks) — see [Private sync](private-sync.md). |
-| `net` | Dependency-free HTTP tooling (a drop-in `curl` shim, an OS-trust-store `certifi` shim, an `httplib` session toolkit reading `AGENTS_PROXY`). |
+| `net` | HTTP tooling: a drop-in `curl` launcher (curlike), an OS-trust-store `certifi` shim, and the httplib toolkit, both packages installed from the overlay's `requirements.txt`; settings are `AGENTS_*` (`AGENTS_PROXY` and kin). |
 | `recovery` | A config-recovery playbook for reconstructing a lost `~/.agents`. |
 
 ## Managing overlays
