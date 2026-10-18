@@ -128,10 +128,15 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install the package with the dev extra
-        # netimps: the net overlay's DNS flags (--dns-servers, --doh-url, ...)
-        # need it, and their tests skip without it. The range is the overlay's
-        # own floor and the next minor, which may break it.
-        run: python -m pip install -e ".[dev]" "netimps>=0.4.1,<0.5"
+        run: python -m pip install -e ".[dev]"
+      - name: Install every overlay's requirements.txt
+        # What dotagents installs into the agents' venv for them; their tests
+        # import it (the net overlay's curl launcher runs curlike).
+        shell: bash
+        run: |
+          for req in overlays-src/overlays/*/requirements.txt; do
+            [ -f "$req" ] && python -m pip install -r "$req"
+          done
       - name: Run the overlays' test suites
         # An empty config file keeps main's own pytest settings out of the
         # overlays' run; each overlay brings its own conftest.
