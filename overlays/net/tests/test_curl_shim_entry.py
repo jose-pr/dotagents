@@ -1,11 +1,13 @@
-"""The shim's two entry points (bin/curl for POSIX, bin/curl.cmd for Windows)
-and the one trap they share: once the overlay's bin/ is on PATH, "the real curl"
-must never resolve to the shim itself.
+"""The launcher's two entry points (bin/curl for POSIX, bin/curl.cmd for
+Windows), the curlike shim behind them, and the one trap they share: once the
+overlay's bin/ is on PATH, "the real curl" must never resolve to the launcher.
 """
 import os
 import stat
 import sys
 from pathlib import Path
+
+import pytest
 
 import curl  # noqa: E402  (bin/, via conftest)
 
@@ -42,37 +44,89 @@ def _fake_real_curl(directory):
     return exe
 
 
-def test_real_curl_is_never_this_shim(tmp_path, monkeypatch):
+def _path(monkeypatch, *dirs):
+    monkeypatch.setenv("PATH", os.pathsep.join(str(d) for d in dirs))
+    if os.name == "nt":
+        monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+
+
+def test_real_curl_is_never_this_launcher(tmp_path, monkeypatch):
+    curlike_shim = pytest.importorskip("curlike.shim")
     real_dir = tmp_path / "system"
     real_dir.mkdir()
     real = _fake_real_curl(real_dir)
     # The overlay's bin/ FIRST on PATH, exactly as `dotagents env` arranges it.
-    monkeypatch.setenv("PATH", os.pathsep.join([str(BIN), str(real_dir)]))
-    if os.name == "nt":
-        monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
-    found = curl.find_real_curl()
-    assert found is not None
-    assert Path(found).resolve() == real.resolve()
+    _path(monkeypatch, BIN, real_dir)
+    found = curlike_shim.find_real_curl(curl.entry())
+    assert found is not None and Path(found).resolve() == real.resolve()
+    assert Path(curl._real_curl()).resolve() == real.resolve(), "the no-curlike path skips it too"
 
 
-def test_no_real_curl_means_fallback(tmp_path, monkeypatch):
-    monkeypatch.setenv("PATH", os.pathsep.join([str(BIN), str(tmp_path)]))
-    assert curl.find_real_curl() is None
-
-
-def test_fallback_runs_when_only_the_shim_is_on_path(tmp_path, monkeypatch, capsysbinary):
-    """End to end: PATH holds nothing but the shim's own dir, so main() must
-    take the stdlib path instead of re-executing bin/curl."""
-    monkeypatch.setenv("PATH", str(BIN))
-    rc = curl.main(["--help"])
-    assert rc == 0
+def test_fallback_runs_when_only_the_launcher_is_on_path(monkeypatch, capsysbinary):
+    """End to end: PATH holds nothing but the launcher's own dir, so main()
+    must take curlike's stdlib path instead of re-executing bin/curl."""
+    pytest.importorskip("curlike")
+    _path(monkeypatch, BIN)
+    assert curl.main(["--help"]) == 0
     assert b"Pure Python curl-like tool" in capsysbinary.readouterr().out
-    assert sys.platform  # (silence the unused-import lint on some setups)
+
+
+def test_the_launcher_reads_agents_settings(monkeypatch):
+    monkeypatch.delenv("HTTPLIB_PREFIX", raising=False)
+    shim = pytest.importorskip("curlike.shim")
+    seen = {}
+    monkeypatch.setattr(shim, "main", lambda argv, entry=None: seen.update(argv=argv, entry=entry) or 0)
+    assert curl.main(["-s", "https://h/"]) == 0
+    assert os.environ["HTTPLIB_PREFIX"] == "AGENTS"
+    assert seen == {"argv": ["-s", "https://h/"], "entry": curl.entry()}
+
+
+def test_without_curlike_the_real_curl_runs_as_typed(tmp_path, monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "curlike.shim", None)  # import fails
+    real = _fake_real_curl(tmp_path)
+    _path(monkeypatch, BIN, tmp_path)
+    calls = []
+
+    class _Done:
+        returncode = 0
+
+    monkeypatch.setattr(curl.subprocess, "run", lambda argv, *a, **k: calls.append(argv) or _Done())
+    assert curl.main(["-s", "https://h/"]) == 0
+    assert Path(calls[0][0]).resolve() == real.resolve() and calls[0][1:] == ["-s", "https://h/"]
+    _path(monkeypatch, BIN)
+    assert curl.main(["-s", "https://h/"]) == 2
+    assert "curlike is not installed" in capsys.readouterr().err
+
+
+def test_env_py_sets_the_agents_prefix_unless_one_is_set():
+    import json
+    import subprocess
+
+    env_py = str(BIN.parent / "env.py")
+    base = {k: v for k, v in os.environ.items() if k.upper() != "HTTPLIB_PREFIX"}
+    out = subprocess.run([sys.executable, env_py], capture_output=True, text=True, env=base, check=True)
+    assert json.loads(out.stdout) == {"HTTPLIB_PREFIX": "AGENTS"}
+    out = subprocess.run([sys.executable, env_py], capture_output=True, text=True,
+                         env=dict(base, HTTPLIB_PREFIX="MINE"), check=True)
+    assert out.stdout.strip() == ""
+
+
+def test_requirements_pin_both_packages_to_a_commit():
+    lines = [ln.strip() for ln in (BIN.parent / "requirements.txt").read_text(encoding="utf-8").splitlines()
+             if ln.strip() and not ln.lstrip().startswith("#")]
+    names = {}
+    for ln in lines:
+        name, _, url = ln.partition(" @ ")
+        assert url.startswith("git+https://github.com/jose-pr/%s@" % name), ln
+        assert len(url.rpartition("@")[2]) == 40, "a full commit, not a branch: " + ln
+        names[name] = url
+    assert set(names) == {"httplib", "curlike"}
 
 
 def _launcher_copy(tmp_path):
     """The two launchers beside a probe curl.py whose CHILD imports the net lib
-    and another overlay's lib: what a URL hook or any script curl starts needs."""
+    (the certifi shim) and another overlay's lib: what a URL hook or any script
+    curl starts needs."""
     import shutil
 
     ov = tmp_path / "net"
@@ -83,7 +137,7 @@ def _launcher_copy(tmp_path):
     (ov / "bin" / "curl").chmod(0o755)
     (ov / "bin" / "curl.py").write_text(
         "import subprocess, sys\n"
-        "code = 'import httplib.proxy, other_lib; print(\"child-ok\")'\n"
+        "code = 'import certifi, other_lib; print(\"child-ok\")'\n"
         "r = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)\n"
         "print(r.stdout.strip() or r.stderr.strip())\n",
         encoding="utf-8",

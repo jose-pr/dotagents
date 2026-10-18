@@ -1,6 +1,6 @@
-"""Make the overlay's bin/ and lib/ importable for the tests, regardless of cwd;
-and pin NET_CURL_COMPAT, so the fallback answers as the newest curl measured
-whatever curl the machine has (the parity tests set the real curl's own)."""
+"""Make the overlay's bin/ and lib/ importable for the tests, regardless of
+cwd; and give each test the caller's HTTPLIB_PREFIX back, which the launcher
+sets when nothing did."""
 import sys
 from pathlib import Path
 
@@ -14,8 +14,8 @@ for _p in (_ROOT / "bin", _ROOT / "lib"):
 
 
 @pytest.fixture(autouse=True)
-def _newest_curl(monkeypatch):
-    from httplib.cli import compat
-
-    monkeypatch.setenv(compat.VAR, "%d.%d.%d" % compat.NEWEST)
-    monkeypatch.setattr(compat, "_cached", {})
+def _restore_prefix(monkeypatch):
+    # setenv first, so monkeypatch records the original state (set or not)
+    # and restores it after the test.
+    monkeypatch.setenv("HTTPLIB_PREFIX", "")
+    monkeypatch.delenv("HTTPLIB_PREFIX")

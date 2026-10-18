@@ -1,0 +1,5 @@
+# What the curl launcher and the overlay's Python users import, installed into
+# the agents' venv by dotagents. Pinned to a commit until both are on PyPI;
+# installing them needs git and network access to github.com.
+httplib @ git+https://github.com/jose-pr/httplib@0ef3f0ac963abac95870da7ad4dec8f6a7228328
+curlike @ git+https://github.com/jose-pr/curlike@03abf170a27aa565b0545d2ab50be6189be331be
