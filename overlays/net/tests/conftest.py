@@ -1,5 +1,5 @@
 """Make the overlay's bin/ and lib/ importable for the tests, regardless of
-cwd; and give each test the caller's HTTPLIB_PREFIX back, which the launcher
+cwd; and give each test the caller's SYSHTTP_PREFIX back, which the launcher
 sets when nothing did."""
 import sys
 from pathlib import Path
@@ -17,5 +17,5 @@ for _p in (_ROOT / "bin", _ROOT / "lib"):
 def _restore_prefix(monkeypatch):
     # setenv first, so monkeypatch records the original state (set or not)
     # and restores it after the test.
-    monkeypatch.setenv("HTTPLIB_PREFIX", "")
-    monkeypatch.delenv("HTTPLIB_PREFIX")
+    monkeypatch.setenv("SYSHTTP_PREFIX", "")
+    monkeypatch.delenv("SYSHTTP_PREFIX")

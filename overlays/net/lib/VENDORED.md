@@ -6,10 +6,10 @@ overlay's own:
 - **`lib/certifi/`** — an OS-trust-store shim, *not* the real cert bundle. Pure
   stdlib (`os` + `ssl`), ships no certificates.
 
-The HTTP code is not vendored either. `httplib` and `curlike` are packages of
+The HTTP code is not vendored either. `syshttp` and `curlike` are packages of
 their own, installed into the agents' venv from this overlay's
 `requirements.txt` (pinned to a commit while neither is on PyPI). `requests` is
-an optional dependency of `httplib.session` and is not installed by the
+an optional dependency of `syshttp.session` and is not installed by the
 overlay.
 
 ## If a future change *does* vendor a package

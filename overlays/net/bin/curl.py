@@ -2,9 +2,9 @@
 bin/curl.cmd (Windows): curlike's shim, which runs the real curl with the
 agent proxy added when there is one, else its standard-library fallback.
 
-curlike and httplib come from the agents' venv (this overlay's
+curlike and syshttp come from the agents' venv (this overlay's
 ``requirements.txt``), which the launchers run under ``$AGENTS_PYTHON``.
-Settings are ``AGENTS_*``: ``HTTPLIB_PREFIX=AGENTS`` (this overlay's
+Settings are ``AGENTS_*``: ``SYSHTTP_PREFIX=AGENTS`` (this overlay's
 ``env.py``) is set here too when nothing set a prefix, so the launcher means
 the same outside a ``dotagents env`` session. Without curlike the real curl
 still runs, as typed.
@@ -44,8 +44,8 @@ def _real_curl():
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not (os.environ.get("HTTPLIB_PREFIX") or "").strip():
-        os.environ["HTTPLIB_PREFIX"] = "AGENTS"
+    if not (os.environ.get("SYSHTTP_PREFIX") or "").strip():
+        os.environ["SYSHTTP_PREFIX"] = "AGENTS"
     try:
         from curlike.shim import main as shim_main
     except ImportError as exc:

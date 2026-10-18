@@ -4,16 +4,17 @@ Installed by `dotagents overlays add net`. It brings two packages into the
 agents' venv (this overlay's `requirements.txt`, which dotagents installs into
 the interpreter `$AGENTS_PYTHON` names):
 
-- **httplib** — proxy resolution with credentials and prefix gateways,
-  Netscape cookie and token jars, OS trust-store TLS, URL hooks, and a
-  configured `requests` session. Reference: <https://jose-pr.github.io/httplib/>
+- **syshttp** — proxy resolution with credentials and prefix gateways (with
+  no proxy variable set, the system's own proxy configuration, PAC and WPAD
+  included), Netscape cookie and token jars, certificates verified by the OS
+  (truststore), URL hooks, and a configured `requests` session. Reference: <https://jose-pr.github.io/syshttp/>
   and the `AGENTS.md` inside the installed package.
 - **curlike** — the drop-in curl: the real curl with the agent proxy added,
   else a curl-compatible command over the standard library. Reference:
   <https://jose-pr.github.io/curlike/> and its packaged `AGENTS.md`.
 
 Both read their settings as `<PREFIX>_<NAME>`. This overlay's `env.py` sets
-`HTTPLIB_PREFIX=AGENTS` (unless a prefix is already set), so every setting is
+`SYSHTTP_PREFIX=AGENTS` (unless a prefix is already set), so every setting is
 an `AGENTS_*` variable. `dotagents env` puts `bin/` on `PATH` and `lib/` (the
 certifi shim) on `PYTHONPATH`. The `bin/` launchers also set `PYTHONPATH`
 themselves, so the shim works from any shell.
@@ -40,7 +41,8 @@ real curl as typed, and is exit 2 when there is none.
 
 | Variable | Sets |
 | --- | --- |
-| `AGENTS_PROXY` | the agent proxy (else `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`) |
+| `AGENTS_PROXY` | the agent proxy (else `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, else the system's proxy configuration for the URL) |
+| `AGENTS_SYSTEM_PROXY` | `0` to stop consulting the system's proxy configuration |
 | `AGENTS_PROXY_AUTH` | its credential, the `Proxy-Authorization` value sent verbatim (else `HTTP_PROXY_AUTH`, else URL userinfo as Basic) |
 | `AGENTS_PROXY_AUTH_HEADER` | the header it rides in (default `Proxy-Authorization`) |
 | `AGENTS_PROXY_TYPE` | `connect` (default) or `prefix[:/endpoint]` |
@@ -72,21 +74,21 @@ store with no shipped certs.
 
     python -m certifi        # prints the resolved OS CA bundle path
 
-## httplib — `import httplib` in the agents' venv
+## syshttp — `import syshttp` in the agents' venv
 
-    from httplib.session import new_session
-    from httplib.fetch import request_json
+    from syshttp.session import new_session
+    from syshttp.fetch import request_json
     s = new_session(cookies=True, tokens=True)   # jars under $AGENTS_HOME
     status, obj = request_json(s, "GET", "https://api.example.com/thing")
 
 - The proxy, its credential, its type and `NO_PROXY` are the same
   `AGENTS_*` settings as the curl launcher's, decided once by
-  `httplib.proxy.plan()` and applied to every redirect hop.
-- Jars live under `$AGENTS_HOME` (`AGENTS_HOME` is httplib's `<PREFIX>_HOME`):
+  `syshttp.proxy.plan()` and applied to every redirect hop.
+- Jars live under `$AGENTS_HOME` (`AGENTS_HOME` is syshttp's `<PREFIX>_HOME`):
   `cookies/<host>.txt` and `tokens/<host>.token`, picked by the origin's
   host. Token values are secrets; never log them.
 - `session` and `fetch` need `requests`, which the overlay does not install:
-  `pip install 'httplib[session]'` into the venv that uses them.
+  `pip install 'syshttp[session]'` into the venv that uses them.
 
 ## URL hooks — `AGENTS_HOOKS_<KEY>`
 
@@ -95,11 +97,11 @@ the environment and matched on the URL you ask for:
 
     AGENTS_HOOKS_<KEY>=<regex>                 re.search against the requested URL
     AGENTS_HOOKS_<KEY>_CURL=<command>          the curl launcher runs this in its place
-    AGENTS_HOOKS_<KEY>_PY=<module:callable>    httplib calls it before the request
+    AGENTS_HOOKS_<KEY>_PY=<module:callable>    syshttp calls it before the request
 
 A `_CURL` wrapper gets `AGENTS_HOOK_URL`, `AGENTS_HOOK_KEY`, `AGENTS_HOOK_CURL`
 (the launcher, to call curl back) and `AGENTS_HOOK_SKIP`. The full contract is in
-httplib's reference.
+syshttp's reference.
 
 ```sh
 AGENTS_HOOKS_INTERNAL='^https://api\.internal\.example/'
@@ -109,5 +111,5 @@ AGENTS_HOOKS_INTERNAL_CURL="$MYTOOLS_OVERLAY_ROOT/bin/curl-signed.py"
 
 ## Referencing the lib from a skill
 
-Use `$NET_OVERLAY_ROOT/lib` for the certifi shim; `httplib` and `curlike` are
+Use `$NET_OVERLAY_ROOT/lib` for the certifi shim; `syshttp` and `curlike` are
 importable from `$AGENTS_PYTHON`. Never hardcode the store path.

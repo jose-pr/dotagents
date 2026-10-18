@@ -72,12 +72,12 @@ def test_fallback_runs_when_only_the_launcher_is_on_path(monkeypatch, capsysbina
 
 
 def test_the_launcher_reads_agents_settings(monkeypatch):
-    monkeypatch.delenv("HTTPLIB_PREFIX", raising=False)
+    monkeypatch.delenv("SYSHTTP_PREFIX", raising=False)
     shim = pytest.importorskip("curlike.shim")
     seen = {}
     monkeypatch.setattr(shim, "main", lambda argv, entry=None: seen.update(argv=argv, entry=entry) or 0)
     assert curl.main(["-s", "https://h/"]) == 0
-    assert os.environ["HTTPLIB_PREFIX"] == "AGENTS"
+    assert os.environ["SYSHTTP_PREFIX"] == "AGENTS"
     assert seen == {"argv": ["-s", "https://h/"], "entry": curl.entry()}
 
 
@@ -103,11 +103,11 @@ def test_env_py_sets_the_agents_prefix_unless_one_is_set():
     import subprocess
 
     env_py = str(BIN.parent / "env.py")
-    base = {k: v for k, v in os.environ.items() if k.upper() != "HTTPLIB_PREFIX"}
+    base = {k: v for k, v in os.environ.items() if k.upper() != "SYSHTTP_PREFIX"}
     out = subprocess.run([sys.executable, env_py], capture_output=True, text=True, env=base, check=True)
-    assert json.loads(out.stdout) == {"HTTPLIB_PREFIX": "AGENTS"}
+    assert json.loads(out.stdout) == {"SYSHTTP_PREFIX": "AGENTS"}
     out = subprocess.run([sys.executable, env_py], capture_output=True, text=True,
-                         env=dict(base, HTTPLIB_PREFIX="MINE"), check=True)
+                         env=dict(base, SYSHTTP_PREFIX="MINE"), check=True)
     assert out.stdout.strip() == ""
 
 
@@ -120,7 +120,7 @@ def test_requirements_pin_both_packages_to_a_commit():
         assert url.startswith("git+https://github.com/jose-pr/%s@" % name), ln
         assert len(url.rpartition("@")[2]) == 40, "a full commit, not a branch: " + ln
         names[name] = url
-    assert set(names) == {"httplib", "curlike"}
+    assert set(names) == {"syshttp", "curlike"}
 
 
 def _launcher_copy(tmp_path):
