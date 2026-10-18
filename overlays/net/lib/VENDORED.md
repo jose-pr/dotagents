@@ -1,32 +1,18 @@
 # Vendored code in `overlays/net/lib/`
 
-**Nothing third-party is vendored here.** This overlay deliberately does *not*
-bundle `requests` / `urllib3` / `idna` / `charset_normalizer`.
+**Nothing third-party is vendored here.** `lib/` holds one module of this
+overlay's own:
 
-## Why
-
-The pieces that matter most are zero-dependency without shipping hundreds of
-KB of third-party code:
-
-- **`bin/curl.py`** — runs the real system `curl` when there is one; its
-  fallback, `lib/httplib/cli`, is `urllib.request` + `ssl` (TLS through the OS
-  trust store) with its options built on **duho**, which is not vendored here
-  either: it comes from the interpreter (an installed dotagents) or the `.pyz`
-  a `.pyz`-run dotagents names in `$AGENTS_PYLIB`. No `requests` needed.
 - **`lib/certifi/`** — an OS-trust-store shim, *not* the real cert bundle. Pure
-  stdlib (`os` + `ssl`). ~2 KB, ships no certificates.
-- **`lib/httplib/`** — the session toolkit. `proxy.py` and `jar.py` are pure
-  stdlib. `session.py` / `fetch.py` import `requests` (+ `urllib3`) **lazily**
-  and only when a caller builds a `Session`; absence raises a clear, actionable
-  `ImportError` pointing at `pip install requests` or the curl shim.
+  stdlib (`os` + `ssl`), ships no certificates.
 
-So `requests`/`urllib3` are a **documented optional dependency** of the httplib
-session toolkit — not vendored, not required for the curl shim or certifi shim.
+The HTTP code is not vendored either. `httplib` and `curlike` are packages of
+their own, installed into the agents' venv from this overlay's
+`requirements.txt` (pinned to a commit while neither is on PyPI). `requests` is
+an optional dependency of `httplib.session` and is not installed by the
+overlay.
 
 ## If a future change *does* vendor a package
 
 Add it here with: package name, exact version, upstream URL, and SPDX license,
-and confirm the license permits redistribution. `requests` (Apache-2.0),
-`urllib3` (MIT), `idna` (BSD-3-Clause), and `charset_normalizer` (MIT) are all
-permissive and would be license-clean to vendor — not vendoring them is about
-payload size and maintenance, not licensing.
+and confirm the license permits redistribution.

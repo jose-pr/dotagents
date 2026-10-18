@@ -1,5 +1,5 @@
 name = "net"
-description = "HTTP tooling needing no installs: a drop-in curl shim (real curl first, else httplib.cli, a curl-compatible urllib command on duho from AGENTS_PYTHON or AGENTS_PYLIB), an OS-trust-store certifi shim, and an httplib session toolkit reading AGENTS_PROXY (credentials from the URL or AGENTS_PROXY_AUTH, NO_PROXY honoured; the curl shim hands the same proxy to real curl). bin/ and lib/ are wired by dotagents env (PATH, PYTHONPATH, NET_OVERLAY_ROOT), and the bin/ launchers set PYTHONPATH themselves; no setup."
+description = "HTTP tooling for agents: a drop-in curl launcher (curlike: the real curl with the agent proxy added, else a curl-compatible command over the standard library), an OS-trust-store certifi shim, and httplib (proxy, jars, hooks, a requests session) -- both packages installed into the agents venv from requirements.txt. env.py sets HTTPLIB_PREFIX=AGENTS, so every setting is AGENTS_* (AGENTS_PROXY with AGENTS_PROXY_AUTH and AGENTS_PROXY_TYPE, AGENTS_HOOKS_<KEY>, AGENTS_CURL*)."
 requires = []
 routing = [
   """- Fetch a URL without network setup, use the bundled curl shim / httplib session
