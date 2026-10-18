@@ -4,4 +4,4 @@
 # installed version that matches, whatever the commit: a new pin takes effect
 # only with a new version of the package.
 syshttp @ git+https://github.com/jose-pr/syshttp@bf2b6975aab151529a9d09fb8f7bfa085e56eb59
-curlike @ git+https://github.com/jose-pr/curlike@23d501032045a38bc8cb21d951453b8d3d812e27
+curlike @ git+https://github.com/jose-pr/curlike@dfa8cf91f65a5f8862b048ececea7149ded584d7
