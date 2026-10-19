@@ -1,5 +1,5 @@
 """The launcher's two entry points (bin/curl for POSIX, bin/curl.cmd for
-Windows), the curlike shim behind them, and the one trap they share: once the
+Windows), lib/curlshim behind them, and the one trap they share: once the
 overlay's bin/ is on PATH, "the real curl" must never resolve to the launcher.
 """
 import os
@@ -51,13 +51,15 @@ def _path(monkeypatch, *dirs):
 
 
 def test_real_curl_is_never_this_launcher(tmp_path, monkeypatch):
-    curlike_shim = pytest.importorskip("curlike.shim")
+    pytest.importorskip("curlike")
+    import curlshim
+
     real_dir = tmp_path / "system"
     real_dir.mkdir()
     real = _fake_real_curl(real_dir)
     # The overlay's bin/ FIRST on PATH, exactly as `dotagents env` arranges it.
     _path(monkeypatch, BIN, real_dir)
-    found = curlike_shim.find_real_curl(curl.entry())
+    found = curlshim.find_real_curl(curl.entry())
     assert found is not None and Path(found).resolve() == real.resolve()
     assert Path(curl._real_curl()).resolve() == real.resolve(), "the no-curlike path skips it too"
 
@@ -73,7 +75,9 @@ def test_fallback_runs_when_only_the_launcher_is_on_path(monkeypatch, capsysbina
 
 def test_the_launcher_reads_agents_settings(monkeypatch):
     monkeypatch.delenv("SYSHTTP_PREFIX", raising=False)
-    shim = pytest.importorskip("curlike.shim")
+    pytest.importorskip("curlike")
+    import curlshim as shim
+
     seen = {}
     monkeypatch.setattr(shim, "main", lambda argv, entry=None: seen.update(argv=argv, entry=entry) or 0)
     assert curl.main(["-s", "https://h/"]) == 0
@@ -82,7 +86,7 @@ def test_the_launcher_reads_agents_settings(monkeypatch):
 
 
 def test_without_curlike_the_real_curl_runs_as_typed(tmp_path, monkeypatch, capsys):
-    monkeypatch.setitem(sys.modules, "curlike.shim", None)  # import fails
+    monkeypatch.setitem(sys.modules, "curlike", None)  # import fails
     real = _fake_real_curl(tmp_path)
     _path(monkeypatch, BIN, tmp_path)
     calls = []

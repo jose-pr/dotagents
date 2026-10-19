@@ -1,6 +1,6 @@
 """The ``curl`` the overlay puts on PATH, run by bin/curl (POSIX sh) and
-bin/curl.cmd (Windows): curlike's shim, which runs the real curl with the
-agent proxy added when there is one, else its standard-library fallback.
+bin/curl.cmd (Windows): ``lib/curlshim``, which runs the real curl with the
+agent proxy added when there is one, else curlike's standard-library curl.
 
 curlike and syshttp come from the agents' venv (this overlay's
 ``requirements.txt``), which the launchers run under ``$AGENTS_PYTHON``.
@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+LIB = HERE.parent / "lib"
 
 
 def entry():
@@ -47,7 +48,10 @@ def main(argv=None):
     if not (os.environ.get("SYSHTTP_PREFIX") or "").strip():
         os.environ["SYSHTTP_PREFIX"] = "AGENTS"
     try:
-        from curlike.shim import main as shim_main
+        if str(LIB) not in sys.path:
+            sys.path.insert(0, str(LIB))
+        import curlike  # noqa: F401  (without it the real curl runs as typed)
+        from curlshim import main as shim_main
     except ImportError as exc:
         real = _real_curl()
         if real:
