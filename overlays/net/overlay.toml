@@ -1,5 +1,5 @@
 name = "net"
-description = "HTTP tooling for agents: a drop-in curl launcher (curlike: the real curl with the agent proxy added, else a curl-compatible command over the standard library), an OS-trust-store certifi shim, and syshttp (proxy, jars, hooks, a requests session) -- both packages installed into the agents venv from requirements.txt. env.py sets SYSHTTP_PREFIX=AGENTS, so every setting is AGENTS_* (AGENTS_PROXY with AGENTS_PROXY_AUTH and AGENTS_PROXY_TYPE, AGENTS_HOOKS_<KEY>, AGENTS_CURL*)."
+description = "HTTP tooling for agents: a drop-in curl launcher (lib/curlshim: the real curl with the agent proxy added, else curlike, a curl-compatible command over the standard library), an OS-trust-store certifi shim, and syshttp (proxy, jars, hooks, a requests session) -- both packages installed into the agents venv from requirements.txt. env.py sets SYSHTTP_PREFIX=AGENTS, so every setting is AGENTS_* (AGENTS_PROXY with AGENTS_PROXY_AUTH and AGENTS_PROXY_TYPE, AGENTS_HOOKS_<KEY>, AGENTS_CURL*)."
 requires = []
 routing = [
   """- Fetch a URL without network setup, use the bundled curl shim / syshttp session

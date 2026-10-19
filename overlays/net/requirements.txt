@@ -3,5 +3,5 @@
 # installing them needs git and network access to github.com. pip keeps an
 # installed version that matches, whatever the commit: a new pin takes effect
 # only with a new version of the package.
-syshttp @ git+https://github.com/jose-pr/syshttp@9bea50bc8a4b93a1ce6deb80bfc0eb5ff0aed029
-curlike @ git+https://github.com/jose-pr/curlike@a42726fcd80db41e01128ae9aea9d739d6e6a106
+syshttp @ git+https://github.com/jose-pr/syshttp@475bdd67373d4a5ffac779d97f7ee1ad9d2f6920
+curlike @ git+https://github.com/jose-pr/curlike@a74466635daa55268663eeda6216eb842df9485e

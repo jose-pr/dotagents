@@ -9,9 +9,12 @@ the interpreter `$AGENTS_PYTHON` names):
   included), Netscape cookie and token jars, certificates verified by the OS
   (sslcontext: the OS verifier and store client certificates), URL hooks, and a configured `requests` session. Reference: <https://jose-pr.github.io/syshttp/>
   and the `AGENTS.md` inside the installed package.
-- **curlike** — the drop-in curl: the real curl with the agent proxy added,
-  else a curl-compatible command over the standard library. Reference:
-  <https://jose-pr.github.io/curlike/> and its packaged `AGENTS.md`.
+- **curlike** — a curl-compatible command in pure Python (`pycurl`), never
+  the real curl. Reference: <https://jose-pr.github.io/curlike/> and its
+  packaged `AGENTS.md`.
+
+The overlay's `curl` launcher (`lib/curlshim`) chooses between the two: the
+real curl with the agent proxy added, else curlike.
 
 Both read their settings as `<PREFIX>_<NAME>`. This overlay's `env.py` sets
 `SYSHTTP_PREFIX=AGENTS` (unless a prefix is already set), so every setting is
@@ -22,14 +25,14 @@ themselves, so the shim works from any shell.
 ## curl — `$NET_OVERLAY_ROOT/bin/curl` (POSIX sh) / `bin/curl.cmd` (Windows)
 
 Both entries run `bin/curl.py` under `$AGENTS_PYTHON` (then `python3` /
-`python`), which calls `curlike.shim.main` with the launcher as its entry:
+`python`), which calls `lib/curlshim`'s `main` with the launcher as its entry:
 
 1. an `AGENTS_HOOKS_<KEY>_CURL` wrapper whose pattern matches the URL runs in
    curl's place;
 2. else the **real curl** on `PATH` (never this launcher) runs with your argv,
    plus `--proxy` and its credential when `AGENTS_PROXY` is set and you named
    no proxy (`-x`) or bypass list (`--noproxy`);
-3. else, or under a `prefix` gateway, curlike's **fallback** serves it, with
+3. else, or under a `prefix` gateway, **curlike** serves it, with
    curl's exit codes and messages. An option it lacks is
    `curl: (2) Unsupported options: …`, never silently ignored.
 
@@ -41,13 +44,14 @@ real curl as typed, and is exit 2 when there is none.
 
 | Variable | Sets |
 | --- | --- |
-| `AGENTS_PROXY` | the agent proxy (else `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, else the system's proxy configuration for the URL) |
+| `AGENTS_PROXY` | the agent proxy (else the request scheme's `*_PROXY` variable or `ALL_PROXY`, else the system's proxy configuration for the URL) |
 | `AGENTS_SYSTEM_PROXY` | `0` to stop consulting the system's proxy configuration |
-| `AGENTS_PROXY_AUTH` | its credential, the `Proxy-Authorization` value sent verbatim (else `HTTP_PROXY_AUTH`, else URL userinfo as Basic) |
+| `AGENTS_PROXY_AUTH` | its credential, the `Proxy-Authorization` value sent verbatim to it only (else URL userinfo as Basic) |
+| `HTTP_PROXY_AUTH` | the credential of the machine's proxy (a `*_PROXY` variable's or the system's) |
 | `AGENTS_PROXY_AUTH_HEADER` | the header it rides in (default `Proxy-Authorization`) |
 | `AGENTS_PROXY_TYPE` | `connect` (default) or `prefix[:/endpoint]` |
 | `AGENTS_CURL` | `0`/`no`/`off`: run the real curl exactly as typed |
-| `AGENTS_CURL_COMPAT` | the curl version the fallback answers as (default: the real curl's) |
+| `AGENTS_CURL_COMPAT` | the curl version curlike answers as (default: the real curl's) |
 | `AGENTS_CURL_SSL_REVOKE` | `best-effort` (default), `true`, `false`: revocation for a Schannel curl |
 | `AGENTS_PYTHON` | the interpreter a `.py` hook wrapper runs under |
 | `NO_PROXY` | hosts that go direct |
@@ -82,12 +86,13 @@ store with no shipped certs.
     status, obj = request_json(s, "GET", "https://api.example.com/thing")
 
 - The proxy, its credential, its type and `NO_PROXY` are the same
-  `AGENTS_*` settings as the curl launcher's, decided once by
-  `syshttp.proxy.plan()` and applied to every redirect hop.
+  `AGENTS_*` settings as the curl launcher's: `syshttp.proxy.proxy_map()`,
+  a proxylib proxy map asked again for every redirect hop; a list from the
+  system is tried in order.
 - Jars live under `$AGENTS_HOME` (`AGENTS_HOME` is syshttp's `<PREFIX>_HOME`):
   `cookies/<host>.txt` and `tokens/<host>.token`, picked by the origin's
   host. Token values are secrets; never log them.
-- `AGENTS_SYSHTTP_IMPORTPATCH=1` (or `requests:urllib:httpx:aiohttp`) patches those
+- `AGENTS_SYSHTTP_IMPORTPATCH=1` (or `requests:urllib:httpx:aiohttp:pip`) patches those
   libraries as they are imported in any program of the agents' venv, so they
   route through the agent proxy, the system's proxy and `NO_PROXY`, and verify
   with the system's TLS context (`syshttp.autopatch`; what a caller sets wins).
