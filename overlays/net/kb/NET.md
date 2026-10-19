@@ -7,7 +7,7 @@ the interpreter `$AGENTS_PYTHON` names):
 - **syshttp** — proxy resolution with credentials and prefix gateways (with
   no proxy variable set, the system's own proxy configuration, PAC and WPAD
   included), Netscape cookie and token jars, certificates verified by the OS
-  (truststore), URL hooks, and a configured `requests` session. Reference: <https://jose-pr.github.io/syshttp/>
+  (sslcontext: the OS verifier and store client certificates), URL hooks, and a configured `requests` session. Reference: <https://jose-pr.github.io/syshttp/>
   and the `AGENTS.md` inside the installed package.
 - **curlike** — the drop-in curl: the real curl with the agent proxy added,
   else a curl-compatible command over the standard library. Reference:
