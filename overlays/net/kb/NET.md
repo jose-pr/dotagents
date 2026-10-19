@@ -87,7 +87,7 @@ store with no shipped certs.
 - Jars live under `$AGENTS_HOME` (`AGENTS_HOME` is syshttp's `<PREFIX>_HOME`):
   `cookies/<host>.txt` and `tokens/<host>.token`, picked by the origin's
   host. Token values are secrets; never log them.
-- `AGENTS_IMPORTPATCH=1` (or `requests,urllib,httpx,aiohttp`) patches those
+- `AGENTS_SYSHTTP_IMPORTPATCH=1` (or `requests:urllib:httpx:aiohttp`) patches those
   libraries as they are imported in any program of the agents' venv, so they
   route through the agent proxy, the system's proxy and `NO_PROXY`, and verify
   with the system's TLS context (`syshttp.autopatch`; what a caller sets wins).
