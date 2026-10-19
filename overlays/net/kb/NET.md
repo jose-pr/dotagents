@@ -29,9 +29,15 @@ Both entries run `bin/curl.py` under `$AGENTS_PYTHON` (then `python3` /
 
 1. an `AGENTS_HOOKS_<KEY>_CURL` wrapper whose pattern matches the URL runs in
    curl's place;
-2. else the **real curl** on `PATH` (never this launcher) runs with your argv,
-   plus `--proxy` and its credential when `AGENTS_PROXY` is set and you named
-   no proxy (`-x`) or bypass list (`--noproxy`);
+2. else the **real curl** on `PATH` (never this launcher, never a `.cmd` /
+   `.bat`, never the current directory) runs with your argv, plus `--proxy`
+   in every `--next` group when `AGENTS_PROXY` is set (or, with no proxy
+   variable at all, the system names a proxy for the group's URL) and the
+   group does not choose its own (`-x`, `--noproxy`, `--proxy1.0`,
+   `--preproxy`, `-K`). Its credential goes in a private `-K` config file,
+   removed afterwards: never on the command line, which other accounts can
+   read. The real curl runs with `AGENTS_CURL_SHIM=1`, so a "curl" that calls
+   this launcher again is served by curlike instead of looping;
 3. else, or under a `prefix` gateway, **curlike** serves it, with
    curl's exit codes and messages. An option it lacks is
    `curl: (2) Unsupported options: …`, never silently ignored.
@@ -50,10 +56,9 @@ real curl as typed, and is exit 2 when there is none.
 | `HTTP_PROXY_AUTH` | the credential of the machine's proxy (a `*_PROXY` variable's or the system's) |
 | `AGENTS_PROXY_AUTH_HEADER` | the header it rides in (default `Proxy-Authorization`) |
 | `AGENTS_PROXY_TYPE` | `connect` (default) or `prefix[:/endpoint]` |
-| `AGENTS_CURL` | `0`/`no`/`off`: run the real curl exactly as typed |
-| `AGENTS_CURL_COMPAT` | the curl version curlike answers as (default: the real curl's) |
+| `AGENTS_CURL` | `0`/`n`/`no`/`false`/`off`: run the real curl exactly as typed; `1`/`y`/`yes`/`true`/`on` or unset: the launcher; anything else is exit 2 |
 | `AGENTS_CURL_SSL_REVOKE` | `best-effort` (default), `true`, `false`: revocation for a Schannel curl |
-| `AGENTS_PYTHON` | the interpreter a `.py` hook wrapper runs under |
+| `AGENTS_PYTHON` | the interpreter a `.py` hook wrapper runs under (on Windows a `.cmd` / `.bat` wrapper is refused, exit 2: cmd.exe would re-parse a URL's `&`) |
 | `NO_PROXY` | hosts that go direct |
 
 ## certifi shim — `$NET_OVERLAY_ROOT/lib/certifi`
