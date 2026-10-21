@@ -31,13 +31,26 @@ The real curl still reads its own variables as curl names them, and so does
 curlike for curl's own `CURL_CA_BUNDLE`.
 
 `dotagents env` puts `bin/` on `PATH` and `lib/` (the certifi shim) on
-`PYTHONPATH`. The `bin/` launchers also set `PYTHONPATH` themselves, so the
-shim works from any shell.
+`PYTHONPATH`. The curl launcher also puts the overlay libs on `PYTHONPATH`
+for what it starts, so the shim works from any shell.
 
-## curl — `$NET_OVERLAY_ROOT/bin/curl` (POSIX sh) / `bin/curl.cmd` (Windows)
+## curl — `$NET_OVERLAY_ROOT/bin/curl` (POSIX sh), `curl.exe` (Windows)
 
-Both entries run `bin/curl.py` under `$AGENTS_PYTHON` (then `python3` /
-`python`), which calls `lib/curlshim`'s `main` with the launcher as its entry:
+On Windows `curl` is a native `curl.exe`, never a `.cmd`: cmd.exe parses a
+batch file's command line before it runs, so a URL's `&`, `|`, `>` or
+`%VAR%` would act. The overlay's `setup.py` (run by `overlays add` / `sync`)
+has pip install `launcher/` into the agents' venv, which generates the
+console script `curl.exe`, and links it into `<venv>/net-curl/`, a directory
+holding only it. `env.py` puts that directory first on `PATH` for the venv
+`$AGENTS_PYTHON` names, every session, and drops any other venv's: the
+executable names its venv's interpreter, and lives and goes with that venv.
+A venv rebuilt without `overlays sync net` has no `curl.exe` yet, so `curl` is
+the system's until then. Windows PowerShell 5.1 aliases `curl` to
+`Invoke-WebRequest`; there, type `curl.exe`.
+
+Both entries run `bin/curl.py` (the POSIX one under `$AGENTS_PYTHON`, then
+`python3` / `python`; `curl.exe` finds it through `$NET_OVERLAY_ROOT`), which
+calls `lib/curlshim`'s `main` with the launcher as its entry:
 
 1. an `AGENTS_SYSHTTP_HOOKS_<KEY>_CURL` wrapper whose pattern matches the URL
    runs in curl's place;
