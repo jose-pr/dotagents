@@ -37,6 +37,8 @@ classifiers = [
 dependencies = [
     "duho>=0.7.5,<0.8",
     "pathapi>=0.1.0,<0.2",
+    # The launchers of overlays' [scripts]: ScriptMaker writes the Windows .exe.
+    "distlib>=0.4.0,<0.5",
     # overlay.toml manifests and TOML registries; tomllib is stdlib from 3.11.
     'tomli>=1.1.0; python_version < "3.11"',
 ]

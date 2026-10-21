@@ -53,10 +53,11 @@ def test_vendored_pins_are_the_declared_floors():
     pin ships a zipapp bundling a version `pip install dotagents-cli` refuses.
     """
     text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
-    floors = dict(re.findall(r"""["'](duho|pathapi|tomli)>=([^,;"'\s]+)""", text))
+    floors = dict(re.findall(r"""["'](duho|pathapi|distlib|tomli)>=([^,;"'\s]+)""", text))
     assert floors == {
         "duho": BuildPyz.duho_version,
         "pathapi": BuildPyz.pathapi_version,
+        "distlib": BuildPyz.distlib_version,
         "tomli": BuildPyz.tomli_version,
     }
 

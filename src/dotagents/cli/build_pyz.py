@@ -99,6 +99,10 @@ class BuildPyz(LoggingArgs, Cmd):
     "Pinned pathapi version to vendor (--pathlib-next-version is its old name)."
     ("--pathapi-version", "--pathlib-next-version")
 
+    distlib_version: str = "0.4.0"
+    "Pinned distlib version to vendor (overlay script launchers)."
+    ("--distlib-version",)
+
     # Declared only for Python < 3.11, but always vendored: the .pyz runs on
     # whatever interpreter launches it, and on 3.11+ `tomllib` wins anyway.
     tomli_version: str = "1.1.0"
@@ -154,6 +158,7 @@ class BuildPyz(LoggingArgs, Cmd):
             requirements = [
                 "duho==%s" % self.duho_version,
                 "pathapi==%s" % self.pathapi_version,
+                "distlib==%s" % self.distlib_version,
                 "tomli==%s" % self.tomli_version,
             ]
             for name in names:
