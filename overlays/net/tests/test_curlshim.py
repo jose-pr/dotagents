@@ -530,16 +530,51 @@ def test_a_wrapper_that_cannot_start_is_exit_2(fake, monkeypatch, capsys):
     assert err.startswith("curl: (2) AGENTS_SYSHTTP_HOOKS_W_CURL: cannot run") and "Traceback" not in err
 
 
-@pytest.mark.skipif(os.name != "nt", reason="cmd.exe")
-@pytest.mark.parametrize("suffix", [".cmd", ".bat"])
-def test_a_batch_wrapper_is_refused_on_windows(suffix, fake, tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    "command",
+    [
+        "'{wrapper}'",
+        "'{bat}'",
+        "'{wrapper}.'",
+        "'{bat} '",
+        "'{wrapper}. .'",
+        "'{wrapper}::$DATA'",
+        "cmd /c '{wrapper}'",
+        "CMD.EXE /c '{wrapper}'",
+        "C:\\Windows\\System32\\cmd.exe /c '{wrapper}'",
+        "cmd.exe. /c '{wrapper}'",
+        "powershell -Command '{wrapper}'",
+        "pwsh.exe -Command '{wrapper}'",
+        "wsl.exe true",
+    ],
+)
+def test_a_wrapper_that_reaches_a_command_interpreter_is_refused(command, fake, tmp_path, monkeypatch, capsys):
+    """cmd.exe (what runs a .cmd / .bat), PowerShell and WSL read the URL
+    appended to them as script text: its `&` would run the rest."""
     marker = tmp_path / "ran"
-    wrapper = tmp_path / ("wrap" + suffix)
-    wrapper.write_text("@echo off\necho ran > \"%s\"\n" % marker, encoding="utf-8")
+    wrapper = tmp_path / "wrap.cmd"
+    bat = tmp_path / "wrap.bat"
+    for path in (wrapper, bat):
+        path.write_text("@echo off\necho ran > \"%s\"\n" % marker, encoding="utf-8")
     monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W", ".")
-    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W_CURL", str(wrapper))
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W_CURL", command.format(wrapper=wrapper, bat=bat))
     assert fake.main(["https://api.example.com/?x=1&calc"]) == 2
-    assert "cannot take a URL safely" in capsys.readouterr().err and not marker.exists()
+    assert "runs through a command interpreter" in capsys.readouterr().err and not marker.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_wrapper_is_judged_by_the_program_it_resolves_to(fake, tmp_path, monkeypatch, capsys):
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "pwsh").write_text("", encoding="utf-8")
+    links = tmp_path / "links"
+    links.mkdir()
+    (links / "tool").symlink_to(real / "pwsh")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(links), str(fake.dir)]))
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W", ".")
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W_CURL", "tool -Command")
+    assert fake.main(["https://api.example.com/"]) == 2
+    assert "runs through a command interpreter" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------

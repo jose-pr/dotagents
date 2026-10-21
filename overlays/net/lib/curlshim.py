@@ -2,8 +2,9 @@
 curlike's own (``pycurl``), called by ``bin/curl.py`` as :func:`main`.
 
   1. **A ``SYSHTTP_HOOKS_<KEY>_CURL`` wrapper** whose pattern matches the URL
-     runs in curl's place, argv appended. A ``.cmd`` / ``.bat`` wrapper is
-     refused on Windows: cmd.exe would parse the URL's ``&`` again.
+     runs in curl's place, argv appended. A wrapper that runs through a
+     command interpreter (cmd.exe, a ``.cmd`` / ``.bat``, PowerShell, WSL) is
+     refused: the interpreter would parse the URL's ``&`` or ``;`` again.
   2. **The real curl, when one is on PATH** (never this launcher), with the
      caller's argv and its exit code -- with ONE addition per ``--next``
      group: the proxy syshttp would use for the group's URL (``SYSHTTP_PROXY``,
@@ -30,6 +31,7 @@ nothing here imports curlike or syshttp until a request needs them, so
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -59,6 +61,9 @@ _CURL_PROXY_VARIABLES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy
 _MAP_PROXY_VARIABLES = tuple(
     n for s in ("HTTP", "HTTPS", "FTP", "WS", "WSS", "ALL") for n in (s.lower() + "_proxy", s + "_PROXY")
 )
+# Programs that read a command line as script text: an argument appended to
+# them is parsed again, so a URL's `&` or `;` runs as a command.
+_INTERPRETERS = ("cmd", "powershell", "pwsh", "wsl")
 _BATCH = (".cmd", ".bat")
 # Options that choose the proxy, besides the ones curlike.caller_steering reads:
 # with any of them the caller steers, and nothing is injected.
@@ -390,12 +395,59 @@ def run_real_curl_as_typed(argv, entry=None):
     return _run([curl_path, *argv], "the real curl")
 
 
+def _program_name(path):
+    """The file name Windows runs for ``path``, lower-cased: trailing dots
+    and spaces dropped (Win32 path normalisation drops them) and an NTFS
+    stream suffix (``x.cmd::$DATA``) cut."""
+    name = re.split(r"[\\/]", path)[-1]
+    if os.name == "nt":
+        name = name.split(":", 1)[0]
+    return name.rstrip(". ").lower()
+
+
+def _resolve(program):
+    """The file ``program`` names: as given when it has a directory part, else
+    the first match in PATH's absolute directories (``.exe`` added on Windows
+    when it has no extension, as CreateProcess adds it), links resolved; else
+    ``None``."""
+    candidates = [program]
+    if os.name == "nt" and not os.path.splitext(_program_name(program))[1]:
+        candidates.append(program + ".exe")
+    if os.path.dirname(program):
+        dirs = [""]
+    else:
+        dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d and os.path.isabs(d)]
+    for directory in dirs:
+        for candidate in candidates:
+            path = os.path.join(directory, candidate) if directory else candidate
+            if os.path.isfile(path):
+                return os.path.realpath(path)
+    return None
+
+
+def _reaches_interpreter(program):
+    """Whether running ``program`` with arguments appended hands them to a
+    command interpreter that parses them as script text: cmd.exe (also what
+    runs a ``.cmd`` / ``.bat``), PowerShell, WSL. Judged by the name as given
+    and by the file it resolves to."""
+    names = [_program_name(program)]
+    resolved = _resolve(program)
+    if resolved:
+        names.append(_program_name(resolved))
+    for name in names:
+        stem, ext = os.path.splitext(name)
+        if ext in _BATCH or (ext in ("", ".exe") and stem in _INTERPRETERS):
+            return True
+    return False
+
+
 def maybe_run_hook(argv, entry=None):
     """``SYSHTTP_HOOKS_<KEY>`` + ``_CURL``: when the caller's URL matches, run
     the wrapper in curl's place with argv appended and, in its environment,
     the ``SYSHTTP_HOOK_*`` variables of ``syshttp.hooks.wrapper_environment``
     (``SYSHTTP_HOOK_CURL`` is ``entry``: the executable to call curl back
-    with). Returns the wrapper's exit code, or ``None`` when no hook applies."""
+    with). Returns the wrapper's exit code, or ``None`` when no hook applies.
+    A wrapper that reaches a command interpreter is a ``ValueError``."""
     from syshttp import hooks
 
     if not hooks.hooks_from_env():
@@ -411,8 +463,11 @@ def maybe_run_hook(argv, entry=None):
     hook = matched[0]
     label = hook.variable + hooks.CURL_SUFFIX
     command = hooks.curl_command(hook, python=_env().get(PYTHON) or sys.executable)
-    if os.name == "nt" and os.path.splitext(command[0])[1].lower() in _BATCH:
-        raise ValueError("%s: a .cmd/.bat wrapper cannot take a URL safely; use a .py or .exe" % label)
+    if _reaches_interpreter(command[0]):
+        raise ValueError(
+            "%s: %s runs through a command interpreter, which would parse the URL again; use a .py or .exe wrapper"
+            % (label, command[0])
+        )
     env = dict(os.environ)
     env.update(hooks.wrapper_environment(hook, url, entry or ""))
     return _run([*command, *argv], label, env=env)
