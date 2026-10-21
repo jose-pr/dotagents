@@ -27,42 +27,27 @@ def entry():
     return str(HERE / ("curl.cmd" if os.name == "nt" else "curl"))
 
 
-def _real_curl():
-    """The first curl on PATH outside this directory, for running without curlike."""
-    import shutil
-
-    for directory in os.environ.get("PATH", "").split(os.pathsep):
-        if not directory:
-            continue
-        try:
-            if Path(directory).resolve() == HERE:
-                continue
-        except OSError:
-            continue
-        found = shutil.which("curl", path=directory)
-        if found and not (Path(found).resolve().parent / "curl.py").is_file():
-            return found
-    return None
-
-
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not (os.environ.get("SYSHTTP_PREFIX") or "").strip():
         os.environ["SYSHTTP_PREFIX"] = PREFIX
+    if str(LIB) not in sys.path:
+        sys.path.insert(0, str(LIB))
+    # curlshim imports nothing outside the standard library until a request
+    # needs it, so its finder serves the fallback below.
+    import curlshim
+
     try:
-        if str(LIB) not in sys.path:
-            sys.path.insert(0, str(LIB))
         import curlike  # noqa: F401  (without it the real curl runs as typed)
-        from curlshim import main as shim_main
     except ImportError as exc:
-        real = _real_curl()
+        real = curlshim.find_real_curl(entry())
         if real:
             print("curl: curlike is not installed (%s): running %s as typed" % (exc, real), file=sys.stderr)
             return subprocess.run([real, *argv]).returncode
         print("curl: (2) no curl on PATH and curlike is not installed: run `dotagents env` "
               "(it installs this overlay's requirements) or pip install curlike", file=sys.stderr)
         return 2
-    return shim_main(argv, entry=entry())
+    return curlshim.main(argv, entry=entry())
 
 
 if __name__ == "__main__":

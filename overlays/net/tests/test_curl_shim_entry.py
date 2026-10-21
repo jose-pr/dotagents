@@ -101,6 +101,23 @@ def test_without_curlike_the_real_curl_runs_as_typed(tmp_path, monkeypatch, caps
     assert "curlike is not installed" in capsys.readouterr().err
 
 
+def test_without_curlike_the_current_directory_is_never_searched(tmp_path, monkeypatch, capsys):
+    """shutil.which searches the current directory first on Windows before
+    Python 3.12: a curl planted there must not run, nor a .cmd on PATH."""
+    monkeypatch.setitem(sys.modules, "curlike", None)
+    _fake_real_curl(tmp_path)
+    (tmp_path / "curl.cmd").write_text("@echo off\n", encoding="utf-8")
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    (batch_dir / "curl.cmd").write_text("@echo off\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    _path(monkeypatch, BIN, ".", batch_dir)
+    calls = []
+    monkeypatch.setattr(curl.subprocess, "run", lambda argv, *a, **k: calls.append(argv))
+    assert curl.main(["-s", "https://h/"]) == 2
+    assert calls == [] and "no curl on PATH" in capsys.readouterr().err
+
+
 def test_env_py_sets_the_agents_prefix_unless_one_is_set():
     import json
     import subprocess
