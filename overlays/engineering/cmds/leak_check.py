@@ -87,7 +87,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from duho import Cmd, LoggingArgs
+from typing import Annotated
+
+from duho import Cmd, LoggingArgs, Meta
 
 EXIT_OK = 0
 EXIT_HITS = 1
@@ -151,10 +153,9 @@ class CannotCheck(Exception):
 
 
 def personal_patterns_path(override: str | None) -> Path:
-    if override:
-        return Path(override)
-    raw = os.environ.get(PATTERNS_ENV)
-    return Path(raw) if raw else DEFAULT_PATTERNS
+    """The pattern file: the option or the variable (duho folds them into
+    `override`), else the agent store's."""
+    return Path(override) if override else DEFAULT_PATTERNS
 
 
 def load_personal_patterns(path: Path) -> tuple[list[str], list[str], str | None]:
@@ -486,7 +487,7 @@ class LeakCheck(LoggingArgs, Cmd):
     "Plans directory to harvest basenames from (default: the nearest one at or above the repo)."
     ("--plans",)
 
-    patterns: str = ""
+    patterns: Annotated[str, Meta(env=PATTERNS_ENV)] = ""
     "Machine-local pattern file (default: $DOTAGENTS_AUDIT_PATTERNS, else the agent store's)."
     ("--patterns",)
 
