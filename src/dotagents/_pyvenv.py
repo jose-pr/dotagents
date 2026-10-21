@@ -18,6 +18,10 @@ every overlay lib in the same project > user > system order the rest of
 dotagents uses, and dotagents itself last (overlay libs import it). A ``.pth``
 applies to that venv's interpreter only, so no other Python changes.
 
+Each venv also holds the launchers of the scripts its store's overlays and
+every lower store's have (``bin/*.py`` and ``[scripts]``), in ``<venv>/overlays/``
+(:mod:`dotagents._launchers`), brought up to date on every sync.
+
 Nothing installs into the system store; a venv an administrator made there is
 used as a layer when it exists. ``AGENTS_NO_PYVENV=1`` turns all of this off.
 """
@@ -31,6 +35,8 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
+
+from dotagents import _launchers
 
 #: Installed into every user venv, so each skill can import duho. The range is
 #: dotagents' own (pyproject.toml), checked by the test suite.
@@ -162,14 +168,22 @@ def requirement_files(scope, store: Path) -> "list[Path]":
     ]
 
 
+def store_overlays(scope, stores) -> list:
+    """The overlays in play installed in any of ``stores``."""
+    keys = {_key(s) for s in stores}
+    return [o for o in scope.overlays if o.store is not None and _key(o.store) in keys]
+
+
 def wants_venv(scope, level: str, store: Path, libs: "list[Path]") -> bool:
     """The user store always has a venv (duho); a project's only when it has
-    requirements or libs of its own; nothing installs into the system store."""
+    requirements, libs or ``[scripts]`` of its own; nothing installs into the
+    system store."""
     if level == "user":
         return True
     if level == "system":
         return False
-    return bool(libs or requirement_files(scope, store))
+    return bool(libs or requirement_files(scope, store)
+                or any(o.scripts() for o in store_overlays(scope, [store])))
 
 
 def sync_venvs(scope, *, dry_run: bool = False, logger=None) -> "list[Path]":
@@ -178,6 +192,10 @@ def sync_venvs(scope, *, dry_run: bool = False, logger=None) -> "list[Path]":
     last run; the ``.pth`` layering is rewritten every time. Returns the venvs
     that exist (or would, on a dry run)."""
     if disabled():
+        scripts = sorted(n for o in scope.overlays for n in o.scripts())
+        if scripts:
+            _log(logger, "info", "pyvenv: %s is set, so no launcher is made for %s",
+                 DISABLE_ENV, ", ".join(scripts))
         return []
     stack = layers(scope)
     done = []
@@ -185,6 +203,11 @@ def sync_venvs(scope, *, dry_run: bool = False, logger=None) -> "list[Path]":
     for index in range(len(stack) - 1, -1, -1):
         level, store, libs = stack[index]
         if not wants_venv(scope, level, store, libs):
+            venv = venv_dir(store)
+            if not dry_run and venv_python(venv).is_file() and (venv / STATE_FILE).is_file():
+                # A venv a sync made that is no longer wanted can still be the
+                # active one (active_venv): keep its launchers current.
+                _launchers.sync(venv, venv_python(venv), _stack_overlays(scope, stack[index:]), logger=logger)
             continue
         reqs = list(BASE_REQUIREMENTS) if level == "user" else []
         _sync_one(scope, store, reqs, requirement_files(scope, store), stack[index:],
@@ -212,9 +235,16 @@ def _sync_one(scope, store: Path, reqs: "list[str]", files: "list[Path]", stack,
     if _read(pth) != text:
         pth.parent.mkdir(parents=True, exist_ok=True)
         _write_atomic(pth, text)
+    _launchers.sync(venv, vpy, _stack_overlays(scope, stack), logger=logger)
     state = {"digest": digest, "requirements": reqs + [str(f) for f in files], "pth": entries}
     if read_state(venv) != state:
         _write_atomic(venv / STATE_FILE, json.dumps(state, indent=2) + "\n")
+
+
+def _stack_overlays(scope, stack) -> list:
+    """The overlays of the stores in ``stack`` (one venv's and every lower
+    store's): what that venv's launchers serve."""
+    return store_overlays(scope, [store for _level, store, _libs in stack])
 
 
 def runtime_entry() -> str:

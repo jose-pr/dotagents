@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from dotagents import _env, _pipwheel, _pyvenv
+from dotagents import _env, _launchers, _pipwheel, _pyvenv
 from dotagents._scope import Scope
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -156,11 +156,19 @@ def test_sync_installs_layers_and_skips_pip_when_unchanged(tmp_path, monkeypatch
     monkeypatch.setattr(_pyvenv, "_install", lambda *a, **kw: installs.append(a[1]) or real_install(*a, **kw))
 
     user, project = tmp_path / "home" / ".agents", tmp_path / "proj" / ".agents"
-    _store_with_lib_overlay(user, "u1")
+    u1 = _store_with_lib_overlay(user, "u1")
+    (u1 / "overlay.toml").write_text('name = "u1"\n[scripts]\nu1tool = "lib/u1_lib.py"\n', encoding="utf-8")
     _store_with_lib_overlay(project, "p1", requirement="projdep")
     scope = Scope("project", project, user_root=user, project_root=project.parent)
 
     assert _pyvenv.sync_venvs(scope) == [_pyvenv.venv_dir(user), _pyvenv.venv_dir(project)]
+    # A user overlay's script gets a launcher in the user venv and in the
+    # project venv layered over it, each naming its own interpreter.
+    for venv in (_pyvenv.venv_dir(user), _pyvenv.venv_dir(project)):
+        launcher = _launchers.launcher_dir(venv) / _launchers.file_name("u1tool")
+        out = subprocess.run([str(launcher)], env=dict(os.environ, U1_OVERLAY_ROOT=str(u1)),
+                             capture_output=True, text=True)
+        assert out.returncode == 0, out.stderr
     assert len(installs) == 2
     pvenv = _pyvenv.venv_dir(project)
     assert not (_pyvenv.site_packages(pvenv) / "pip").exists(), "pip ran from the wheel"

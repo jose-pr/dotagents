@@ -4,7 +4,8 @@ Contract B, the exact sequence :func:`get_environment` performs:
 
   1. **Bins onto PATH FIRST**, before any env eval. Each level's ``bin`` dir
      (contract-A precedence order, *except* project-root) is prepended to
-     ``PATH`` so env scripts can call overlay helpers by name. **Libs go on
+     ``PATH`` so env scripts can call overlay helpers by name, and ahead of
+     them the active venv's launcher dir (:func:`_launcher_path`). **Libs go on
      ``PYTHONPATH`` the same way**: each level's ``lib`` dir that EXISTS
      (:func:`get_lib_paths`) is prepended to ``PYTHONPATH`` and listed,
      ``os.pathsep``-joined, in ``AGENTS_PYTHONPATH`` -- so an ``env.py``, a
@@ -852,6 +853,25 @@ def _anchored(entry: str) -> bool:
     return bool(entry) and (os.path.isabs(entry) or entry[0] in "/\\")
 
 
+def _launcher_path(path: str, venv: "Optional[Path]") -> "Optional[str]":
+    """``PATH`` with ``venv``'s launcher dir (``<venv>/overlays``, the
+    overlays' ``[scripts]``: :mod:`dotagents._launchers`) first when it
+    exists, and every other dotagents venv's taken out: a launcher names its
+    own venv's interpreter. ``None`` if nothing changes.
+
+    First, ahead of the levels' ``bin`` dirs too: cmd.exe and PowerShell try
+    every ``PATHEXT`` extension in one directory before the next, so a
+    ``bin`` holding the script itself (``curl.py``, with ``.PY`` in
+    ``PATHEXT``) or a ``.cmd`` of the same name would otherwise win."""
+    from dotagents import _launchers
+
+    entries = [e for e in path.split(os.pathsep) if not (e and _launchers.is_launcher_dir(e))] if path else []
+    if venv is not None and _launchers.launcher_dir(venv).is_dir():
+        entries.insert(0, str(_launchers.launcher_dir(venv)))
+    updated = os.pathsep.join(entries)
+    return updated if updated != path else None
+
+
 def _prepended_path_var(osenv: "dict[str, str]", var: str, entries: "list[str]") -> "Optional[str]":
     """The new value of an ``os.pathsep``-joined path var with ``entries``
     prepended (:func:`_prepend_missing` order), or ``None`` if nothing changes.
@@ -1104,6 +1124,10 @@ def get_environment(
     # --- Contract B step 1: bins onto PATH FIRST. ---
     bin_paths = [str(p) for p in get_bin_paths(scope)]
     updated = _prepended_path_var(osenv, "PATH", bin_paths)
+    if updated is not None:
+        _apply({"PATH": updated})
+    updated = _launcher_path(osenv.get("PATH", ""), venv if venv is not None
+                             and osenv.get("AGENTS_PYTHON") == str(_pyvenv.venv_python(venv)) else None)
     if updated is not None:
         _apply({"PATH": updated})
 

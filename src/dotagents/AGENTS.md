@@ -239,8 +239,10 @@ returns the exit code.
   otherwise; `0` from either means no limit.
 - `parse_manifest_text(text, origin="overlay.toml") -> Optional[dict]` — the TOML
   document via `tomllib` / `tomli`, else a built-in reader (top-level strings,
-  string arrays including multi-line strings, an integer); `None` plus one warning
-  when it is not valid TOML.
+  string arrays including multi-line strings, an integer, and the `[scripts]` table
+  of strings and booleans); `None` plus one warning when it is not valid TOML.
+- `SCRIPT_NAME_RE` — a script (launcher) name: a letter or digit, then letters,
+  digits, `.`, `_`, `-`; never ending in `.exe` nor a Windows device name.
 - `class InstallResult` — what `install_to` did: `written`, `unchanged`,
   `replaced` (edited here, replaced by the source's file), `removed` (not in the
   source, or cleared by `prune`), `backed_up`, `lines`; property `skipped`
@@ -270,8 +272,16 @@ returns the exit code.
     (the later copy shadows it).
   - `Overlay.sort_by_priority(overlays) -> list[Overlay]` — sorted by `sort_key`.
   - `read_manifest() -> dict` — keys `name`, `description`, `routing`, `rules`,
-    `requires` (valid names only, normalized, de-duplicated), `priority`; a missing
-    or invalid manifest gives empty contributions.
+    `requires` (valid names only, normalized, de-duplicated), `priority`,
+    `setup_timeout`, `scripts` (the `[scripts]` table as written: name -> path
+    relative to the overlay, `/`-separated, plain file-name characters, no `..`,
+    or `false`; any other entry is dropped with a warning); a missing or invalid
+    manifest gives empty contributions.
+  - `scripts() -> dict[str, str]` — the scripts that get a launcher
+    (`dotagents._launchers`): each top-level `bin/<name>.py` whose stem is a
+    `SCRIPT_NAME_RE` name (so not `_private.py`, not `__init__.py`), then
+    `[scripts]`, which adds or replaces a path by name, or drops a detected one
+    with `false`.
   - `find_setup_script() -> Optional[Path]`.
   - `setup_timeout(override=None) -> int` — `override`, else the manifest's
     `setup_timeout` (a non-negative int; anything else is ignored with a warning),
@@ -306,6 +316,35 @@ returns the exit code.
   — rebuild the managed block from the pristine `base_block` over `overlays` in
   `sort_key` order; creates the file when absent; content outside the markers kept;
   returns whether it changed (`False` and a warning when the file has no block).
+
+## `dotagents._launchers`
+
+Launchers for overlays' scripts (`Overlay.scripts()`), in `<venv>/overlays/` of a
+dotagents venv; `_pyvenv.sync_venvs` brings them up to date on every sync, and
+`_env.get_environment` puts that dir first on `PATH` for the venv `AGENTS_PYTHON`
+names. A launcher runs `$<NAME>_OVERLAY_ROOT/<script>` under the venv's
+interpreter, resolved when it runs (argv[0] the script, its dir first on
+`sys.path`, run as `__main__`); with the variable unset or the script missing it
+exits 2 naming both. Windows: `<name>.exe`, distlib's `ScriptMaker` launcher (no
+command interpreter parses its arguments). POSIX: `<name>`, mode 0755, a `/bin/sh`
+script that `exec`s the interpreter.
+
+- `DIR = "overlays"`, `MANIFEST = ".dotagents-launchers.json"` (in that dir:
+  `{name: overlay name}` of the launchers dotagents wrote).
+- `class LauncherError(SystemExit)` — two overlays with one script name; the
+  message names both.
+- `launcher_dir(venv) -> Path`. `file_name(name) -> str` (`.exe` added on Windows).
+  `is_launcher_dir(path) -> bool` — the shape `<store>/.pyvenv/<triplet>/overlays`,
+  no filesystem access.
+- `declared(overlays) -> dict[str, tuple[Overlay, str]]` — every script by name;
+  raises `LauncherError` on a name two overlays have.
+- `render(name, var, script, python) -> bytes` — one launcher's bytes; equal
+  inputs give equal bytes (the `.exe`'s archive carries a fixed time).
+- `sync(venv, python, overlays, *, dry_run=False, logger=None) -> list[str]` —
+  writes each launcher whose bytes differ (atomic replace), deletes those
+  `MANIFEST` lists that no overlay has any more (other files there are left
+  alone), rewrites `MANIFEST`; returns the names written or deleted. Raises
+  `LauncherError` before any write.
 
 ## `dotagents._sources`
 
@@ -383,7 +422,12 @@ a directory of overlays or a registry file (default: the root); for a **source**
 
 Assembly order (`get_environment`): identity (`stamp_identity`), then the roots,
 then `PATH`, then `PYTHONPATH` / `AGENTS_PYTHONPATH`, then the env files, then the
-proxy model.
+proxy model. `PATH`: every level's `bin` prepended, then, first of all, the active
+venv's launcher dir (`<venv>/overlays`, `_launchers`) when `AGENTS_PYTHON` is that
+venv's interpreter and the dir exists; every other dotagents venv's launcher dir is
+taken out. First even before the `bin` dirs: cmd.exe and PowerShell try every
+`PATHEXT` extension in a directory before the next one, so a `bin/<name>.py` (with
+`.PY` in `PATHEXT`) or a `.cmd` there would otherwise win.
 
 - Roots: `AGENTS_HOME` and `AGENTS_PROJECT_ROOT` name the stores walked, absolute —
   an inherited value naming the same directory holds, another is replaced; in a
@@ -706,10 +750,16 @@ code. `AGENTS_NO_PYVENV=1` (or `true`/`yes`/`on`) turns it all off.
   when the requirements' digest changed, in one `pip install -r ... -r ...` per
   venv, with `--find-links` from `AGENTS_PIP_SOURCE`. The `.pth` is rewritten when
   it differs: the store's own libs, then each lower store's venv site-packages and
-  libs, then `runtime_entry()`. Raises `VenvError` (a `SystemExit`) on failure.
+  libs, then `runtime_entry()`. Each venv's launchers (`_launchers.sync`) serve its
+  store's overlays and every lower store's; a project venv a sync made that is no
+  longer wanted keeps its launchers current too. With `AGENTS_NO_PYVENV` it logs
+  which scripts get no launcher. Raises `VenvError` or `LauncherError` (both
+  `SystemExit`) on failure.
 - `wants_venv(scope, level, store, libs) -> bool` — always for `user`; for `project`
-  when it has overlay requirements or libs; never for `system` (a venv an
+  when it has overlay requirements, libs or scripts; never for `system` (a venv an
   administrator made there is still layered).
+- `store_overlays(scope, stores) -> list[Overlay]` — the overlays in play
+  installed in any of `stores`.
 - `ensure_venv(target, python=None, *, with_pip=None, dry_run=False, logger=None)
   -> Optional[Path]` — the venv's interpreter, created when missing; `with_pip=None`
   tries ensurepip and falls back to `--without-pip`, `False` never uses it.
@@ -801,6 +851,8 @@ proxy vars, plus whatever the env files set. `AGENTS_AGENT` is never emitted.
 
 Set for an overlay's `setup.py`: `AGENTS_HOME` (user store), `AGENTS_SCOPE_ROOT`,
 `AGENTS_SCOPE`, `AGENTS_OVERLAY_DIR`.
+
+Read by a script launcher (`_launchers`): its overlay's `<NAME>_OVERLAY_ROOT`.
 
 ## Gotchas
 

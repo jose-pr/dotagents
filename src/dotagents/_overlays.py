@@ -69,8 +69,8 @@ def _setup_timeout(value: object, name: str) -> "Optional[int]":
 # `tomllib` (3.11+) or `tomli` reads the manifest. `tomli` is a declared
 # dependency below 3.11 and is vendored in the .pyz, so the small hand reader
 # below only runs in an install that skipped its dependencies; it covers what
-# a manifest uses: top-level strings, arrays of strings and an integer, with
-# TOML's escapes.
+# a manifest uses: top-level strings, arrays of strings and an integer, and
+# the `[scripts]` table of strings, with TOML's escapes.
 # --------------------------------------------------------------------------- #
 
 
@@ -272,6 +272,29 @@ def _parse_priority(text: str) -> int:
     return int(m.group(1).replace("_", ""))  # the pattern admits only valid ints
 
 
+def _parse_table_strings(text: str, table: str) -> "dict[str, object]":
+    """The single-line ``key = "..."`` / ``key = '...'`` / ``key = true|false``
+    entries of the ``[table]`` section of (comment-stripped) TOML source; bare
+    or quoted keys."""
+    m = re.search(r"(?m)^[ \t]*\[%s\][ \t]*$" % re.escape(table), text)
+    if m is None:
+        return {}
+    end = re.search(r"(?m)^[ \t]*\[", text[m.end():])
+    body = text[m.end(): m.end() + end.start()] if end else text[m.end():]
+    entry = re.compile(
+        r"""(?m)^[ \t]*(?:([A-Za-z0-9_-]+)|"((?:[^"\\\n]|\\.)*)")[ \t]*=[ \t]*"""
+        r"""(?:"((?:[^"\\\n]|\\.)*)"|'([^'\n]*)'|(true|false))[ \t]*$"""
+    )
+    out: "dict[str, object]" = {}
+    for bare, quoted, basic, literal, boolean in entry.findall(body):
+        key = bare or _unescape(quoted)
+        if boolean:
+            out[key] = boolean == "true"
+        else:
+            out[key] = _unescape(basic) if basic or not literal else literal
+    return out
+
+
 def _hand_parse(text: str) -> "dict[str, object]":
     """The fallback reader's view of a manifest, as the keys ``tomllib`` would
     give (absent keys omitted)."""
@@ -286,6 +309,9 @@ def _hand_parse(text: str) -> "dict[str, object]":
         value = _parse_string(raw, key)
         if value is not None:
             doc[key] = value
+    scripts = _parse_table_strings(_strip_comments(text), "scripts")
+    if scripts:
+        doc["scripts"] = scripts
     return doc
 
 
@@ -301,6 +327,48 @@ def parse_manifest_text(text: str, origin: str = "overlay.toml") -> "Optional[di
     except ValueError as exc:  # TOMLDecodeError is a ValueError
         _warn_once("%s is not valid TOML (%s); ignoring it", origin, exc)
         return None
+
+
+#: A ``[scripts]`` name: the launcher's file name in ``<venv>/overlays/``
+#: (``.exe`` added on Windows), so a plain file name.
+SCRIPT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+#: A ``[scripts]`` path: ``/``-separated, relative, plain file-name
+#: characters only, so a launcher can embed it in sh and Python unquoted.
+_SCRIPT_PATH_RE = re.compile(r"^[A-Za-z0-9_+-][A-Za-z0-9._+-]*(?:/[A-Za-z0-9_+-][A-Za-z0-9._+-]*)*$")
+
+
+def _script_path_ok(path: object) -> bool:
+    """A path inside the overlay: :data:`_SCRIPT_PATH_RE`, so no ``..``, no
+    absolute path or drive, no backslash, no empty part."""
+    return isinstance(path, str) and _SCRIPT_PATH_RE.match(path) is not None
+
+
+def _scripts(value: object, overlay: str) -> "dict[str, object]":
+    """``[scripts]``: launcher name -> script path relative to the overlay, or
+    ``False`` to make no launcher for a detected ``bin/<name>.py``; an entry
+    that is neither is dropped with a warning."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        _warn_once("overlay %s: ignoring scripts (a table of name = \"path\" expected)", overlay)
+        return {}
+    out: "dict[str, str]" = {}
+    for name, path in value.items():
+        stem = name.split(".")[0].lower() if isinstance(name, str) else ""
+        if not (isinstance(name, str) and SCRIPT_NAME_RE.match(name)) or name.lower().endswith(".exe")                 or stem in Overlay.RESERVED_NAMES:
+            _warn_once("overlay %s: ignoring invalid script name %r", overlay, name)
+            continue
+        if path is False:
+            out[name] = False
+            continue
+        if not _script_path_ok(path):
+            _warn_once("overlay %s: ignoring script %s: %r is neither a path inside the overlay nor false",
+                       overlay, name, path)
+            continue
+        out[name] = path  # type: ignore[assignment]
+    return out
 
 
 def _string_list(value: object) -> "list[str]":
@@ -572,13 +640,15 @@ class Overlay:
     def read_manifest(self) -> "dict[str, object]":
         """Parse `overlay.toml`, returning name / description / routing / rules /
         requires / priority / setup_timeout (seconds, ``0`` = none; ``None``
-        when the manifest does not set it).
+        when the manifest does not set it) / scripts (``[scripts]`` as
+        written: launcher name -> script path relative to the overlay, or
+        ``False``; :meth:`scripts` adds the detected ones).
 
         A missing or unreadable manifest yields empty contributions -- an overlay
         is allowed to be just a directory of files."""
         empty: "dict[str, object]" = {
             "name": self.name, "description": "", "routing": [], "rules": [],
-            "requires": [], "priority": DEFAULT_PRIORITY, "setup_timeout": None,
+            "requires": [], "priority": DEFAULT_PRIORITY, "setup_timeout": None, "scripts": {},
         }
         path = self.manifest_path
         if not path.is_file():
@@ -612,7 +682,28 @@ class Overlay:
             "priority": priority if isinstance(priority, int) and not isinstance(priority, bool)
             else DEFAULT_PRIORITY,
             "setup_timeout": _setup_timeout(doc.get("setup_timeout"), self.name),
+            "scripts": _scripts(doc.get("scripts"), self.name),
         }
+
+    def scripts(self) -> "dict[str, str]":
+        """The scripts that get a launcher (:mod:`dotagents._launchers`):
+        each top-level ``bin/<name>.py`` whose stem is a valid script name,
+        then ``[scripts]`` from the manifest, which adds or replaces a path
+        by name, or with ``false`` drops a detected one."""
+        found: "dict[str, str]" = {}
+        bin_dir = self.path / "bin"
+        if bin_dir.is_dir():
+            for entry in sorted(bin_dir.iterdir()):
+                stem = entry.name[:-3]
+                if entry.name.endswith(".py") and entry.is_file() and SCRIPT_NAME_RE.match(stem) \
+                        and stem.split(".")[0].lower() not in self.RESERVED_NAMES:
+                    found[stem] = "bin/" + entry.name
+        for name, path in self.read_manifest()["scripts"].items():  # type: ignore[union-attr]
+            if path is False:
+                found.pop(name, None)
+            else:
+                found[name] = path  # type: ignore[assignment]
+        return found
 
     @property
     def priority(self) -> int:
