@@ -8,9 +8,8 @@ overlay's own:
 
 The HTTP code is not vendored either. `syshttp` and `curlike` are packages of
 their own, installed into the agents' venv from this overlay's
-`requirements.txt` (pinned to a commit while neither is on PyPI). `requests` is
-an optional dependency of `syshttp.session` and is not installed by the
-overlay.
+`requirements.txt`, from PyPI. Neither needs `requests`, and the overlay does
+not install it.
 
 ## If a future change *does* vendor a package
 
