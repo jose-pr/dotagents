@@ -567,7 +567,7 @@ def test_a_wrapper_that_cannot_start_is_exit_2(fake, monkeypatch, capsys):
         "'{wrapper}.'",
         "'{bat} '",
         "'{wrapper}. .'",
-        "'{wrapper}::$DATA'",
+        pytest.param("'{wrapper}::$DATA'", marks=pytest.mark.skipif(os.name != "nt", reason="NTFS streams")),
         "cmd /c '{wrapper}'",
         "CMD.EXE /c '{wrapper}'",
         "C:\\Windows\\System32\\cmd.exe /c '{wrapper}'",
