@@ -99,7 +99,8 @@ same relative path in your scope. Minimal shape:
   overlay.toml     # name, description, requires, routing lines, optional priority
   kb/…             # knowledge-base files the routing points at ($<NAME>_OVERLAY_ROOT/kb/…)
   rules/, flows/, references/, tools/   # other content, one category dir per kind -- never <name>/<name>/
-  bin/, lib/       # optional; put on PATH / PYTHONPATH by `dotagents env`
+  bin/, lib/       # optional; put on PATH / PYTHONPATH by `dotagents env`;
+                   #   each bin/<name>.py also gets a `<name>` launcher on PATH
   cmds/            # optional duho command modules, discovered as `dotagents <name>`
                    #   and served as MCP tools by `DOTAGENTS_MCP=stdio dotagents`
   env.py           # optional; run by `dotagents env`, prints a JSON object of env changes
