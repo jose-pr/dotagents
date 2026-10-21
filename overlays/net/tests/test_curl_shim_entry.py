@@ -1,6 +1,7 @@
-"""The launcher's two entry points (bin/curl for POSIX, bin/curl.cmd for
-Windows), lib/curlshim behind them, and the one trap they share: once the
-overlay's bin/ is on PATH, "the real curl" must never resolve to the launcher.
+"""The launcher's entry points (bin/curl for POSIX sh, on Windows the curl.exe
+setup.py makes in the agents' venv: see test_curl_exe.py), lib/curlshim behind them, and the
+one trap they share: once the overlay's bin/ is on PATH, "the real curl" must
+never resolve to the launcher.
 """
 import os
 import stat
@@ -29,11 +30,13 @@ def test_posix_entry_exists_and_dispatches_to_curl_py():
         assert sh.stat().st_mode & stat.S_IXUSR, "must be executable in the checkout"
 
 
-def test_windows_entry_dispatches_to_curl_py():
-    cmd = (BIN / "curl.cmd").read_text(encoding="utf-8")
-    assert "curl.py" in cmd and "%*" in cmd
-    assert '"%AGENTS_PYTHON%" "%~dp0curl.py" %*' in cmd, "the Python dotagents runs under comes first"
-    assert cmd.index("AGENTS_PYTHON") < cmd.index("python.exe")
+def test_no_entry_is_a_batch_file():
+    """cmd.exe parses a .cmd / .bat command line before its first line runs,
+    so a URL's & | > or %VAR% would act: Windows gets a generated curl.exe."""
+    assert not [p.name for p in BIN.iterdir() if p.suffix.lower() in (".cmd", ".bat")]
+    import curlshim
+
+    assert curl.entry() == (curlshim.venv_curl() if os.name == "nt" else str(BIN / "curl"))
 
 
 def _fake_real_curl(directory):
@@ -123,7 +126,7 @@ def test_env_py_sets_the_agents_prefix_unless_one_is_set():
     import subprocess
 
     env_py = str(BIN.parent / "env.py")
-    base = {k: v for k, v in os.environ.items() if k.upper() != "SYSHTTP_PREFIX"}
+    base = {k: v for k, v in os.environ.items() if k.upper() not in ("SYSHTTP_PREFIX", "AGENTS_PYTHON")}
     out = subprocess.run([sys.executable, env_py], capture_output=True, text=True, env=base, check=True)
     assert json.loads(out.stdout) == {"SYSHTTP_PREFIX": "AGENTS_"}
     out = subprocess.run([sys.executable, env_py], capture_output=True, text=True,
@@ -137,64 +140,39 @@ def test_requirements_take_both_packages_from_pypi_in_one_minor_series():
     assert sorted(lines) == ["curlike>=0.1.0,<0.2", "syshttp>=0.1.0,<0.2"]
 
 
-def _launcher_copy(tmp_path):
-    """The two launchers beside a probe curl.py whose CHILD imports the net lib
-    (the certifi shim) and another overlay's lib: what a URL hook or any script
-    curl starts needs."""
+def test_the_launcher_puts_the_libs_on_pythonpath_for_what_it_starts(tmp_path):
+    """Outside a `dotagents env` session nothing else puts the overlay libs on
+    PYTHONPATH, so the launcher does, for the real curl, a URL hook and what
+    they start: its own lib, then $AGENTS_PYTHONPATH, then the caller's."""
     import shutil
+    import subprocess
+
+    import fake_curl
 
     ov = tmp_path / "net"
     (ov / "bin").mkdir(parents=True)
-    shutil.copytree(BIN.parent / "lib", ov / "lib")
-    for name in ("curl", "curl.cmd"):
+    shutil.copytree(BIN.parent / "lib", ov / "lib", ignore=shutil.ignore_patterns("__pycache__"))
+    for name in ("curl", "curl.py"):
         shutil.copy2(BIN / name, ov / "bin" / name)
     (ov / "bin" / "curl").chmod(0o755)
-    (ov / "bin" / "curl.py").write_text(
-        "import subprocess, sys\n"
-        "code = 'import certifi, other_lib; print(\"child-ok\")'\n"
-        "r = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)\n"
-        "print(r.stdout.strip() or r.stderr.strip())\n",
-        encoding="utf-8",
-    )
     other = tmp_path / "other-lib"
     other.mkdir()
-    (other / "other_lib.py").write_text("", encoding="utf-8")
+    system = tmp_path / "system"
+    fake_curl.install(system)
+    log = tmp_path / "log.jsonl"
     env = {k: v for k, v in os.environ.items()
-           if k.upper() not in ("PYTHONPATH", "AGENTS_PYTHONPATH", "AGENTS_PYTHON")}
-    env["AGENTS_PYTHON"] = sys.executable
-    return ov, other, env
-
-
-def test_the_launchers_put_the_libs_on_pythonpath_for_what_they_start(tmp_path):
-    """Outside a `dotagents env` session nothing else puts the overlay libs on
-    PYTHONPATH, so each launcher sets it: its own lib, then $AGENTS_PYTHONPATH."""
-    import shutil
-    import subprocess
-
-    ov, other, env = _launcher_copy(tmp_path)
-    runs = []
+           if not k.upper().startswith(("AGENTS_", "SYSHTTP_")) and k.upper() != "PYTHONPATH"}
+    env.update(fake_curl.environment(log))
+    env.update(PATH=os.pathsep.join([str(ov / "bin"), str(system)]), AGENTS_PYTHON=sys.executable,
+               AGENTS_PYTHONPATH=str(other), AGENTS_CURL="0", FAKE_CURL_ENV="PYTHONPATH")
     if os.name == "nt":
-        env["AGENTS_PYTHONPATH"] = str(other)
-        runs.append(["cmd.exe", "/d", "/c", str(ov / "bin" / "curl.cmd"), "-s"])
-        for ps in ("powershell", "pwsh"):
-            if shutil.which(ps):
-                runs.append([ps, "-NoProfile", "-Command", "& '%s' -s" % (ov / "bin" / "curl.cmd")])
+        argv = [sys.executable, str(ov / "bin" / "curl.py")]  # curl.exe: test_curl_exe.py
     else:
-        env["AGENTS_PYTHONPATH"] = str(other)
-        runs.append(["/bin/sh", str(ov / "bin" / "curl"), "-s"])
-    for argv in runs:
-        out = subprocess.run(argv, capture_output=True, text=True, env=env)
-        assert out.stdout.strip() == "child-ok", (argv[0], out.stdout, out.stderr)
-
-
-def test_the_cmd_launcher_leaves_the_callers_environment_alone(tmp_path):
-    import subprocess
-
-    if os.name != "nt":
-        return
-    ov, _other, env = _launcher_copy(tmp_path)
-    out = subprocess.run(
-        ["cmd.exe", "/d", "/c", 'call "%s" -s >nul & echo after=[%%PYTHONPATH%%]' % (ov / "bin" / "curl.cmd")],
-        capture_output=True, text=True, env=env,
-    ).stdout.strip().splitlines()[-1]
-    assert out == "after=[%PYTHONPATH%]"
+        argv = ["/bin/sh", str(ov / "bin" / "curl")]
+    out = subprocess.run([*argv, "-s", "https://h/"], capture_output=True, text=True, env=env)
+    assert out.returncode == 0, out.stderr
+    [record] = fake_curl.records(log)
+    assert record["argv"] == ["-s", "https://h/"]
+    seen = [os.path.normcase(os.path.realpath(p)) for p in record["env"]["PYTHONPATH"].split(os.pathsep)]
+    want = [ov / "lib", other, fake_curl.HERE]
+    assert seen == [os.path.normcase(os.path.realpath(str(p))) for p in want]

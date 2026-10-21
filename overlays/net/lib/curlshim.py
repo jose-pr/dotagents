@@ -65,6 +65,16 @@ _MAP_PROXY_VARIABLES = tuple(
 # them is parsed again, so a URL's `&` or `;` runs as a command.
 _INTERPRETERS = ("cmd", "powershell", "pwsh", "wsl")
 _BATCH = (".cmd", ".bat")
+#: The directory of the agents' venv that holds the Windows ``curl.exe``
+#: (the overlay's setup.py links pip's there) and nothing else, so PATH can
+#: name it without the venv's other programs; it goes with the venv.
+EXE_DIR = "net-curl"
+
+
+def venv_curl(prefix=None):
+    """The Windows ``curl.exe`` of the venv at ``prefix`` (default: the one
+    running this), whether or not it exists."""
+    return os.path.join(prefix or sys.prefix, EXE_DIR, "curl.exe")
 
 
 def _env():

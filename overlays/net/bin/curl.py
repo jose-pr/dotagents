@@ -1,14 +1,16 @@
-"""The ``curl`` the overlay puts on PATH, run by bin/curl (POSIX sh) and
-bin/curl.cmd (Windows): ``lib/curlshim``, which runs the real curl with the
-agent proxy added when there is one, else curlike's standard-library curl.
+"""The ``curl`` the overlay puts on PATH: ``lib/curlshim``, which runs the
+real curl with the agent proxy added when there is one, else curlike's
+standard-library curl. Started by ``bin/curl`` (POSIX sh) and, on Windows, by
+the ``curl.exe`` pip generates from ``launcher/`` into the agents' venv
+(setup.py, env.py): a native program, so no command interpreter parses the
+caller's arguments.
 
 curlike and syshttp come from the agents' venv (this overlay's
-``requirements.txt``), which the launchers run under ``$AGENTS_PYTHON``.
-Settings are read under the prefix ``AGENTS_`` (``AGENTS_SYSHTTP_PROXY``,
-``AGENTS_CURL``): ``SYSHTTP_PREFIX=AGENTS_`` (this overlay's ``env.py``) is
-set here too when nothing set a prefix, so the launcher means the same
-outside a ``dotagents env`` session. Without curlike the real curl still
-runs, as typed.
+``requirements.txt``), which both entries run under. Settings are read under
+the prefix ``AGENTS_`` (``AGENTS_SYSHTTP_PROXY``, ``AGENTS_CURL``):
+``SYSHTTP_PREFIX=AGENTS_`` (this overlay's ``env.py``) is set here too when
+nothing set a prefix, so the launcher means the same outside a ``dotagents
+env`` session. Without curlike the real curl still runs, as typed.
 """
 
 import os
@@ -23,16 +25,41 @@ PREFIX = "AGENTS_"
 
 def entry():
     """This launcher's platform entry, what curlike skips when looking for the
-    real curl and hands to hook wrappers."""
-    return str(HERE / ("curl.cmd" if os.name == "nt" else "curl"))
+    real curl and hands to hook wrappers: on Windows the curl.exe of the venv
+    running this."""
+    if os.name == "nt":
+        if str(LIB) not in sys.path:
+            sys.path.insert(0, str(LIB))
+        import curlshim
+
+        return curlshim.venv_curl()
+    return str(HERE / "curl")
+
+
+def _libs_first():
+    """The overlay's ``lib/``, then every overlay's (``$AGENTS_PYTHONPATH``),
+    ahead of this process's imports and of ``PYTHONPATH`` for what it starts
+    (a URL hook, the real curl), even outside a ``dotagents env`` session.
+    Empty parts are left out: an empty PYTHONPATH entry means the current
+    directory."""
+    libs = [str(LIB), *(p for p in os.environ.get("AGENTS_PYTHONPATH", "").split(os.pathsep) if p)]
+    for path in reversed(libs):
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    parts, seen = [], set()
+    for path in [*libs, *os.environ.get("PYTHONPATH", "").split(os.pathsep)]:
+        key = os.path.normcase(path)
+        if path and key not in seen:
+            seen.add(key)
+            parts.append(path)
+    os.environ["PYTHONPATH"] = os.pathsep.join(parts)
 
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not (os.environ.get("SYSHTTP_PREFIX") or "").strip():
         os.environ["SYSHTTP_PREFIX"] = PREFIX
-    if str(LIB) not in sys.path:
-        sys.path.insert(0, str(LIB))
+    _libs_first()
     # curlshim imports nothing outside the standard library until a request
     # needs it, so its finder serves the fallback below.
     import curlshim

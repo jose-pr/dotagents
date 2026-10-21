@@ -1,6 +1,7 @@
 """Make the overlay's bin/ and lib/ importable for the tests, regardless of
-cwd; and give each test the caller's SYSHTTP_PREFIX back, which the launcher
-sets when nothing did."""
+cwd; and give each test the caller's SYSHTTP_PREFIX and PYTHONPATH back,
+which the launcher sets for what it starts."""
+import os
 import sys
 from pathlib import Path
 
@@ -19,3 +20,9 @@ def _restore_prefix(monkeypatch):
     # and restores it after the test.
     monkeypatch.setenv("SYSHTTP_PREFIX", "")
     monkeypatch.delenv("SYSHTTP_PREFIX")
+    pythonpath = os.environ.get("PYTHONPATH")
+    monkeypatch.setenv("PYTHONPATH", "")
+    if pythonpath is None:
+        monkeypatch.delenv("PYTHONPATH")
+    else:
+        monkeypatch.setenv("PYTHONPATH", pythonpath)
