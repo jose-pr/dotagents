@@ -299,6 +299,7 @@ def test_every_next_group_gets_the_proxy(fake, monkeypatch):
         ["-sK", "mine.curlrc"],
         ["--expand-proxy", "http://other:1"],
         ["--expand-preproxy", "socks5://s:1"],
+        ["-x", ""],
     ],
 )
 def test_a_group_that_steers_its_proxy_gets_nothing_injected(steer, fake, monkeypatch):

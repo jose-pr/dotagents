@@ -65,9 +65,6 @@ _MAP_PROXY_VARIABLES = tuple(
 # them is parsed again, so a URL's `&` or `;` runs as a command.
 _INTERPRETERS = ("cmd", "powershell", "pwsh", "wsl")
 _BATCH = (".cmd", ".bat")
-# Options that choose the proxy, besides the ones curlike.caller_steering reads:
-# with any of them the caller steers, and nothing is injected.
-_STEERING = ("--proxy1.0", "--preproxy", "--config")
 
 
 def _env():
@@ -164,22 +161,14 @@ def _first_reachable(url):
 
 
 def _steers(group):
-    """Whether the group chooses its proxy itself: curlike's reading of
-    ``-x``/``--proxy``/``--socks*``/``--noproxy``, or a ``--proxy1.0``,
-    ``--preproxy`` or config file (``-K``), whose ``proxy`` would win over an
-    injected one and receive the configured credential. Reading too much as
-    steering only means nothing is injected."""
+    """Whether the group chooses its proxy itself, as curlike reads argv:
+    ``-x``/``--proxy``, ``--proxy1.0``, ``--preproxy``, ``--socks*``,
+    ``--noproxy``, or a config file (``-K``) that may name a ``proxy`` which
+    would win over an injected one and receive the configured credential."""
     from curlike import caller_steering
 
     given, noproxy, _ = caller_steering(group)
-    if given or noproxy is not None:
-        return True
-    for arg in group:
-        if arg.startswith(_STEERING):
-            return True
-        if arg.startswith("-") and not arg.startswith("--") and "K" in arg[1:]:
-            return True
-    return False
+    return given is not None or noproxy is not None
 
 
 def _agent_routing(env):
