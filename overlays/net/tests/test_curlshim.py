@@ -394,6 +394,34 @@ def test_a_malformed_agent_proxy_runs_the_real_curl_as_typed(setting, fake, monk
     assert err.startswith(b"curl: ignoring the configured proxy:") and b"Traceback" not in err
 
 
+@pytest.mark.parametrize("password", ["pa/ss", "p@ss/w?rd#x", "s3cret:x"])
+def test_a_proxy_password_is_never_printed(password, fake, monkeypatch, capsysbinary):
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY", "http://agent:%s@proxy.example:3128" % password)
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY_TYPE", "socks5")  # unusable, whatever the URL
+    assert fake.main(["https://api.example.com/"]) == 0
+    assert fake.argv() == ["https://api.example.com/"]
+    err = capsysbinary.readouterr().err.decode()
+    assert err.startswith("curl: ignoring the configured proxy:")
+    assert "agent:" not in err and password not in err
+
+
+def test_a_misread_proxy_url_is_named_with_its_userinfo_hidden(fake, monkeypatch, capsysbinary):
+    """urllib reads `pa` as the port of `http://agent:pa/ss@...` and quotes it."""
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY", "http://agent:pa/ss@proxy.example:3128")
+    assert fake.main(["https://api.example.com/"]) == 0
+    assert capsysbinary.readouterr().err.decode() == (
+        "curl: ignoring the configured proxy: AGENTS_SYSHTTP_PROXY=http://***@proxy.example:3128"
+        " cannot be used as a proxy URL\n"
+    )
+
+
+def test_a_message_quoting_a_proxy_credential_names_only_the_variable(monkeypatch):
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY_AUTH", "Bearer abc")
+    expected = "AGENTS_SYSHTTP_PROXY_AUTH cannot be used (its value is not shown)"
+    assert curlshim._redacted("bad header 'Bearer abc'") == expected
+    assert curlshim._redacted("nothing secret") == "nothing secret"
+
+
 def test_a_prefix_gateway_is_served_by_curlike(fake, gateway, monkeypatch, capsysbinary):
     monkeypatch.setenv("AGENTS_SYSHTTP_PROXY", gateway)
     monkeypatch.setenv("AGENTS_SYSHTTP_PROXY_TYPE", "prefix:/fetch/")

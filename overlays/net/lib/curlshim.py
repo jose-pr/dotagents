@@ -317,6 +317,47 @@ def _lead(group):
     return [], group
 
 
+_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+
+
+def _userinfo_text(url):
+    """What precedes the last ``@`` of ``url`` as typed (a password may hold
+    ``/``, ``?``, ``#`` or ``@``, so no URL parser says where it ends), or ``''``."""
+    scheme = _SCHEME.match(url or "")
+    return (url or "")[len(scheme.group(0)) if scheme else 0 :].rpartition("@")[0]
+
+
+def _hide_userinfo(url):
+    """``url`` with everything before its last ``@`` shown as ``***``."""
+    scheme = _SCHEME.match(url)
+    head = scheme.group(0) if scheme else ""
+    _userinfo, at, rest = url[len(head) :].rpartition("@")
+    return "%s***@%s" % (head, rest) if at else url
+
+
+def _redacted(message):
+    """``message`` safe to print: when it holds a proxy variable's userinfo,
+    a piece of its password (a parser quoting what it took for the port) or
+    a ``*PROXY_AUTH`` credential, it is replaced by one naming the variable
+    and its URL with the userinfo hidden. Every prefix is covered, since every
+    variable whose name ends in ``PROXY`` or ``PROXY_AUTH`` is read."""
+    for name, value in sorted(os.environ.items()):
+        upper = name.upper()
+        value = (value or "").strip()
+        if not value:
+            continue
+        if upper.endswith("PROXY_AUTH"):
+            if value in message or repr(value)[1:-1] in message:
+                return "%s cannot be used (its value is not shown)" % name
+        elif upper.endswith("PROXY"):
+            userinfo = _userinfo_text(value)
+            password = userinfo.partition(":")[2]
+            secrets = [userinfo] + [p for p in re.split(r"[/?#@:]", password) if p]
+            if userinfo and any(s in message or repr(s)[1:-1] in message for s in secrets):
+                return "%s=%s cannot be used as a proxy URL" % (name, _hide_userinfo(value))
+    return message
+
+
 def _run(command, label, env=None):
     """``command``'s exit code, curl's way: a signal death N is 128 + N. One
     that cannot be started is a ``ValueError`` naming ``label`` (exit 2)."""
@@ -338,7 +379,7 @@ def maybe_run_system_curl(argv, entry=None):
     """Run the real curl with the configured proxy applied; ``None`` when
     curlike must serve the request (no real curl, or a prefix gateway). A
     malformed proxy configuration never blocks real curl: it runs with argv
-    as typed, after one warning."""
+    as typed, after one warning that shows no credential."""
     curl_path = find_real_curl(entry)
     if not curl_path:
         return None
@@ -358,7 +399,7 @@ def maybe_run_system_curl(argv, entry=None):
             print("curl: (7) %s" % exc, file=sys.stderr)
             return 7
     except (ValueError, ImportError) as exc:
-        print("curl: ignoring the configured proxy: %s" % exc, file=sys.stderr)
+        print("curl: ignoring the configured proxy: %s" % _redacted(str(exc)), file=sys.stderr)
         plans = []
     workdir = None
     try:
@@ -504,7 +545,7 @@ def _main(argv, entry):
         # would be used, an unknown CURL, a malformed SYSHTTP_PREFIX), a
         # wrapper that cannot start, or no curlike to read argv with: curl's
         # exit 2, one line on stderr.
-        print("curl: (2) %s" % exc, file=sys.stderr)
+        print("curl: (2) %s" % _redacted(str(exc)), file=sys.stderr)
         return 2
     from curlike import main as curlike_main
 
