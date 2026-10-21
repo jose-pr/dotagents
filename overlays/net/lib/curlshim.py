@@ -1,29 +1,32 @@
 """The overlay's ``curl``: the real curl with the agent proxy added, else
 curlike's own (``pycurl``), called by ``bin/curl.py`` as :func:`main`.
 
-  1. **A ``<P>_HOOKS_<KEY>_CURL`` wrapper** whose pattern matches the URL
+  1. **A ``SYSHTTP_HOOKS_<KEY>_CURL`` wrapper** whose pattern matches the URL
      runs in curl's place, argv appended. A ``.cmd`` / ``.bat`` wrapper is
      refused on Windows: cmd.exe would parse the URL's ``&`` again.
   2. **The real curl, when one is on PATH** (never this launcher), with the
      caller's argv and its exit code -- with ONE addition per ``--next``
-     group: when syshttp's ``<P>_PROXY`` is set, or no proxy variable is and
-     the system's configuration names a proxy for the group's URL, and the
-     group does not steer the proxy itself, ``--proxy`` is added and its
+     group: the proxy syshttp would use for the group's URL (``SYSHTTP_PROXY``,
+     a ``*_PROXY`` variable under the prefix, else the system's
+     configuration), unless the group steers the proxy itself or only curl's
+     own unprefixed variables name one. ``--proxy`` is added and its
      credential goes in a private ``-K`` config file (never on the command
      line, which other accounts can read); and for a Schannel curl (Windows),
-     ``--ssl-revoke-best-effort`` (``<P>_CURL_SSL_REVOKE``). A leading ``-q``
-     stays first. ``<P>_CURL=0`` runs it exactly as typed.
+     ``--ssl-revoke-best-effort`` (``CURL_SSL_REVOKE``). A leading ``-q``
+     stays first. ``CURL=0`` runs it exactly as typed.
   3. **Else curlike** (``curlike.main``): the common curl surface over the
      standard library. So is a request through a ``prefix`` gateway, which
      curl cannot express.
 
-The real curl runs with ``<P>_CURL_SHIM=1`` in its environment: if "the real
+The real curl runs with ``CURL_SHIM=1`` in its environment: if "the real
 curl" is in fact a wrapper that calls this launcher again, that call goes to
 curlike instead of looking for curl once more.
 
-``<P>`` is syshttp's prefix (``AGENTS`` in this overlay). Reading argv the
-way curl does needs curlike, which is imported only when a proxy or a URL
-hook is in play.
+Every setting is read as ``<PREFIX><NAME>`` for each prefix of
+``SYSHTTP_PREFIX`` (``AGENTS_`` in this overlay: ``AGENTS_CURL``,
+``AGENTS_SYSHTTP_PROXY``). Reading argv the way curl does needs curlike;
+nothing here imports curlike or syshttp until a request needs them, so
+:func:`find_real_curl` works without either.
 """
 
 import os
@@ -32,49 +35,63 @@ import subprocess
 import sys
 import tempfile
 
-from syshttp.env import HTTPEnv
-
-#: Where the real curl's revocation check is asked for, as ``<P>_CURL_SSL_REVOKE``:
-#: ``best-effort`` (default), ``true`` or ``false``. Only a Schannel curl is affected.
+#: The real curl's revocation check, ``CURL_SSL_REVOKE``: ``best-effort``
+#: (default), ``true`` or ``false``. Only a Schannel curl is affected.
 REVOKE = "CURL_SSL_REVOKE"
 _REVOKE_VALUES = ("best-effort", "true", "false")
 _REVOKE_FLAGS = ("--ssl-no-revoke", "--ssl-revoke-best-effort")
-#: ``<P>_CURL``: ``0``/``n``/``no``/``false``/``off`` run the real curl exactly
+#: ``CURL``: ``0``/``n``/``no``/``false``/``off`` run the real curl exactly
 #: as typed -- no configured proxy, no hooks, no curlike; ``1``/``y``/``yes``/
 #: ``true``/``on`` or unset is this launcher; anything else is exit 2.
 SHIM = "CURL"
 _OFF = ("0", "n", "no", "false", "off")
 _ON = ("", "1", "y", "yes", "true", "on")
-#: ``<P>_CURL_SHIM=1``: set in the real curl's environment; a launcher started
+#: ``CURL_SHIM=1``: set in the real curl's environment; a launcher started
 #: with it serves the request with curlike and never looks for curl.
 MARKER = "CURL_SHIM"
-#: The interpreter a ``.py`` hook wrapper runs under, as ``<P>_PYTHON``;
-#: default this one.
+#: ``PYTHON``: the interpreter a ``.py`` hook wrapper runs under; default
+#: this one.
 PYTHON = "PYTHON"
-# The variables real curl reads for its proxy: with one set, the system's
-# configuration is not consulted (curl uses the variable).
-_PROXY_VARIABLES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
+# The variables real curl reads for its proxy, as curl names them (no prefix):
+# with one set and no agent setting, curl uses the variable.
+_CURL_PROXY_VARIABLES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
+# The variables syshttp's proxy map reads under the prefixes besides SYSHTTP_PROXY.
+_MAP_PROXY_VARIABLES = tuple(
+    n for s in ("HTTP", "HTTPS", "FTP", "WS", "WSS", "ALL") for n in (s.lower() + "_proxy", s + "_PROXY")
+)
+_BATCH = (".cmd", ".bat")
 # Options that choose the proxy, besides the ones curlike.caller_steering reads:
 # with any of them the caller steers, and nothing is injected.
 _STEERING = ("--proxy1.0", "--preproxy", "--config")
 _NEXT = ("--next", "-:")
 
 
-def _var(setting):
-    return HTTPEnv().name(setting) or setting
+def _env():
+    from syshttp.env import HTTPEnv
+
+    return HTTPEnv()
+
+
+def _var(setting, env=None):
+    """The variable to name in a message about ``setting``: the one set, else
+    the name under the first prefix."""
+    env = _env() if env is None else env
+    found = env.find(setting)
+    return found[0] if found else env.name(setting)
 
 
 def shim_enabled():
-    """``<P>_CURL`` as a boolean; an unrecognised value is a ``ValueError``
+    """``CURL`` as a boolean; an unrecognised value is a ``ValueError``
     naming the variable."""
-    raw = (HTTPEnv().get(SHIM) or "").lower()
+    env = _env()
+    raw = (env.get(SHIM) or "").lower()
     if raw in _OFF:
         return False
     if raw in _ON:
         return True
     raise ValueError(
         "%s=%s: expected one of %s to turn the launcher off, or %s"
-        % (_var(SHIM), HTTPEnv().get(SHIM), "/".join(_OFF), "/".join(v for v in _ON if v))
+        % (_var(SHIM, env), env.get(SHIM), "/".join(_OFF), "/".join(v for v in _ON if v))
     )
 
 
@@ -84,10 +101,10 @@ def find_real_curl(entry=None):
     skipped, and so is any directory with a ``curl.py`` (a launcher like this
     one). On Windows only ``PATHEXT`` executables count, never ``.cmd`` /
     ``.bat``; elsewhere the file must be executable. The current directory is
-    never searched."""
+    never searched, nor is any relative PATH entry."""
     skip = os.path.normcase(os.path.dirname(os.path.abspath(entry))) if entry else None
     if os.name == "nt":
-        exts = [e for e in os.environ.get("PATHEXT", ".COM;.EXE").lower().split(";") if e and e not in (".cmd", ".bat")]
+        exts = [e for e in os.environ.get("PATHEXT", ".COM;.EXE").lower().split(";") if e and e not in _BATCH]
     else:
         exts = [""]
     for directory in os.environ.get("PATH", "").split(os.pathsep):
@@ -108,10 +125,11 @@ def revoke_argv(curl_path, argv):
     """The revocation flag to add for ``curl_path`` (see :data:`REVOKE`):
     only for a Schannel curl (Windows), only when the caller chose none, and
     best-effort only where curl has it (7.70). An unknown value: ValueError."""
-    raw = HTTPEnv().get(REVOKE)
+    env = _env()
+    raw = env.get(REVOKE)
     mode = (raw or "best-effort").lower()
     if mode not in _REVOKE_VALUES:
-        raise ValueError("%s=%s: expected one of %s" % (_var(REVOKE), raw, ", ".join(_REVOKE_VALUES)))
+        raise ValueError("%s=%s: expected one of %s" % (_var(REVOKE, env), raw, ", ".join(_REVOKE_VALUES)))
     if mode == "true" or os.name != "nt" or any(a in _REVOKE_FLAGS for a in argv):
         return []
     from curlike import describe_curl
@@ -125,7 +143,7 @@ def revoke_argv(curl_path, argv):
 
 
 def _first_reachable(url):
-    """The system's entry for ``url``: the only one, or of a list the first
+    """syshttp's entry for ``url``: the only one, or of a list the first
     that accepts a connection (``NoReachableProxyError`` when none does and
     the list holds no DIRECT)."""
     import proxylib
@@ -160,6 +178,14 @@ def _steers(group):
     return False
 
 
+def _agent_routing(env):
+    """Whether an agent setting names the proxy: ``SYSHTTP_PROXY`` or a
+    ``*_PROXY`` variable, read under the prefixes."""
+    from syshttp import proxy
+
+    return env.get(proxy.PROXY, *_MAP_PROXY_VARIABLES) is not None
+
+
 def _quote(value):
     """A value for a curl config file: double-quoted, ``\\`` and ``"`` escaped."""
     return '"%s"' % value.replace("\\", "\\\\").replace('"', '\\"')
@@ -170,32 +196,34 @@ def agent_proxy_argv(group):
     ``--next`` group, the proxy syshttp would; ``([], [])`` when nothing is
     injected.
 
-    Injected when ``<P>_PROXY`` is set -- or, with no proxy variable at all,
-    when the system's configuration names a proxy for the group's URL -- and
-    the group does not steer the proxy (:func:`_steers`); a caller's ``-U``
+    The proxy is syshttp's answer for the group's URL (its ``NO_PROXY``
+    under the prefix applied; ``SYSHTTP_PROXY`` alone when the group names
+    no URL). Nothing is injected when the group steers the proxy
+    (:func:`_steers`), or when no agent setting names one and curl's own
+    unprefixed variables do (curl reads them itself). A caller's ``-U``
     keeps the proxy and replaces the credential. The credential is a config
     line (``proxy-header`` for a header credential, ``proxy-user`` for
-    userinfo), never an argument. ``NO_PROXY`` needs nothing: curl honours it
-    even with ``--proxy``. A prefix gateway is not expressible to curl -- see
-    :func:`use_real_curl`."""
+    userinfo), never an argument. A prefix gateway is not expressible to
+    curl -- see :func:`use_real_curl`."""
     from syshttp import proxy
 
-    env = HTTPEnv()
-    configured = bool(env.get(proxy.PROXY))
-    if not configured and env.conventional(*_PROXY_VARIABLES):
-        return [], []  # curl reads the variable itself
+    env = _env()
+    if not group:
+        return [], []
+    if not _agent_routing(env) and any(os.environ.get(n, "").strip() for n in _CURL_PROXY_VARIABLES):
+        return [], []
     if _steers(group):
         return [], []
     from curlike import caller_steering, requested_url
 
     proxy_user = caller_steering(group)[2]
-    if configured:
+    url = requested_url(group)
+    if url:
+        entry = _first_reachable(url)
+    elif env.get(proxy.PROXY):
         entry = proxy.configured_proxy()
     else:
-        url = requested_url(group)
-        if not url:
-            return [], []
-        entry = _first_reachable(url)
+        return [], []
     if entry is None or entry.is_gateway:
         return [], []
     config = []
@@ -217,7 +245,7 @@ def use_real_curl(argv):
     configured, curlike serves the request, speaking the gateway per hop."""
     from syshttp import proxy
 
-    if not HTTPEnv().get(proxy.PROXY):
+    if not _env().get(proxy.PROXY):
         return True
     if _steers(argv):
         return True
@@ -263,9 +291,7 @@ def _run(command, label, env=None):
 def _child_env():
     """This environment with the recursion marker set."""
     env = dict(os.environ)
-    name = HTTPEnv().name(MARKER)
-    if name:
-        env[name] = "1"
+    env[_env().name(MARKER)] = "1"
     return env
 
 
@@ -277,7 +303,7 @@ def maybe_run_system_curl(argv, entry=None):
     curl_path = find_real_curl(entry)
     if not curl_path:
         return None
-    revoke = revoke_argv(curl_path, argv)  # a bad <P>_CURL_SSL_REVOKE: exit 2
+    revoke = revoke_argv(curl_path, argv)  # a bad CURL_SSL_REVOKE: exit 2
     groups = _groups(argv)
     plans = []
     try:
@@ -317,12 +343,13 @@ def maybe_run_system_curl(argv, entry=None):
 
 
 def run_real_curl_as_typed(argv, entry=None):
-    """``<P>_CURL=0``: the real curl with argv untouched, or exit 2 when
-    there is none -- the caller asked for the real thing."""
+    """``CURL=0``: the real curl with argv untouched, or exit 2 when there is
+    none -- the caller asked for the real thing."""
     curl_path = find_real_curl(entry)
     if not curl_path:
+        env = _env()
         print(
-            "curl: (2) %s=%s asks for the real curl, which is not on PATH" % (_var(SHIM), HTTPEnv().get(SHIM)),
+            "curl: (2) %s=%s asks for the real curl, which is not on PATH" % (_var(SHIM, env), env.get(SHIM)),
             file=sys.stderr,
         )
         return 2
@@ -330,11 +357,11 @@ def run_real_curl_as_typed(argv, entry=None):
 
 
 def maybe_run_hook(argv, entry=None):
-    """``<P>_HOOKS_<KEY>`` + ``_CURL``: when the caller's URL matches, run the
-    wrapper in curl's place with argv appended and, in its environment, the
-    ``<P>_HOOK_*`` variables of ``syshttp.hooks.wrapper_environment``
-    (``<P>_HOOK_CURL`` is ``entry``: the executable to call curl back with).
-    Returns the wrapper's exit code, or ``None`` when no hook applies."""
+    """``SYSHTTP_HOOKS_<KEY>`` + ``_CURL``: when the caller's URL matches, run
+    the wrapper in curl's place with argv appended and, in its environment,
+    the ``SYSHTTP_HOOK_*`` variables of ``syshttp.hooks.wrapper_environment``
+    (``SYSHTTP_HOOK_CURL`` is ``entry``: the executable to call curl back
+    with). Returns the wrapper's exit code, or ``None`` when no hook applies."""
     from syshttp import hooks
 
     if not hooks.hooks_from_env():
@@ -348,9 +375,9 @@ def maybe_run_hook(argv, entry=None):
     if not matched:
         return None
     hook = matched[0]
-    label = _var("HOOKS_%s_CURL" % hook.key)
-    command = hooks.curl_command(hook, python=HTTPEnv().get(PYTHON) or sys.executable)
-    if os.name == "nt" and os.path.splitext(command[0])[1].lower() in (".cmd", ".bat"):
+    label = hook.variable + hooks.CURL_SUFFIX
+    command = hooks.curl_command(hook, python=_env().get(PYTHON) or sys.executable)
+    if os.name == "nt" and os.path.splitext(command[0])[1].lower() in _BATCH:
         raise ValueError("%s: a .cmd/.bat wrapper cannot take a URL safely; use a .py or .exe" % label)
     env = dict(os.environ)
     env.update(hooks.wrapper_environment(hook, url, entry or ""))
@@ -369,13 +396,12 @@ def main(argv=None, *, entry=None):
 
 
 def _main(argv, entry):
-    marker = HTTPEnv().name(MARKER)
-    if marker and os.environ.get(marker):
-        # Started by a curl this launcher ran: never look for curl again.
-        from curlike import main as curlike_main
-
-        return curlike_main(argv)
     try:
+        if os.environ.get(_env().name(MARKER)):
+            # Started by a curl this launcher ran: never look for curl again.
+            from curlike import main as curlike_main
+
+            return curlike_main(argv)
         if not shim_enabled():
             return run_real_curl_as_typed(argv, entry)
         hook_rc = maybe_run_hook(argv, entry)
@@ -385,9 +411,10 @@ def _main(argv, entry):
         if system_curl_rc is not None:
             return system_curl_rc
     except (ValueError, ImportError) as exc:
-        # A configuration error (a bad <P>_PROXY / <P>_PROXY_TYPE that would
-        # be used, an unknown <P>_CURL), a wrapper that cannot start, or no
-        # curlike to read argv with: curl's exit 2, one line on stderr.
+        # A configuration error (a bad SYSHTTP_PROXY / SYSHTTP_PROXY_TYPE that
+        # would be used, an unknown CURL, a malformed SYSHTTP_PREFIX), a
+        # wrapper that cannot start, or no curlike to read argv with: curl's
+        # exit 2, one line on stderr.
         print("curl: (2) %s" % exc, file=sys.stderr)
         return 2
     from curlike import main as curlike_main

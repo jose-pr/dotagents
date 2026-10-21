@@ -2,7 +2,7 @@
 real curl with the agent proxy added, else curlike. The real curl is a fake
 (``fake_curl``) that records its argv, its ``-K`` files and its environment;
 curlike serves for real against loopback servers. Settings are read under the
-default prefix (``SYSHTTP_*``) here."""
+overlay's prefix, ``SYSHTTP_PREFIX=AGENTS_``."""
 
 import json
 import os
@@ -22,15 +22,18 @@ import fake_curl  # noqa: E402  (tests/)
 from syshttp import proxy as agent_proxy  # noqa: E402
 
 BEARER = "Bearer eyJ0b2tlbiI6ICJhZ2VudCJ9"
-_PROXY_VARS = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy")
+_PROXY_VARS = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy",
+               "HTTP_PROXY_AUTH")
 
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
-    """No SYSHTTP_* setting, proxy variable or system proxy of the machine."""
+    """The overlay's prefix, and no agent setting, proxy variable or system
+    proxy of the machine."""
     for name in list(os.environ):
-        if name.startswith("SYSHTTP_") or name in _PROXY_VARS:
+        if name.upper().startswith(("SYSHTTP_", "AGENTS_")) or name in _PROXY_VARS:
             monkeypatch.delenv(name)
+    monkeypatch.setenv("SYSHTTP_PREFIX", "AGENTS_")
     monkeypatch.setattr(agent_proxy, "system_map", lambda: None)
     proxylib.clear_caches()
     # The fake is no Schannel curl (curlike would ask it for -V).
@@ -51,7 +54,7 @@ class _Fake:
             monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         for name, value in fake_curl.environment(self.log).items():
             monkeypatch.setenv(name, value)
-        monkeypatch.setenv("FAKE_CURL_ENV", "SYSHTTP_CURL_SHIM")
+        monkeypatch.setenv("FAKE_CURL_ENV", "AGENTS_CURL_SHIM")
         self.entry = str(tmp_path / "launcher" / "curl")
 
     def runs(self):
@@ -119,9 +122,9 @@ class _FakeSystem:
 
 
 def _agent_proxy(monkeypatch, auth=BEARER):
-    monkeypatch.setenv("SYSHTTP_PROXY", "http://proxy.example:3128")
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY", "http://proxy.example:3128")
     if auth:
-        monkeypatch.setenv("SYSHTTP_PROXY_AUTH", auth)
+        monkeypatch.setenv("AGENTS_SYSHTTP_PROXY_AUTH", auth)
 
 
 # --------------------------------------------------------------------------
@@ -206,13 +209,13 @@ def test_a_symlinked_real_curl_is_found(tmp_path, monkeypatch):
 
 def test_the_real_curl_runs_with_the_recursion_marker(fake):
     fake.main(["https://example.com/"])
-    assert fake.runs()[-1]["env"] == {"SYSHTTP_CURL_SHIM": "1"}
+    assert fake.runs()[-1]["env"] == {"AGENTS_CURL_SHIM": "1"}
 
 
 def test_a_launcher_started_by_the_real_curl_serves_with_curlike(fake, monkeypatch, capsysbinary):
     """A "real curl" that is a wrapper calling this launcher again ends in
     curlike, not in a chain of launchers."""
-    monkeypatch.setenv("SYSHTTP_CURL_SHIM", "1")
+    monkeypatch.setenv("AGENTS_CURL_SHIM", "1")
     assert fake.main(["--help"]) == 0
     assert fake.runs() == [] and b"Pure Python curl-like tool" in capsysbinary.readouterr().out
 
@@ -234,13 +237,13 @@ def test_the_agent_proxys_credential_goes_in_a_config_file_not_argv(fake, monkey
 
 def test_the_configured_header_name_and_quotes_are_kept(fake, monkeypatch):
     _agent_proxy(monkeypatch, auth='Token a"b\\c')
-    monkeypatch.setenv("SYSHTTP_PROXY_AUTH_HEADER", "X-Proxy-Token")
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY_AUTH_HEADER", "X-Proxy-Token")
     fake.main(["https://api.example.com/"])
     assert fake.runs()[-1]["config"] == ['proxy-header = "X-Proxy-Token: Token a\\"b\\\\c"\n']
 
 
 def test_url_userinfo_becomes_a_proxy_user_config_line(fake, monkeypatch):
-    monkeypatch.setenv("SYSHTTP_PROXY", "http://agent:s3cret@proxy.example:3128")
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY", "http://agent:s3cret@proxy.example:3128")
     fake.main(["https://api.example.com/"])
     run = fake.runs()[-1]
     assert fake.argv()[:4] == ["--proxy", "http://proxy.example:3128", "-K", "<K>"]
@@ -294,6 +297,8 @@ def test_every_next_group_gets_the_proxy(fake, monkeypatch):
         ["-K", "mine.curlrc"],
         ["--config", "mine.curlrc"],
         ["-sK", "mine.curlrc"],
+        ["--expand-proxy", "http://other:1"],
+        ["--expand-preproxy", "socks5://s:1"],
     ],
 )
 def test_a_group_that_steers_its_proxy_gets_nothing_injected(steer, fake, monkeypatch):
@@ -315,13 +320,39 @@ def test_the_variables_are_curls_own(fake, monkeypatch):
     assert fake.argv() == ["https://api.example.com/"]
 
 
+def test_the_machines_unprefixed_settings_are_not_the_agents(fake, monkeypatch):
+    monkeypatch.setenv("SYSHTTP_PROXY", "http://machine.example:3128")
+    monkeypatch.setenv("SYSHTTP_PROXY_AUTH", BEARER)
+    fake.main(["https://api.example.com/"])
+    assert fake.argv() == ["https://api.example.com/"] and fake.runs()[-1]["config"] == []
+
+
+def test_an_agent_proxy_variable_wins_over_curls_own(fake, monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://global.example:3128")
+    monkeypatch.setenv("AGENTS_HTTPS_PROXY", "http://agents.example:3128")
+    monkeypatch.setenv("AGENTS_HTTP_PROXY_AUTH", BEARER)
+    fake.main(["https://api.example.com/"])
+    assert fake.argv() == ["--proxy", "http://agents.example:3128", "-K", "<K>", "https://api.example.com/"]
+    assert fake.runs()[-1]["config"] == ['proxy-header = "Proxy-Authorization: %s"\n' % BEARER]
+
+
+def test_the_agents_no_proxy_keeps_the_configured_proxy_off_a_group(fake, monkeypatch):
+    """curl reads no AGENTS_NO_PROXY: the launcher applies it per group."""
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_NO_PROXY", "internal.example")
+    fake.main(["https://api.internal.example/", "--next", "https://api.example.com/"])
+    assert fake.argv() == [
+        "https://api.internal.example/", "--next", "--proxy", "http://proxy.example:3128", "https://api.example.com/"
+    ]
+
+
 def test_the_callers_u_keeps_the_agent_proxy_without_its_credential(fake, monkeypatch):
     _agent_proxy(monkeypatch)
     fake.main(["-U", "me:pw", "https://api.example.com/"])
     assert fake.argv() == ["--proxy", "http://proxy.example:3128", "-U", "me:pw", "https://api.example.com/"]
 
 
-@pytest.mark.parametrize("setting", [("SYSHTTP_PROXY", "http://[bad:3128"), ("SYSHTTP_PROXY_TYPE", "socks5")])
+@pytest.mark.parametrize("setting", [("AGENTS_SYSHTTP_PROXY", "http://[bad:3128"), ("AGENTS_SYSHTTP_PROXY_TYPE", "socks5")])
 def test_a_malformed_agent_proxy_runs_the_real_curl_as_typed(setting, fake, monkeypatch, capsysbinary):
     _agent_proxy(monkeypatch)
     monkeypatch.setenv(*setting)
@@ -332,9 +363,9 @@ def test_a_malformed_agent_proxy_runs_the_real_curl_as_typed(setting, fake, monk
 
 
 def test_a_prefix_gateway_is_served_by_curlike(fake, gateway, monkeypatch, capsysbinary):
-    monkeypatch.setenv("SYSHTTP_PROXY", gateway)
-    monkeypatch.setenv("SYSHTTP_PROXY_TYPE", "prefix:/fetch/")
-    monkeypatch.setenv("SYSHTTP_PROXY_AUTH", BEARER)
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY", gateway)
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY_TYPE", "prefix:/fetch/")
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY_AUTH", BEARER)
     target = "http://origin.example/x"
     assert fake.main(["-s", target]) == 0
     assert fake.runs() == [] and capsysbinary.readouterr().out == b"via-gateway"
@@ -351,7 +382,7 @@ def test_a_prefix_gateway_is_served_by_curlike(fake, gateway, monkeypatch, capsy
 def test_the_systems_proxy_and_the_machine_credential(fake, monkeypatch):
     system = _FakeSystem("PROXY pac.example:3128")
     monkeypatch.setattr(agent_proxy, "system_map", lambda: system)
-    monkeypatch.setenv("HTTP_PROXY_AUTH", BEARER)
+    monkeypatch.setenv("AGENTS_HTTP_PROXY_AUTH", BEARER)
     assert fake.main(["-s", "https://api.example.com/x"]) == 0
     assert fake.argv() == ["--proxy", "http://pac.example:3128", "-K", "<K>", "-s", "https://api.example.com/x"]
     assert fake.runs()[-1]["config"] == ['proxy-header = "Proxy-Authorization: %s"\n' % BEARER]
@@ -404,30 +435,30 @@ def test_exit_7_when_no_system_proxy_answers(fake, monkeypatch, capsys):
 @pytest.mark.parametrize("value", ["0", "n", "No", "false", "OFF"])
 def test_curl_off_runs_the_real_curl_as_typed(value, fake, monkeypatch):
     _agent_proxy(monkeypatch)
-    monkeypatch.setenv("SYSHTTP_HOOKS_ALL", ".")
-    monkeypatch.setenv("SYSHTTP_HOOKS_ALL_CURL", "never-run-me")
-    monkeypatch.setenv("SYSHTTP_CURL", value)
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_ALL", ".")
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_ALL_CURL", "never-run-me")
+    monkeypatch.setenv("AGENTS_CURL", value)
     assert fake.main(["-s", "https://api.example.com/"]) == 0
     assert fake.argv() == ["-s", "https://api.example.com/"]
 
 
 @pytest.mark.parametrize("value", ["1", "y", "yes", "true", "on"])
 def test_curl_on_values(value, monkeypatch):
-    monkeypatch.setenv("SYSHTTP_CURL", value)
+    monkeypatch.setenv("AGENTS_CURL", value)
     assert curlshim.shim_enabled()
 
 
 def test_an_unknown_curl_value_is_exit_2(fake, monkeypatch, capsys):
-    monkeypatch.setenv("SYSHTTP_CURL", "disable")
+    monkeypatch.setenv("AGENTS_CURL", "disable")
     assert fake.main(["https://api.example.com/"]) == 2
-    assert capsys.readouterr().err.startswith("curl: (2) SYSHTTP_CURL=disable") and fake.runs() == []
+    assert capsys.readouterr().err.startswith("curl: (2) AGENTS_CURL=disable") and fake.runs() == []
 
 
 def test_curl_off_without_a_real_curl_is_exit_2(tmp_path, monkeypatch, capsysbinary):
-    monkeypatch.setenv("SYSHTTP_CURL", "0")
+    monkeypatch.setenv("AGENTS_CURL", "0")
     monkeypatch.setenv("PATH", str(tmp_path))
     assert curlshim.main(["-s", "https://api.example.com/"], entry=str(tmp_path / "curl")) == 2
-    assert capsysbinary.readouterr().err.startswith(b"curl: (2) SYSHTTP_CURL=0 asks for the real curl")
+    assert capsysbinary.readouterr().err.startswith(b"curl: (2) AGENTS_CURL=0 asks for the real curl")
 
 
 # --------------------------------------------------------------------------
@@ -438,8 +469,8 @@ WRAPPER = """
 import json, os, sys
 from pathlib import Path
 Path(os.environ["WRAPPER_LOG"]).write_text(json.dumps({
-    "argv": sys.argv[1:], "curl": os.environ.get("SYSHTTP_HOOK_CURL"), "skip": os.environ.get("SYSHTTP_HOOK_SKIP"),
-    "url": os.environ.get("SYSHTTP_HOOK_URL"), "key": os.environ.get("SYSHTTP_HOOK_KEY"),
+    "argv": sys.argv[1:], "curl": os.environ.get("AGENTS_SYSHTTP_HOOK_CURL"), "skip": os.environ.get("AGENTS_SYSHTTP_HOOK_SKIP"),
+    "url": os.environ.get("AGENTS_SYSHTTP_HOOK_URL"), "key": os.environ.get("AGENTS_SYSHTTP_HOOK_KEY"),
 }))
 """
 
@@ -449,9 +480,9 @@ def test_a_curl_hook_runs_the_wrapper_in_curls_place(fake, tmp_path, monkeypatch
     wrapper.write_text(WRAPPER, encoding="utf-8")
     log = tmp_path / "log.json"
     monkeypatch.setenv("WRAPPER_LOG", str(log))
-    monkeypatch.setenv("SYSHTTP_HOOKS_W", r"^https://api\.example\.com/hooked")
-    monkeypatch.setenv("SYSHTTP_HOOKS_W_CURL", "'%s' fetch --" % wrapper)
-    monkeypatch.setenv("SYSHTTP_PYTHON", sys.executable)
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W", r"^https://api\.example\.com/hooked")
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W_CURL", "'%s' fetch --" % wrapper)
+    monkeypatch.setenv("AGENTS_PYTHON", sys.executable)
     assert fake.main(["-s", "https://api.example.com/hooked?a=1&calc"]) == 0
     seen = json.loads(log.read_text(encoding="utf-8"))
     assert seen["argv"] == ["fetch", "--", "-s", "https://api.example.com/hooked?a=1&calc"]
@@ -460,11 +491,11 @@ def test_a_curl_hook_runs_the_wrapper_in_curls_place(fake, tmp_path, monkeypatch
 
 
 def test_a_wrapper_that_cannot_start_is_exit_2(fake, monkeypatch, capsys):
-    monkeypatch.setenv("SYSHTTP_HOOKS_W", ".")
-    monkeypatch.setenv("SYSHTTP_HOOKS_W_CURL", "no-such-wrapper-program")
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W", ".")
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W_CURL", "no-such-wrapper-program")
     assert fake.main(["https://api.example.com/"]) == 2
     err = capsys.readouterr().err
-    assert err.startswith("curl: (2) SYSHTTP_HOOKS_W_CURL: cannot run") and "Traceback" not in err
+    assert err.startswith("curl: (2) AGENTS_SYSHTTP_HOOKS_W_CURL: cannot run") and "Traceback" not in err
 
 
 @pytest.mark.skipif(os.name != "nt", reason="cmd.exe")
@@ -473,8 +504,8 @@ def test_a_batch_wrapper_is_refused_on_windows(suffix, fake, tmp_path, monkeypat
     marker = tmp_path / "ran"
     wrapper = tmp_path / ("wrap" + suffix)
     wrapper.write_text("@echo off\necho ran > \"%s\"\n" % marker, encoding="utf-8")
-    monkeypatch.setenv("SYSHTTP_HOOKS_W", ".")
-    monkeypatch.setenv("SYSHTTP_HOOKS_W_CURL", str(wrapper))
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W", ".")
+    monkeypatch.setenv("AGENTS_SYSHTTP_HOOKS_W_CURL", str(wrapper))
     assert fake.main(["https://api.example.com/?x=1&calc"]) == 2
     assert "cannot take a URL safely" in capsys.readouterr().err and not marker.exists()
 
@@ -503,7 +534,7 @@ def test_schannel_gets_best_effort_by_default(schannel, fake):
     "value,added", [("false", ["--ssl-no-revoke"]), ("true", []), ("BEST-EFFORT", ["--ssl-revoke-best-effort"])]
 )
 def test_the_revoke_setting(schannel, fake, monkeypatch, value, added):
-    monkeypatch.setenv("SYSHTTP_CURL_SSL_REVOKE", value)
+    monkeypatch.setenv("AGENTS_CURL_SSL_REVOKE", value)
     fake.main(["-s", "https://example.com/"])
     assert fake.argv() == added + ["-s", "https://example.com/"]
 
@@ -545,6 +576,6 @@ def test_never_off_windows(monkeypatch):
 
 
 def test_an_unknown_revoke_value_is_exit_2(fake, monkeypatch, capsys):
-    monkeypatch.setenv("SYSHTTP_CURL_SSL_REVOKE", "maybe")
+    monkeypatch.setenv("AGENTS_CURL_SSL_REVOKE", "maybe")
     assert fake.main(["-s", "https://example.com/"]) == 2
-    assert "SYSHTTP_CURL_SSL_REVOKE=maybe" in capsys.readouterr().err
+    assert "AGENTS_CURL_SSL_REVOKE=maybe" in capsys.readouterr().err

@@ -1,7 +1,5 @@
 # What the curl launcher and the overlay's Python users import, installed into
-# the agents' venv by dotagents. Pinned to a commit until both are on PyPI;
-# installing them needs git and network access to github.com. pip keeps an
-# installed version that matches, whatever the commit: a new pin takes effect
-# only with a new version of the package.
-syshttp @ git+https://github.com/jose-pr/syshttp@475bdd67373d4a5ffac779d97f7ee1ad9d2f6920
-curlike @ git+https://github.com/jose-pr/curlike@a74466635daa55268663eeda6216eb842df9485e
+# the agents' venv by dotagents from PyPI. Both are pre-1.0: a new minor may
+# break the API the launcher uses, so each range stays within one minor.
+syshttp>=0.1.0,<0.2
+curlike>=0.1.0,<0.2

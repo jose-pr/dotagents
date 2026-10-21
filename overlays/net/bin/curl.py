@@ -4,10 +4,11 @@ agent proxy added when there is one, else curlike's standard-library curl.
 
 curlike and syshttp come from the agents' venv (this overlay's
 ``requirements.txt``), which the launchers run under ``$AGENTS_PYTHON``.
-Settings are ``AGENTS_*``: ``SYSHTTP_PREFIX=AGENTS`` (this overlay's
-``env.py``) is set here too when nothing set a prefix, so the launcher means
-the same outside a ``dotagents env`` session. Without curlike the real curl
-still runs, as typed.
+Settings are read under the prefix ``AGENTS_`` (``AGENTS_SYSHTTP_PROXY``,
+``AGENTS_CURL``): ``SYSHTTP_PREFIX=AGENTS_`` (this overlay's ``env.py``) is
+set here too when nothing set a prefix, so the launcher means the same
+outside a ``dotagents env`` session. Without curlike the real curl still
+runs, as typed.
 """
 
 import os
@@ -17,6 +18,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 LIB = HERE.parent / "lib"
+PREFIX = "AGENTS_"
 
 
 def entry():
@@ -46,7 +48,7 @@ def _real_curl():
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not (os.environ.get("SYSHTTP_PREFIX") or "").strip():
-        os.environ["SYSHTTP_PREFIX"] = "AGENTS"
+        os.environ["SYSHTTP_PREFIX"] = PREFIX
     try:
         if str(LIB) not in sys.path:
             sys.path.insert(0, str(LIB))

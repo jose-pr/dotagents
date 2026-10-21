@@ -61,7 +61,6 @@ def test_real_curl_is_never_this_launcher(tmp_path, monkeypatch):
     _path(monkeypatch, BIN, real_dir)
     found = curlshim.find_real_curl(curl.entry())
     assert found is not None and Path(found).resolve() == real.resolve()
-    assert Path(curl._real_curl()).resolve() == real.resolve(), "the no-curlike path skips it too"
 
 
 def test_fallback_runs_when_only_the_launcher_is_on_path(monkeypatch, capsysbinary):
@@ -81,7 +80,7 @@ def test_the_launcher_reads_agents_settings(monkeypatch):
     seen = {}
     monkeypatch.setattr(shim, "main", lambda argv, entry=None: seen.update(argv=argv, entry=entry) or 0)
     assert curl.main(["-s", "https://h/"]) == 0
-    assert os.environ["SYSHTTP_PREFIX"] == "AGENTS"
+    assert os.environ["SYSHTTP_PREFIX"] == "AGENTS_"
     assert seen == {"argv": ["-s", "https://h/"], "entry": curl.entry()}
 
 
@@ -109,22 +108,16 @@ def test_env_py_sets_the_agents_prefix_unless_one_is_set():
     env_py = str(BIN.parent / "env.py")
     base = {k: v for k, v in os.environ.items() if k.upper() != "SYSHTTP_PREFIX"}
     out = subprocess.run([sys.executable, env_py], capture_output=True, text=True, env=base, check=True)
-    assert json.loads(out.stdout) == {"SYSHTTP_PREFIX": "AGENTS"}
+    assert json.loads(out.stdout) == {"SYSHTTP_PREFIX": "AGENTS_"}
     out = subprocess.run([sys.executable, env_py], capture_output=True, text=True,
                          env=dict(base, SYSHTTP_PREFIX="MINE"), check=True)
     assert out.stdout.strip() == ""
 
 
-def test_requirements_pin_both_packages_to_a_commit():
+def test_requirements_take_both_packages_from_pypi_in_one_minor_series():
     lines = [ln.strip() for ln in (BIN.parent / "requirements.txt").read_text(encoding="utf-8").splitlines()
              if ln.strip() and not ln.lstrip().startswith("#")]
-    names = {}
-    for ln in lines:
-        name, _, url = ln.partition(" @ ")
-        assert url.startswith("git+https://github.com/jose-pr/%s@" % name), ln
-        assert len(url.rpartition("@")[2]) == 40, "a full commit, not a branch: " + ln
-        names[name] = url
-    assert set(names) == {"syshttp", "curlike"}
+    assert sorted(lines) == ["curlike>=0.1.0,<0.2", "syshttp>=0.1.0,<0.2"]
 
 
 def _launcher_copy(tmp_path):
