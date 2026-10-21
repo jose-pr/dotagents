@@ -63,7 +63,6 @@ _BATCH = (".cmd", ".bat")
 # Options that choose the proxy, besides the ones curlike.caller_steering reads:
 # with any of them the caller steers, and nothing is injected.
 _STEERING = ("--proxy1.0", "--preproxy", "--config")
-_NEXT = ("--next", "-:")
 
 
 def _env():
@@ -252,25 +251,60 @@ def use_real_curl(argv):
     return proxy.proxy_type()[0] != "prefix"
 
 
+def _takes_value(option):
+    """Whether curl reads the next argument as ``option``'s value
+    (``--expand-NAME`` as ``--NAME``), by curlike's table of curl's options."""
+    from curlike.argv import VALUE_OPTIONS
+
+    if option.startswith("--expand-"):
+        option = "--" + option[len("--expand-") :]
+    return option in VALUE_OPTIONS
+
+
 def _groups(argv):
-    """argv split at ``--next`` / ``-:`` (each separator starts its group)."""
+    """argv split where curl starts another transfer: at ``--next`` or a
+    short cluster holding ``:`` (``-:``, ``-s:``) that is an option, never at
+    an option's value (``-o --next``) nor after ``--``. Each later group
+    starts with the argument that split it."""
     groups = [[]]
-    for arg in argv:
-        if arg in _NEXT:
-            groups.append([])
+    args = list(argv)
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        i += 1
+        if arg == "--":
+            groups[-1].extend(args[i - 1 :])
+            break
+        takes = False
+        if arg.startswith("--"):
+            name, eq, _value = arg.partition("=")
+            if arg == "--next":
+                groups.append([])
+            takes = not eq and _takes_value(name)
+        elif arg.startswith("-") and len(arg) > 1:
+            # curl reads a cluster letter by letter: a value-taking letter
+            # takes the rest (or the next argument), and `:` ends the cluster.
+            for j in range(1, len(arg)):
+                if arg[j] == ":":
+                    groups.append([])
+                    break
+                if _takes_value("-" + arg[j]):
+                    takes = j == len(arg) - 1
+                    break
         groups[-1].append(arg)
+        if takes and i < len(args):
+            groups[-1].append(args[i])
+            i += 1
     return groups
 
 
 def _lead(group):
-    """``(lead, rest)``: what must stay first in a group -- a leading ``-q``
-    (curl skips ``.curlrc`` only for a first ``-q``, and a ``-q...`` cluster
-    is split so that what follows ``q`` keeps its value), or a ``--next``."""
+    """``(lead, rest)`` of the first group: what must stay first -- a leading
+    ``-q`` (curl skips ``.curlrc`` only for a first ``-q``, and a ``-q...``
+    cluster is split so that what follows ``q`` keeps its value)."""
     if not group:
         return [], group
     first = group[0]
-    if first in _NEXT:
-        return [first], group[1:]
     if first == "--disable" or first == "-q":
         return [first], group[1:]
     if first.startswith("-q") and not first.startswith("--"):
@@ -334,7 +368,7 @@ def maybe_run_system_curl(argv, entry=None):
                 with os.fdopen(fd, "w", encoding="utf-8") as handle:
                     handle.write("\n".join(config) + "\n")
                 extra = [*extra, "-K", path]
-            lead, rest = _lead(group)
+            lead, rest = _lead(group) if index == 0 else (group[:1], group[1:])
             command += [*lead, *revoke, *extra, *rest]
         return _run(command, "the real curl", env=_child_env())
     finally:

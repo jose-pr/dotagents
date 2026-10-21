@@ -314,6 +314,38 @@ def test_an_option_value_is_not_steering(fake, monkeypatch):
     assert fake.argv()[:2] == ["--proxy", "http://proxy.example:3128"]
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["-H", "--next", "-x", "http://other:1", "https://api.example.com/"],
+        ["--header", "--next", "-x", "http://other:1", "https://api.example.com/"],
+        ["-o", "-:", "-x", "http://other:1", "https://api.example.com/"],
+        ["-sH", "-:", "-x", "http://other:1", "https://api.example.com/"],
+        ["--expand-header", "--next", "-x", "http://other:1", "https://api.example.com/"],
+    ],
+)
+def test_a_next_that_is_an_option_value_starts_no_group(argv, fake, monkeypatch):
+    """Split there, the part before would get the agent proxy and its
+    credential, and curl would send both to the caller's later -x."""
+    _agent_proxy(monkeypatch)
+    fake.main(argv)
+    assert fake.argv() == argv and fake.runs()[-1]["config"] == []
+
+
+def test_a_short_cluster_holding_a_colon_starts_a_group(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    fake.main(["https://a.example/", "-s:", "https://b.example/"])
+    proxy = ["--proxy", "http://proxy.example:3128"]
+    assert fake.argv() == [*proxy, "https://a.example/", "-s:", *proxy, "https://b.example/"]
+
+
+def test_after_a_double_dash_nothing_starts_a_group(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    argv = ["--", "https://a.example/", "--next", "https://b.example/"]
+    fake.main(argv)
+    assert fake.argv() == ["--proxy", "http://proxy.example:3128", *argv]
+
+
 def test_the_variables_are_curls_own(fake, monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://global.example:3128")
     fake.main(["https://api.example.com/"])
