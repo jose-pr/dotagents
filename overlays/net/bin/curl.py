@@ -1,12 +1,12 @@
 """The ``curl`` the overlay puts on PATH: ``lib/curlshim``, which runs the
 real curl with the agent proxy added when there is one, else curlike's
-standard-library curl. Started by ``bin/curl`` (POSIX sh) and, on Windows, by
-the ``curl.exe`` pip generates from ``launcher/`` into the agents' venv
-(setup.py, env.py): a native program, so no command interpreter parses the
-caller's arguments.
+standard-library curl. Started by the launcher dotagents makes for this file
+in the agents' venv, ``<venv>/overlays/curl`` (``curl.exe`` on Windows, a
+native program, so no command interpreter parses the caller's arguments),
+which ``dotagents env`` puts first on PATH.
 
 curlike and syshttp come from the agents' venv (this overlay's
-``requirements.txt``), which both entries run under. Settings are read under
+``requirements.txt``), which the launcher runs under. Settings are read under
 the prefix ``AGENTS_`` (``AGENTS_SYSHTTP_PROXY``, ``AGENTS_CURL``):
 ``SYSHTTP_PREFIX=AGENTS_`` (this overlay's ``env.py``) is set here too when
 nothing set a prefix, so the launcher means the same outside a ``dotagents
@@ -24,16 +24,14 @@ PREFIX = "AGENTS_"
 
 
 def entry():
-    """This launcher's platform entry, what curlike skips when looking for the
-    real curl and hands to hook wrappers: on Windows the curl.exe of the venv
+    """This launcher's entry, what curlike skips when looking for the real
+    curl and hands to hook wrappers: the ``curl`` launcher of the venv
     running this."""
-    if os.name == "nt":
-        if str(LIB) not in sys.path:
-            sys.path.insert(0, str(LIB))
-        import curlshim
+    if str(LIB) not in sys.path:
+        sys.path.insert(0, str(LIB))
+    import curlshim
 
-        return curlshim.venv_curl()
-    return str(HERE / "curl")
+    return curlshim.venv_curl()
 
 
 def _libs_first():

@@ -1,7 +1,7 @@
-"""The launcher's entry points (bin/curl for POSIX sh, on Windows the curl.exe
-setup.py makes in the agents' venv: see test_curl_exe.py), lib/curlshim behind them, and the
-one trap they share: once the overlay's bin/ is on PATH, "the real curl" must
-never resolve to the launcher.
+"""bin/curl.py, the script dotagents makes the `curl` launcher for (see
+test_curl_launcher.py), lib/curlshim behind it, and the one trap it has: once
+the launcher and the overlay's bin/ are on PATH, "the real curl" must never
+resolve to the launcher.
 """
 import os
 import stat
@@ -15,28 +15,14 @@ import curl  # noqa: E402  (bin/, via conftest)
 BIN = Path(curl.__file__).resolve().parent
 
 
-def test_posix_entry_exists_and_dispatches_to_curl_py():
-    sh = BIN / "curl"
-    text = sh.read_text(encoding="utf-8")
-    assert text.startswith("#!/bin/sh\n")
-    assert 'exec "$AGENTS_PYTHON" "$here/curl.py" "$@"' in text, "the Python dotagents runs under comes first"
-    assert text.index("AGENTS_PYTHON") < text.index("python3"), "...before any PATH lookup"
-    assert 'exec python3 "$here/curl.py" "$@"' in text
-    assert 'exec python "$here/curl.py" "$@"' in text, "Git Bash on Windows has no python3"
-    code = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
-    assert not any("dirname" in ln or "$(" in ln for ln in code), "no external commands: PATH may be minimal"
-    assert "\r" not in text, "a CRLF shebang line is a 'bad interpreter' on POSIX"
-    if os.name != "nt":
-        assert sh.stat().st_mode & stat.S_IXUSR, "must be executable in the checkout"
-
-
-def test_no_entry_is_a_batch_file():
+def test_bin_holds_the_script_and_no_launcher_of_its_own():
     """cmd.exe parses a .cmd / .bat command line before its first line runs,
-    so a URL's & | > or %VAR% would act: Windows gets a generated curl.exe."""
-    assert not [p.name for p in BIN.iterdir() if p.suffix.lower() in (".cmd", ".bat")]
+    so a URL's & | > or %VAR% would act: dotagents makes the launcher."""
+    assert sorted(p.name for p in BIN.iterdir() if p.is_file()) == ["curl.py"]
     import curlshim
 
-    assert curl.entry() == (curlshim.venv_curl() if os.name == "nt" else str(BIN / "curl"))
+    assert curl.entry() == curlshim.venv_curl()
+    assert curlshim.venv_curl("venv") == os.path.join("venv", "overlays", "curl.exe" if os.name == "nt" else "curl")
 
 
 def _fake_real_curl(directory):
@@ -126,7 +112,7 @@ def test_env_py_sets_the_agents_prefix_unless_one_is_set():
     import subprocess
 
     env_py = str(BIN.parent / "env.py")
-    base = {k: v for k, v in os.environ.items() if k.upper() not in ("SYSHTTP_PREFIX", "AGENTS_PYTHON")}
+    base = {k: v for k, v in os.environ.items() if k.upper() != "SYSHTTP_PREFIX"}
     out = subprocess.run([sys.executable, env_py], capture_output=True, text=True, env=base, check=True)
     assert json.loads(out.stdout) == {"SYSHTTP_PREFIX": "AGENTS_"}
     out = subprocess.run([sys.executable, env_py], capture_output=True, text=True,
@@ -152,9 +138,7 @@ def test_the_launcher_puts_the_libs_on_pythonpath_for_what_it_starts(tmp_path):
     ov = tmp_path / "net"
     (ov / "bin").mkdir(parents=True)
     shutil.copytree(BIN.parent / "lib", ov / "lib", ignore=shutil.ignore_patterns("__pycache__"))
-    for name in ("curl", "curl.py"):
-        shutil.copy2(BIN / name, ov / "bin" / name)
-    (ov / "bin" / "curl").chmod(0o755)
+    shutil.copy2(BIN / "curl.py", ov / "bin" / "curl.py")
     other = tmp_path / "other-lib"
     other.mkdir()
     system = tmp_path / "system"
@@ -165,11 +149,9 @@ def test_the_launcher_puts_the_libs_on_pythonpath_for_what_it_starts(tmp_path):
     env.update(fake_curl.environment(log))
     env.update(PATH=os.pathsep.join([str(ov / "bin"), str(system)]), AGENTS_PYTHON=sys.executable,
                AGENTS_PYTHONPATH=str(other), AGENTS_CURL="0", FAKE_CURL_ENV="PYTHONPATH")
-    if os.name == "nt":
-        argv = [sys.executable, str(ov / "bin" / "curl.py")]  # curl.exe: test_curl_exe.py
-    else:
-        argv = ["/bin/sh", str(ov / "bin" / "curl")]
-    out = subprocess.run([*argv, "-s", "https://h/"], capture_output=True, text=True, env=env)
+    # The launcher by name: test_curl_launcher.py.
+    out = subprocess.run([sys.executable, str(ov / "bin" / "curl.py"), "-s", "https://h/"],
+                         capture_output=True, text=True, env=env)
     assert out.returncode == 0, out.stderr
     [record] = fake_curl.records(log)
     assert record["argv"] == ["-s", "https://h/"]
