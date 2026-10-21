@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-21
+
 ### Added
 
 - Overlay commands get a launcher on `PATH`: each top-level `bin/<name>.py`, and
@@ -1544,7 +1546,8 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
   before dispatch; a no-op for a plain install.
 
-[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/jose-pr/dotagents/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/jose-pr/dotagents/compare/v0.7.6...v0.8.0
 [0.7.6]: https://github.com/jose-pr/dotagents/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/jose-pr/dotagents/compare/v0.7.4...v0.7.5
