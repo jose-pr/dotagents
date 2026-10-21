@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Overlay commands get a launcher on `PATH`: each top-level `bin/<name>.py`, and
+  each `[scripts]` entry in `overlay.toml` (`name = "path"` adds or replaces one,
+  `name = false` opts a `bin/<name>.py` out). The launchers live in the agents'
+  venv, in `<venv>/overlays/`: `<name>.exe` on Windows, made with distlib's
+  `ScriptMaker` so no command interpreter parses the arguments, and a `/bin/sh`
+  script elsewhere. They run the script through `$<NAME>_OVERLAY_ROOT` when they
+  run, so only a new interpreter needs them made again. `init` and `overlays add` /
+  `sync` / `remove` keep them current and delete those no overlay has; two
+  overlays with one script name is an error naming both.
+- `dotagents env` puts the launcher directory of the venv `AGENTS_PYTHON` names
+  first on `PATH`, ahead of the levels' `bin` dirs, and takes any other venv's
+  off it.
+- A project gets its own venv when one of its overlays has scripts.
+- New dependency: `distlib>=0.4.0,<0.5`, vendored in the `.pyz`.
+
 ## [0.8.0] - 2026-10-16
 
 ### Added

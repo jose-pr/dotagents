@@ -182,7 +182,9 @@ dotagents overlays sync -g                                                   # r
 
 Nothing in an overlay has to set up its own paths. For every installed overlay,
 `dotagents env` prepends `bin/` to `PATH` and an existing `lib/` to `PYTHONPATH`
-(listing the libs in `AGENTS_PYTHONPATH` too), and exports **`$<NAME>_OVERLAY_ROOT`** — the overlay's
+(listing the libs in `AGENTS_PYTHONPATH` too), puts the launchers of its scripts
+(`bin/*.py` and `[scripts]`, in `<venv>/overlays/` of the agents' venv) first on
+`PATH`, and exports **`$<NAME>_OVERLAY_ROOT`** — the overlay's
 installed directory (`NAME` is the overlay's name upper-cased, `-` → `_`:
 `private-sync` → `PRIVATE_SYNC_OVERLAY_ROOT`).
 That variable is how overlay content refers to itself and to other overlays: a
@@ -214,6 +216,7 @@ small built-in reader that covers these keys. Keys:
 | `rules` | Overlay-relative markdown paths whose rule bullets append to "Always-on rules". |
 | `priority` | Merge order (lower sorts earlier; unprioritized default is 500). |
 | `setup_timeout` | Seconds the setup script may run before it is stopped (default 300; `0` = no limit). |
+| `[scripts]` | Launchers on `PATH`: `name = "path/in/overlay.py"` adds or replaces one, `name = false` drops the one for a `bin/<name>.py`. See [Authoring → Commands on PATH](authoring.md#commands-on-path-binpy-and-scripts). |
 
 `overlay.toml` is the only manifest. A leading `---` frontmatter block in a
 `CONTEXT.md` (the `priority:` / `scope:` / `dependencies:` an older overlay format

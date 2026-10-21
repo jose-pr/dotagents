@@ -72,12 +72,41 @@ dotagents starts with the libs in place whatever shell it runs from. A `lib/` mo
 comes before site-packages and the standard library: do not reuse a package name you
 do not mean to replace.
 
-A `bin/` launcher can also be run outside a `dotagents env` session (from cmd.exe or
-a PowerShell prompt, say), so it sets `PYTHONPATH` itself before starting Python:
-its own `lib/`, then `$AGENTS_PYTHONPATH`, then the caller's, leaving empty parts
-out (an empty entry means the current directory). The net overlay's `bin/curl` and
-`bin/curl.cmd` are the pattern: POSIX sh with no external commands, and a `.cmd`
-that uses `setlocal` so the caller's cmd session is not changed.
+## Commands on PATH: `bin/*.py` and `[scripts]`
+
+A Python command needs no launcher of your own. Every top-level `bin/<name>.py`
+gets one named `<name>`: `<name>.exe` on Windows (distlib's `ScriptMaker`, the
+launcher pip gives console scripts) and a `/bin/sh` script elsewhere, made in the
+agents' venv, in `<venv>/overlays/`, whenever `overlays add` / `sync` / `remove` or
+`init` brings the venv up to date. `dotagents env` puts that directory first on
+`PATH` for the venv `$AGENTS_PYTHON` names, so `bin/curl.py` answers to `curl`
+ahead of the system's, and drops any other venv's.
+
+The launcher runs your script under the venv's interpreter, as `python
+bin/<name>.py` would, found when it runs through `$<NAME>_OVERLAY_ROOT`: editing
+the script or moving the store needs nothing regenerated, only a new interpreter
+does. Unset, or with the script missing, it exits 2 and says so. A file whose name
+starts with `_` is not a command. Name other scripts, rename one, or opt one out
+in `overlay.toml`:
+
+```toml
+[scripts]
+tool = "lib/tool/main.py"   # a launcher `tool` for another path
+helper = false              # none for bin/helper.py
+```
+
+Two overlays with one script name is an error naming both. A launcher no overlay
+has any more is deleted at the next sync.
+
+**Never ship a `.cmd` or `.bat` that takes arguments.** cmd.exe parses its command
+line before the first line runs, so an argument's `&`, `|`, `>` or `%VAR%` acts:
+from PowerShell, `curl "http://h/?a=1|hostname"` would run `hostname`. The `.exe`
+above hands the arguments over as passed.
+
+Your script may run outside a `dotagents env` session too, so set `PYTHONPATH`
+for what it starts, if anything needs the libs: its own `lib/`, then
+`$AGENTS_PYTHONPATH`, then the caller's, leaving empty parts out (an empty entry
+means the current directory). The net overlay's `bin/curl.py` does this.
 
 ## Setup scripts
 
