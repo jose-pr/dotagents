@@ -31,6 +31,8 @@ NOTES = "." + "agents"  # the private notes directory
 PHASE = "Phase" + " 2"
 DECISION = "D" + "46"
 TRAILER = "Claude" + "-Session:"
+PLAN_LABEL = "Plan" + " 13"
+DECISION_LABEL = "Decision" + " 4"
 
 # A marker no fixture contains by accident, and an allowlisted string that
 # contains it: the pair is what makes the blanking test mean something.
@@ -57,13 +59,18 @@ def write(path: Path, text: str) -> None:
         handle.write(text)
 
 
-def run(target: str, *flags: str) -> tuple[int, str]:
-    """Build the command from an argument vector and call it."""
+def run(target: str, *flags: str, stderr: bool = False) -> tuple[int, str]:
+    """Build the command from an argument vector and call it; `stderr` folds
+    the error stream into the returned text."""
     command = duho.parse(leak_check.LeakCheck, [target, *flags])
     buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
+    errors = io.StringIO()
+    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(errors):
         code = command()
-    return code, buffer.getvalue()
+    if not stderr:
+        sys.stderr.write(errors.getvalue())
+        return code, buffer.getvalue()
+    return code, buffer.getvalue() + errors.getvalue()
 
 
 class Base(unittest.TestCase):
@@ -529,6 +536,231 @@ class CommitsOnly(Base):
         write(app / "main.py", "print(1)\n")
         code, out = run(str(app), "--commits-only")
         self.assertEqual(code, leak_check.EXIT_CANNOT_CHECK, out)
+
+
+class OwnName(Base):
+    """A repository naming itself is publishing its own name."""
+
+    def test_the_top_level_directory_name_is_not_a_marker_hit(self) -> None:
+        crate = self.repo(("src/lib.rs", "use %s::x;\n// src/%s/mod.rs\n" % (MARKER, MARKER)),
+                          name=MARKER)
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_OK, out)
+        self.assertNotIn(": personal marker", out)
+
+    def test_the_header_counts_the_names_and_never_prints_them(self) -> None:
+        crate = self.repo(("src/lib.rs", "// clean\n"), name=MARKER)
+        code, out = self.scan(crate)
+        line = [l for l in out.splitlines() if l.startswith("own name:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("1 name(s) allowlisted", line[0])
+        self.assertNotIn(MARKER, line[0])
+
+    def test_a_manifest_name_is_allowlisted_in_both_spellings(self) -> None:
+        manifests = (
+            ("pyproject.toml", '[project]\nname = "%s-tools"\n' % MARKER),
+            ("Cargo.toml", '[package]\nname = "%s-tools"\n' % MARKER),
+            ("package.json", '{"name": "%s-tools"}\n' % MARKER),
+        )
+        for index, (manifest, text) in enumerate(manifests):
+            with self.subTest(manifest=manifest):
+                crate = self.repo((manifest, text), (
+                    "src/lib.py", "import %s_tools\n# pip install %s-tools\n"
+                                  "# /home/%s/devel\n" % (MARKER, MARKER, MARKER)),
+                    name="crate%d" % index)
+                code, out = self.scan(crate)
+                self.assertEqual(code, leak_check.EXIT_HITS, out)
+                self.assertIn("src/lib.py:3: personal marker", out)
+                self.assertNotIn("src/lib.py:1", out)
+                self.assertNotIn("src/lib.py:2", out)
+
+    def test_a_short_own_name_does_not_blank_part_of_a_marker(self) -> None:
+        crate = self.repo(("src/lib.rs", "// /home/%s\n" % MARKER), name="priv")
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_HITS, out)
+        self.assertIn("src/lib.rs:1: personal marker", out)
+
+    def test_an_unreadable_manifest_is_ignored(self) -> None:
+        crate = self.repo(("pyproject.toml", "[project\nname = \n"),
+                          ("package.json", "{not json\n"), name=MARKER)
+        self.assertEqual(leak_check.own_names(crate), [MARKER])
+
+    def test_names_are_read_from_the_manifests(self) -> None:
+        crate = self.repo(("pyproject.toml", '[project]\nname = "a_b-c"\n'))
+        self.assertEqual(sorted(leak_check.own_names(crate)),
+                         ["a-b-c", "a_b-c", "a_b_c", "crate"])
+
+
+class ManifestExclusion(Base):
+    def test_an_exclusion_entry_in_a_manifest_is_not_a_hit(self) -> None:
+        crate = self.repo(
+            ("pyproject.toml", '[tool.hatch.build.targets.sdist]\n'
+                               'exclude = ["/.*", "/%s"]\nignore = [\'%s/**\', "**/%s"]\n'
+                               % (NOTES, NOTES, NOTES)),
+            ("Cargo.toml", '[package]\nname = "crate"\nexclude = ["%s/"]\n' % NOTES),
+            ("package.json", '{"name": "crate", "files": ["lib", "!%s"]}\n' % NOTES),
+            ("MANIFEST.in", "prune %s\nglobal-exclude %s/*\n" % (NOTES, NOTES)))
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_OK, out)
+
+    def test_any_other_mention_in_a_manifest_is_still_a_hit(self) -> None:
+        crate = self.repo(
+            ("pyproject.toml", '# see %s/plans/x.md\ninclude = ["%s/plans/x.md"]\n'
+                               % (NOTES, NOTES)),
+            ("MANIFEST.in", "include %s/env\n" % NOTES))
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_HITS, out)
+        for where in ("pyproject.toml:1:", "pyproject.toml:2:", "MANIFEST.in:1:"):
+            self.assertIn("%s .agents path" % where, out)
+
+    def test_the_same_entry_outside_a_manifest_is_a_hit(self) -> None:
+        crate = self.repo(("config.toml", 'exclude = ["/%s"]\n' % NOTES))
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_HITS, out)
+        self.assertIn("config.toml:1: .agents path", out)
+
+
+class StoreRefusal(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        self.store = self.root / "store"
+        self.store.mkdir()
+        write(self.store / "kb/NOTES.md", "see %s/plans/x.md\n" % NOTES)
+        self._saved_home = os.environ.get("AGENTS_HOME")
+        os.environ["AGENTS_HOME"] = str(self.store)
+
+    def tearDown(self) -> None:
+        if self._saved_home is None:
+            os.environ.pop("AGENTS_HOME", None)
+        else:
+            os.environ["AGENTS_HOME"] = self._saved_home
+        super().tearDown()
+
+    def test_the_store_itself_is_refused(self) -> None:
+        for flags in ((), ("--commits-only",)):
+            with self.subTest(flags=flags):
+                code, out = self.scan(self.store, *flags)
+                self.assertEqual(code, leak_check.EXIT_CANNOT_CHECK, out)
+                self.assertIn("agent store", out)
+                self.assertIn("private by design", out)
+
+    def test_a_directory_inside_the_store_is_refused(self) -> None:
+        code, out = self.scan(self.store / "kb")
+        self.assertEqual(code, leak_check.EXIT_CANNOT_CHECK, out)
+
+    def test_a_worktree_of_the_store_repository_is_refused(self) -> None:
+        git(self.store, "init", "-q")
+        git(self.store, "add", ".")
+        git(self.store, "commit", "-qm", "store")
+        worktree = self.root / "project-notes"
+        git(self.store, "worktree", "add", "-q", "-b", "project", str(worktree))
+        code, out = self.scan(worktree)
+        self.assertEqual(code, leak_check.EXIT_CANNOT_CHECK, out)
+        self.assertIn("checkout of the agent store's repository", out)
+
+    def test_a_repository_beside_the_store_is_checked(self) -> None:
+        git(self.store, "init", "-q")
+        crate = self.repo(("src/lib.rs", "// clean\n"))
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_OK, out)
+
+    def test_a_store_inside_another_checkout_does_not_claim_it(self) -> None:
+        outer = self.repo(("app/main.py", "print(1)\n"), name="outer")
+        store = outer / "store"
+        store.mkdir()
+        os.environ["AGENTS_HOME"] = str(store)
+        code, out = self.scan(outer / "app")
+        self.assertEqual(code, leak_check.EXIT_OK, out)
+
+    def test_without_agents_home_the_store_is_under_home(self) -> None:
+        home = self.root / "home"
+        write(home / NOTES / "kb/NOTES.md", "notes\n")
+        saved = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+        os.environ.pop("AGENTS_HOME", None)
+        os.environ["HOME"] = os.environ["USERPROFILE"] = str(home)
+        try:
+            code, out = self.scan(home / NOTES)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        self.assertEqual(code, leak_check.EXIT_CANNOT_CHECK, out)
+
+
+class Exemptions(Base):
+    def exempting(self, *classes: str, files: tuple = ()) -> Path:
+        crate = self.repo((".gitignore", NOTES + "\n"), *files)
+        write(crate / NOTES / leak_check.EXEMPTIONS_NAME,
+              "exempt = [%s]\n" % ", ".join(json.dumps(c) for c in classes))
+        return crate
+
+    def test_an_exempt_class_does_not_count_and_is_counted_per_file(self) -> None:
+        crate = self.exempting("'Phase N'", "decision id", "plan label", files=(
+            ("src/lib.rs", "// %s\n// as %s says\n// %s and %s\n"
+                           % (PHASE, DECISION, PLAN_LABEL, PHASE)),))
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_OK, out)
+        self.assertIn("EXEMPT src/lib.rs: 2 'Phase N', 1 decision id, 1 plan label", out)
+        self.assertIn(leak_check.EXEMPTIONS_NAME, out.split("\n\n")[0])
+        self.assertIn("4 hits exempt", out.strip().splitlines()[-1])
+
+    def test_other_classes_still_count(self) -> None:
+        crate = self.exempting("'Phase N'", files=(
+            ("src/lib.rs", "// %s\n// see %s/plans/x.md\n// /home/%s\n"
+                           % (PHASE, NOTES, MARKER)),))
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_HITS, out)
+        self.assertIn("src/lib.rs:2: .agents path", out)
+        self.assertIn("src/lib.rs:3: personal marker", out)
+        self.assertNotIn("src/lib.rs:1: 'Phase N'", out)
+
+    def test_commit_messages_are_exempt_too(self) -> None:
+        crate = self.exempting("'Phase N'", files=(("src/lib.rs", "// clean\n"),))
+        git(crate, "add", ".")
+        git(crate, "commit", "-qm", "feat: %s of the work" % PHASE)
+        for flags in ((), ("--commits-only",)):
+            with self.subTest(flags=flags):
+                code, out = self.scan(crate, *flags)
+                self.assertEqual(code, leak_check.EXIT_OK, out)
+                self.assertRegex(out, r"EXEMPT commit [0-9a-f]{12}: 1 'Phase N'")
+
+    def test_an_unknown_class_is_a_usage_error_naming_the_known_ones(self) -> None:
+        for bad in ("phase", "personal marker", "session trailer"):
+            with self.subTest(bad=bad):
+                crate = self.exempting(bad, files=(("src/lib.rs", "// clean\n"),))
+                code, out = run(str(crate), "--plans", str(self.empty_plans()),
+                                stderr=True)
+                self.assertEqual(code, leak_check.EXIT_USAGE, out)
+                for known in leak_check.EXEMPTABLE:
+                    self.assertIn(repr(known), out)
+
+    def test_no_file_exempts_nothing(self) -> None:
+        crate = self.repo(("src/lib.rs", "// %s\n" % PHASE))
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_HITS, out)
+        self.assertNotIn("EXEMPT", out)
+
+
+class PlanLabels(Base):
+    def test_a_plan_or_decision_label_is_a_hit(self) -> None:
+        crate = self.repo(("src/lib.rs", "// from %s\n// per %s\n"
+                                         "// plan 13, Planet 5, Plan B, C11, M10\n"
+                           % (PLAN_LABEL, DECISION_LABEL)))
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_HITS, out)
+        self.assertIn("src/lib.rs:1: plan label %r" % PLAN_LABEL, out)
+        self.assertIn("src/lib.rs:2: plan label %r" % DECISION_LABEL, out)
+        self.assertNotIn("src/lib.rs:3", out)
+
+    def test_a_label_in_an_unpushed_message_is_a_hit(self) -> None:
+        crate = self.repo(("src/lib.rs", "// clean\n"))
+        git(crate, "add", ".")
+        git(crate, "commit", "-qm", "fix: finishes %s" % PLAN_LABEL)
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_HITS, out)
+        self.assertIn(": plan label %r" % PLAN_LABEL, out)
 
 
 class TheCommand(unittest.TestCase):

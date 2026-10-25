@@ -12,6 +12,7 @@ What it looks for
 * a path into the private notes directory, either slash;
 * ``Phase N`` phrasing: a plan's own structure narrated into shipped text;
 * a decision-log id, bare (``D<nn>``) or as a wiki link;
+* a plan label: ``Plan`` or ``Decision`` followed by a number;
 * the basename of every plan under the nearest private ``plans/`` directory at
   or above the repository, subdirectories included. A distinctive basename is
   a hit; a single generic word is a warning, since a public document may
@@ -24,8 +25,37 @@ What it looks for
   ``*-Session:`` trailer, a "Generated with" footer carrying a link or naming
   an assistant, and a session link.
 
-The bare filename ``AGENTS.md`` is not a pattern: it is a committed, public
-file that tracked text legitimately names.
+What is not a hit
+-----------------
+* The bare filename ``AGENTS.md``: a committed, public file that tracked text
+  legitimately names.
+* The repository's own name. Its git top-level directory's basename and the
+  package names ``pyproject.toml``, ``Cargo.toml`` and ``package.json``
+  declare (``-``/``_`` spelt both ways) are blanked, as whole tokens, before
+  the personal markers are matched. The header counts them and never prints
+  them, since a name may equal a marker.
+* A packaging manifest excluding the private directory: in ``pyproject.toml``,
+  ``Cargo.toml`` or ``package.json`` a quoted string that is only a ``.agents``
+  path pattern (``"/.agents"``, ``".agents/**"``, ...), and in ``MANIFEST.in``
+  a ``prune``/``exclude``/``global-exclude``/``recursive-exclude`` line.
+
+The agent store is refused
+--------------------------
+The store (``$AGENTS_HOME``, else ``~/.agents``), anything inside it, and any
+checkout of the store's own git repository is private by design and ships
+nowhere, so scanning it is exit 3 with the reason.
+
+Per-repository exemptions
+-------------------------
+``<repo>/.agents/leak-check.toml`` (private, so never shipped) may name hit
+classes that do not count toward the verdict, in the tree or in commit
+messages::
+
+    exempt = ["decision id", "plan label"]
+
+The classes are ``.agents path``, ``'Phase N'``, ``decision id``,
+``plan basename`` and ``plan label``; any other name is exit 2. Exempted hits
+are still counted per file (``EXEMPT <file>: N <class>``).
 
 The pattern file
 ----------------
@@ -67,9 +97,9 @@ Exit codes
 ----------
     0  PASS           nothing found
     1  FAIL           hits to judge
-    2  usage error
-    3  CANNOT CHECK   the tree could not be enumerated, or held no readable
-                      file
+    2  usage error, or an unusable exemptions file
+    3  CANNOT CHECK   the tree could not be enumerated, held no readable
+                      file, or is the agent store
 
 Judge by the exit code. Do not pipe the output through ``tail``: the pipe
 returns tail's status and the verdict is lost.
@@ -87,9 +117,18 @@ import sys
 import tempfile
 from pathlib import Path
 
+from collections import OrderedDict
 from typing import Annotated
 
 from duho import Cmd, LoggingArgs, Meta
+
+try:
+    import tomllib as _toml
+except ImportError:  # Python < 3.11
+    try:
+        import tomli as _toml  # type: ignore[no-redef]
+    except ImportError:
+        _toml = None  # type: ignore[assignment]
 
 EXIT_OK = 0
 EXIT_HITS = 1
@@ -125,6 +164,26 @@ PHASE_RE = re.compile(r"\bPhase [0-9]")
 # The bare form needs the boundary and exactly two digits, or it fires on
 # ordinary identifiers: a register name, a hex literal, `AMD64`.
 DECISION_RE = re.compile(r"\[\[D[0-9]{2}\]\]|(?<![0-9A-Za-z_])D[0-9]{2}\b")
+# Capitalised and followed by a number: a private plan or decision label. Short
+# fix codes are not matched, since they read the same as register names.
+PLAN_LABEL_RE = re.compile(r"\b(?:Plan|Decision) [0-9]+\b")
+
+# Packaging manifests whose exclusion lists name `.agents` to keep it out.
+MANIFEST_NAMES = {"pyproject.toml", "Cargo.toml", "package.json"}
+# A quoted string that is nothing but a `.agents` path pattern (`"/.agents"`,
+# `'.agents/**'`, `"!.agents"`, ...); any other text in the string makes it a
+# reference.
+AGENTS_EXCLUSION_RE = re.compile(r"""(["'])!?(?:\*\*/|\./|/)?\.agents(?:/[*/]*)?\1""")
+MANIFEST_IN_EXCLUDE_RE = re.compile(
+    r"^\s*(?:prune|exclude|global-exclude|recursive-exclude)(?:\s|$)")
+
+# Per-repository exemptions, read from the repository's private `.agents/`.
+EXEMPTIONS_NAME = "leak-check.toml"
+# The hit classes a repository may exempt. Personal markers, infra rules and
+# attribution trailers are never exemptable.
+EXEMPTABLE = (".agents path", "'Phase N'", "decision id", "plan basename",
+              "plan label")
+HIT_RE = re.compile(r"^(?P<rel>.+?):(?P<lineno>[0-9]+): (?P<what>.*)$")
 # Trailers are anchored to line start: a trailer is a `Key: value` line, and a
 # commit that discusses the rule mentions it inline. "Generated with" is
 # ordinary English, so it is a hit only with the emoji, a link on the line, or
@@ -151,6 +210,10 @@ DEFAULT_PATTERNS = (Path(os.environ.get("AGENTS_HOME") or Path.home() / ".agents
 
 class CannotCheck(Exception):
     """The tree could not be examined. Never reported as PASS or as FAIL."""
+
+
+class UsageError(Exception):
+    """A configuration the tool refuses to guess about: exit 2."""
 
 
 def personal_patterns_path(override: str | None) -> Path:
@@ -330,6 +393,173 @@ def is_git_worktree(repo: Path) -> bool:
     return out.returncode == 0 and out.stdout.strip() == b"true"
 
 
+def git_toplevel(path: Path) -> Path | None:
+    try:
+        out = _git(["-C", str(path), "rev-parse", "--show-toplevel"])
+    except OSError:
+        return None
+    text = out.stdout.decode("utf-8", "surrogateescape").strip()
+    return Path(text).resolve() if out.returncode == 0 and text else None
+
+
+def git_common_dir(path: Path) -> Path | None:
+    """The repository every worktree of `path` shares (relative output is
+    relative to `path`, which is how older git prints it)."""
+    try:
+        out = _git(["-C", str(path), "rev-parse", "--git-common-dir"])
+    except OSError:
+        return None
+    text = out.stdout.decode("utf-8", "surrogateescape").strip()
+    if out.returncode != 0 or not text:
+        return None
+    common = Path(text)
+    return (common if common.is_absolute() else path / common).resolve()
+
+
+def agents_store() -> Path:
+    """The user's agent store: `$AGENTS_HOME`, else `~/.agents`."""
+    return Path(os.environ.get("AGENTS_HOME") or Path.home() / ".agents")
+
+
+def store_refusal(repo: Path) -> str | None:
+    """Why `repo` (resolved) is the private agent store, or None.
+
+    The store's git repository counts only when the store is its top level,
+    so a store inside some other checkout does not claim that checkout."""
+    try:
+        store = agents_store().resolve()
+    except OSError:
+        return None
+    if repo == store or store in repo.parents:
+        return "%s is the agent store (%s) or lies inside it" % (repo, store)
+    if not store.is_dir() or not repo.is_dir() or git_toplevel(store) != store:
+        return None
+    store_common = git_common_dir(store)
+    if store_common is not None and git_common_dir(repo) == store_common:
+        return ("%s is a checkout of the agent store's repository (%s)"
+                % (repo, store_common))
+    return None
+
+
+def _declared_name(path: Path) -> str | None:
+    """The package name a manifest declares, or None if it cannot be read."""
+    try:
+        text = path.read_text(encoding="utf-8")
+        if path.name == "package.json":
+            data = json.loads(text)
+            name = data.get("name") if isinstance(data, dict) else None
+        else:
+            if _toml is None:
+                return None
+            table = _toml.loads(text).get(
+                "project" if path.name == "pyproject.toml" else "package")
+            name = table.get("name") if isinstance(table, dict) else None
+    except (ValueError, OSError):
+        return None
+    return name if isinstance(name, str) and name.strip() else None
+
+
+def own_names(repo: Path) -> list[str]:
+    """The names a repository publishes itself under: its top-level
+    directory's basename and the package names its manifests declare, each
+    with `-`/`_` spelt both ways, longest first."""
+    top = git_toplevel(repo)
+    roots = [repo] if top is None or top == repo else [repo, top]
+    names = {(top or repo).name}
+    for root in roots:
+        for manifest in sorted(MANIFEST_NAMES):
+            path = root / manifest
+            if path.is_file():
+                names.add(_declared_name(path) or "")
+    forms: set[str] = set()
+    for name in names:
+        name = name.strip()
+        forms.update(f for f in (name, name.replace("-", "_"), name.replace("_", "-")) if f)
+    return sorted(forms, key=lambda f: (-len(f), f))
+
+
+def own_names_re(names: list[str]) -> re.Pattern | None:
+    """Each name as a whole token, so a short repository name cannot blank
+    part of a longer marker."""
+    if not names:
+        return None
+    return re.compile("|".join(r"(?<![0-9A-Za-z])%s(?![0-9A-Za-z])" % re.escape(n)
+                               for n in names))
+
+
+def load_exemptions(repo: Path) -> tuple[set[str], Path | None]:
+    """(exempt hit classes, the file they came from) from the repository's
+    private `.agents/leak-check.toml`, at the target or its git top level."""
+    candidates = [repo / ".agents" / EXEMPTIONS_NAME]
+    top = git_toplevel(repo)
+    if top is not None and top != repo:
+        candidates.append(top / ".agents" / EXEMPTIONS_NAME)
+    path = next((c for c in candidates if c.is_file()), None)
+    if path is None:
+        return set(), None
+    if _toml is None:
+        raise UsageError("%s cannot be read: no TOML parser (Python below 3.11 "
+                         "needs tomli)" % path)
+    try:
+        data = _toml.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as exc:
+        raise UsageError("%s could not be read (%s)" % (path, exc)) from None
+    raw = data.get("exempt", [])
+    if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
+        raise UsageError("%s: `exempt` must be a list of hit class names" % path)
+    unknown = [x for x in raw if x not in EXEMPTABLE]
+    if unknown:
+        raise UsageError("%s: unknown hit class(es) %s; the known ones are %s"
+                         % (path, ", ".join(repr(x) for x in unknown),
+                            ", ".join(repr(k) for k in EXEMPTABLE)))
+    return set(raw), path
+
+
+def hit_class(hit: str) -> str | None:
+    """The exemptable class of a tree hit (`"<rel>:<lineno>: <what>"`)."""
+    match = HIT_RE.match(hit)
+    if not match:
+        return None
+    what = match.group("what")
+    for cls in EXEMPTABLE:
+        if what == cls or what.startswith(cls + " "):
+            return cls
+    return None
+
+
+def split_exempt(hits: list[str], commit_hits: list[tuple[str, str, str]],
+                 exempt: set[str]):
+    """(kept tree hits, kept commit hits, {where: {class: count}} exempted)."""
+    counts: OrderedDict[str, OrderedDict[str, int]] = OrderedDict()
+    kept: list[str] = []
+    for hit in hits:
+        cls = hit_class(hit)
+        if cls in exempt:
+            where = HIT_RE.match(hit).group("rel")
+            per = counts.setdefault(where, OrderedDict())
+            per[cls] = per.get(cls, 0) + 1
+        else:
+            kept.append(hit)
+    kept_commits: list[tuple[str, str, str]] = []
+    for sha, kind, text in commit_hits:
+        if kind in exempt:
+            per = counts.setdefault("commit %s" % sha, OrderedDict())
+            per[kind] = per.get(kind, 0) + 1
+        else:
+            kept_commits.append((sha, kind, text))
+    return kept, kept_commits, counts
+
+
+def agents_reference(name: str, line: str) -> bool:
+    """Whether `line` of a file called `name` names the private directory,
+    leaving out a packaging manifest's own exclusion of it."""
+    if name == "MANIFEST.in" and MANIFEST_IN_EXCLUDE_RE.match(line):
+        return False
+    if name in MANIFEST_NAMES:
+        line = AGENTS_EXCLUSION_RE.sub("", line)
+    return AGENTS_RE.search(line) is not None
+
+
 def _split0(blob: bytes) -> list[str]:
     return [f for f in blob.decode("utf-8", "surrogateescape").split("\0") if f]
 
@@ -433,7 +663,8 @@ def scan_commits(repo: Path, plan_re=None, full: bool = False
             continue
         checked += 1
         for kind, pattern in ((".agents path", AGENTS_RE), ("'Phase N'", PHASE_RE),
-                              ("decision id", DECISION_RE), ("plan basename", plan_re)):
+                              ("decision id", DECISION_RE), ("plan label", PLAN_LABEL_RE),
+                              ("plan basename", plan_re)):
             match = pattern.search(body) if pattern is not None else None
             if match:
                 hits.append((sha[:12], kind, match.group(0)))
@@ -456,13 +687,19 @@ def allowlist_forms(allowlist: list[str]) -> list[str]:
 def scan_tree(repo: Path, files: list[str], plan_re, generic_re,
               personal: list[str] | None = None,
               allowlist: list[str] | None = None,
-              infra: list[tuple[str, re.Pattern]] | None = None):
-    """(hits, warnings, files read, files skipped)."""
+              infra: list[tuple[str, re.Pattern]] | None = None,
+              own: list[str] | None = None):
+    """(hits, warnings, files read, files skipped).
+
+    `own` is the repository's own names (`own_names`), blanked before the
+    personal markers are matched: a repository naming itself publishes only
+    its own name."""
     hits: list[str] = []
     warnings: list[str] = []
     personal = personal or []
     allowlist = allowlist_forms(allowlist or [])
     infra = infra or []
+    own_re = own_names_re(own or [])
     read = 0
     skipped = 0
     for rel in files:
@@ -485,21 +722,25 @@ def scan_tree(repo: Path, files: list[str], plan_re, generic_re,
                 for allowed in allowlist:
                     probe = probe.replace(allowed, "")
             if personal:
+                personal_probe = own_re.sub("", probe) if own_re else probe
                 for marker in personal:
-                    if marker in probe:
+                    if marker in personal_probe:
                         hits.append("%s: personal marker %r" % (where, marker))
             for rule_id, rule_re in infra:
                 match = rule_re.search(probe)
                 if match:
                     hits.append("%s: internal infra [%s] %r"
                                 % (where, rule_id, match.group(0)))
-            if AGENTS_RE.search(line):
+            if agents_reference(path.name, line):
                 hits.append("%s: .agents path" % where)
             if PHASE_RE.search(line):
                 hits.append("%s: 'Phase N'" % where)
             match = DECISION_RE.search(line)
             if match:
                 hits.append("%s: decision id %r" % (where, match.group(0)))
+            match = PLAN_LABEL_RE.search(line)
+            if match:
+                hits.append("%s: plan label %r" % (where, match.group(0)))
             if plan_re:
                 match = plan_re.search(line)
                 if match:
@@ -542,6 +783,23 @@ class LeakCheck(LoggingArgs, Cmd):
     def __call__(self) -> int:
         repo = Path(self.repo).resolve()
         print("repo:     %s" % repo)
+        refusal = store_refusal(repo)
+        if refusal:
+            print("mode:     CANNOT CHECK")
+            print("\nCANNOT CHECK: %s." % refusal)
+            print("The agent store is private by design and ships nowhere; "
+                  "leak-check checks what ships. Run it on a repository that "
+                  "publishes something.")
+            return EXIT_CANNOT_CHECK
+        try:
+            self._exempt, self._exempt_path = load_exemptions(repo)
+        except UsageError as exc:
+            print("exempt:   UNUSABLE -- %s" % exc, file=sys.stderr)
+            return EXIT_USAGE
+        if self._exempt_path is not None:
+            print("exempt:   %s (from %s)"
+                  % (", ".join(c for c in EXEMPTABLE if c in self._exempt) or "nothing",
+                     self._exempt_path))
         optout_state, optout_reason, optout_problems = self._optout(repo)
 
         if self.plans:
@@ -574,6 +832,10 @@ class LeakCheck(LoggingArgs, Cmd):
                          ", ".join(rule_id for rule_id, _ in infra))))
         for problem in infra_broken:
             print("infra:    RULE DID NOT COMPILE -- %s" % problem)
+        # Counted, never listed: a repository's name may equal a private marker.
+        own = own_names(repo)
+        print("own name: %d name(s) allowlisted for personal markers "
+              "(the repository's own, not printed)" % len(own))
 
         try:
             files, mode = enumerate_files(repo)
@@ -588,16 +850,17 @@ class LeakCheck(LoggingArgs, Cmd):
 
         hits, warnings, read, skipped = scan_tree(
             repo, files, alternation(distinctive), alternation(generic),
-            personal, allowlist, infra)
+            personal, allowlist, infra, own=own)
         commit_hits: list[tuple[str, str, str]] = []
         commits = checked = 0
         if is_git_worktree(repo):
             commit_hits, commits, checked = scan_commits(
                 repo, alternation(distinctive), self.full)
+        hits, commit_hits, exempted = split_exempt(hits, commit_hits, self._exempt)
 
         print("files:    %d listed, %d read, %d skipped (binary or unreadable)"
               % (len(files), read, skipped))
-        print("patterns: .agents path + 'Phase N' + decision ids, "
+        print("patterns: .agents path + 'Phase N' + decision ids + plan labels, "
               "%d plan basenames (%d strict, %d generic->warn), "
               "%d personal marker(s), %d infra rule(s)"
               % (len(distinctive) + len(generic), len(distinctive), len(generic),
@@ -610,6 +873,7 @@ class LeakCheck(LoggingArgs, Cmd):
             print("%s%s" % (tag, line))
         for sha, kind, text in commit_hits:
             print("%scommit %s: %s %r" % (tag, sha, kind, text))
+        self._print_exempted(exempted)
         for line in warnings:
             print("WARN %s%s" % (tag, line))
         if optout_state == "refused":
@@ -640,6 +904,7 @@ class LeakCheck(LoggingArgs, Cmd):
         suffix = ""
         if warnings:
             suffix += " [%d warning%s]" % (len(warnings), "" if len(warnings) == 1 else "s")
+        suffix += self._exempt_suffix(exempted)
         if empty:
             suffix += " [INCOMPLETE: %s not checked]" % ", ".join(empty)
         if total and optout_state == "honoured":
@@ -681,6 +946,7 @@ class LeakCheck(LoggingArgs, Cmd):
                   "messages to scan: %s" % repo)
             return EXIT_CANNOT_CHECK
         hits, commits, checked = scan_commits(repo, plan_re, self.full)
+        _, hits, exempted = split_exempt([], hits, self._exempt)
         print("mode:     commit messages only (tree scan SKIPPED)")
         print(self._commits_line(commits, checked))
         print()
@@ -689,12 +955,29 @@ class LeakCheck(LoggingArgs, Cmd):
             return EXIT_CANNOT_CHECK
         for sha, kind, text in hits:
             print("commit %s: %s %r" % (sha, kind, text))
+        self._print_exempted(exempted)
+        suffix = self._exempt_suffix(exempted)
         if hits:
-            print("\nFAIL (%d hits) [commit messages only; the tree was NOT "
-                  "scanned]" % len(hits))
+            print("\nFAIL (%d hits)%s [commit messages only; the tree was NOT "
+                  "scanned]" % (len(hits), suffix))
             return EXIT_HITS
-        print("\nPASS [commit messages only; the tree was NOT scanned]")
+        print("\nPASS%s [commit messages only; the tree was NOT scanned]" % suffix)
         return EXIT_OK
+
+    @staticmethod
+    def _print_exempted(exempted) -> None:
+        """One line per file (or commit): what the exemptions kept out of the
+        verdict, counted by class."""
+        for where, per in exempted.items():
+            print("EXEMPT %s: %s" % (where, ", ".join(
+                "%d %s" % (n, cls) for cls, n in per.items())))
+
+    def _exempt_suffix(self, exempted) -> str:
+        total = sum(sum(per.values()) for per in exempted.values())
+        if not total:
+            return ""
+        return " [%d hit%s exempt by %s]" % (total, "" if total == 1 else "s",
+                                             self._exempt_path)
 
     @staticmethod
     def _print_refusal(problems: list[str]) -> None:

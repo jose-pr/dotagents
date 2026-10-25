@@ -8,7 +8,8 @@ Text in a tracked file, or in a commit message, that points a reader at
 something they cannot open or that identifies what is private:
 
 - a path into the private notes directory;
-- a plan, by file name or by phase; a finding; a decision, by id;
+- a plan, by file name, by phase or by numbered label (`Plan <n>`,
+  `Decision <n>`); a finding; a decision, by id;
 - a user name, a home-directory path, a private repository's name;
 - internal infrastructure: host names, private address ranges, test accounts,
   credentials, management endpoints;
@@ -45,6 +46,37 @@ the pipe returns tail's status and the verdict is lost.
 A hit is judged, not obeyed: fix the file, or accept it knowingly. A
 repository whose subject is the private notes themselves will always have
 path hits.
+
+### What is not a hit
+
+- The repository's own name: its top-level directory's name and the package
+  name its `pyproject.toml`, `Cargo.toml` or `package.json` declares are
+  blanked before personal markers are matched. The header counts them and
+  never prints them.
+- A packaging manifest keeping the private directory out: a quoted entry that
+  is only a `.agents` path pattern in `pyproject.toml`, `Cargo.toml` or
+  `package.json`, and a `prune`/`exclude` line in `MANIFEST.in`. Any other
+  mention in those files is still a hit.
+
+### The agent store is refused
+
+The store itself, anything inside it and any checkout of its repository are
+private by design and ship nowhere. Scanning one is exit 3, with the reason.
+
+### Exemptions for one repository
+
+A repository that cites its own private labels on purpose can say so in
+`<repo>/.agents/leak-check.toml`, which never ships:
+
+```toml
+exempt = ["decision id", "plan label"]
+```
+
+The classes are `.agents path`, `'Phase N'`, `decision id`, `plan basename`
+and `plan label`; any other name is a usage error. Personal markers,
+infrastructure rules and attribution trailers cannot be exempted. Exempted
+hits, in files and in commit messages, leave the verdict and are still
+counted, one `EXEMPT <file>: N <class>` line per file.
 
 ## When
 
