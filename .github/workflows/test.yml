@@ -278,10 +278,12 @@ jobs:
           out=$(python -m dotagents sync-project --project "$proj" --remote https://example.invalid/you/.agents.git --no-pull --no-push -m "sync" 2>&1)
           grep -qF "skip copy-back" <<<"$out"
           test ! -e "$HOME/.agents/projects/$(basename "$proj")/AGENTS.md"  # not copied back
-          # --force backs the checkout up (git state intact) and links the store.
+          # --force backs the checkout up (git state intact) and links the store. The
+          # sync above made ~/.agents a git repo, so the store is the branch layout:
+          # .agents becomes a worktree of ~/.agents on a branch named after the project.
           python -m dotagents link-project "$proj" --force
-          test -L "$proj/.agents"
           test -d "$proj/.agents.bak/.git"
+          test "$(git -C "$proj/.agents" rev-parse --abbrev-ref HEAD)" = "$(basename "$proj")"
       - name: Copy-mode link + copy-back on sync (no-symlink fallback path)
         run: |
           export HOME="$(mktemp -d)"
