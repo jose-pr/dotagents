@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `findings` (and `init` / `overlays`) run from inside a project's `.agents`, such as
+  `<project>/.agents/findings`, target that project. They used to write a second
+  `.agents` inside the store. Deeper than a top-level directory of the user store,
+  where no project can be named, they refuse instead of writing there.
+- `findings` keeps a hand-written `INDEX.md`: before the first regeneration it is
+  copied to `INDEX.md.handwritten`, with a warning.
+- The routing note above overlay paths no longer suggests `dotagents env` for
+  reading an overlay root (it prints the whole environment, secrets included); it
+  says to read just the variable.
+
 - The `sh` wrapper `init` writes into `<store>/bin/dotagents` works from another
   system that shares the store, such as WSL reading a Windows store. It ran the
   interpreter recorded by `init`, a Windows path there; where that interpreter
