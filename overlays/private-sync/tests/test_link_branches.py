@@ -183,6 +183,16 @@ def test_store_repo_url_clones_a_team_repo_and_new_machines_follow_the_record(re
     assert branch_of(elsewhere / ".agents") == "app-store"
 
 
+def test_an_invalid_branch_name_is_refused_before_anything_moves(repos):
+    _origin, agents, project = repos
+    (project / ".agents").mkdir()
+    (project / ".agents" / "keep.md").write_text("k\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="not a valid git branch name"):
+        link_project(project, agents, store_branch=".agents")
+    assert (project / ".agents" / "keep.md").is_file()
+    assert store_record(agents, "app") is None
+
+
 def test_copy_cannot_take_a_store_repo(repos):
     _origin, agents, project = repos
     with pytest.raises(SystemExit, match="--copy"):

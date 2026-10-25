@@ -705,6 +705,12 @@ def link_store_repo(project_dir: Path, agents_dir: Path, name: str, repo: str,
     repo, ``self``, a local git repo, or a URL), on ``branch``, and record the
     choice in the agents repo when ``record``."""
     branch = branch or _default_branch(repo, name)
+    check = subprocess.run(["git", "check-ref-format", "--branch", branch],
+                           capture_output=True, text=True, check=False)
+    if check.returncode:
+        raise SystemExit("error: %r is not a valid git branch name (no part of it may "
+                         "start with '.', e.g. '.agents'); pick another with "
+                         "--store-branch" % branch)
     if not repo:
         _link_branch(project_dir, agents_dir, branch, force=force, dry_run=dry_run, log=log)
     else:
