@@ -6,20 +6,39 @@ import stat
 import sys
 from pathlib import Path
 
-POSIX_TEMPLATE = '#!/bin/sh\nexec "{python}" "{pyz}" "$@"\n'
-
-# Relative forms: resolve the pyz from the wrapper's own directory, so moving or
-# copying the scope dir does not break the command.
-# `readlink -f` so a wrapper run through a symlink (into ~/.local/bin, say)
-# still finds the pyz beside the real file; plain `$0` where readlink -f fails.
-POSIX_TEMPLATE_REL = (
-    '#!/bin/sh\nd=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")\n'
-    'exec "{python}" "$d/{pyz}" "$@"\n'
+# The sh wrapper. `{target}` is what the interpreter runs: the pyz (absolute,
+# or `"$d/..."` relative to the wrapper's own directory, so moving the scope dir
+# does not break it) or `-m dotagents` for a plain install. `readlink -f` so a
+# wrapper run through a symlink still finds what is beside the real file.
+#
+# The interpreter recorded is the one of the system that ran `init`. A store
+# shared with another system -- WSL reading a Windows store -- reaches a
+# recorded path that does not run there; the wrapper then takes that system's
+# own: the store's agents' venv for this OS and machine (`.pyvenv/*-<os>-<arch>`,
+# the naming `dotagents._pyvenv` uses), else `python3`, and a recorded
+# `C:/...` pyz path goes through `wslpath`.
+POSIX_TEMPLATE = (
+    '#!/bin/sh\n'
+    'd=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")\n'
+    'py="{python}"\n'
+    'set -- {target} "$@"\n'
+    'if [ ! -x "$py" ]; then\n'
+    '  case "$(uname -s)" in Darwin) os=darwin ;; *) os=posix ;; esac\n'
+    '  py=\n'
+    '  for v in "$d"/../.pyvenv/*-"$os"-"$(uname -m)"/bin/python; do\n'
+    '    [ -x "$v" ] && py=$v\n'
+    '  done\n'
+    '  [ -n "$py" ] || py=$(command -v python3 || command -v python) || {{\n'
+    '    echo "dotagents: no Python interpreter found" >&2; exit 127; }}\n'
+    '  case "$1" in [A-Za-z]:/*) if command -v wslpath >/dev/null 2>&1; then\n'
+    '    p=$(wslpath -u "$1"); shift; set -- "$p" "$@"; fi ;; esac\n'
+    'fi\n'
+    'exec "$py" "$@"\n'
 )
 
-# Module mode: a plain (pip / editable) install has no pyz to point at, so the
-# wrapper runs the package through the interpreter that has it installed.
-POSIX_TEMPLATE_MODULE = '#!/bin/sh\nexec "{python}" -m dotagents "$@"\n'
+
+def _posix_wrapper(python: str, target: str) -> str:
+    return POSIX_TEMPLATE.format(python=Path(python).as_posix(), target=target)
 
 
 def _cmd_safe(path: str) -> str:
@@ -88,7 +107,7 @@ def write_module_wrappers(bin_dir: Path, python: "str | None" = None) -> "list[P
     python = python or sys.executable
     sh_path, cmd_path = bin_dir / "dotagents", bin_dir / "dotagents.cmd"
     with open(sh_path, "w", encoding="utf-8", newline="") as f:
-        f.write(POSIX_TEMPLATE_MODULE.format(python=Path(python).as_posix()))
+        f.write(_posix_wrapper(python, "-m dotagents"))
     if os.name != "nt":
         sh_path.chmod(sh_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     _write_cmd(cmd_path, '"%s" -m dotagents %%*' % _cmd_safe(str(python)))
@@ -149,17 +168,9 @@ def write_wrappers(
     sh_path = bin_dir / "dotagents"
     with open(sh_path, "w", encoding="utf-8", newline="") as f:
         if rel_pyz is not None:
-            f.write(
-                POSIX_TEMPLATE_REL.format(
-                    python=Path(python).as_posix(), pyz=rel_pyz.as_posix()
-                )
-            )
+            f.write(_posix_wrapper(python, '"$d/%s"' % rel_pyz.as_posix()))
         else:
-            f.write(
-                POSIX_TEMPLATE.format(
-                    python=Path(python).as_posix(), pyz=pyz_path.as_posix()
-                )
-            )
+            f.write(_posix_wrapper(python, '"%s"' % pyz_path.as_posix()))
     if os.name != "nt":
         mode = sh_path.stat().st_mode
         sh_path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

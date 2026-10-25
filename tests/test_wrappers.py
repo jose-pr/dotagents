@@ -74,8 +74,7 @@ def test_relative_declines_a_pyz_outside_the_scope(tmp_path):
     write_wrappers(tmp_path / "scope" / "bin", pyz, relative=True)
 
     sh = (tmp_path / "scope" / "bin" / "dotagents").read_text(encoding="utf-8")
-    assert ".." not in sh, "must not emit a ../ chain"
-    assert pyz.as_posix() in sh
+    assert 'set -- "%s"' % pyz.as_posix() in sh, "the pyz must be absolute, not a ../ chain"
 
 
 def test_absolute_by_default(tmp_path):
@@ -83,7 +82,7 @@ def test_absolute_by_default(tmp_path):
     write_wrappers(tmp_path / "bin", pyz)
     sh = (tmp_path / "bin" / "dotagents").read_text(encoding="utf-8")
     assert pyz.as_posix() in sh
-    assert "dirname" not in sh
+    assert '"$d/' not in sh, "the pyz path is absolute, not relative to the wrapper"
 
 
 def test_crlf_in_cmd_and_lf_in_sh(tmp_path):
@@ -157,6 +156,33 @@ def test_relative_falls_back_when_no_relative_path_exists(tmp_path, monkeypatch)
 
     sh = (tmp_path / "bin" / "dotagents").read_text(encoding="utf-8")
     assert pyz.as_posix() in sh, "must fall back to an absolute path, not crash"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the fallback is for a system where the recorded interpreter does not run")
+def test_a_recorded_interpreter_that_does_not_run_falls_back_to_the_store_venv(tmp_path):
+    """A store shared with another system (WSL reading a Windows store): the
+    recorded interpreter is not there, so the store's agents' venv for this OS
+    and machine runs the pyz."""
+    import platform
+
+    store = tmp_path / "store"
+    store.mkdir()
+    pyz = store / "dotagents.pyz"
+    pyz.write_text(PROBE, encoding="utf-8")
+    write_wrappers(store / "bin", pyz, python="C:/Not/Here/python.exe", relative=True)
+    os_name = "darwin" if sys.platform == "darwin" else "posix"
+    venv_python = store / ".pyvenv" / ("3.99.0-%s-%s" % (os_name, platform.machine())) / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(sys.executable)
+    _run_sh(store / "bin" / "dotagents", tmp_path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the fallback is for a system where the recorded interpreter does not run")
+def test_with_no_store_venv_the_fallback_is_python3(tmp_path):
+    pyz = tmp_path / "dotagents.pyz"
+    pyz.write_text(PROBE, encoding="utf-8")
+    write_wrappers(tmp_path / "bin", pyz, python="C:/Not/Here/python.exe")
+    _run_sh(tmp_path / "bin" / "dotagents", tmp_path)
 
 
 def test_module_wrappers_run_the_installed_package(tmp_path):

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The `sh` wrapper `init` writes into `<store>/bin/dotagents` works from another
+  system that shares the store, such as WSL reading a Windows store. It ran the
+  interpreter recorded by `init`, a Windows path there; where that interpreter
+  does not run it now takes the store's agents' venv for that OS and machine
+  (`.pyvenv/<version>-<os>-<arch>`), else `python3`, and converts a recorded
+  `C:/...` pyz path with `wslpath`.
+
 ## [0.8.1] - 2026-10-21
 
 ### Added

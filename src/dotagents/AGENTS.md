@@ -722,8 +722,11 @@ objects `{"matcher"?: str, "hooks": [{"type": "command", "command": str, ...}]}`
 
 ## `dotagents._wrappers`
 
-- `POSIX_TEMPLATE`, `POSIX_TEMPLATE_REL` (pyz path relative to the wrapper),
-  `POSIX_TEMPLATE_MODULE` (`"<python>" -m dotagents`) — the `sh` wrapper bodies.
+- `POSIX_TEMPLATE` — the `sh` wrapper body, for a `.pyz` (absolute, or relative
+  to the wrapper) or `-m dotagents`. It runs the recorded interpreter; where that
+  does not run (a Windows store read from WSL) it takes the store's agents' venv
+  for this OS and machine (`.pyvenv/*-<os>-<arch>/bin/python`), else `python3`,
+  and turns a recorded `C:/...` pyz path into a local one with `wslpath`.
 - `write_wrappers(bin_dir, pyz_path, python=None, *, relative=False) -> list[Path]` —
   `dotagents` (sh) and `dotagents.cmd`, both always, running the `.pyz`.
 - `write_module_wrappers(bin_dir, python=None) -> list[Path]` — both forms running
