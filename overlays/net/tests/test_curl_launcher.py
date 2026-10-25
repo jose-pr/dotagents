@@ -11,7 +11,7 @@ import base64
 import os
 import shutil
 import subprocess
-import sysconfig
+import sys
 import venv as venv_module
 from pathlib import Path
 
@@ -60,10 +60,13 @@ def launcher_dir(tmp_path_factory):
     root = tmp_path_factory.mktemp("venv")
     venv_module.EnvBuilder(with_pip=False).create(str(root))
     python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    paths = sysconfig.get_paths()
     site = subprocess.run([str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
                           capture_output=True, text=True, check=True).stdout.strip()
-    Path(site, "test-layers.pth").write_text("%s\n%s\n" % (paths["purelib"], paths["platlib"]), encoding="utf-8")
+    # The test interpreter's whole import path, not just its site-packages: a .pth
+    # inside a directory added this way is not processed, so an editable install
+    # (a src/ reached through a .pth) would be invisible.
+    layers = [p for p in sys.path if p and Path(p).is_dir()]
+    Path(site, "test-layers.pth").write_text("\n".join(layers) + "\n", encoding="utf-8")
     launchers.sync(root, python, [overlays.Overlay(OVERLAY)])
     return launchers.launcher_dir(root)
 
