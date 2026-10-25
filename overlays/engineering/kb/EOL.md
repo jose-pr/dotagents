@@ -2,10 +2,9 @@
 
 Every text file is LF, in every repository, on every platform.
 
-A repository has one line ending. A tool that writes LF into a CRLF file
-leaves it **mixed**, and mixed is the state that costs time: it defeats diffs,
-makes byte-for-byte fixtures fail for reasons unrelated to their content, and
-hides real changes inside whitespace churn.
+A tool that writes LF into a CRLF file leaves it **mixed**, the state that costs
+time: it defeats diffs, fails byte-for-byte fixtures for reasons unrelated to their
+content, and hides real changes in whitespace churn.
 
 ## What makes it hold
 
@@ -20,7 +19,7 @@ hides real changes inside whitespace churn.
 | A file the platform requires to be CRLF: some `.bat` and `.cmd` files, some signed manifests | `*.bat text eol=crlf` | the platform refuses it otherwise |
 | Recorded evidence: a captured response saved as a fixture, a wire payload, a golden file copied from a third party | `tests/fixtures/** -text`, with a comment saying why | **who chose the bytes?** If someone else did and we are recording it, they are a measurement |
 
-Normalising recorded evidence does not break a test. It makes the test assert
+Normalising recorded evidence does not break a test: it makes the test assert
 against bytes the source never sent, while it keeps passing.
 
 ## Checking and converting
@@ -33,13 +32,13 @@ dotagents eol fix [path ...] [--dry-run]
 
 Over MCP: `dotagents.eol.check`, `dotagents.eol.fix`.
 
-The command reads the repository's attributes, so `eol=crlf` files are
-expected to be CRLF and `-text` files are left alone. So is a file git
-stores as non-text (`git ls-files --eol` shows `i/-text`; under `text=auto` a
-lone CR is enough), unless `text` is set on it: git keeps such a file's bytes
-verbatim, so converting it would change tracked content. If the file really is
-text, set `text` on it in `.gitattributes`. It counts bytes, reads
-all of a file before writing any of it, and replaces the file by rename.
+The command reads the repository's attributes: `eol=crlf` files are expected to be
+CRLF and `-text` files are left alone. So is a file git stores as non-text (`git
+ls-files --eol` shows `i/-text`; under `text=auto` a lone CR is enough) unless `text`
+is set on it, since git keeps such a file's bytes verbatim and converting it would
+change tracked content; if it really is text, set `text` on it in `.gitattributes`.
+It counts bytes, reads all of a file before writing any of it, and replaces the file
+by rename.
 
 **Use it instead of a one-liner.** The obvious ones are wrong:
 
@@ -56,8 +55,8 @@ crlf, lf = data.count(b"\r\n"), data.count(b"\n")
 # crlf == 0 -> LF      crlf == lf -> CRLF      otherwise -> MIXED
 ```
 
-`git ls-files --eol` answers a different question — the index, the working
-tree and the attributes, for tracked files only — and complements it.
+`git ls-files --eol` answers a different question (index, working tree and
+attributes, tracked files only) and complements it.
 
 ## Writing files from a script
 
@@ -70,16 +69,13 @@ path.write_bytes(text.encode("utf-8"))                          # any Python
 path.write_text(text, encoding="utf-8", newline="\n")           # 3.10 and later
 ```
 
-Write an edit script to a file and run it. A script passed inline through a
-shell can lose a level of backslashes on the way, turning `\r\n` written as
-text into a real carriage return and `\b` into a backspace byte.
-`dotagents eol check --control` finds those.
+Write an edit script to a file and run it. A script passed inline through a shell
+can lose a level of backslashes, turning `\r\n` written as text into a real carriage
+return and `\b` into a backspace byte; `dotagents eol check --control` finds those.
 
 ## Changing an existing file
 
-Match the file you found. Convert a whole file deliberately, as its own
-change, or leave it alone: a partial conversion is the mixed state this rule
-exists to prevent.
-
-Where another writer is active in the same tree, a conversion will not stick;
-leave it for when the tree is yours.
+Match the file you found. Convert a whole file deliberately, as its own change, or
+leave it alone: a partial conversion is the mixed state this rule exists to prevent.
+Where another writer is active in the same tree, a conversion will not stick; leave
+it for when the tree is yours.

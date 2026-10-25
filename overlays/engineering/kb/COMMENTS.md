@@ -1,25 +1,25 @@
 # Comments and doc comments
 
-Applies to every comment, docstring or doc comment, log message and error
-message in a tracked file, in every language and every change.
+Applies to every comment, docstring or doc comment, log message and error message
+in a tracked file, in every language and every change.
 
 ## To the point
 
 - **Say what the code cannot**: the constraint, the reason, the unit, the
-  invariant, the consequence that is not visible from the line itself.
-- **One to three lines.** An explanation that needs more is a doc comment, or
-  a page in the docs that the comment names.
-- **Describe the code as it is.** No "used to", "previously", "now", "no
-  longer", "was changed to". What changed, and why, is the commit message;
-  what a user must know about the change is the changelog.
-- **No account of the work**: how a defect was found, what was tried first,
-  who asked, what a review said, how long it took.
-- **Do not restate the code.** A comment that repeats the line below it is
-  deleted.
+  invariant, the consequence not visible from the line itself.
+- **One to three lines**, at the project's formatter line length (100 columns where
+  none is set); re-flowing a comment wider is not shortening it. An explanation that
+  needs more is a doc comment, or a docs page the comment names.
+- **Describe the code as it is.** No "used to", "previously", "now", "no longer",
+  "was changed to". What changed and why is the commit message; what a user must
+  know about it is the changelog.
+- **No account of the work**: how a defect was found, what was tried first, who
+  asked, what a review said, how long it took.
+- **Do not restate the code.** A comment that repeats the line below it is deleted.
 
 ## Only what a reader of the repository can follow
 
-A comment may refer to things a stranger with the public repository can open:
+A comment may refer to what a stranger with the public repository can open:
 
 - a published specification (an RFC, a PEP, a standard), with its section;
 - a public issue or pull request, by URL;
@@ -27,7 +27,7 @@ A comment may refer to things a stranger with the public repository can open:
 - upstream documentation or an upstream bug, by URL;
 - the versions and platform that make a stated fact reproducible.
 
-A comment never refers to anything that is not in the repository:
+Never to anything outside it:
 
 - private working notes, or any path under `.agents/`;
 - a plan, by name, number or phase (`Phase N`, "the hardening plan");
@@ -36,9 +36,8 @@ A comment never refers to anything that is not in the repository:
 - a review, an audit, a session, an agent, a model or a conversation;
 - private hosts, machines, people or dates of internal events.
 
-The test: could someone holding only the public repository act on this
-sentence? If it sends them to something they cannot open, rewrite it to state
-the fact itself, or remove it.
+The test: could someone holding only the public repository act on this sentence? If
+it sends them to something they cannot open, state the fact itself, or remove it.
 
 ## Measurements
 
@@ -56,21 +55,21 @@ Good: the fact and what it depends on.
       seconds.
 ```
 
-A date belongs only where the fact is expected to go stale, and then beside
-the version it was true for.
+A date belongs only where the fact is expected to go stale, beside the version it
+was true for.
 
 ## Doc comments
 
 - First line: what the thing does or is, one sentence.
-- A public function documents its arguments, its return value and what it
-  raises or returns on failure. A private helper gets a line, or nothing.
-- The doc comment is the contract; the reasoning behind an implementation
-  choice is a comment at the line that makes it.
+- A public function documents its arguments, its return value and what it raises
+  or returns on failure. A private helper gets a line, or nothing.
+- The doc comment is the contract; the reasoning behind an implementation choice is
+  a comment at the line that makes it.
 
 ## `TODO`
 
-A `TODO` names a public issue, or it is not written. Deferred work with no
-public issue is tracked outside the source.
+A `TODO` names a public issue, or it is not written. Deferred work with no public
+issue is tracked outside the source.
 
 ## Check
 
@@ -80,12 +79,18 @@ Before committing, search the staged diff for what this file forbids:
 git diff --cached -U0 | grep -nE '\.agents|[Ff]indings?[ /:]|[Pp]lans?/|\bD[0-9]{2}\b|Phase [0-9]|\b(review|audit|session) (found|flagged|said)'
 ```
 
-A hit is read and judged, not waved through: `plans/` in a path that exists in
+And the whole tree for history wording:
+
+```bash
+git grep -nE '\b(used to|previously|no longer|was changed to|anymore)\b' -- ':!CHANGELOG*'
+```
+
+Each hit is read and judged, not waved through: `plans/` in a path that exists in
 the repository is fine. The leak scan
-(`$ENGINEERING_OVERLAY_ROOT/kb/LEAKS.md`), run at every publishing handoff,
-covers the same ground over the whole tree and the commit messages.
+(`$ENGINEERING_OVERLAY_ROOT/kb/LEAKS.md`), run at every publishing handoff, covers
+the first search over the whole tree and the commit messages.
 
 ## Exceptions
 
-A project that keeps a different convention records it in its
-`.agents/AGENTS.md`. Without that record, this file applies.
+A project that keeps a different convention records it in its `.agents/AGENTS.md`.
+Without that record, this file applies.

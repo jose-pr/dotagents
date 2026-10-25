@@ -1,10 +1,7 @@
 # Master Refactoring & Implementation Plan
 
-Single source of truth for a multi-phase refactor/build-out of `<project>`. This is a
-**global template** — it demonstrates the *format* an executor agent should produce and
-live-update, not literal content to copy. Replace phases, file links, and rationale with
-whatever the real project needs; keep the shape: `## Progress` first, a roadmap, explicit
-cross-cutting rules, then one detailed section per phase.
+An illustration of tone and detail for a multi-phase plan on `<project>`, not content
+to copy; `plan_template.md` is the required shape and wins any disagreement.
 
 ## Progress
 
@@ -91,10 +88,9 @@ graph TD
 
 ## 5. Phase 3: Plugin System — 🔄 IN PROGRESS (see Progress above)
 
-- Break the phase into the same shape as the others once it's underway: what's the
-  target design, what file(s) does it land in, what's the highest-risk/most-complex
-  piece worth flagging explicitly (mark it, e.g., "**highest-complexity item in this
-  plan**" the way Phase 3 items often deserve extra scrutiny before merging).
+- Same shape as the others once underway: the target design, the file(s) it lands
+  in, and the riskiest piece flagged explicitly ("**highest-complexity item in this
+  plan**").
 
 ---
 

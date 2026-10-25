@@ -30,10 +30,9 @@ routing = [
   `dotagents compare-bench <old.json> <new.json>`""",
 ]
 
-# Always-on RULES, not load-on-demand routing: `overlays add` merges each listed
-# file's `- **...` bullets into AGENTS.md's managed block under "Always-on rules"
-# (D59). Only the leading bullet run is taken, so the prose sections in
-# `rules/ENGINEERING.md` explaining *why* these are not in the base stay out of the core.
+# Always-on rules, not routing: `overlays add` merges the leading `- **...` bullet
+# run of each listed file into AGENTS.md's managed block under "Always-on rules";
+# prose from the file's first `## ` heading down stays out.
 rules = [
   "rules/ENGINEERING.md",
 ]
