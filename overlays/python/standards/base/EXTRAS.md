@@ -1,8 +1,8 @@
 # Standard: optional dependencies
 
-Base standard: applies to every Python library with an extra. Index:
-[README.md](../README.md). How extras are declared and version-ranged is in
-`../../kb/PYTHON.md`; this file is how they behave at run time.
+Base standard: how extras behave at run time. Index:
+[README.md](../README.md). Declaring and ranging them is in
+`../../kb/PYTHON.md`.
 
 ## Naming
 

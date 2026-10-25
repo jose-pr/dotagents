@@ -1,26 +1,21 @@
 # Standard: command line of a library
 
-Specialized standard: applies when a command line is a feature of a library,
-not the package's reason to exist. Adds to the base standards; index:
+Specialized standard: a command line that is a feature of a library, not the
+package's reason to exist ([APPLICATION.md](APPLICATION.md)). Index:
 [README.md](../README.md).
 
 ## Framework
 
-**Build the command line with `duho`.** (**house**) One framework across
-libraries means one way to declare arguments, one help format, one set of
-logging flags and one completion story.
-
-Use something else only where a recorded decision or an overriding reason
-rules `duho` out: the library is one `duho` itself depends on, or it must stay
-installable with no third-party package even with its `cli` extra. Record the
-exception in the project's `.agents/AGENTS.md`, so the next session does not
-"fix" it. A preference for another framework is not a reason. The same rule covers the other preferred libraries:
-[base/DEPENDENCIES.md](../base/DEPENDENCIES.md).
+**Build the command line with `duho`.** (**house**) One framework means one
+way to declare arguments, one help format, one set of logging flags and one
+completion story. It yields only as
+[base/DEPENDENCIES.md](../base/DEPENDENCIES.md) "When not to" allows: the
+library is one `duho` depends on, or it must install with no third-party
+package even with its `cli` extra.
 
 ## The command is a class
 
-Using `duho` means writing the command as an object, not wrapping a script in
-one.
+Write the command as an object, not a script wrapped in one.
 
 - **Each command is a class.** Its fields are its arguments; `__call__` is the
   command.
@@ -131,6 +126,12 @@ call into an API a library user could make.
 - **Signals are handled here**, not in the library: the command line turns
   Ctrl-C into the library's `shutdown()`.
 - **Logging is configured here**, not in the library.
+- **A command that reimplements a reference tool's command line** takes its
+  flags, output formats and exit statuses from the reference
+  ([CONFORMANCE.md](CONFORMANCE.md)), in place of the flag and exit-status
+  rules above. The
+  project records this once in its `.agents/AGENTS.md`. Structure, `duho` and
+  the module-size ceiling still apply.
 
 ## Tests
 

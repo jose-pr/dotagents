@@ -1,8 +1,7 @@
 # Standard: value types
 
-Base standard: applies to a type that stands for a value — an address, a
-name, a version, a duration, a parsed token — as opposed to a thing with a
-lifecycle. Index: [README.md](../README.md). (stdlib `ipaddress`,
+Base standard: a type that stands for a value — an address, a name, a
+version, a duration, a parsed token — not a thing with a lifecycle. Index: [README.md](../README.md). (stdlib `ipaddress`,
 `pathlib.PurePath`, `datetime`, `uuid.UUID`, `fractions.Fraction`.)
 
 ## Immutable

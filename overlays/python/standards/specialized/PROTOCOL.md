@@ -1,7 +1,7 @@
 # Standard: protocol libraries
 
-Specialized standard: applies to a library that speaks a wire protocol. Adds
-to [the base API standard](../base/API.md); index: [README.md](../README.md).
+Specialized standard: a library that speaks a wire protocol. Index:
+[README.md](../README.md).
 
 ## Roles
 

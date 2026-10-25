@@ -1,6 +1,6 @@
 # Standard: public API
 
-Base standard: applies to every Python library. Index: [README.md](../README.md).
+Base standard. Index: [README.md](../README.md).
 
 ## Names
 
@@ -61,11 +61,13 @@ Pick one when the library is created. (**house**)
 A module stays small enough to review in one sitting, a few hundred lines.
 Split by responsibility into a package and keep its `__init__` re-exporting
 the names callers already import, so a split never moves a public path. No
-`utils.py`, `base.py` or `manager.py`: name a module for what it owns.
+`utils.py`, `base.py` or `manager.py`: name a module for what it owns. No
+unreachable code ships.
 
 ## Exceptions
 
-- **One module, `exceptions.py`.** (requests, urllib3, httpx, websockets.)
+- **One exceptions module**: `exceptions.py` in a role-based library,
+  `_exceptions.py` in a root-only one. (requests, urllib3, httpx, websockets.)
 - **One base class per package**, named for the subject and ending in `Error`:
   `DHCPError`. Category classes under it end in `Error` too. (PEP 8.)
 - **Also inherit from the builtin a caller would already catch.** Malformed
@@ -97,6 +99,11 @@ the names callers already import, so a split never moves a public path. No
 - **One object used from both worlds stays one class** and pairs each blocking
   method with an `a`-prefixed coroutine: `recv()` and `arecv()`. For
   endpoints, streams and responses, not for roles. (httpx `Response`.)
+- **A toolkit of blocking module-level functions** (resolve, probe, wait)
+  says in the shipped header which functions block, and that an asyncio
+  caller runs them in a thread (`asyncio.to_thread`). It adds an `a`-prefixed
+  coroutine only where the awaitable form needs no thread: a sleep-and-poll
+  loop.
 - **No flag that changes whether a method is awaited, and no return type of
   `Union[T, Awaitable[T]]`.**
 - **Say what "async" covers.** If a method runs blocking code in an executor,

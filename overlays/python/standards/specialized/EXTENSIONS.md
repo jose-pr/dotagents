@@ -1,9 +1,8 @@
 # Standard: backends and registries
 
-Specialized standard: applies to a library with interchangeable
-implementations of one contract — storage backends, file formats, URI
-schemes, transports, providers. Adds to the base standards; index:
-[README.md](../README.md).
+Specialized standard: a library with interchangeable implementations of one
+contract — storage backends, file formats, URI schemes, transports,
+providers. Index: [README.md](../README.md).
 
 Build this only when there are, or will soon be, two implementations. One
 implementation behind a registry is indirection with no return.
@@ -55,11 +54,8 @@ src/<pkg>/backends/
 ## Optional dependencies
 
 Each backend's dependency is its own extra, named for the backend, imported
-inside the backend's module. A backend whose extra is missing stays
-registered and fails when used, naming the extra.
-([EXTRAS.md](../base/EXTRAS.md).)
-
-Importing the package imports no backend's dependency.
+inside the backend's module, and missing as [EXTRAS.md](../base/EXTRAS.md)
+says: the backend stays registered and fails when used, naming the extra.
 
 ## Failures
 

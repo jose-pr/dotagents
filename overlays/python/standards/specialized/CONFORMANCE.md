@@ -1,9 +1,8 @@
 # Standard: following a reference implementation
 
-Specialized standard: applies to a library that reimplements something
-another implementation defines — a port, a compatible client, a second
-implementation of a tool's file format. Adds to the base standards; index:
-[README.md](../README.md).
+Specialized standard: a library that reimplements what another
+implementation defines — a port, a compatible client, a tool's file format.
+Index: [README.md](../README.md).
 
 ## The reference is the specification
 
@@ -14,6 +13,10 @@ implementation of a tool's file format. Adds to the base standards; index:
   against.
 - **Each module that ports reference code says which upstream files it
   follows**, in its module docstring, so a reader can compare.
+- **Names the reference defines and callers use by name** (a script's
+  builtins, a format's keys) keep the reference's spelling, and no exception
+  needs recording. [base/API.md](../base/API.md)'s naming rules govern
+  everything else.
 
 ## Recorded cases
 

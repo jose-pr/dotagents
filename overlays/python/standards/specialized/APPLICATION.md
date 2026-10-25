@@ -1,25 +1,22 @@
 # Standard: applications
 
-Specialized standard: applies to a package whose reason to exist is its
-command. A library that merely ships a command line follows
-[CLI.md](CLI.md) instead. Adds to the base standards; index:
-[README.md](../README.md).
+Specialized standard: a package whose reason to exist is its command. A
+library that merely ships a command line follows [CLI.md](CLI.md) instead.
+Index: [README.md](../README.md).
 
 ## An application is a library with a command in front
 
-- **Commands live in `cli/`, one module per subcommand**, with the same
-  rules as [CLI.md](CLI.md): declare arguments, call into the package,
-  format the result, return an exit status. About 200 lines per module.
+- **Commands live in `cli/`, one module per subcommand**, and follow
+  [CLI.md](CLI.md): each is a class with its logic in `__call__` and its
+  methods, never a forwarder to one function; it declares arguments, calls
+  into the package, formats the result and returns an exit status, in about
+  200 lines; and it is designed to be served to agents as a tool as well as
+  run by hand ("The command is a class", "For agents").
 - **Everything outside `cli/` is library code** and follows the base
   standard: it returns, raises or logs; it does not `print`, call
   `sys.exit` or read `sys.argv`.
-- The command line is built with `duho`
-  ([DEPENDENCIES.md](../base/DEPENDENCIES.md)). Here it is a required
-  dependency, not an extra: the command is the product.
-- **Each command is a class with its logic in `__call__` and its methods**,
-  never a forwarder to one function, and it is designed to be served to
-  agents as a tool as well as run by hand ([CLI.md](CLI.md), "The command is
-  a class" and "For agents").
+- `duho` is a required dependency here, not an extra: the command is the
+  product.
 - `main(argv=None) -> int` in `<pkg>.cli`; `python -m <pkg>` runs it.
 
 ## Output
@@ -51,16 +48,14 @@ its own; it says so.
   not told otherwise. Every prompt has a flag that answers it.
 - **A destructive command needs an explicit confirmation flag**, and offers
   `--dry-run` showing what it would do.
-- Commands are idempotent where the operation allows: running one twice is
-  the same as running it once.
+- Commands are idempotent where the operation allows.
 - **Files are written whole or not at all**: write beside the target, then
   replace it.
 
 ## Settings
 
-Flags, then environment, then a configuration file, then defaults
-([CONFIG.md](../base/CONFIG.md)). The command configures logging; `-v` and
-`-q` adjust it.
+Precedence follows [CONFIG.md](../base/CONFIG.md). The command configures
+logging; `-v` and `-q` adjust it.
 
 ## Extending
 

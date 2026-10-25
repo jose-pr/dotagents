@@ -1,10 +1,9 @@
 # Standard: parsers and loaders
 
-Specialized standard: applies to a library that turns text or files into data
-— configuration loaders, data-file backends, expression parsers. Adds to
-[the base API standard](../base/API.md); index: [README.md](../README.md).
-
-A wire protocol's `encode`/`decode` is in [PROTOCOL.md](PROTOCOL.md), not here.
+Specialized standard: a library that turns text or files into data —
+configuration loaders, data-file backends, expression parsers. Index:
+[README.md](../README.md). A wire protocol's `encode`/`decode` is in
+[PROTOCOL.md](PROTOCOL.md).
 
 ## Vocabulary
 
@@ -79,12 +78,19 @@ Loading data must not be able to do anything else.
 
 - **Loading never executes code**: no unsafe YAML loader, no `pickle`, no
   `eval`.
+- **A format that is a program by definition** (a PAC file is JavaScript) is
+  executed only when the caller asks for it, in an embedded engine with no
+  filesystem, network or host access beyond the builtins the format defines,
+  and with a time and a memory bound. Loading anything else is still never
+  execution.
 - **Anything that reaches beyond the document is off unless the caller turns
   it on**: include directives, running commands, fetching URLs, reading
   environment variables, rendering templates, decrypting. Each has its own
   switch.
 - **Includes are confined** to roots the caller names, checked before the
   file is opened, with depth bounded and cycles detected.
+- **A file found beside a target** (a sidecar, a baseline, a marker),
+  symlinks included, is untrusted input.
 - **Bounds on what a document can cost**: nesting depth, alias or entity
   expansion, interpolation recursion.
 - **A command a loader runs** has a timeout, no shell, and its standard
@@ -98,9 +104,8 @@ Loading data must not be able to do anything else.
   wins; whether matching is case-sensitive is stated.
 - Content is not sniffed to guess a format.
 - An unknown format raises the unsupported-format error.
-- A format whose optional dependency is missing fails with the name of the
-  extra to install, when the format is asked for — not at import, and not by
-  quietly disappearing from the list.
+- A format whose optional dependency is missing stays listed and fails when
+  asked for, naming the extra ([EXTRAS.md](../base/EXTRAS.md)).
 
 ## Laziness and caching
 
@@ -124,15 +129,9 @@ cycles.
 ## Following a reference implementation
 
 Where the format is whatever another implementation accepts, that
-implementation is the specification:
-
-- behaviour is recorded from it as test cases and replayed without it;
-- every deliberate difference is listed in the README and asserted by a test;
-- a known difference still to be fixed is a strict expected failure, so
-  fixing it forces the marker out.
-
-A rule above that the reference implementation contradicts yields to it, and
-the difference is recorded as the project's exception.
+implementation is the specification ([CONFORMANCE.md](CONFORMANCE.md)). A
+rule above that the reference contradicts yields to it, and the difference
+is recorded as the project's exception.
 
 ## Tests
 

@@ -1,8 +1,8 @@
 # Standard: tests
 
 Base standard: how tests are designed. Index: [README.md](../README.md).
-Running them — virtual environments, the supported-version matrix, the test
-configuration — is in `../../kb/PYTHON.md`.
+Running them (venvs, the version matrix, test configuration) is in
+`../../kb/PYTHON.md`.
 
 ## Layout
 
@@ -47,7 +47,9 @@ A test module imports the package, never another test module.
 - **Warnings are errors**: `filterwarnings = ["error"]`, with each exception
   listed and narrow.
 - **A skip is conditional on a probe, and visible.** Probe the capability at
-  run time; do not skip by platform name. Run with `-rs`, and state the
+  run time; do not skip by platform name. Where the code under test binds a
+  platform's own API (WinHTTP, CFNetwork), the platform is the capability and
+  `skipif(sys.platform != ...)` is the probe. Run with `-rs`, and state the
   expected skip count where a run is called verified.
 - **An expected failure is strict** (`xfail(strict=True)`), so the fix that
   makes it pass forces the marker out.
@@ -63,6 +65,8 @@ A test module imports the package, never another test module.
 - **Property tests** for anything that parses, encodes or round-trips.
 - **Contract tests** run against every implementation of a shared interface.
 - **The README's and the docs' examples are executed.**
+- **A claim in the README or the docs about coverage, validation or
+  compatibility names the test that backs it.**
 - **The built package is installed into a clean environment and its console
   script run**, on each supported OS.
 

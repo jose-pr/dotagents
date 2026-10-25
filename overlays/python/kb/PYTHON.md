@@ -1,242 +1,201 @@
 # Python Directives
 
-Python-specific extras/overrides on top of the generic repo standard in
-`$ENGINEERING_OVERLAY_ROOT/flows/REPO.md` — read that first. Only Python-specific content here.
-
-This file is packaging, tooling, CI and release. **How a library is designed,
-named, documented and commented is in `$PYTHON_OVERLAY_ROOT/standards/`** —
-start at its `README.md`, which says which standard applies to the work. A
-project's recorded exceptions to them are in its `.agents/AGENTS.md`.
+Python packaging, tooling, CI and release, on top of
+`$ENGINEERING_OVERLAY_ROOT/flows/REPO.md` (read that first). How a library is
+designed, named, documented and commented is in
+`$PYTHON_OVERLAY_ROOT/standards/README.md`; a project's exceptions to it are
+in its `.agents/AGENTS.md`.
 
 ## Packaging and Layout
 
-- **Source Layout**: `src/<package_name>/` — never a flat top-level package (keeps
-  `import <package_name>` from silently resolving to the checkout instead of the
+- **Source layout**: `src/<package_name>/`, never a flat top-level package (a
+  flat one lets `import <package_name>` resolve to the checkout instead of the
   installed artifact).
-- **Build Backend**: `hatchling` via `pyproject.toml` (no `setup.py`). Literal config:
-  `$PYTHON_OVERLAY_ROOT/references/pyproject.toml`.
-- **Python Version**: modern floor (e.g. `requires-python = ">=3.9"`). Add
-  `from __future__ import annotations` to every file using bare `X | Y` unions in a
-  runtime-evaluated position — omitting it breaks the older end of the range.
-- **Typing**: ship `src/<package_name>/py.typed` in the wheel. Hatchling includes
-  it with the package, with or without an explicit `packages` list.
-- **Wheel packages**: hatchling finds `src/<package_name>/` by itself only when the
-  import name matches the distribution name (`my-lib` → `my_lib`). When they differ
-  (`dotagents-cli` ships `dotagents`), set
-  `[tool.hatch.build.targets.wheel] packages = ["src/<package_name>"]` — the reference
-  `pyproject.toml` always does, so a copy works either way.
-- **Ship the consumer's docs in the package**: `README.md` (`readme = "README.md"`
-  → long-description) and `src/<pkg>/AGENTS.md` (the agent-facing library-interface
-  doc, see REPO.md) must land in the built sdist AND wheel.
-
-  Python's answer to REPO.md's packaging-boundary rule: the wheel ships
-  `src/<pkg>/` only, so the API header lives **inside the package dir** — a
-  repo-root file would not ship. (Contrast Rust, where the crate root *is* the
-  shipped root.) The optional repo-root `AGENTS.md` is REPO.md's contributor-
-  orientation file — layout, venvs, CI, release — never the API header. It ships
-  in neither the wheel nor the sdist: the reference manifest excludes `/AGENTS.md`
-  from the sdist.
-
-  Because `src/<pkg>/AGENTS.md` ships, it must be **self-contained**: no
-  repo-relative links (`src/...`, `CHANGELOG.md`, `LICENSE`), since an installed
-  consumer has no repo. Point at the project URL instead. The root `AGENTS.md`
-  may link freely — it is only ever read in a checkout. Hatchling
-  puts `README.md` in the sdist by default. `src/<pkg>/AGENTS.md` lives inside the
-  package, so it ships in the wheel with no configuration — **never** force-include an
-  `AGENTS.md` into `<pkg>/`: with a repo-root `AGENTS.md` beside it the wheel build
-  fails (`A second file is being added to the wheel archive at the same path`). To ship
-  the README inside the installed package too (readable via `importlib.resources`),
-  force-include only it: `[tool.hatch.build.targets.wheel.force-include]` with
-  `"README.md" = "<package_name>/README.md"`. Verify with `python -m build` +
-  `unzip -l dist/*.whl`.
-- **Optional Dependencies**: zero *required* runtime deps where feasible. One extra
-  per integration (`pkg[s3]`, never a catch-all bucket), guarded in code by
-  `try/except ImportError` with a stdlib fallback or clearly degraded behavior —
-  never a hard crash on import. `dev`/`docs` extras are tooling, not features.
-- **Dependency ranges** (runtime deps and feature extras, in `pyproject.toml` only —
-  a constraint restated anywhere else drifts):
-  - a **pre-1.0** dependency: floor at the minor's `.0`, ceiling at the next minor —
-    `>=X.Y.0,<X.(Y+1)`. Raise the floor above `.0` **only** when the code uses an API
-    added in a later patch, and name that API and patch in a comment beside it;
-  - **1.0 and above**: major-scoped — `>=1.0,<2`; a minor floor only when the code
-    uses an API added in that minor.
-  - "Update to the latest" means move the range to the latest *series*, not pin the
-    latest patch. The floors are tested: the `floors` job of the reference
-    `test.yml` installs every declared dependency AT its floor.
-- **README badges**: the exact row, its order and the README section order are
-  fixed in `$PYTHON_OVERLAY_ROOT/standards/base/DOCS.md` — Version, Python
-  versions, License, Docs, CI. Copy the row from there; do not compose one. PyPI
-  badges 404 until first publish — fine to include early.
+- **Build backend**: `hatchling` via `pyproject.toml`, no `setup.py`. Literal
+  config: `$PYTHON_OVERLAY_ROOT/references/pyproject.toml`.
+- **Python version**: a modern floor (`requires-python = ">=3.9"`). Every file
+  using bare `X | Y` in a runtime-evaluated position needs
+  `from __future__ import annotations`, or the floor breaks.
+- **Typing**: ship `src/<package_name>/py.typed`; hatchling includes it with
+  the package.
+- **Wheel packages**: hatchling finds `src/<package_name>/` by itself only when
+  the import name matches the distribution name (`my-lib` → `my_lib`). The
+  reference `pyproject.toml` always sets
+  `[tool.hatch.build.targets.wheel] packages = ["src/<package_name>"]`, so a
+  copy works either way.
+- **Shipped docs**: `README.md` (`readme = "README.md"`, the long description)
+  and the API header `src/<pkg>/AGENTS.md` (REPO.md's "shipped API header")
+  must land in the sdist AND the wheel.
+  - The wheel ships `src/<pkg>/` only, so the header lives inside the package
+    dir and ships with no configuration. **Never** force-include an
+    `AGENTS.md` into `<pkg>/`: beside a repo-root `AGENTS.md` the wheel build
+    fails (`A second file is being added to the wheel archive at the same
+    path`).
+  - The repo-root `AGENTS.md` (contributor orientation) ships in neither: the
+    reference manifest excludes `/AGENTS.md` from the sdist.
+  - To ship the README inside the installed package too (for
+    `importlib.resources`), force-include only it:
+    `[tool.hatch.build.targets.wheel.force-include]`
+    `"README.md" = "<package_name>/README.md"`.
+  - Verify with `python -m build` + `unzip -l dist/*.whl`.
+- **Optional dependencies**: zero *required* runtime deps where feasible. One
+  extra per integration (`pkg[s3]`, never a catch-all), guarded by
+  `try/except ImportError` with a stdlib fallback or clearly degraded
+  behaviour, never a crash on import. `dev`/`docs` are tooling, not features.
+- **Dependency ranges** (runtime deps and feature extras, in `pyproject.toml`
+  only; a constraint restated elsewhere drifts):
+  - **pre-1.0**: floor at the minor's `.0`, ceiling at the next minor,
+    `>=X.Y.0,<X.(Y+1)`. Raise the floor above `.0` **only** when the code uses
+    an API added in a later patch, and name that API and patch in a comment
+    beside it;
+  - **1.0 and above**: major-scoped, `>=1.0,<2`; a minor floor only when the
+    code uses an API added in that minor;
+  - **a dependency that ships a major every few months** (cryptography): a
+    floor at what the code needs, proved by the `floors` job, and no ceiling,
+    with the reason in a comment beside it.
+  - "Update to the latest" moves the range to the latest *series*; it does not
+    pin the latest patch. The `floors` job of the reference `test.yml`
+    installs every declared dependency AT its floor.
+- **README badges**: copy the row from
+  `$PYTHON_OVERLAY_ROOT/standards/base/DOCS.md`; do not compose one. PyPI
+  badges 404 until first publish, which is fine.
 
 ## Testing and Development
 
-- **Version policy**: develop and run on the **latest** stable Python (currently 3.14),
-  and also test the **floor** the package declares in `requires-python` (currently 3.9)
-  — that catches version-specific breakage (e.g. APIs added after the floor). Keep one
-  venv per version you test against, named per the scheme below. CI runs the full matrix;
-  locally, at minimum smoke-test latest + floor.
-- **Project venvs live in `.pyvenv/<version>-<os>-<arch>/` at the project root**
-  (gitignored), one per interpreter, created with **`dotagents pyvenv [version]`**
-  (this overlay's own command) — never by hand, and never in `.venv/`. The tag
-  lets a 3.9 floor and 3.14 sit side by side (e.g. `.pyvenv/3.9.10-nt-arm64`,
-  `.pyvenv/3.14.7-posix-x86_64`). `-g` makes one in `~/.pyvenv/`, shared across
-  projects. Re-running it is safe: an existing venv is left as it is.
-  **Never** install to system/user Python unless explicitly told. A project that
-  already keeps its venvs elsewhere (its own `.venv/`, uv, poetry) records that in
-  its `.agents/AGENTS.md`; follow the record, and do not move them.
-- **Agents' venvs are not project venvs.** `.agents/.pyvenv/` (inside any store)
-  holds the venvs dotagents builds for agents: skills, overlay helpers and setup
-  scripts run there (`$AGENTS_PYTHON`). Never create one, install into one or test
-  a project in one.
-- **How `dotagents pyvenv` names a venv.** `<os>`
-  is `nt`/`posix`/`darwin`, `<arch>` is what the chosen interpreter was **built**
-  for (its `sysconfig.get_platform()` tail: `arm64`, `amd64`, `x86_64`; e.g.
-  `3.14.7-nt-arm64`) — never `platform.machine()`, which reports the host and so
-  files an emulated x64 CPython on an ARM64 box as native. Version and arch are
-  probed from the interpreter, not trusted from a filename, so the same
-  version+os+arch always names the same dir regardless of which install produced
-  it. **Native first**: among the installs that satisfy the spec, one built for
-  the machine's native architecture wins before the highest version does (an
-  ARM64 3.9.10 over an emulated x64 3.9.13); it warns when only an emulated one
-  fits. A venv's own interpreter is never a candidate.
-  - **Normal work**: no version argument — `dotagents pyvenv` resolves and
-    uses the **latest** Python installed on the machine. No version to track
-    or pass day to day.
-  - **Before a release, or after finishing a significant chunk of work**: also
-    create and test against the **floor** version from `requires-python` (see
-    Version policy above; currently 3.9) — `dotagents pyvenv 3.9` — and run the
-    test suite against it. This is what actually catches version-specific
-    breakage before it ships, not a per-commit ritual.
-  - Always invoke venv-scoped executables from the created dir (Windows
-    `.pyvenv\<tag>\Scripts\{python,pip,pytest}`, Unix `bin/`).
-- **Running one-off Python: `dotagents py`**. If you need to actually run
-  something (not just create the venv), use `dotagents py`. It never creates a
-  venv in a project: it runs the project's `.pyvenv/` venv for that version when
-  one exists, else the user one in `~/.pyvenv/` (created there when missing; same
-  logic/naming as `pyvenv` above, not a second lookup). Make a project venv
-  deliberately, with `dotagents pyvenv [version]`. It passes everything after
-  `--` straight through to that
-  interpreter, with real stdin/stdout/stderr (not captured) and the real exit
-  code, so interactive input and streamed output both work as if you'd
-  invoked python directly:
+- **Version policy**: develop on the **latest** stable Python (3.14) and also
+  test the **floor** in `requires-python` (3.9). CI runs the full matrix;
+  locally, test latest by default and the floor before a release or after a
+  significant chunk of work (`dotagents py 3.9 -- -m pytest -q`).
+- **Project venvs live in `<project>/.pyvenv/<version>-<os>-<arch>/`**
+  (gitignored), one per interpreter, created with **`dotagents pyvenv
+  [version]`**, never by hand and never in `.venv/`. No version means the
+  latest Python on the machine. Re-running it leaves an existing venv as it
+  is. `-g` makes one in `~/.pyvenv/` instead. **Never** install into the
+  system or user Python unless told to. A project that keeps its venvs
+  elsewhere (its own `.venv/`, uv, poetry) records that in its
+  `.agents/AGENTS.md`; follow the record and do not move them.
+- **Agents' venvs are not project venvs.** `.agents/.pyvenv/` holds the venvs
+  dotagents builds for skills, overlay helpers and setup scripts
+  (`$AGENTS_PYTHON`). Never create one, install into one or test a project in
+  one.
+- **How a venv is named**: `<os>` is `nt`/`posix`/`darwin`; `<arch>` is what
+  the interpreter was **built** for (the tail of its
+  `sysconfig.get_platform()`: `arm64`, `amd64`, `x86_64`), never
+  `platform.machine()`, which reports the host and so files an emulated x64
+  CPython on an ARM64 box as native. Both are probed from the interpreter.
+  **Native first**: among installs that satisfy the spec, one built for the
+  machine's architecture wins before a higher version (an ARM64 3.9.10 over an
+  emulated x64 3.9.13), with a warning when only an emulated one fits.
+- **Running Python: `dotagents py [version] -- <args>`**. It runs the
+  project's `.pyvenv/` venv for that version when one exists, else the user
+  one in `~/.pyvenv/` (created when missing); it never creates a project venv.
+  Everything after `--` goes to the interpreter, with the real stdio and exit
+  code. Use it instead of locating `.pyvenv/<tag>/.../python` by hand; where a
+  venv's own executables are needed, they are under `Scripts\` (Windows) or
+  `bin/`.
   ```
   dotagents py -- -c "print(1)"       # latest Python on the machine
-  dotagents py 3.9 -- -m pytest -q    # the floor version, explicitly
+  dotagents py 3.9 -- -m pytest -q    # the floor
   ```
-  This is the one command for both finding/creating a shared interpreter AND
-  using it — do not separately locate `.pyvenv/<tag>/.../python.exe` by hand
-  when `dotagents py` already resolves and runs it in one step.
-- **Interpreter management**: use the **Python Manager** (`py install <ver>`;
-  `py -0p` lists installs with real paths) to add/select versions — the `py`
-  launcher then resolves them, and `dotagents pyvenv`/`dotagents py` discover
-  them the same way. **Avoid Microsoft Store Python**: its app-execution alias
-  sandboxes the filesystem and `pip install` silently hangs / no-ops (exits 0
-  having installed nothing, no output past pip's startup line). A
-  pymanager/python.org build under a real path (`py -0p` shows one) does not
-  have this problem.
-- **Install**: `.pyvenv/<tag>/<Scripts|bin>/python -m pip install -e ".[dev,<extras-with-tests>]"`
-  — include every extra that has tests depending
-  on it, or those tests silently skip instead of running.
+- **Interpreters**: add them with the Python Manager (`py install <ver>`;
+  `py -0p` lists installs with their paths); `dotagents pyvenv` and
+  `dotagents py` find them the same way. **Avoid Microsoft Store Python**: its
+  app-execution alias sandboxes the filesystem, and `pip install` exits 0
+  having installed nothing.
+- **Install**: `python -m pip install -e ".[dev,<extras-with-tests>]"` in the
+  project venv. Include every extra that has tests, or those tests silently
+  skip.
 - **Test config**: `pythonpath = ["src"]` + `testpaths` under
   `[tool.pytest.ini_options]` (in the template).
 - **Optional-extra tests guard their imports**: the module starts with
-  `pytest.importorskip("<sdk_module>")` before importing the code under test — a bare
-  top-level import of a missing extra breaks *collection for the whole suite*. Verify
-  with `pytest -rs` so skips are visible; "0 failures" with targeted tests skipped is
-  not verification.
-- **Formatting**: **black**, on by default. Add `black` to the `dev` extra and pin
-  `[tool.black] target-version = ["py<floor>"]` in `pyproject.toml` to the project's
-  *minimum* supported Python, so it never emits syntax the floor cannot parse.
-  Format with `<venv>/black src/ tests/`; `--check` is the CI/verify form. Run it
-  before committing, and re-run tests after — black is safe but a reformat of a file
-  mid-edit can expose a genuine mistake (e.g. a missing blank line masking a lost
-  function boundary).
-- **Linting/type-checking**: none by default (no per-push CI, no ruff/mypy) — only if
-  the project deliberately opts in. (Formatting is the exception: black is standard.)
+  `pytest.importorskip("<sdk_module>")`; a bare import of a missing extra
+  breaks *collection for the whole suite*. Verify with `pytest -rs`: "0
+  failures" with targeted tests skipped is not verification.
+- **Formatting**: **black**, in the `dev` extra, with `[tool.black]
+  target-version = ["py<floor>"]` so it never emits syntax the floor cannot
+  parse. Format with `black src/ tests/` before committing, then re-run the
+  tests. `black --check` is the verify form, run on the newest interpreter
+  only: `target-version` already keeps the output parseable by the floor.
+- **Linting and type-checking**: none by default (no ruff/mypy/pyright) unless
+  the project opts in.
 - **`.gitignore` language block** (source for the template placeholder):
-  `__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.hypothesis/`, `.mypy_cache/`,
-  `.ruff_cache/`, `.coverage*`, `htmlcov/`, `*.egg-info/`, `.pyvenv/` (project-scope
-  `dotagents pyvenv` output; `-g` ones land outside the repo), `.venv/` (other
-  tools' default).
-  Include the **whole** list even when a tool is not in use yet: these dirs
-  appear the first time anyone runs mypy/ruff/hypothesis, which is exactly when
-  a hand-written `.gitignore` turns out to be missing them. A global
-  `core.excludesFile` (`~/.config/git/ignore`) backstops a developer machine, but it
-  does not travel with the repo — so the repo block still has to be complete.
+  `__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.hypothesis/`,
+  `.mypy_cache/`, `.ruff_cache/`, `.coverage*`, `htmlcov/`, `*.egg-info/`,
+  `.pyvenv/`, `.venv/`. Include the **whole** list even for tools not in use
+  yet: the dirs appear the first time anyone runs one, and a global
+  `core.excludesFile` does not travel with the repo.
 
 ## CI/CD: Implementing the Three-Workflow Split
 
-Templates: `$PYTHON_OVERLAY_ROOT/references/workflows/python/{test,release,docs}.yml` — test,
-release, and docs are three separate workflows; docs deploys on its own so a
-release is never the first exercise of the docs build, and the site can be
-redeployed without cutting a release).
-- test + release both install `pip install -e ".[dev,<extras-with-tests>]"` and run
-  `pytest -q`.
-- `release.yml` gates the build on the same `floors` job `test.yml` runs, and the
-  GitHub release on `wheel-smoke`: the built wheel installed into a clean venv on
-  the oldest and newest Python, imported, and checked for `py.typed` and the
-  shipped `AGENTS.md`.
-- `release.yml` keeps a `docs-gate` job that runs `mkdocs build --strict` but does
-  **not** deploy — verify locally first (`pip install -e ".[docs]"`). Only `docs.yml`
-  deploys to Pages: on a push to `main` touching docs sources (latest between
-  releases) and on `workflow_dispatch`, which the release workflow's last job fires at
-  its tag for a final release (a release made with `GITHUB_TOKEN` starts no workflow,
-  so `release: published` would never fire).
-- `publish-pypi` sets `skip-existing: true` so a re-run of a partial release skips
-  files already uploaded (PyPI never replaces a version) instead of hard-failing.
-- PyPI publish uses Trusted Publishing (OIDC, `id-token: write`), never a stored token.
-- **GitHub Pages preconditions** (one-time, owner-only on the real repo; confirm
-  before assuming `docs.yml`/`publish-pypi` will work):
-  - PyPI Trusted-Publishing must be registered for the project + workflow.
-  - Pages must be set to **Source: GitHub Actions**, not a branch. Check + set via:
-    - `gh api repos/<gh_org>/<project_name>/pages` — 404 means Pages is off; the JSON
-      `build_type` must read `workflow` (a `legacy`/branch source ignores the Actions
-      artifact and the deploy silently no-ops).
-    - `gh api -X POST repos/<gh_org>/<project_name>/pages -f build_type=workflow` to
-      enable it with the Actions source (use `-X PUT` to switch an existing
-      branch-source Pages over to `workflow`).
-  - The `github-pages` environment may carry branch/tag protection rules that block a
-    deploy from a tag ref — check the deploy job's logs if it's skipped, not failed.
-- **Debugging a green-but-wrong run**: a job can exit 0 while emitting check-run
-  **annotations** (warnings that never fail the step) — `mkdocs --strict` nav warnings,
-  `setup-python` cache misses. They don't show in the step's tail; read them with
-  `gh api repos/<gh_org>/<project_name>/check-runs/<id>/annotations` (get `<id>` from
-  `gh run view <run-id> --json jobs`).
+Templates: `$PYTHON_OVERLAY_ROOT/references/workflows/python/{test,release,docs}.yml`
+(REPO.md's three-workflow split).
+
+- **`test.yml` is every check the release gate runs**: the test matrix, the
+  `floors` job, `build` (sdist + wheel, `twine check`, the `dist` artifact)
+  and `wheel-smoke` (the built wheel installed into a clean venv on the oldest
+  and newest Python, imported, and checked for `py.typed` and the shipped
+  `AGENTS.md`). It runs on `workflow_dispatch` (with a `ref`), a pushed `ci-*`
+  tag or `ci-*` branch, and `workflow_call`.
+- **`release.yml` calls `test.yml`** (`uses: ./.github/workflows/test.yml`), so
+  the release runs the same steps a `ci-*` run does and publishes the `dist`
+  that run built. It then checks that the tag names the built version, runs a
+  `docs-gate` (`mkdocs build --strict`, no deploy; verify locally first with
+  `pip install -e ".[docs]"`), creates the GitHub release, and for a final tag
+  publishes to PyPI and dispatches `docs.yml` at the tag.
+- **Only `docs.yml` deploys Pages**: on a push to `main` touching docs sources,
+  and on `workflow_dispatch`, which the release fires (a release made with
+  `GITHUB_TOKEN` starts no workflow, so `release: published` never fires).
+- `publish-pypi` uses Trusted Publishing (OIDC, `id-token: write`), never a
+  stored token, and `skip-existing: true` so a re-run of a partial release
+  skips files already uploaded.
+- **One-time owner setup** (confirm before relying on `docs.yml` or
+  `publish-pypi`):
+  - PyPI Trusted Publishing registered for the project and `release.yml`.
+  - Pages source is GitHub Actions: `gh api repos/<gh_org>/<project_name>/pages`
+    must show `"build_type": "workflow"` (404 means Pages is off; a branch
+    source silently ignores the deploy). Set it with
+    `gh api -X POST repos/<gh_org>/<project_name>/pages -f build_type=workflow`
+    (`-X PUT` to switch an existing branch source). The other settings are in
+    REPO.md.
+  - A deploy job that is skipped, not failed, is usually the `github-pages`
+    environment's protection rules: read its log.
+- **A green run can still be wrong**: a job exits 0 while emitting check-run
+  annotations (`mkdocs --strict` nav warnings, `setup-python` cache misses)
+  that do not show in the step's tail. Read them with
+  `gh api repos/<gh_org>/<project_name>/check-runs/<id>/annotations` (`<id>`
+  from `gh run view <run-id> --json jobs`).
 
 ## Releases and Versioning
 
-- **PEP 440 vs SemVer**: `pyproject.toml` `version` must be PEP 440 (`1.0.0rc1`, no
-  hyphen — hatchling/pip reject SemVer pre-release syntax); git tags and
-  `CHANGELOG.md` keep SemVer (`v1.0.0-rc.1`). Same release, two syntaxes — never
-  "fix" one to match the other.
+- **PEP 440 vs SemVer**: `pyproject.toml` `version` is PEP 440 (`1.0.0rc1`;
+  hatchling and pip reject SemVer pre-release syntax); git tags and
+  `CHANGELOG.md` keep SemVer (`v1.0.0-rc.1`). Never "fix" one to match the
+  other.
 - Bump `version` in the same commit as the changelog entry.
-- **Pre-1.0, additive API is a PATCH, not a minor** — the minor slot is reserved
-  for breaking the *documented* API (see `flows/REPO.md` "Versioning"). Worth
-  repeating here because a Keep-a-Changelog `### Added` section reads like a
-  minor and is not one: three new public methods under "Added", with no "Fixed"
-  and no removals, is still `0.9.0` → `0.9.1`. Consumers pin `~=0.9.0` precisely
-  so additions arrive without a re-read.
-- **Release-prep checklist** (assert before tagging, not after):
-  - `src/<package_name>/py.typed` **exists** (a typed package MUST ship it — an
-    absent marker means consumers get no types from the wheel) AND the
-    `"Typing :: Typed"` classifier is present in `pyproject.toml`. Verify the marker
-    reaches the wheel: `python -m build` then `unzip -l dist/*.whl | grep py.typed`.
-  - `license`/`license-files` (PEP 639) set; no legacy `License ::` classifier
-    alongside them.
+- The bump follows REPO.md "Versioning": pre-1.0, additive API is a PATCH, so
+  a changelog with only an `### Added` section is still `0.9.0` → `0.9.1`.
+- **Before tagging**, assert:
+  - `src/<package_name>/py.typed` exists, the `"Typing :: Typed"` classifier
+    is in `pyproject.toml`, and the marker reaches the wheel
+    (`python -m build`, then `unzip -l dist/*.whl | grep py.typed`);
+  - `license`/`license-files` (PEP 639) are set, with no legacy `License ::`
+    classifier beside them.
 
 ## Documentation Site
 
 - MkDocs + Material + `mkdocstrings[python]`; literal config:
-  `$PYTHON_OVERLAY_ROOT/references/mkdocs.yml`. Plain-prose docstrings render fine —
-  mkdocstrings just won't build per-parameter tables without `:param:` sections.
-- `docs/changelog.md` may snippet-embed `CHANGELOG.md` (`pymdownx.snippets`) since its
-  only links are absolute URLs — safe where a verbatim README embed isn't (REPO.md).
+  `$PYTHON_OVERLAY_ROOT/references/mkdocs.yml`. Plain-prose docstrings render;
+  per-parameter tables need `:param:` sections.
+- `docs/changelog.md` may snippet-embed `CHANGELOG.md` (`pymdownx.snippets`):
+  its links are absolute, unlike a README embed (REPO.md).
 
 ## Known Difficulties (symptom → fix)
 
 - Windows venv `WinError 145` / corrupted package (missing submodules, missing
   Material theme files) → venv pip `install --force-reinstall <package>`.
-- MkDocs strict-nav errors on repo-level markdown when snippets `base_path: ["."]` →
-  set `docs_dir: docs` (the template does).
+- MkDocs strict-nav errors on repo-level markdown when snippets
+  `base_path: ["."]` → set `docs_dir: docs` (the template does).
 - Windows/PowerShell venv console script resolving outside the venv →
-  `.\.pyvenv\<tag>\Scripts\python.exe -m <module>` instead of the direct script.
+  `.pyvenv\<tag>\Scripts\python.exe -m <module>` instead of the script.
+- pyright reports nothing for a file under a dot-directory (it skips them) →
+  type-check a probe outside `.agents/`.

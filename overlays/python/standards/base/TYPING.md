@@ -1,8 +1,8 @@
 # Standard: type annotations
 
-Base standard: applies to every library that ships `py.typed`. Index:
+Base standard: every library that ships `py.typed`. Index:
 [README.md](../README.md). Whether a project runs a type checker is its own
-decision, per `../../kb/PYTHON.md`; these rules hold either way, and the last
+decision (`../../kb/PYTHON.md`); these rules hold either way, and the last
 section applies once it does.
 
 ## The public API is annotated

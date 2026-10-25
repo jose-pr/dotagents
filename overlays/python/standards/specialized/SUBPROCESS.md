@@ -1,7 +1,7 @@
 # Standard: wrapping an external command
 
-Specialized standard: applies to a library that runs another program and
-uses its result. Adds to the base standards; index: [README.md](../README.md).
+Specialized standard: a library that runs another program and uses its
+result. Index: [README.md](../README.md).
 
 ## Starting it
 
@@ -40,6 +40,14 @@ uses its result. Adds to the base standards; index: [README.md](../README.md).
   the payload: decrypted data, credentials, file contents.
 - State which versions of the program are supported; probe the version where
   behaviour differs.
+
+## Best-effort probes
+
+A run whose failure is itself an answer (reading OS configuration through a
+system tool) may treat a missing program, a non-zero exit or a timeout as
+"not available". It logs that at debug with the program and the status, and
+its docstring says it is best-effort. The timeout, no-shell and stdin rules
+still apply.
 
 ## Structure
 

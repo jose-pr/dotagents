@@ -1,9 +1,9 @@
 # Standard: README and AGENTS.md format
 
-Base standard. Every library's `README.md` and `AGENTS.md` files have the
-same shape, so a reader who knows one knows where to look in the next. Index:
+Base standard: every library's `README.md` and `AGENTS.md` have one shape,
+so a reader who knows one knows where to look in the next. Index:
 [README.md](../README.md). Which `AGENTS.md` is which, and what ships, is in
-`$ENGINEERING_OVERLAY_ROOT/flows/REPO.md`; this file fixes their format.
+`$ENGINEERING_OVERLAY_ROOT/flows/REPO.md`.
 
 ## `README.md`
 
@@ -21,12 +21,6 @@ five badges, in this order, with this alt text, one per line.
 [![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://<gh_org>.github.io/<repo>/)
 [![CI](https://img.shields.io/github/actions/workflow/status/<gh_org>/<repo>/test.yml)](https://github.com/<gh_org>/<repo>/actions/workflows/test.yml)
 ```
-
-1. Version
-2. Python versions
-3. License
-4. Docs
-5. CI
 
 - No badge is added, dropped or reordered. A repository with no license yet
   omits the License badge and the License section, and adds both when one is

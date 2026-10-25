@@ -1,9 +1,9 @@
 # Standard: clients of a remote service
 
-Specialized standard: applies to a library that calls a service over a
-network — an HTTP or WebSocket API, SSH, a directory, a cloud store. Adds to
-the base standards; index: [README.md](../README.md). A library that
-implements the wire protocol itself follows [PROTOCOL.md](PROTOCOL.md).
+Specialized standard: a library that calls a service over a network — an
+HTTP or WebSocket API, SSH, a directory, a cloud store. Index:
+[README.md](../README.md). A library that implements the wire protocol
+itself follows [PROTOCOL.md](PROTOCOL.md).
 
 ## Time
 

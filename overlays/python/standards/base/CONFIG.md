@@ -1,19 +1,14 @@
 # Standard: settings and environment variables
 
-Base standard: applies to anything a library or tool reads to decide how to
-behave. Index: [README.md](../README.md).
+Base standard: anything a library or tool reads to decide how to behave.
+Index: [README.md](../README.md).
 
 ## Precedence
 
-One order, everywhere:
-
-1. an explicit argument;
-2. an environment variable;
-3. a configuration file;
-4. the built-in default.
-
-A higher source overrides a lower one for that setting only. The shipped
-header states the order once.
+One order, everywhere: an explicit argument, then an environment variable,
+then a configuration file, then the built-in default. A higher source
+overrides a lower one for that setting only. The shipped header states the
+order once.
 
 ## Environment variables
 
@@ -47,15 +42,22 @@ header states the order once.
 
 ## Configuration files
 
-- **Found by the platform's convention**: `$XDG_CONFIG_HOME` (else
-  `~/.config`) on POSIX, `%APPDATA%` on Windows, overridable by an argument
-  and by `<PKG>_CONFIG`.
+- **Found by the platform's convention**:
+
+  | Tool | POSIX | Windows |
+  | --- | --- | --- |
+  | per-user | `$XDG_CONFIG_HOME` (else `~/.config`) | `%APPDATA%` |
+  | host-wide service | `/etc` | `%PROGRAMDATA%` |
+
+  A tool that is both reads the system file, then the user file. Either is
+  overridden by an argument and by `<PKG>_CONFIG`.
+- **Read through `anycfg`** ([DEPENDENCIES.md](DEPENDENCIES.md)).
 - **A missing file is not an error; a malformed one is**, reported with the
   path and position, never ignored.
 - **Unknown keys are an error**, or a warning naming the key. A misspelled
   setting must not look like it worked.
-- Reading follows the loaders standard: explicit encoding, no code execution,
-  nothing reached outside the file unless asked.
+- Reading follows [the loaders standard](../specialized/LOADERS.md): explicit
+  encoding, no code execution, nothing reached outside the file unless asked.
 
 ## Tests
 

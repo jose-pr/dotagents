@@ -1,8 +1,8 @@
 # Standard: conversions
 
 Base standard: one vocabulary for turning a value into and out of text, bytes
-and other types. Index: [README.md](../README.md). Value types themselves are
-in [VALUES.md](VALUES.md).
+and other types. Index: [README.md](../README.md). Value types are in
+[VALUES.md](VALUES.md).
 
 ## One name per direction
 
