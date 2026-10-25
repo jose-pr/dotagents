@@ -30,9 +30,11 @@ a file converted to LF is rewritten as CRLF.
 
 1. **Commit.** A worktree starts from a commit; uncommitted work is invisible to it.
 2. **Record the base**: `git rev-parse --short HEAD`.
-3. **Make sure the repository exists.** Worktree isolation is resolved when the
-   agents are launched; a repository created earlier in the same run is not there
-   yet.
+3. **Make sure the repository exists, and launch from it.** Worktree isolation is
+   resolved when the agents are launched, from the session's current directory: a
+   repository created earlier in the same run is not there yet, and a cwd inside
+   `<project>/.agents` (itself a checkout of the agents repo) isolates the agents
+   in that repo, not the project. `cd` to the project's root first.
 4. **Put the base in every brief**, with a landmark the agent can check: "Your base
    is `<sha>`. Run `git log --oneline -3` first. If the tree does not contain
    `<a file or commit from this session>`, stop and say so."
