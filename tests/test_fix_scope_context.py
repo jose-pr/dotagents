@@ -97,6 +97,33 @@ def test_a_store_that_appears_twice_is_walked_once(tmp_path):
 # scope-context-03: a pin the cwd has left is reported by the writing commands
 # --------------------------------------------------------------------------
 
+def test_a_cwd_inside_a_project_store_means_that_project(tmp_path, monkeypatch):
+    """`dotagents findings index` run from `<project>/.agents/findings` wrote a
+    second `.agents` inside the store; the project is the one holding it."""
+    project = tmp_path / "proj"
+    (project / ".agents" / "findings").mkdir(parents=True)
+    monkeypatch.chdir(project / ".agents" / "findings")
+    assert _scope.resolve_scope(False).agents_root == project / ".agents"
+    # Pinned elsewhere, the same.
+    monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(tmp_path / "other"))
+    assert _scope.resolve_scope(False).agents_root == project / ".agents"
+
+
+def test_a_cwd_deep_in_the_user_store_is_refused(tmp_path, monkeypatch):
+    """Reached through a linked store's target, the cwd names no project; it is
+    refused rather than written into the store as `.agents/.agents`."""
+    store = tmp_path / "home" / ".agents"
+    monkeypatch.setenv("AGENTS_HOME", str(store))
+    deep = store / "projects" / "app" / "findings"
+    deep.mkdir(parents=True)
+    monkeypatch.chdir(deep)
+    with pytest.raises(SystemExit, match="inside the agents store"):
+        _scope.resolve_scope(False)
+    # A top-level directory of the store is the store itself: the user scope.
+    monkeypatch.chdir(store / "projects")
+    assert _scope.resolve_scope(False).agents_root == store
+
+
 def test_writing_outside_the_pinned_root_warns(tmp_path, monkeypatch, caplog):
     proj_a, proj_b = tmp_path / "projA", tmp_path / "projB"
     (proj_a / "sub").mkdir(parents=True)

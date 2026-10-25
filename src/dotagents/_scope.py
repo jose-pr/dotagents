@@ -505,6 +505,27 @@ def _project_containing(start: Path) -> Path:
     return start
 
 
+def _outside_store(cwd: Path) -> Path:
+    """``cwd``, or -- when it lies inside a ``.agents`` directory -- the project
+    that ``.agents`` belongs to (the parent of the outermost one): a command run
+    from ``<project>/.agents/findings`` means that project, never a second
+    ``.agents`` inside its store. Deeper than a top-level directory of the user
+    store (a linked project store reached through its target) there is no
+    project to name, so that is refused rather than written into the store."""
+    parts = cwd.parts
+    if ".agents" not in parts:
+        return cwd
+    index = parts.index(".agents")
+    root = Path(*parts[:index]) if index else cwd
+    store = resolve_user_store()
+    if _same_path(root / ".agents", store) and len(parts) > index + 2:
+        raise SystemExit(
+            "error: %s is inside the agents store %s, not a project; run from the "
+            "project's root (or pass --dir / --agents-dir)" % (cwd, store)
+        )
+    return root
+
+
 def install_project_root() -> Path:
     """The project root the WRITING commands (``init``, ``overlays``,
     ``findings``) target when none is passed explicitly.
@@ -519,8 +540,10 @@ def install_project_root() -> Path:
 
     ``env`` / ``context`` keep :func:`project_root_default`, where the pin wins
     regardless of the cwd: what they read must stay stable across the
-    subdirectories a session's commands run in."""
-    cwd = Path.cwd()
+    subdirectories a session's commands run in.
+
+    A cwd inside a ``.agents`` counts as its project's root (:func:`_outside_store`)."""
+    cwd = _outside_store(Path.cwd())
     for var in ("AGENTS_PROJECT_ROOT", *_HARNESS_PROJECT_ROOT_VARS):
         value = os.environ.get(var)
         if not value:
