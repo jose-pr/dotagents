@@ -49,6 +49,16 @@ from typing import Optional
 DEFAULT_STORE_SUBDIR = "projects"
 
 
+def default_agents_dir() -> Path:
+    """The user store, read at call time: ``$AGENTS_HOME``, else ``~/.agents``
+    (dotagents' own rule when dotagents is importable)."""
+    try:
+        from dotagents._scope import resolve_user_store
+    except ImportError:  # the lib imported outside a dotagents process
+        return Path(os.environ.get("AGENTS_HOME") or Path.home() / ".agents")
+    return Path(resolve_user_store(None))
+
+
 def store_root(agents_dir: Path, store_dir: "str | os.PathLike | None" = None) -> Path:
     """Directory holding the per-project stores.
 
@@ -189,9 +199,16 @@ def link_project(
     force: bool = False,
     dry_run: bool = False,
     logger=None,
+    store_repo: Optional[str] = None,
+    store_branch: Optional[str] = None,
 ) -> str:
     """Link ``<project>/.agents`` to its store (default ``<agents_dir>/projects/<name>``;
     see ``store_root`` -- the layout is a convention, overridable with ``store_dir``).
+
+    ``store_repo`` / ``store_branch`` put the store on a branch of another
+    repository instead (see :func:`link_store_repo`), and are recorded so a later
+    link of the same project, on any machine, does the same; with neither given,
+    a recorded choice is used.
 
     Default is a symlink; ``--copy`` (or a symlink failure, e.g. Windows without
     privilege) mirrors the store into the project as a real directory instead.
@@ -208,6 +225,16 @@ def link_project(
         raise SystemExit("error: project path is not a directory: %s" % project_dir)
 
     name = resolve_name(project_dir, name)
+    explicit = store_repo is not None or store_branch is not None
+    if explicit and copy:
+        raise SystemExit("error: --copy mirrors a store directory; it cannot take "
+                         "--store-repo or --store-branch")
+    record = None if explicit or copy else store_record(agents_dir, name)
+    if explicit or record is not None:
+        repo = store_repo if explicit else record["repo"]
+        branch = store_branch if explicit else record["branch"]
+        return link_store_repo(project_dir, agents_dir, name, repo or "", branch or "",
+                               force=force, dry_run=dry_run, record=explicit, log=log)
     if not copy and branch_layout(agents_dir, name, store_dir):
         return _link_branch(project_dir, agents_dir, name, force=force,
                             dry_run=dry_run, log=log)
@@ -423,7 +450,8 @@ def _move_into(src: Path, dst: Path) -> None:
 
 def _link_branch(project_dir: Path, agents_dir: Path, name: str, *, force: bool,
                  dry_run: bool, log) -> str:
-    """Make ``<project>/.agents`` a worktree of the agents repo on branch ``name``.
+    """Make ``<project>/.agents`` a worktree of the git repo ``agents_dir`` (the
+    agents repo, or the repo ``--store-repo`` names) on branch ``name``.
 
     The branch is the local one, else ``origin/<name>`` (tracked), else a new
     orphan branch seeded with ignore rules. A real ``.agents`` is adopted: its
@@ -456,13 +484,19 @@ def _link_branch(project_dir: Path, agents_dir: Path, name: str, *, force: bool,
         log("[dry-run] would check out branch %s at %s/.agents", name, project_dir.name)
         return name
 
-    # Move what is there aside; its files come back on top of the branch.
+    # Move what is there aside; its files come back on top of the branch. A git
+    # checkout is someone else's repository: it is backed up whole, .git and
+    # all, and never adopted or deleted.
     carried = None
     if os.path.islink(str(target)):
         carried = Path(os.path.realpath(str(target)))
         os.rmdir(str(target)) if os.name == "nt" else os.unlink(str(target))
         log("replaced symlink %s/.agents (its store's files are carried over)",
             project_dir.name)
+    elif target.exists() and (target / ".git").exists():
+        backup = _next_backup(project_dir)
+        shutil.move(str(target), str(backup))
+        log("force: backed up git checkout %s/.agents -> %s", project_dir.name, backup.name)
     elif target.exists():
         carried = _next_backup(project_dir)
         shutil.move(str(target), str(carried))
@@ -495,6 +529,208 @@ def _link_branch(project_dir: Path, agents_dir: Path, name: str, *, force: bool,
         log("committed the adopted files on %s", name)
     _warn_gitignore(project_dir, log)
     return name
+
+
+# --------------------------------------------------------------------------- #
+# A store on another repository: the project's own (``self``), another local
+# git repo, or a URL (a team account's repo). Recorded per project in the
+# agents repo, so every machine links the project the same way.
+# --------------------------------------------------------------------------- #
+
+#: ``--store-repo self``: a branch of the project's own repository.
+SELF_REPO = "self"
+#: The branch a ``self`` store uses unless ``--store-branch`` names another.
+SELF_BRANCH = "agents"
+#: Where the choice is recorded, under the agents dir (synced on its main branch).
+RECORD_PATH = ("dotagents", "projects.toml")
+
+
+def _record_file(agents_dir: Path) -> Path:
+    return Path(agents_dir).joinpath(*RECORD_PATH)
+
+
+def _read_records(agents_dir: Path) -> dict:
+    path = _record_file(agents_dir)
+    if not path.is_file():
+        return {}
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:  # Python < 3.11: dotagents itself depends on tomli there
+        import tomli as tomllib  # type: ignore[no-redef]
+    with open(path, "rb") as handle:
+        data = tomllib.load(handle)
+    stores = data.get("stores")
+    return stores if isinstance(stores, dict) else {}
+
+
+def store_record(agents_dir: Path, name: str) -> "dict | None":
+    """``{"repo": ..., "branch": ...}`` recorded for project ``name``, or None.
+    An empty ``repo`` means the agents repo itself."""
+    entry = _read_records(agents_dir).get(name)
+    if not isinstance(entry, dict):
+        return None
+    return {"repo": str(entry.get("repo") or ""), "branch": str(entry.get("branch") or "")}
+
+
+def write_store_record(agents_dir: Path, name: str, repo: str, branch: str) -> Path:
+    """Record (or replace) where project ``name``'s store lives."""
+    import json
+
+    records = _read_records(agents_dir)
+    records[name] = {"repo": repo, "branch": branch}
+    lines = [
+        "# Where each project's .agents store lives, written by",
+        "# `dotagents link-project --store-repo/--store-branch`. `repo` is \"self\"",
+        "# (the project's own repository), a git URL, or empty for this repository;",
+        "# `branch` is the store's branch there.",
+        "",
+    ]
+    for key in sorted(records):
+        entry = records[key]
+        lines += ["[stores.%s]" % json.dumps(key),
+                  "repo = %s" % json.dumps(str(entry.get("repo") or "")),
+                  "branch = %s" % json.dumps(str(entry.get("branch") or "")), ""]
+    path = _record_file(agents_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(lines))
+    return path
+
+
+def _default_branch(repo: str, name: str) -> str:
+    return SELF_BRANCH if repo == SELF_REPO else name
+
+
+def _repo_dir(project_dir: Path, repo: str) -> "Path | None":
+    """The local git repo ``repo`` names (``self``: the project's own), or None
+    when ``repo`` is a URL to clone."""
+    if repo == SELF_REPO:
+        top = _gitout(project_dir, "rev-parse", "--show-toplevel")
+        if top.returncode:
+            raise SystemExit("error: --store-repo self needs %s to be a git repository"
+                             % project_dir)
+        return Path(top.stdout.strip())
+    local = Path(repo).expanduser()
+    if local.is_dir() and (local / ".git").exists():
+        return local.resolve()
+    return None
+
+
+def _origin_url(target: Path) -> "str | None":
+    res = _gitout(target, "remote", "get-url", "origin")
+    return res.stdout.strip() if res.returncode == 0 else None
+
+
+def _same_url(a: str, b: str) -> bool:
+    def norm(url: str) -> str:
+        url = url.strip().rstrip("/")
+        return url[:-4] if url.endswith(".git") else url
+    return norm(a) == norm(b)
+
+
+def _link_clone(project_dir: Path, url: str, branch: str, *, force: bool,
+                dry_run: bool, log) -> None:
+    """Make ``<project>/.agents`` a clone of ``url`` on ``branch`` (tracking
+    ``origin/<branch>`` when it exists, else a new orphan branch). A real
+    ``.agents`` is adopted onto it; a git checkout of anything else is backed
+    up whole with ``--force``, never adopted."""
+    target = project_dir / ".agents"
+    is_link = os.path.islink(str(target))
+    if not is_link and target.is_dir() and (target / ".git").exists():
+        head = _gitout(target, "symbolic-ref", "--short", "-q", "HEAD").stdout.strip()
+        origin = _origin_url(target)
+        if origin and _same_url(origin, url) and head == branch:
+            log("linked (already): %s/.agents is %s on %s", project_dir.name, url, branch)
+            return
+        if not force:
+            log("skip: %s/.agents is a checkout of %s; re-run with --force to back it up "
+                "and clone the store", project_dir.name, origin or "another repo")
+            return
+    if not is_link and target.is_dir():
+        n_tracked = _tracked_agents_files(project_dir)
+        if n_tracked:
+            raise SystemExit(
+                "error: %s/.agents has %d file(s) tracked by this repo; linking "
+                "would delete them from it -- do not link it." % (project_dir.name, n_tracked))
+    if dry_run:
+        log("[dry-run] would clone %s (branch %s) at %s/.agents", url, branch, project_dir.name)
+        return
+
+    carried = None
+    if is_link:
+        carried = Path(os.path.realpath(str(target)))
+        os.rmdir(str(target)) if os.name == "nt" else os.unlink(str(target))
+        log("replaced symlink %s/.agents (its store's files are carried over)", project_dir.name)
+    elif target.exists() and (target / ".git").exists():
+        backup = _next_backup(project_dir)
+        shutil.move(str(target), str(backup))
+        log("force: backed up git checkout %s/.agents -> %s", project_dir.name, backup.name)
+    elif target.exists():
+        carried = _next_backup(project_dir)
+        shutil.move(str(target), str(carried))
+        log("adopting %s/.agents (moved aside to %s)", project_dir.name, carried.name)
+
+    res = subprocess.run(["git", "clone", "--quiet", url, str(target)],
+                         capture_output=True, text=True, check=False)
+    if res.returncode:
+        if carried is not None and carried.parent == project_dir:
+            shutil.move(str(carried), str(target))  # put the old copy back
+        raise SystemExit("error: git clone of %s failed: %s" % (url, res.stderr.strip()))
+    if _has_ref(target, "refs/remotes/origin/" + branch):
+        res = _gitout(target, "checkout", "-q", "-B", branch, "--track", "origin/" + branch)
+    else:
+        res = _gitout(target, "checkout", "-q", "--orphan", branch)
+        _gitout(target, "rm", "-rfq", ".")  # an orphan starts empty, not as main's copy
+    if res.returncode:
+        raise SystemExit("error: git checkout of %s failed: %s" % (branch, res.stderr.strip()))
+    log("cloned %s (branch %s) at %s/.agents", url, branch, project_dir.name)
+
+    gi = target / ".gitignore"
+    if not gi.exists():
+        with open(gi, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("\n".join(BRANCH_IGNORE) + "\n")
+    if carried is not None and carried.exists():
+        _move_into(carried, target)
+        if carried.parent == project_dir:
+            shutil.rmtree(str(carried), ignore_errors=True)
+    _gitout(target, "add", "-A")
+    if _gitout(target, "status", "--porcelain").stdout.strip():
+        _gitout(target, "commit", "-q", "-m", "chore: the project's .agents adopted onto %s" % branch)
+        log("committed the adopted files on %s", branch)
+
+
+def link_store_repo(project_dir: Path, agents_dir: Path, name: str, repo: str,
+                    branch: str, *, force: bool, dry_run: bool, record: bool, log) -> str:
+    """Link ``<project>/.agents`` to a store on ``repo`` (``""`` = the agents
+    repo, ``self``, a local git repo, or a URL), on ``branch``, and record the
+    choice in the agents repo when ``record``."""
+    branch = branch or _default_branch(repo, name)
+    if not repo:
+        _link_branch(project_dir, agents_dir, branch, force=force, dry_run=dry_run, log=log)
+    else:
+        local = _repo_dir(project_dir, repo)
+        if local is not None:
+            _link_branch(project_dir, local, branch, force=force, dry_run=dry_run, log=log)
+        else:
+            _link_clone(project_dir, repo, branch, force=force, dry_run=dry_run, log=log)
+            _warn_gitignore(project_dir, log)
+    if record and not dry_run:
+        path = write_store_record(agents_dir, name, repo, branch)
+        log("recorded: %s's store is %s, branch %s (%s)", name,
+            repo or "the agents repo", branch, path)
+    return name
+
+
+def _store_branch_target(project_dir: Path, agents_dir: Path, name: str) -> "str | None":
+    """The branch to sync when ``<project>/.agents`` is the store its record
+    names (a worktree or clone on the recorded branch), else None."""
+    record = store_record(agents_dir, name)
+    target = project_dir / ".agents"
+    if record is None or not (target / ".git").exists():
+        return None
+    head = _gitout(target, "symbolic-ref", "--short", "-q", "HEAD").stdout.strip()
+    wanted = record["branch"] or _default_branch(record["repo"], name)
+    return head if head and head == wanted else None
 
 
 def _sync_branch(target: Path, branch: str, message: str, *, pull: bool, push: bool,
@@ -791,7 +1027,9 @@ def sync_agents(
     if project_dir is not None:
         project_dir = Path(project_dir).expanduser().resolve()
         target = project_dir / ".agents"
-        project_branch = _worktree_branch(target, agents_dir)
+        project_branch = (_worktree_branch(target, agents_dir)
+                          or _store_branch_target(project_dir, agents_dir,
+                                                  resolve_name(project_dir, name)))
         if project_branch is not None:
             # Branch layout: the project's .agents is its own worktree; it is
             # committed and pushed on its branch below, after any hook.

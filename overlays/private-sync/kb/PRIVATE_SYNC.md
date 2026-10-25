@@ -35,6 +35,15 @@ queue). A new `projects/` tree holds each project's private `.agents` payload:
   `AGENTS_STORE_LAYOUT=branch` (`dir` forces the layout below).
 - **Directory layout:** stores under `projects/<name>` on `main`, linked as below.
 
+The branch need not live in `~/.agents`. `link-project --store-repo` puts it on
+another repository: `self` for a branch of the project's own repo (`agents` by
+default, so the project's remote carries its private state on a branch nobody
+merges), a local git repo, or any git URL, a team account's repo for instance
+(cloned into `<project>/.agents`). `--store-branch` names the branch (default:
+the project's name). The choice is recorded in `~/.agents/dotagents/projects.toml`,
+which syncs with the config, so `link-project` with no flags on another machine,
+or in a cloud session, links the project the same way.
+
 In the directory layout, for each checked-out project, `<project>/.agents` is a
 **symlink** → `~/.agents/projects/<name>`. The project repo's own `.gitignore` already excludes
 `.agents/` (the global Leakage rule), so the symlink is never committed to the project
@@ -77,10 +86,17 @@ touch a project directory.
   - `--copy` mirrors the store as a real directory instead of symlinking (Windows or
     any no-symlink environment; a symlink failure auto-falls back to this).
   - `--force` backs up a conflicting real `.agents/` (both project and store carry
-    content) or replaces a stale symlink.
+    content) or replaces a stale symlink. A `.agents` that is itself a git checkout is
+    backed up whole, `.git` included, to `.agents.bak`, and never adopted.
+  - `--store-repo self|<path>|<url>` and `--store-branch <name>`: keep the store on a
+    branch of another repository (see *Two store layouts*); recorded per project.
+  - `--agents-dir` defaults to `$AGENTS_HOME`, else `~/.agents` (also for
+    `sync-project`).
 - `dotagents sync-project` — reconcile a copy-mode project, then move the store.
   - `--project PATH` first copies a **copy-mode** project's `.agents` back into its
-    store (symlinked projects need no copy-back — their `.agents` *is* the store).
+    store (symlinked projects need no copy-back — their `.agents` *is* the store). A
+    branch-layout store, on `~/.agents` or on the repository `--store-repo` recorded,
+    is committed and pushed on its own branch to that repository's `origin`.
     This is the only part dotagents genuinely owns: it repairs the divergence its
     own `--copy` fallback creates.
   - **Transport** is then handed to `<agents-dir>/hooks/sync` if that exists — it

@@ -83,8 +83,8 @@ class SyncProject(LoggingArgs, Cmd):
 
     _parsername_ = "sync-project"
 
-    agents_dir: Path = Path.home() / ".agents"
-    "Global agents dir (default: ~/.agents)."
+    agents_dir: Optional[Path] = None
+    "Global agents dir (default: $AGENTS_HOME, else ~/.agents)."
     ("--agents-dir",)
 
     store_dir: Optional[str] = None
@@ -121,8 +121,10 @@ class SyncProject(LoggingArgs, Cmd):
     ("--dry-run",)
 
     def __call__(self) -> int:
-        return _load_link().sync_agents(
-            self.agents_dir, message=self.message, project_dir=self.project,
+        link = _load_link()
+        return link.sync_agents(
+            self.agents_dir or link.default_agents_dir(), message=self.message,
+            project_dir=self.project,
             name=self.name, store_dir=self.store_dir, remote=self.remote,
             pull=not self.no_pull, push=not self.no_push, dry_run=self.dry_run,
             logger=self._logger_,

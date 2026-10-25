@@ -70,9 +70,12 @@ def _load_link():
 class LinkProject(LoggingArgs, Cmd):
     """Point a project's .agents at a store outside the project repo.
 
-    Symlinks ``<project>/.agents`` to its store (``--copy`` mirrors it as a real
-    dir instead, for Windows / no-symlink environments). An existing real
-    ``.agents/`` is adopted into an empty store on the first link. Optional: this
+    With a git-kept agents dir, ``<project>/.agents`` becomes a worktree of it on
+    a branch named after the project; ``--store-repo`` puts that branch on another
+    repository instead (the project's own, or a team's), and the choice is
+    recorded. Otherwise it symlinks ``<project>/.agents`` to its store directory
+    (``--copy`` mirrors it as a real dir instead, for Windows / no-symlink
+    environments). An existing real ``.agents/`` is adopted on the first link. Optional: this
     is one way to keep private agent state out of a public repo, not something
     dotagents requires."""
 
@@ -82,8 +85,8 @@ class LinkProject(LoggingArgs, Cmd):
     "Project directory to link (default: current directory)."
     ("path",)
 
-    agents_dir: Path = Path.home() / ".agents"
-    "Global agents dir (default: ~/.agents)."
+    agents_dir: Optional[Path] = None
+    "Global agents dir (default: $AGENTS_HOME, else ~/.agents)."
     ("--agents-dir",)
 
     store_dir: Optional[str] = None
@@ -103,15 +106,28 @@ class LinkProject(LoggingArgs, Cmd):
     "Replace an existing .agents symlink, or back up a conflicting real .agents dir."
     ("--force",)
 
+    store_repo: Optional[str] = None
+    ("Keep the store on another repository: 'self' (a branch of the project's own "
+     "repo), a local git repo, or a git URL (default: a branch of the agents repo). "
+     "Recorded, so later links of this project do the same.")
+    ("--store-repo",)
+
+    store_branch: Optional[str] = None
+    ("The store's branch there (default: the store name; 'agents' for --store-repo "
+     "self). Recorded too.")
+    ("--store-branch",)
+
     dry_run: bool = False
     "Show what would happen without touching anything."
     ("--dry-run",)
 
     def __call__(self) -> int:
-        _load_link().link_project(
-            self.path, self.agents_dir, name=self.name, store_dir=self.store_dir,
-            copy=self.copy, force=self.force, dry_run=self.dry_run,
-            logger=self._logger_,
+        link = _load_link()
+        link.link_project(
+            self.path, self.agents_dir or link.default_agents_dir(), name=self.name,
+            store_dir=self.store_dir, copy=self.copy, force=self.force,
+            dry_run=self.dry_run, logger=self._logger_, store_repo=self.store_repo,
+            store_branch=self.store_branch,
         )
         if self.dry_run:
             self._logger_.info("dry-run: no files were written")
