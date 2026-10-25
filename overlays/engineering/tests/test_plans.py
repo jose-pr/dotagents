@@ -186,6 +186,16 @@ def test_validate_reports_what_is_missing(store):
         handle.write(text)
     assert store.require("filled").problems() == []
 
+    # A quoted path pattern or a generic type is text, not an unfilled placeholder.
+    text += ("\n- `src/<pkg>/AGENTS.md` and `Box<dyn K>` are quoted.\n"
+             "```rust\nfn f() -> Vec<u8> {}\n```\n")
+    with open(good.path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+    assert store.require("filled").problems() == []
+    with open(good.path, "a", encoding="utf-8", newline="") as handle:
+        handle.write("- left: <todo>\n")
+    assert "unfilled placeholders: <todo>" in "\n".join(store.require("filled").problems())
+
 
 def run_cli(tmp_path, *argv):
     """Through the real command line, with an empty agent store."""

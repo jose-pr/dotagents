@@ -32,6 +32,20 @@ _PHASE_ID_RE = re.compile(r"^Phase\s+([0-9A-Za-z.]+)\s*:\s*(.*)$")
 _FIELD_RE = re.compile(r"^([A-Z][A-Za-z-]*):\s*(.*)$")
 _COMMENT_RE = re.compile(r"<!--.*?-->\n?", re.DOTALL)
 _PLACEHOLDER_RE = re.compile(r"<[a-z][^<>\n]*>")
+_CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
+
+
+def _prose_lines(lines):
+    """``lines`` without fenced code blocks and backtick spans: a ``<name>``
+    there is quoted text (a path pattern, a generic type), not a placeholder
+    the template left unfilled."""
+    fenced = False
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced:
+            yield _CODE_SPAN_RE.sub("", line)
 SECTIONS = {
     "progress": "Progress",
     "facts": "Known Facts & Context",
@@ -295,7 +309,7 @@ class Plan:
                          % (missing, missing))
         for extra in [b for b in blocks if b not in ids]:
             found.append("`### Phase %s:` has no line in Progress" % extra)
-        left = sorted({m.group(0) for line in self.lines
+        left = sorted({m.group(0) for line in _prose_lines(self.lines)
                        for m in _PLACEHOLDER_RE.finditer(line)})
         if left:
             found.append("unfilled placeholders: %s" % ", ".join(left[:6]))
