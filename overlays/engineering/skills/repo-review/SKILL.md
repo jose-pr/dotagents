@@ -124,8 +124,10 @@ separately (below), each with who needs it and what it would cost.
 
 The coordinator gives every reviewer subagent these rules:
 
-- No I/O to a non-loopback host. To see where a connection goes, intercept connect
-  and record its arguments.
+- No I/O to a non-loopback host. Run Python probes and test runs with the loopback
+  guard first on the path (`PYTHONPATH=$ENGINEERING_OVERLAY_ROOT/references/loopback_guard`),
+  which refuses anything else. To see where a connection goes, intercept connect and
+  record its arguments.
 - Temporary directories only under your own scratch directory; delete only paths you
   created, by name, never by prefix.
 - Stop every process you started before reporting.

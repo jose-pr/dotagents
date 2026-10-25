@@ -56,6 +56,9 @@ public-facing text runs `dotagents leak-check <repo>`
 - A missing tool or import is `[!]` with the exact failed command, never an
   improvised install.
 - Skipped tests are not passed: report skip counts and confirm targeted tests ran.
+- A probe or test of code that does network I/O, when the plan allows loopback only,
+  runs with `PYTHONPATH=$ENGINEERING_OVERLAY_ROOT/references/loopback_guard` (refuses
+  any other address; `AGENTS_LOOPBACK_GUARD=off` lifts it).
 - A step whose output feeds something else reads that output back the way the
   consumer will (its parser, its type) before reporting success.
 - Never hand-write the serialised form of a type the codebase defines.
