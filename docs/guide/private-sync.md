@@ -11,13 +11,19 @@ overlay is what makes them exist; a plain dotagents has no private-sync surface 
 
 ## The idea
 
-Your global config store **is** a private git repo. Its root is the per-user config;
-a `projects/<name>/` tree inside it holds each project's private payload. For a
-checked-out project, its `.agents` directory is a **symlink** into the store (the
-project's `.gitignore` already excludes `.agents` per the Leakage rule, so the link
+Your global config store **is** a private git repo, and its `main` branch is the
+per-user config. Each project's private payload is a **branch** of it, named after
+the project, and the project's `.agents` directory is a git worktree on that branch
+(the project's `.gitignore` already excludes `.agents` per the Leakage rule, so it
 never lands in the public repo). `<name>` defaults to the project's basename, so a
-local checkout and a cloud checkout of the same project resolve to the same store
-entry.
+local checkout and a cloud checkout of the same project resolve to the same branch.
+
+That branch can live elsewhere: `link-project --store-repo self` keeps it on the
+project's own repository (branch `agents`), and `--store-repo <url>` on any other,
+such as a team account's (cloned into `.agents`); `--store-branch` names the branch.
+The choice is recorded in the config repo, so every machine links the project the
+same way. A store kept as a `projects/<name>/` directory, symlinked into the
+project, still works and is kept by a project that already has one.
 
 The store's installed overlays can travel two ways:
 
@@ -39,11 +45,12 @@ dotagents overlays add private-sync -g \
   --repo "https://github.com/jose-pr/dotagents.git@repo#overlays"   # commands + kb + hooks
 
 # link-project / sync-project come FROM that overlay -- run `overlays add` first.
-dotagents link-project .   # symlink this project's .agents into its store
+dotagents link-project .   # check this project's store branch out at .agents
                            #   (an existing real .agents/ is adopted on the
-                           #    first link; --copy mirrors it as a real dir
-                           #    for no-symlink systems)
-dotagents sync-project -m "msg"   # git pull --rebase / commit / push the store
+                           #    first link)
+dotagents link-project . --store-repo self             # ...on the project's own repo
+dotagents link-project . --store-repo <team-repo-url>  # ...on another repo
+dotagents sync-project --project . -m "msg"   # commit / push the project's branch, then the config
 dotagents sync-project --remote <url> -m init   # one-command bootstrap
 ```
 
