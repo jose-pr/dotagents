@@ -117,9 +117,10 @@ PRUNE_DIRS = {
     "dist", ".pytest_cache", ".mypy_cache", ".ruff_cache",
 }
 
-# Preceded by a word character it is an attribute access (`cfg.agents`), not a
-# path.
-AGENTS_RE = re.compile(r"(?<!\w)\.agents\b")
+# Preceded by a word character, `.` or `)` it is an attribute access
+# (`cfg.agents`, `Set().agents`) or a relative import (`from ..agents`), and
+# right after `from ` a relative import of a module named `agents`: not a path.
+AGENTS_RE = re.compile(r"(?<![\w.)])(?<!from )\.agents\b")
 PHASE_RE = re.compile(r"\bPhase [0-9]")
 # The bare form needs the boundary and exactly two digits, or it fires on
 # ordinary identifiers: a register name, a hex literal, `AMD64`.
@@ -414,6 +415,19 @@ def scan_commits(repo: Path) -> tuple[list[tuple[str, str]], int]:
     return hits, examined
 
 
+def allowlist_forms(allowlist: list[str]) -> list[str]:
+    """Each allowlisted string plus the spellings it takes in the wild, longest
+    first: shields.io badge text escapes `-` as `--`, and a JNI symbol writes
+    a dotted package with `_` (escaping its own `_` as `_1`)."""
+    forms: list[str] = []
+    for allowed in allowlist:
+        for form in (allowed, allowed.replace("-", "--"),
+                     allowed.replace("_", "_1").replace(".", "_")):
+            if form and form not in forms:
+                forms.append(form)
+    return sorted(forms, key=len, reverse=True)
+
+
 def scan_tree(repo: Path, files: list[str], plan_re, generic_re,
               personal: list[str] | None = None,
               allowlist: list[str] | None = None,
@@ -422,7 +436,7 @@ def scan_tree(repo: Path, files: list[str], plan_re, generic_re,
     hits: list[str] = []
     warnings: list[str] = []
     personal = personal or []
-    allowlist = allowlist or []
+    allowlist = allowlist_forms(allowlist or [])
     infra = infra or []
     read = 0
     skipped = 0

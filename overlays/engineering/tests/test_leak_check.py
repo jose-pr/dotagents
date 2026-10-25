@@ -207,6 +207,16 @@ class BuiltInPatterns(Base):
         code, out = self.scan(crate)
         self.assertEqual(code, leak_check.EXIT_OK, out)
 
+    def test_a_relative_import_of_an_agents_module_is_not_a_path(self) -> None:
+        crate = self.repo(("pkg/run.py",
+                           "from .agents import Agent\nfrom ..agents import x\n"
+                           "names = AgentSet().agents()\npath = 'x/.agents/plans'\n"))
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_HITS, out)
+        self.assertIn("pkg/run.py:4: .agents path", out)
+        for line in ("pkg/run.py:1:", "pkg/run.py:2:", "pkg/run.py:3:"):
+            self.assertNotIn(line, out)
+
     def test_notes_path_matches_either_slash_but_not_an_attribute(self) -> None:
         crate = self.repo(
             ("src/lib.rs", "// a\n// %s\\env\n// cfg%s = 3;\n" % (NOTES, NOTES)))
@@ -281,6 +291,22 @@ class PersonalMarkers(Base):
         self.assertEqual(code, leak_check.EXIT_HITS, out)
         self.assertIn("src/lib.rs:2: personal marker", out)
         self.assertNotIn("src/lib.rs:1", out)
+
+    def test_an_allowlisted_id_is_also_blanked_in_badge_and_jni_spellings(self) -> None:
+        write(self.patterns, json.dumps({
+            "personal": [MARKER],
+            "public_allowlist": ["net.%s.app" % MARKER, "%s-pr" % MARKER],
+        }) + "\n")
+        crate = self.repo((
+            "src/jni.c",
+            "void Java_net_%s_app_Main_run(void);\n"
+            "![ci](https://img.shields.io/badge/%s--pr-blue)\n"
+            "// /home/%s\n" % (MARKER, MARKER, MARKER)))
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_HITS, out)
+        self.assertIn("src/jni.c:3: personal marker", out)
+        self.assertNotIn("src/jni.c:1", out)
+        self.assertNotIn("src/jni.c:2", out)
 
     def test_no_pattern_file_is_incomplete_not_a_bare_pass(self) -> None:
         crate = self.repo(("src/lib.rs", "// nothing private\n"))
