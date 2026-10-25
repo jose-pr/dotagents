@@ -21,8 +21,22 @@ queue). A new `projects/` tree holds each project's private `.agents` payload:
     └── <project-b>/ ...
 ```
 
-For each checked-out project, `<project>/.agents` is a **symlink** →
-`~/.agents/projects/<name>`. The project repo's own `.gitignore` already excludes
+### Two store layouts
+
+- **Branch layout (preferred):** each project's store is a **branch** of the
+  private repo, named after the project, holding the payload at its root (with
+  its own `.gitignore`), and `<project>/.agents` is a **git worktree** of
+  `~/.agents` on that branch. `main` keeps only the per-user config. Nothing to
+  symlink, works the same on Windows, and each project's history is its own.
+  `link-project` checks the branch out (the local one, else `origin/<name>`,
+  else a new orphan branch) and adopts a real `.agents/` onto it;
+  `sync-project --project` commits and pushes that branch. It is chosen when
+  `~/.agents` is a git repo with no `projects/<name>` directory, or always with
+  `AGENTS_STORE_LAYOUT=branch` (`dir` forces the layout below).
+- **Directory layout:** stores under `projects/<name>` on `main`, linked as below.
+
+In the directory layout, for each checked-out project, `<project>/.agents` is a
+**symlink** → `~/.agents/projects/<name>`. The project repo's own `.gitignore` already excludes
 `.agents/` (the global Leakage rule), so the symlink is never committed to the project
 — but everything behind it lives in, and syncs through, the one private repo.
 

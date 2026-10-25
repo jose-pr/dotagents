@@ -208,6 +208,9 @@ def link_project(
         raise SystemExit("error: project path is not a directory: %s" % project_dir)
 
     name = resolve_name(project_dir, name)
+    if not copy and branch_layout(agents_dir, name, store_dir):
+        return _link_branch(project_dir, agents_dir, name, force=force,
+                            dry_run=dry_run, log=log)
     store = project_store(agents_dir, name, store_dir)
     target = project_dir / ".agents"
     target_is_link = os.path.islink(str(target))
@@ -320,6 +323,197 @@ def link_project(
 
     _warn_gitignore(project_dir, log)
     return name
+
+
+# --------------------------------------------------------------------------- #
+# Branch layout: each project's store is a branch of the agents repo, named
+# after the project, and <project>/.agents is a git worktree on that branch.
+# --------------------------------------------------------------------------- #
+
+#: ``AGENTS_STORE_LAYOUT``: ``branch`` forces the branch layout, ``dir`` the
+#: ``projects/<name>`` directory layout; unset picks per project (see below).
+LAYOUT_ENV = "AGENTS_STORE_LAYOUT"
+
+#: Ignore rules a new project branch starts with: the store defaults plus the
+#: machine-local and throwaway names a project's .agents collects.
+BRANCH_IGNORE = (
+    "# Machine- or user-local overrides never sync.",
+    "*.local.*",
+    "*.local.md",
+    "AGENTS.local.md",
+    "local.*",
+    "local.env",
+    "**/logs/*.txt",
+    "# Throwaway and tool directories.",
+    "scratch/",
+    "tmp/",
+    "__pycache__/",
+    "*.py[cod]",
+    ".venv/",
+    "node_modules/",
+    "# Hidden files and directories (venvs such as .pyvenv, caches), except these.",
+    ".*",
+    "!.gitignore",
+    "!.gitattributes",
+    "!.gitkeep",
+    "!.ignore",
+)
+
+
+def branch_layout(agents_dir: Path, name: str, store_dir=None) -> bool:
+    """True when this project's store is a branch of the agents repo.
+
+    ``AGENTS_STORE_LAYOUT`` decides when set. Otherwise: a git-kept agents dir
+    with no ``projects/<name>`` directory (and no ``--store-dir`` /
+    ``AGENTS_STORE_DIR`` override) uses the branch layout; an existing
+    ``projects/<name>`` keeps the directory layout it already has."""
+    forced = (os.environ.get(LAYOUT_ENV) or "").strip().lower()
+    if forced in ("branch", "dir"):
+        return forced == "branch"
+    if store_dir or os.environ.get("AGENTS_STORE_DIR"):
+        return False
+    if not (Path(agents_dir) / ".git").exists():
+        return False
+    return not (store_root(agents_dir) / name).exists()
+
+
+def _gitout(cwd: Path, *args: str) -> "subprocess.CompletedProcess[str]":
+    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True,
+                          text=True, check=False)
+
+
+def _worktree_branch(target: Path, agents_dir: Path) -> "str | None":
+    """The branch ``target`` has checked out, if it is a worktree of the agents
+    repo (its common git dir is the agents repo's); else None."""
+    if not (target / ".git").exists():
+        return None
+    common = _gitout(target, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    mine = _gitout(agents_dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common.returncode or mine.returncode:
+        return None
+    if Path(common.stdout.strip()).resolve() != Path(mine.stdout.strip()).resolve():
+        return None
+    head = _gitout(target, "symbolic-ref", "--short", "-q", "HEAD")
+    return head.stdout.strip() or None
+
+
+def _has_ref(agents_dir: Path, ref: str) -> bool:
+    return _gitout(agents_dir, "show-ref", "--verify", "--quiet", ref).returncode == 0
+
+
+def _move_into(src: Path, dst: Path) -> None:
+    """Move ``src``'s entries into ``dst``: a file replaces, a directory merges."""
+    for entry in list(src.iterdir()):
+        target = dst / entry.name
+        if entry.name == ".git":
+            continue
+        if entry.is_dir() and not os.path.islink(str(entry)) and target.is_dir():
+            _move_into(entry, target)
+            try:
+                entry.rmdir()
+            except OSError:
+                pass
+            continue
+        if target.is_dir() and not os.path.islink(str(target)):
+            shutil.rmtree(str(target))
+        elif target.exists() or os.path.islink(str(target)):
+            target.unlink()
+        shutil.move(str(entry), str(target))
+
+
+def _link_branch(project_dir: Path, agents_dir: Path, name: str, *, force: bool,
+                 dry_run: bool, log) -> str:
+    """Make ``<project>/.agents`` a worktree of the agents repo on branch ``name``.
+
+    The branch is the local one, else ``origin/<name>`` (tracked), else a new
+    orphan branch seeded with ignore rules. A real ``.agents`` is adopted: its
+    files are moved into the worktree (a file both have keeps the project's)
+    and committed. A symlink (the directory layout's) is replaced, its store's
+    files carried over the same way."""
+    target = project_dir / ".agents"
+    have = _worktree_branch(target, agents_dir)
+    if have == name:
+        log("linked (already): %s/.agents is the %s branch", project_dir.name, name)
+        _warn_gitignore(project_dir, log)
+        return name
+    if have is not None or (target.is_dir() and not os.path.islink(str(target))
+                            and (target / ".git").exists()):
+        if not force:
+            log("skip: %s/.agents is a checkout of %s; re-run with --force to back it "
+                "up and check out the %s branch", project_dir.name, have or "another repo", name)
+            return name
+
+    if not os.path.islink(str(target)) and target.is_dir():
+        n_tracked = _tracked_agents_files(project_dir)
+        if n_tracked:
+            raise SystemExit(
+                "error: %s/.agents has %d file(s) tracked by this repo; linking "
+                "would delete them from it -- do not link it." % (project_dir.name, n_tracked))
+
+    if _has_origin(agents_dir):
+        _gitout(agents_dir, "fetch", "--quiet", "origin", name)
+    if dry_run:
+        log("[dry-run] would check out branch %s at %s/.agents", name, project_dir.name)
+        return name
+
+    # Move what is there aside; its files come back on top of the branch.
+    carried = None
+    if os.path.islink(str(target)):
+        carried = Path(os.path.realpath(str(target)))
+        os.rmdir(str(target)) if os.name == "nt" else os.unlink(str(target))
+        log("replaced symlink %s/.agents (its store's files are carried over)",
+            project_dir.name)
+    elif target.exists():
+        carried = _next_backup(project_dir)
+        shutil.move(str(target), str(carried))
+        log("adopting %s/.agents (moved aside to %s)", project_dir.name, carried.name)
+
+    if _has_ref(agents_dir, "refs/heads/" + name):
+        res = _gitout(agents_dir, "worktree", "add", str(target), name)
+    elif _has_ref(agents_dir, "refs/remotes/origin/" + name):
+        res = _gitout(agents_dir, "worktree", "add", "--track", "-b", name, str(target),
+                      "origin/" + name)
+    else:
+        res = _gitout(agents_dir, "worktree", "add", "--orphan", "-b", name, str(target))
+    if res.returncode:
+        if carried is not None and carried != target and carried.parent == project_dir:
+            shutil.move(str(carried), str(target))  # put the old copy back
+        raise SystemExit("error: git worktree add failed: %s" % res.stderr.strip())
+    log("checked out branch %s at %s/.agents", name, project_dir.name)
+
+    gi = target / ".gitignore"
+    if not gi.exists():
+        with open(gi, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("\n".join(BRANCH_IGNORE) + "\n")
+    if carried is not None and carried.exists():
+        _move_into(carried, target)
+        if carried.parent == project_dir:
+            shutil.rmtree(str(carried), ignore_errors=True)
+    _gitout(target, "add", "-A")
+    if _gitout(target, "status", "--porcelain").stdout.strip():
+        _gitout(target, "commit", "-q", "-m", "chore: %s's .agents adopted onto its branch" % name)
+        log("committed the adopted files on %s", name)
+    _warn_gitignore(project_dir, log)
+    return name
+
+
+def _sync_branch(target: Path, branch: str, message: str, *, pull: bool, push: bool,
+                 config_args, auth_env, log) -> None:
+    """Commit and push a project's worktree on its own branch."""
+    if pull and _has_origin(target):
+        res = _git(target, "pull", "--rebase", "--autostash", "origin", branch,
+                   capture=True, config_args=config_args, env=auth_env)
+        if res.returncode != 0:
+            log("note: pull of %s skipped/failed", branch)
+    _git(target, "add", "-A")
+    if (_git(target, "status", "--porcelain", capture=True).stdout or "").strip():
+        log("git commit -m %r (branch %s)", message, branch)
+        _git(target, "commit", "-m", message)
+    if push and _has_origin(target):
+        res = _git(target, "push", "-u", "origin", branch, capture=True,
+                   config_args=config_args, env=auth_env)
+        if res.returncode != 0:
+            log("WARN: git push of %s failed: %s", branch, (res.stderr or "").strip())
 
 
 def _warn_gitignore(project_dir: Path, log) -> None:
@@ -593,10 +787,16 @@ def sync_agents(
     # `link --copy` mirrors store -> project when symlinking isn't available, so
     # the two diverge as soon as the project's copy is edited. This folds those
     # edits back. A symlinked project has no divergence and needs none of it.
+    branch_target = None
     if project_dir is not None:
         project_dir = Path(project_dir).expanduser().resolve()
         target = project_dir / ".agents"
-        if target.is_dir() and not os.path.islink(str(target)):
+        project_branch = _worktree_branch(target, agents_dir)
+        if project_branch is not None:
+            # Branch layout: the project's .agents is its own worktree; it is
+            # committed and pushed on its branch below, after any hook.
+            branch_target = (target, project_branch)
+        elif target.is_dir() and not os.path.islink(str(target)):
             if (target / ".git").exists():
                 # Same guard as link_project's adoption: a git checkout at
                 # <project>/.agents belongs to something else; copying it back
@@ -652,6 +852,9 @@ def sync_agents(
     # bypass, so apply it here too. No-op unless DOTAGENTS_AGENTS_TOKEN is set.
     config_args, auth_env, auth_tmp = _agents_git_auth(log)
     try:
+        if branch_target is not None:
+            _sync_branch(branch_target[0], branch_target[1], message, pull=pull,
+                         push=push, config_args=config_args, auth_env=auth_env, log=log)
         if pull and _has_origin(agents_dir):
             log("git pull --rebase --autostash")
             res = _git(agents_dir, "pull", "--rebase", "--autostash", "origin", "HEAD",
