@@ -1166,9 +1166,10 @@ def _compose_block(base_text: str, overlays, logger) -> str:
 #: Emitted once above overlay routing lines that use the per-overlay root vars.
 OVERLAY_ROOT_NOTE = (
     "Overlay paths below use `$<NAME>_OVERLAY_ROOT` -- an environment variable "
-    "`dotagents env` exports per installed overlay (its install dir); resolve it "
-    "in a shell (`echo $ENGINEERING_OVERLAY_ROOT`; PowerShell `$env:ENGINEERING_OVERLAY_ROOT`) "
-    "before opening the file with a file tool."
+    "already set in your shell for each installed overlay (its install dir); read "
+    "just that one (`echo $ENGINEERING_OVERLAY_ROOT`; PowerShell "
+    "`$env:ENGINEERING_OVERLAY_ROOT`) before opening the file with a file tool, "
+    "never the whole environment (`dotagents env` prints secrets)."
 )
 
 
