@@ -14,11 +14,11 @@ name: Docs
 #     uses. (A release made with GITHUB_TOKEN fires no `release` event for other
 #     workflows, which is why this does not listen for one.)
 #
-# It self-enables Pages on every run (configure-pages with enablement). Two repo
-# settings a workflow cannot set for itself: default workflow permissions must
-# be read and write (Settings -> Actions -> General), or `pages: write` cannot be
-# granted; and the `github-pages` environment's deployment policy must allow
-# `v*` tags, or a release's deploy is rejected after a successful build.
+# It self-enables Pages on every run (configure-pages with enablement). Its
+# jobs declare `pages: write`, so the read-only default workflow permissions are
+# enough. One repo setting a workflow cannot set for itself: the `github-pages`
+# environment's deployment policy must allow `v*` tags, or a release's deploy is
+# rejected after a successful build.
 on:
   push:
     branches: ["main"]

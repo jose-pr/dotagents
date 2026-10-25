@@ -3,10 +3,10 @@ name: Release
 # Runs when a version tag (e.g. v1.0.0, v1.0.0-rc.1) is pushed. Not wired to
 # push/PR events on branches -- this is a release gate, not general CI.
 #
-# Test gate and dependency-floor gate, build (checking that the tag names the
-# version built), an installed-wheel smoke test, a strict docs build gate, the
-# GitHub Release, then -- for final (non pre-release) tags
-# only -- the PyPI upload and a dispatch of docs.yml at this tag.
+# The whole of test.yml as the gate (tests, floors, build, installed-wheel
+# smoke), a check that the tag names the version built, a strict docs build
+# gate, the GitHub Release, then -- for final (non pre-release) tags only --
+# the PyPI upload and a dispatch of docs.yml at this tag.
 on:
   push:
     tags:
@@ -16,77 +16,29 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test (py${{ matrix.python-version }}, ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.9", "3.14"] # oldest + newest supported
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install package with all extras
-        run: python -m pip install -e ".[dev,<extras-with-tests>]"
-      - name: Run tests
-        run: python -m pytest -q
+  # Its build job uploads the `dist` artifact every job below publishes.
+  checks:
+    name: Checks
+    uses: ./.github/workflows/test.yml
 
-  # The same job test.yml runs: a release must hold at the lowest version of every
-  # dependency the manifest claims to support.
-  floors:
-    name: Test at the declared dependency floors
+  # A tag on the wrong commit would otherwise publish a release named for
+  # one version that carries another version's artifacts.
+  version:
+    name: The tag names the version that was built
+    needs: checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.9"
-      - name: Pin every declared dependency to its floor
-        shell: python
-        run: |
-          import re
-          import subprocess
-          import sys
-
-          subprocess.run([sys.executable, "-m", "pip", "install", "-q", "tomli"], check=True)
-          import tomli
-
-          project = tomli.load(open("pyproject.toml", "rb"))["project"]
-          specs = list(project.get("dependencies", []))
-          for extra, deps in project.get("optional-dependencies", {}).items():
-              if extra not in ("dev", "docs"):
-                  specs += deps
-          pins = []
-          for spec in specs:
-              m = re.match(r"^\s*([A-Za-z0-9._-]+)(\[[^\]]*\])?\s*[^;]*?>=\s*([^,;\s]+)", spec)
-              if m:
-                  pins.append("%s==%s" % (m.group(1), m.group(3)))
-          open("floors.txt", "w").write("\n".join(pins) + "\n")
-          print("\n".join(pins) or "(no floors declared)")
-      - name: Install at the floors
-        run: python -m pip install -c floors.txt -e ".[dev,<extras-with-tests>]"
-      - name: Run tests
-        run: python -m pytest -q
-
-  build:
-    name: Build distribution
-    needs: [test, floors]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
-      - name: Install build tooling
-        run: python -m pip install --upgrade build twine packaging
-      - name: Build sdist and wheel
-        run: python -m build
-      # A tag on the wrong commit would otherwise publish a release named for
-      # one version that carries another version's artifacts.
-      - name: The tag names the version that was built
+      - name: Install packaging
+        run: python -m pip install --upgrade packaging
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Compare the tag with the built version
         shell: python
         env:
           TAG: ${{ github.ref_name }}
@@ -106,50 +58,6 @@ jobs:
           if built != {str(want)}:
               sys.exit("tag %s is version %s, but dist/ holds %s" % (tag, want, sorted(built)))
           print("tag %s matches the built version %s" % (tag, want))
-      - name: Verify sdist and wheel
-        run: python -m twine check dist/*
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: dist
-          path: dist/
-
-  # What a user installs is the wheel, not the checkout: install it into a clean
-  # environment and check it imports and carries the files it must ship.
-  wheel-smoke:
-    name: Installed-wheel smoke test (py${{ matrix.python-version }})
-    needs: build
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.9", "3.14"] # oldest + newest supported
-    steps:
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Download build artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
-      - name: Install the wheel into a fresh venv
-        run: |
-          python -m venv "$RUNNER_TEMP/smoke"
-          "$RUNNER_TEMP/smoke/bin/pip" install dist/*.whl
-      - name: Import it, and find the files it must ship
-        working-directory: ${{ runner.temp }}
-        run: |
-          "$RUNNER_TEMP/smoke/bin/python" - <<'PY'
-          from importlib.resources import files
-
-          import <package_name>
-
-          root = files("<package_name>")
-          for name in ("py.typed", "AGENTS.md"):
-              assert (root / name).is_file(), "the wheel does not ship %s" % name
-          print("ok:", <package_name>.__name__)
-          PY
 
   # Docs are DEPLOYED by docs.yml. This job only GATES the release on a strict
   # docs BUILD: a release must never ship if the docs site is broken, but the
@@ -157,7 +65,7 @@ jobs:
   # dispatches docs.yml for this tag, off the publish chain.
   docs-gate:
     name: Docs build gate (strict, no deploy)
-    needs: test
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -171,7 +79,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [build, docs-gate, wheel-smoke]
+    needs: [version, docs-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -231,7 +139,7 @@ jobs:
   # irreversible (a version can never be reused), a GitHub release is not.
   publish-pypi:
     name: Publish to PyPI
-    needs: [build, github-release]
+    needs: [version, github-release]
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     environment:
@@ -250,8 +158,8 @@ jobs:
         with:
           # A partially-completed release re-run must not hard-fail on files
           # already uploaded (PyPI never lets a version be replaced); skip them
-          # and publish only what's missing. The build job's tag/version check
-          # keeps it from masking a wrong tag.
+          # and publish only what's missing. The version job's tag check keeps
+          # it from masking a wrong tag.
           skip-existing: true
 
   # Events made with the workflow's own GITHUB_TOKEN, such as the release above,

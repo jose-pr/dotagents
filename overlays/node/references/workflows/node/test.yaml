@@ -2,7 +2,8 @@ name: Test
 
 # On-demand / ad-hoc test workflow, kept separate from release.yaml's own
 # release-gate test job -- same two-trigger pattern as the Python template:
-# workflow_dispatch (with ref input) + throwaway "ci-*" tags (delete after).
+# workflow_dispatch (with ref input) + throwaway "ci-*" tags (delete after),
+# or a "ci-*" branch where tags cannot be pushed (a cloud git proxy).
 # Not triggered by push/PR on branches by default.
 on:
   workflow_dispatch:
@@ -14,6 +15,7 @@ on:
   push:
     tags:
       - "ci-*"
+    branches: ["ci-*"]
 
 permissions:
   contents: read

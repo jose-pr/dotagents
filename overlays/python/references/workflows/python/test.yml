@@ -1,13 +1,14 @@
 name: Test
 
-# On-demand / ad-hoc test workflow, kept separate from release.yml's own
-# release-gate test job so it can be run without cutting a release. Two ways
-# to trigger it:
-#   - workflow_dispatch (optionally against a specific ref), for manual runs.
-#   - push of a tag matching "ci-*" (throwaway tag, delete after) so an agent
-#     without dashboard access can trigger + poll a run via the API/CLI.
-# Not triggered by push/PR on branches by default -- add that only if the
-# project actually wants CI on every commit.
+# Every check a release gates on: the test matrix, the dependency floors, and
+# the built wheel installed and smoke-tested. release.yml runs this workflow
+# (workflow_call) as its gate, so a check cannot pass here and fail at a tag.
+# Triggers:
+#   - workflow_dispatch (optionally against a ref), for manual runs;
+#   - a pushed "ci-*" tag, or a "ci-*" branch where tags cannot be pushed:
+#     throwaway refs (delete after) that let an agent start and poll a run;
+#   - workflow_call, from release.yml.
+# Not run on every push or PR; add that only if the project wants it.
 on:
   workflow_dispatch:
     inputs:
@@ -15,15 +16,26 @@ on:
         description: "Git ref to test (branch, tag, or SHA)"
         required: false
         default: ""
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to test (branch, tag, or SHA)"
+        type: string
+        required: false
+        default: ""
   push:
+    branches:
+      - "ci-*"
     tags:
       - "ci-*"
 
 permissions:
   contents: read
 
+# github.workflow is the caller's name under workflow_call, so a release's gate
+# never cancels, or is cancelled by, a manual run at the same ref.
 concurrency:
-  group: test-${{ github.ref }}
+  group: test-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -110,3 +122,63 @@ jobs:
         run: python -m pip install -c floors.txt -e ".[dev,<extras-with-tests>]"
       - name: Run tests
         run: python -m pytest -q
+
+  # The artifacts a release publishes: release.yml downloads this `dist`.
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Verify sdist and wheel
+        run: python -m twine check dist/*
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  # What a user installs is the wheel, not the checkout: install it into a clean
+  # environment and check it imports and carries the files it must ship.
+  wheel-smoke:
+    name: Installed-wheel smoke test (py${{ matrix.python-version }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.14"] # oldest + newest supported
+    steps:
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Install the wheel into a fresh venv
+        run: |
+          python -m venv "$RUNNER_TEMP/smoke"
+          "$RUNNER_TEMP/smoke/bin/pip" install dist/*.whl
+      - name: Import it, and find the files it must ship
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/smoke/bin/python" - <<'PY'
+          from importlib.resources import files
+
+          import <package_name>
+
+          root = files("<package_name>")
+          for name in ("py.typed", "AGENTS.md"):
+              assert (root / name).is_file(), "the wheel does not ship %s" % name
+          print("ok:", <package_name>.__name__)
+          PY
