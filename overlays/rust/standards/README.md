@@ -1,13 +1,11 @@
 # Rust standards
 
 How a Rust crate or workspace is named, laid out, documented and tested.
-Packaging, tooling, CI, release and the traps already paid for are in
-`../kb/RUST.md` and the repository standard
-(`$ENGINEERING_OVERLAY_ROOT/flows/REPO.md`); nothing here restates them.
+Packaging, tooling, CI, release and known traps are in `../kb/RUST.md` and
+`$ENGINEERING_OVERLAY_ROOT/flows/REPO.md`; nothing here restates them.
 
-Two tiers. **Base** standards bind every crate. A **specialized** standard
-adds to the base for one kind of crate or one optional feature, and never
-overrides it.
+**Base** standards bind every crate. A **specialized** standard adds to the
+base for one kind of crate or feature, and never overrides it.
 
 ## Base: every crate
 
@@ -23,8 +21,7 @@ overrides it.
 | [base/CONFIG.md](base/CONFIG.md) | reading an environment variable or a configuration file; handling a secret |
 | [base/TESTING.md](base/TESTING.md) | writing or reviewing tests, lints or CI gates |
 
-Comments and doc comments follow `$ENGINEERING_OVERLAY_ROOT/kb/COMMENTS.md`,
-which binds every change in every language and is not restated here.
+Comments and doc comments follow `$ENGINEERING_OVERLAY_ROOT/kb/COMMENTS.md`.
 
 ## Specialized: when the crate is of this kind
 
@@ -36,8 +33,7 @@ which binds every change in every language and is not restated here.
 | [specialized/LOADERS.md](specialized/LOADERS.md) | the crate turns text or files into data: a format, a configuration loader, a path or expression grammar |
 | [specialized/APPLICATION.md](specialized/APPLICATION.md) | the package builds a binary (a daemon, a command, a worker), or a library ships a command line |
 
-A crate can match several. It follows the base and each specialized standard
-that applies.
+A crate follows the base and every specialized standard that applies.
 
 ## How to read a rule
 
@@ -54,11 +50,14 @@ signature is an API break and is versioned as one (`REPO.md`, "Versioning").
 
 ## Exceptions
 
-A project that departs from a rule records the exception in its
-`.agents/AGENTS.md`: which rule, what it does instead, and why. Read that file
-before "fixing" a departure, and before relying on a rule the project has
-opted out of. A departure with no recorded exception is a defect to raise, not
-a precedent to copy.
+A project records its departures under one `## Exceptions to the standards`
+heading in its `.agents/AGENTS.md`. The section opens with `Last brought to
+the standards: <date>`, then one bullet per departure: the rule (file and
+heading), what the project does instead, and why.
+
+Read it before "fixing" a departure, and before relying on a rule the project
+has opted out of. A departure with no recorded exception is a defect to raise,
+not a precedent to copy.
 
 ## Before a crate is called conforming
 
@@ -88,7 +87,9 @@ a precedent to copy.
   features, and a strict `cargo doc` pass on stable and the MSRV.
 - `README.md` has the standard badge row and section order; the shipped
   `AGENTS.md` has the standard opening and tail sections.
+- Comments, doc comments and the shipped `AGENTS.md` describe the code as it
+  is: no history.
 - No comment, doc comment or error message refers to anything outside the
   public repository.
-- Every departure from the above is recorded in the project's
-  `.agents/AGENTS.md`.
+- Every departure from the above is recorded under "Exceptions to the
+  standards" in the project's `.agents/AGENTS.md`.

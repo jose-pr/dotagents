@@ -1,8 +1,8 @@
 # Standard: plugins and providers
 
-Specialized standard: applies to a project that loads providers from shared
-libraries, and to every crate that ships one. Adds to the base standards and
-to [FFI.md](FFI.md); index: [README.md](../README.md).
+Specialized standard: a project that loads providers from shared libraries,
+and every crate that ships one. Adds to [FFI.md](FFI.md); index:
+[README.md](../README.md).
 
 Build this only when there are, or will soon be, two implementations loaded
 by name. One implementation behind a loader is indirection with no return.
@@ -87,3 +87,19 @@ providers/<kind>/<name>/plugin/ that provider as a cdylib: one providers! line
   from beside the test binary.
 - A test proves a provider loaded twice, or a stale library beside a new
   one, is reported rather than silently doubled.
+
+## A plugin for someone else's host
+
+When a third-party program defines the entry symbols (Wireshark, GStreamer,
+OBS), `guatiao` does not apply.
+
+- **The runtime crate (the binding to that host) provides one `macro_rules!`
+  entry macro** that defines the host's entry symbols. The cdylib that
+  expands it owns the plugin's state.
+- **The shipped header lists every exported symbol.**
+- **A test loads the built library in the real host.**
+
+The two-implementations threshold, "The mechanism", "The contract", "The
+host" and "Tests" above do not apply. Of "Layout", only the rule that the
+entry symbols live in a crate that is a `cdylib` and nothing else applies.
+[FFI.md](FFI.md) applies in full.
