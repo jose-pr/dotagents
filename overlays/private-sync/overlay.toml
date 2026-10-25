@@ -1,8 +1,8 @@
 name = "private-sync"
-description = "One private git repo for per-user + per-project .agents: link a project's .agents to ~/.agents/projects/<name>, sync via git, and auto-link in cloud sessions."
+description = "One private git repo for per-user + per-project .agents: each project's .agents is a worktree of its own branch (or a link to projects/<name>), synced via git, auto-linked in cloud sessions."
 requires = []
 routing = [
   """- Set up or understand private-agents git sync — make ~/.agents a private repo,
-  link a project's .agents to ~/.agents/projects/<name>, or wire cloud auto-linking →
+  check a project's .agents out as its branch of ~/.agents, or wire cloud auto-linking →
   $PRIVATE_SYNC_OVERLAY_ROOT/kb/PRIVATE_SYNC.md""",
 ]
