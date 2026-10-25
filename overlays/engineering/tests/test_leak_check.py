@@ -259,6 +259,33 @@ class CommitMessages(Base):
         code, out = self.scan(self.commit("feat: thing\n\n%s" % trailer))
         self.assertEqual(code, leak_check.EXIT_HITS, out)
 
+    def test_private_note_patterns_in_an_unpushed_message_are_hits(self) -> None:
+        write(self.root / NOTES / "plans/relay_support.md", "x\n")
+        crate = self.commit("feat: as %s/plans/x.md says, %s, per %s" % (NOTES, PHASE, DECISION))
+        write(crate / "src/more.rs", "// clean\n")
+        git(crate, "add", ".")
+        git(crate, "commit", "-qm", "fix: finishes relay_support.md")
+        code, out = run(str(crate), "--plans", str(self.root / NOTES / "plans"))
+        self.assertEqual(code, leak_check.EXIT_HITS, out)
+        for kind in (".agents path", "'Phase N'", "decision id", "plan basename"):
+            self.assertIn(": %s " % kind, out)
+
+    def test_a_pushed_message_is_checked_only_with_full(self) -> None:
+        crate = self.commit("feat: %s of the work" % PHASE)
+        remote = self.root / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True,
+                       capture_output=True, env=GIT_ENV)
+        git(crate, "remote", "add", "origin", str(remote))
+        git(crate, "push", "-q", "origin", "HEAD:main")
+        git(crate, "fetch", "-q", "origin")
+        code, out = self.scan(crate)
+        self.assertEqual(code, leak_check.EXIT_OK, out)
+        self.assertIn("0 unpushed for private-note patterns", out)
+        for flag in ("--full", "--all"):
+            code, out = self.scan(crate, flag)
+            self.assertEqual(code, leak_check.EXIT_HITS, out)
+            self.assertIn(": 'Phase N' ", out)
+
     def test_prose_mentioning_an_assistant_is_not_a_trailer(self) -> None:
         code, out = self.scan(self.commit("feat: written with claude, no trailer"))
         self.assertEqual(code, leak_check.EXIT_OK, out)

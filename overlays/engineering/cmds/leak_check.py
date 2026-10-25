@@ -397,22 +397,47 @@ def enumerate_files(repo: Path) -> tuple[list[str], str]:
         "NO ignore rules applied, only a built-in prune list)")
 
 
-def scan_commits(repo: Path) -> tuple[list[tuple[str, str]], int]:
-    """Attribution trailers in commit messages. (hits, commits examined)."""
+def unpushed_commits(repo: Path) -> set[str]:
+    """Commits reachable from HEAD and from no remote-tracking branch: what the
+    next push would publish (every commit, when there is no remote)."""
+    out = _git(["-C", str(repo), "rev-list", "HEAD", "--not", "--remotes"])
+    if out.returncode != 0:
+        return set()
+    return set(out.stdout.decode("ascii", "replace").split())
+
+
+def scan_commits(repo: Path, plan_re=None, full: bool = False
+                 ) -> tuple[list[tuple[str, str, str]], int, int]:
+    """Commit messages: every one for attribution trailers, and the unpushed
+    ones (every one with ``full``) for the tree's private-note patterns too --
+    a pushed message can only be fixed by rewriting history.
+
+    (hits as (sha, kind, matched text), commits examined, commits checked for
+    the private-note patterns)."""
     out = _git(["-C", str(repo), "log", "--format=%x01%H%x02%B"])
     if out.returncode != 0:  # no commits yet
-        return [], 0
-    hits = []
-    examined = 0
+        return [], 0, 0
+    unpushed = None if full else unpushed_commits(repo)
+    hits: list[tuple[str, str, str]] = []
+    examined = checked = 0
     for record in out.stdout.decode("utf-8", "replace").split("\x01"):
         if not record.strip():
             continue
         examined += 1
         sha, _, body = record.partition("\x02")
+        sha = sha.strip()
         match = TRAILER_RE.search(body)
         if match:
-            hits.append((sha.strip()[:12], match.group(0)))
-    return hits, examined
+            hits.append((sha[:12], "session trailer", match.group(0)))
+        if unpushed is not None and sha not in unpushed:
+            continue
+        checked += 1
+        for kind, pattern in ((".agents path", AGENTS_RE), ("'Phase N'", PHASE_RE),
+                              ("decision id", DECISION_RE), ("plan basename", plan_re)):
+            match = pattern.search(body) if pattern is not None else None
+            if match:
+                hits.append((sha[:12], kind, match.group(0)))
+    return hits, examined, checked
 
 
 def allowlist_forms(allowlist: list[str]) -> list[str]:
@@ -509,13 +534,15 @@ class LeakCheck(LoggingArgs, Cmd):
     "Scan only commit messages, skipping the tree."
     ("--commits-only",)
 
+    full: bool = False
+    ("Check every commit message for private-note patterns, not only the commits "
+     "not yet pushed (trailers are checked in all of them either way).")
+    ("--full", "--all")
+
     def __call__(self) -> int:
         repo = Path(self.repo).resolve()
         print("repo:     %s" % repo)
         optout_state, optout_reason, optout_problems = self._optout(repo)
-
-        if self.commits_only:
-            return self._commit_messages(repo)
 
         if self.plans:
             plans_dir: Path | None = Path(self.plans).resolve()
@@ -529,6 +556,9 @@ class LeakCheck(LoggingArgs, Cmd):
         if plans_dir:
             distinctive, generic = harvest_plan_names(plans_dir)
         print("plans:    %s" % (plans_dir if plans_dir else "NONE FOUND"))
+
+        if self.commits_only:
+            return self._commit_messages(repo, alternation(distinctive))
 
         patterns_file = personal_patterns_path(self.patterns or None)
         personal, allowlist, personal_gap = load_personal_patterns(patterns_file)
@@ -559,10 +589,11 @@ class LeakCheck(LoggingArgs, Cmd):
         hits, warnings, read, skipped = scan_tree(
             repo, files, alternation(distinctive), alternation(generic),
             personal, allowlist, infra)
-        commit_hits: list[tuple[str, str]] = []
-        commits = 0
+        commit_hits: list[tuple[str, str, str]] = []
+        commits = checked = 0
         if is_git_worktree(repo):
-            commit_hits, commits = scan_commits(repo)
+            commit_hits, commits, checked = scan_commits(
+                repo, alternation(distinctive), self.full)
 
         print("files:    %d listed, %d read, %d skipped (binary or unreadable)"
               % (len(files), read, skipped))
@@ -571,14 +602,14 @@ class LeakCheck(LoggingArgs, Cmd):
               "%d personal marker(s), %d infra rule(s)"
               % (len(distinctive) + len(generic), len(distinctive), len(generic),
                  len(personal), len(infra)))
-        print("commits:  %d examined for session trailers" % commits)
+        print(self._commits_line(commits, checked))
         print()
 
         tag = "[ships-nowhere] " if optout_state == "honoured" else ""
         for line in hits:
             print("%s%s" % (tag, line))
-        for sha, pattern in commit_hits:
-            print("%scommit %s: session trailer %r" % (tag, sha, pattern))
+        for sha, kind, text in commit_hits:
+            print("%scommit %s: %s %r" % (tag, sha, kind, text))
         for line in warnings:
             print("WARN %s%s" % (tag, line))
         if optout_state == "refused":
@@ -633,7 +664,12 @@ class LeakCheck(LoggingArgs, Cmd):
             print("optout:   none")
         return state, reason, problems
 
-    def _commit_messages(self, repo: Path) -> int:
+    def _commits_line(self, commits: int, checked: int) -> str:
+        return ("commits:  %d examined for session trailers, %d %s for private-note "
+                "patterns%s" % (commits, checked, "(all)" if self.full else "unpushed",
+                               "" if self.full else " (--full checks every commit)"))
+
+    def _commit_messages(self, repo: Path, plan_re=None) -> int:
         """`--commits-only`: the commit-message scan alone.
 
         For a repository that tracks text about the private notes on purpose,
@@ -644,15 +680,15 @@ class LeakCheck(LoggingArgs, Cmd):
             print("\nCANNOT CHECK: not a git repository, so there are no commit "
                   "messages to scan: %s" % repo)
             return EXIT_CANNOT_CHECK
-        hits, commits = scan_commits(repo)
+        hits, commits, checked = scan_commits(repo, plan_re, self.full)
         print("mode:     commit messages only (tree scan SKIPPED)")
-        print("commits:  %d examined for session trailers" % commits)
+        print(self._commits_line(commits, checked))
         print()
         if commits == 0:
             print("CANNOT CHECK: 0 commits under %s" % repo)
             return EXIT_CANNOT_CHECK
-        for sha, pattern in hits:
-            print("commit %s: session trailer %r" % (sha, pattern))
+        for sha, kind, text in hits:
+            print("commit %s: %s %r" % (sha, kind, text))
         if hits:
             print("\nFAIL (%d hits) [commit messages only; the tree was NOT "
                   "scanned]" % len(hits))

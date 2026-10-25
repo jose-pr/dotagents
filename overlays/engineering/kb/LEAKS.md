@@ -23,14 +23,18 @@ The writing rule behind the first two is
 ```bash
 dotagents leak-check <repo>
 dotagents leak-check <repo> --commits-only
+dotagents leak-check <repo> --full          # also audit pushed commit messages
 ```
 
 Over MCP it is the tool `dotagents.leak-check`, with the same arguments.
 
 It scans the working tree — tracked and untracked, ignore rules honoured,
-since a file just written is where a new leak is likeliest — and every commit
-message. `--commits-only` skips the tree, for a repository that tracks text
-about the private notes on purpose.
+since a file just written is where a new leak is likeliest — and commit
+messages: every one for attribution trailers, and the commits not yet pushed
+for the tree's patterns too (notes paths, phase labels, decision ids, plan
+names). A pushed message can only be fixed by rewriting history, so `--full`
+(alias `--all`) is the audit that checks every commit. `--commits-only` skips
+the tree, for a repository that tracks text about the private notes on purpose.
 
 **Judge it by its exit code**: 0 pass, 1 hits, 2 usage, 3 it could not check.
 Read the header it prints: it names how files were enumerated and how many
