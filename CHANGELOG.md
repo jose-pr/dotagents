@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `dotagents mcp` starts the stdio MCP gateway and can forward tools from
+  overlay-declared stdio and Streamable HTTP servers. Forwarded names default
+  to `<skill-or-server-name>.<tool>`; `--prefix` accepts a `{name}` template.
+  `dotagents.mcp.refresh` reloads active overlay declarations and reconnects
+  servers without restarting dotagents.
+  Overlays declare servers and skill mappings in `overlay.toml` under `[mcp]`;
+  Streamable HTTP requires the `mcp-http` extra, and credentials are read from
+  named environment variables.
+
 ## [0.8.2] - 2026-10-25
 
 ### Fixed
