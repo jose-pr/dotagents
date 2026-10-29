@@ -92,16 +92,12 @@ def _initialize(protocol):
     }}
 
 
-def test_mcp_gateway_answers_bad_calls_as_duho_does(tmp_path):
+def test_mcp_bad_calls_are_json_rpc_errors_until_2025_11_25(tmp_path):
     def call(req_id, name, arguments):
         return {"jsonrpc": "2.0", "id": req_id, "method": "tools/call",
                 "params": {"name": name, "arguments": arguments}}
 
     list_tools = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-    # Before `initialize`, a request is refused.
-    early = _serve([list_tools], tmp_path)
-    assert early[1]["error"]["code"] == -32002
-
     # No `notifications/initialized` is sent: the `initialize` exchange suffices.
     older = _serve([
         _initialize("2025-06-18"),
@@ -120,6 +116,26 @@ def test_mcp_gateway_answers_bad_calls_as_duho_does(tmp_path):
     ], tmp_path)
     assert newer[2]["error"]["code"] == -32602
     assert newer[3]["result"]["isError"] is True
+
+
+def test_mcp_refuses_to_start_on_an_invalid_declaration(tmp_path):
+    overlay = tmp_path / ".agents" / "overlays" / "sample"
+    overlay.mkdir(parents=True)
+    (overlay / "overlay.toml").write_bytes(
+        b'[mcp]\n\n[[mcp.servers]]\nname = "builder"\ntransport = "carrier-pigeon"\n'
+    )
+    proc = subprocess.run(
+        [sys.executable, "-m", "dotagents", "mcp"],
+        input=json.dumps(_initialize("2025-11-25")) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=_mcp_environment(tmp_path),
+        timeout=30,
+    )
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "transport must be stdio or streamable-http" in proc.stderr
 
 
 def _peer_script():

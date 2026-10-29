@@ -92,7 +92,7 @@ class BuildPyz(LoggingArgs, Cmd):
     # stale pin here ships an artifact `pip install dotagents-cli` would refuse.
     # Pin the FLOOR of each declared range, not the latest patch -- the .pyz then
     # exercises the minimum the metadata promises.
-    duho_version: str = "0.7.5"
+    duho_version: str = "0.7.9"
     "Pinned duho version to vendor."
     ("--duho-version",)
 

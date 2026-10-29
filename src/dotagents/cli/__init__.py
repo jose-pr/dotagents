@@ -84,10 +84,21 @@ _BUILTIN_COMMANDS = [
 CMDS_PATH_ENV = "AGENTS_CMDS_PATH"
 
 
+def _mcp_tools(notify, name_prefix=None):
+    """The overlay MCP gateway (a `duho.mcp.ToolProvider`) for the current scope."""
+    from dotagents._mcp_gateway import Gateway, discover
+
+    scope = _discovery_scope([])
+    return Gateway(notify, lambda: discover(scope), name_prefix)
+
+
 class Dotagents(LoggingArgs, Cli):
     """Umbrella CLI for installing and building the dotagents config."""
 
     _version_ = __version__
+    # Every MCP server of this CLI (`dotagents mcp`, `DOTAGENTS_MCP=stdio`)
+    # forwards the active overlays' MCP servers.
+    _mcp_tools_ = staticmethod(_mcp_tools)
     # Built-ins are handed to `duho.app` via `commands=` (see `main`/`_discover`),
     # NOT resolved from `_subcommands_`: `app` returns the `commands=` list as-is
     # and does not merge `_subcommands_` on top of it, so keeping the built-ins
@@ -395,56 +406,6 @@ def _discover(argv=None) -> "list":
 
 
 def main(argv=None) -> int:
-    """Run the dotagents command line and return its status."""
-    return _main(argv)
-
-
-def _run_mcp_gateway(name_prefix=None) -> int:
-    previous_mcp = os.environ.get("DOTAGENTS_MCP")
-    os.environ["DOTAGENTS_MCP"] = "stdio"
-    try:
-        return _main([], mcp_prefix=name_prefix)
-    finally:
-        if previous_mcp is None:
-            os.environ.pop("DOTAGENTS_MCP", None)
-        else:
-            os.environ["DOTAGENTS_MCP"] = previous_mcp
-
-
-def _main(argv=None, *, mcp_prefix=None) -> int:
-    if os.environ.get("DOTAGENTS_MCP", "").strip().lower() != "stdio":
-        return _run(argv)
-    from duho import mcp
-
-    from dotagents._mcp_gateway import GatewayConfigError, discover
-    from dotagents._mcp_gateway import serve as serve_gateway
-
-    try:
-        gateway_scope = _discovery_scope(argv)
-        gateway_specs = discover(gateway_scope)
-    except GatewayConfigError as exc:
-        sys.stderr.write("dotagents MCP gateway: %s\n" % exc)
-        return 2
-
-    # duho has no hook for extra tools: its `DOTAGENTS_MCP` trigger calls
-    # `duho.mcp.serve` with the tree it built for this run, so swapping that
-    # function for the run hands the gateway the same tree the CLI parses.
-    def gateway_serve(root_cls, *, stdin=None, stdout=None, output_var=None):
-        return serve_gateway(
-            root_cls, gateway_specs, stdin=stdin, stdout=stdout,
-            output_var=output_var, name_prefix=mcp_prefix,
-            reload_specs=lambda: discover(gateway_scope),
-        )
-
-    original_serve = mcp.serve
-    mcp.serve = gateway_serve
-    try:
-        return _run(argv)
-    finally:
-        mcp.serve = original_serve
-
-
-def _run(argv=None) -> int:
     # `commands=` makes `run` use `duho.app` (not `duho.main`) so the resolved
     # built-ins + discovered set are the commands; dispatch calls each command's
     # `__call__`. `exit=False` returns the status, whatever ended the run.

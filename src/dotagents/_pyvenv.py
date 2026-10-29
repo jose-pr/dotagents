@@ -40,7 +40,7 @@ from dotagents import _launchers
 
 #: Installed into every user venv, so each skill can import duho. The range is
 #: dotagents' own (pyproject.toml), checked by the test suite.
-BASE_REQUIREMENTS = ("duho>=0.7.5,<0.8",)
+BASE_REQUIREMENTS = ("duho>=0.7.9,<0.8",)
 PYVENV_DIR = ".pyvenv"
 REQUIREMENTS_FILE = "requirements.txt"
 #: Beside the venv's interpreter tree: what was installed and layered.

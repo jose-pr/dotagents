@@ -203,12 +203,14 @@ returns the exit code.
 
 ## `dotagents._mcp_gateway`, `dotagents._mcp_gateway_config`, `dotagents._mcp_gateway_clients`
 
-- `_mcp_gateway.serve(core, specs, *, stdin=None, stdout=None, output_var=None,
-  name_prefix=None, reload_specs=None) -> int` — the stdio server: duho's tools for
-  `core`, `dotagents.mcp.refresh`, and the tools of `specs`. Answers as
-  `duho.mcp.serve` does for duho's own tools (an unknown tool or bad arguments is a
-  JSON-RPC `-32602` error; bad arguments are a tool result from protocol
-  `2025-11-25` on).
+- `_mcp_gateway.Gateway(notify, load_specs, name_prefix=None)` — the
+  `duho.mcp.ToolProvider` the root's `_mcp_tools_` (`cli._mcp_tools`) builds:
+  `list_tools()` (`dotagents.mcp.refresh` and the forwarded tools; servers start on
+  the first call), `call_tool(name, arguments)` (`None` for a name it does not
+  forward), `close()` (every connection). `load_specs()` runs in the
+  constructor, so a `GatewayConfigError` ends `duho.mcp.serve` with status 2 before
+  the first request. duho's server answers everything else (`-32602` for an unknown
+  tool or bad arguments, bad arguments a tool result from protocol `2025-11-25` on).
 - `_mcp_gateway_config.discover(scope) -> list` — the validated server declarations
   of the scope's active overlays; raises `GatewayConfigError` (a `ValueError`) on
   the first invalid one, or on a `[[mcp.skills]]` entry without
@@ -777,7 +779,7 @@ interpreter; layered project > user > system through a `.pth`. `.pyvenv/` holds 
 agents' venvs only (skills, overlay helpers, setup scripts), never a project's own
 code. `AGENTS_NO_PYVENV=1` (or `true`/`yes`/`on`) turns it all off.
 
-- `BASE_REQUIREMENTS = ("duho>=0.7.5,<0.8",)` — always in the user venv; dotagents'
+- `BASE_REQUIREMENTS = ("duho>=0.7.9,<0.8",)` — always in the user venv; dotagents'
   own duho range. `REQUIREMENTS_FILE = "requirements.txt"` (at an overlay's root),
   `PYVENV_DIR = ".pyvenv"`, `STATE_FILE = ".dotagents-venv.json"` (in the venv:
   `{"digest", "requirements", "pth"}`), `PTH_FILE = "dotagents-layers.pth"` (in its

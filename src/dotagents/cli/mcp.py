@@ -29,6 +29,8 @@ class Mcp(LoggingArgs, Cmd):
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", sample):
                 sys.stderr.write("dotagents mcp: --prefix must format to a valid MCP name\n")
                 return 2
-        from dotagents.cli import _run_mcp_gateway
+        from duho.mcp import serve_running_app
 
-        return _run_mcp_gateway(self.prefix)
+        from dotagents.cli import _mcp_tools
+
+        return serve_running_app(tools=lambda notify: _mcp_tools(notify, self.prefix))

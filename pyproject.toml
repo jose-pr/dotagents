@@ -35,7 +35,7 @@ classifiers = [
 # `build-pyz` vendors the floor of each of these (src/dotagents/cli/build_pyz.py);
 # raise a floor and move its pin there in the same change.
 dependencies = [
-    "duho>=0.7.5,<0.8",
+    "duho>=0.7.9,<0.8",
     "pathapi>=0.1.0,<0.2",
     # The launchers of overlays' [scripts]: ScriptMaker writes the Windows .exe.
     "distlib>=0.4.0,<0.5",
