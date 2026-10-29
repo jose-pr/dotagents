@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Streamable HTTP requires the `mcp-http` extra, and credentials are read from
   named environment variables.
 
+### Changed
+
+- Requires duho 0.7.9 (its `ToolProvider` serves the forwarded tools), also in
+  the scope venvs and the `.pyz`.
+
 ## [0.8.2] - 2026-10-25
 
 ### Fixed
