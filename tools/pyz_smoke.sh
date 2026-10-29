@@ -76,7 +76,7 @@ has_re "$h" "$(flag --agents)"
 # modules, findings and launch. Matched on the command-list line, since
 # `overlays`' own description mentions its `sync` subcommand.
 h=$(pyz --help)
-has "$h" "{about,build-pyz,context,env,findings,init,launch,overlays,path}"
+has "$h" "{about,build-pyz,context,env,findings,init,launch,mcp,overlays,path}"
 lacks "$h" "link-project"
 lacks "$h" "sync-project"
 lacks "$h" "audit"
