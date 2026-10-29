@@ -205,7 +205,8 @@ contract is under [Commands → env](commands.md#env).
 
 The manifest is read by the `overlays` command and the context assembler, with
 `tomllib` (Python 3.11+) or `tomli` when either is installed, and otherwise with a
-small built-in reader that covers these keys. Keys:
+small built-in reader that covers these keys (all but `[mcp]`, which needs one of
+the two). Keys:
 
 | Key | Meaning |
 | --- | --- |
@@ -217,10 +218,57 @@ small built-in reader that covers these keys. Keys:
 | `priority` | Merge order (lower sorts earlier; unprioritized default is 500). |
 | `setup_timeout` | Seconds the setup script may run before it is stopped (default 300; `0` = no limit). |
 | `[scripts]` | Launchers on `PATH`: `name = "path/in/overlay.py"` adds or replaces one, `name = false` drops the one for a `bin/<name>.py`. See [Authoring → Commands on PATH](authoring.md#commands-on-path-binpy-and-scripts). |
+| `[mcp]` | `[[mcp.servers]]` and `[[mcp.skills]]` declare MCP endpoints and skills that expose them. See [MCP servers](#mcp-servers). |
 
 `overlay.toml` is the only manifest. A leading `---` frontmatter block in a
 `CONTEXT.md` (the `priority:` / `scope:` / `dependencies:` an older overlay format
 kept there) is not read, and `context` leaves it out of what it assembles.
+
+## MCP servers
+
+`dotagents mcp` forwards the tools of the MCP servers an overlay declares. Each
+`[[mcp.servers]]` entry has a `name`, a `transport` and an optional `timeout` in
+seconds (default 60):
+
+| `transport` | Keys |
+| --- | --- |
+| `stdio` | `command`, `args`; `env` sets values (not secrets: they sit in the manifest); `env_passthrough` names variables passed on from the environment. |
+| `streamable-http` | `url` (no credentials, no fragment); `headers_env` maps a header name to the variable holding its value. Needs `dotagents-cli[mcp-http]`. |
+
+```toml
+[mcp]
+
+[[mcp.servers]]
+name = "builder"
+transport = "stdio"
+command = "uvx"
+args = ["builder-mcp"]
+env = { BUILDER_MCP = "stdio" }
+env_passthrough = ["BUILDER_TOKEN"]
+timeout = 60
+
+[[mcp.servers]]
+name = "docs"
+transport = "streamable-http"
+url = "https://docs.example/mcp"
+headers_env = { Authorization = "DOCS_TOKEN" }
+timeout = 30
+
+[[mcp.skills]]
+name = "code-search"
+server = "builder"
+```
+
+A `[[mcp.skills]]` entry names a skill of the overlay (`skills/code-search/SKILL.md`
+must exist) and the server behind it; that server's tools are then listed as
+`code-search.<tool>` instead of `builder.<tool>`, once per skill when it backs
+several. `dotagents mcp --prefix 'dotagents.{name}'` puts every forwarded name under
+`dotagents.`.
+
+A stdio server gets `PATH`, `HOME`, `USERPROFILE`, `SYSTEMROOT`, `TEMP` and `TMP`,
+the variables in `env_passthrough`, and `env`; nothing else of the environment. An
+invalid `[mcp]` table in any active overlay stops `dotagents mcp` from starting; a
+server that fails to start is left out with a warning. Only tools are forwarded.
 
 ## Skills
 

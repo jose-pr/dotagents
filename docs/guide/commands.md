@@ -27,10 +27,11 @@ otherwise.
 | `path` | Print the bin dirs `env` puts on `PATH` (or, with `--lib`, the lib dirs it puts on `PYTHONPATH`). |
 | `build-pyz` | Build the self-contained `dotagents.pyz` zipapp (from a source checkout). |
 | `about` | `dotagents-cli <version>`, then the packages bundled in the `.pyz` (or installed beside a plain install) with their versions. |
+| `mcp [--prefix TEMPLATE]` | Serve dotagents command tools and active overlay MCP tools over stdio. |
 | `findings` | Per-scope findings queue: `add` / `list` / `show` / `done` / `reopen` / `remove` / `index` / `path`. |
 | `launch` | Start an agent's CLI with the `env` exported and the `context` handed over; everything after `--` goes to the agent. |
 
-That table is the **whole** shipped surface: six built-in commands and two bundled
+That table is the **whole** shipped surface: eight built-in commands and two bundled
 command modules, `findings` and `launch` (discovered from the package itself). Every
 other command is **discovered** from a directory of command modules. The sources, in
 order — a later one overrides a same-named command from an earlier one:
@@ -61,13 +62,19 @@ subcommand, no registration needed; see
 
 ## As tools for an agent
 
-Every command above except `env`, and every discovered one, is also an **MCP tool**.
-Start `dotagents` with `DOTAGENTS_MCP=stdio` in its environment and it serves that
-command set over stdio instead of running a command:
+Every command above except `env` and `mcp`, and every discovered one, is also an
+**MCP tool**. `dotagents mcp` serves that command set over stdio; starting
+`dotagents` with `DOTAGENTS_MCP=stdio` in its environment is the same server:
 
 ```sh
-DOTAGENTS_MCP=stdio dotagents        # register this as a stdio MCP server in your agent
+dotagents mcp                        # register this as a stdio MCP server in your agent
 ```
+
+The same server forwards the tools of the MCP servers that active overlays declare
+(see [Overlays → MCP servers](overlays.md#mcp-servers)), named
+`<skill-or-server-name>.<tool>`; `--prefix 'dotagents.{name}'` puts them under
+`dotagents.`. Calling `dotagents.mcp.refresh` re-reads those declarations without a
+restart and sends `notifications/tools/list_changed`.
 
 - One tool per leaf command, named with dots: `dotagents.findings.add`,
   `dotagents.overlays.list`, and for an overlay's commands `dotagents.<command>`.
