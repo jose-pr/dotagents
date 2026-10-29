@@ -33,6 +33,7 @@ _UNSHIPPED_PATTERNS = ("__pycache__", "*.pyc", "*.local.*", "CLAUDE*")
 EXTRA_REQUIREMENTS = {
     "uri": ("pathapi-uri>=0.1.0,<0.2",),
     "http": ("pathapi-uri>=0.1.0,<0.2",),
+    "mcp-http": ("syshttp>=0.1.0,<0.2",),
     "sftp": ("pathapi-uri>=0.1.0,<0.2", "sftppath[paramiko]>=0.1.0,<0.2"),
     "s3": ("pathapi-uri>=0.1.0,<0.2", "objpath[s3]>=0.1.0,<0.2"),
     "repo": ("pathapi-uri>=0.1.0,<0.2", "repopath[uri]>=0.1.0,<0.2"),
@@ -111,7 +112,7 @@ class BuildPyz(LoggingArgs, Cmd):
 
     extras: str = ""
     (
-        "dotagents-cli extras to vendor too, comma-separated (uri, http, s3, "
+        "dotagents-cli extras to vendor too, comma-separated (uri, http, mcp-http, s3, "
         "repo), so the .pyz speaks those schemes for overlay sources; none by "
         "default. Only pure-Python dependencies can be vendored, so sftp "
         "(cryptography, bcrypt, pynacl) cannot."

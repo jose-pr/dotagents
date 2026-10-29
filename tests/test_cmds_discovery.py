@@ -89,6 +89,7 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
     # The compiled built-ins survive the app switch.
     for builtin in ("init", "build-pyz", "context", "env", "path", "overlays", "about"):
         assert builtin in names
+    assert "mcp" in names
     # The bundled command modules: the findings queue (its subcommands are
     # nested classes, so none of them leaks out as a top-level command) and
     # launch.
@@ -106,11 +107,12 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
         assert gone not in names
     # A personal command module is discovered only when the user has dropped it
     # into their own `<scope>/dotagents/cmds/` (D84) -- never a default of a
-    # fresh install. So a fresh install offers EXACTLY the built-ins plus the
-    # bundled modules, and nothing else.
+    # fresh install. So a fresh install offers exactly its CLI commands and
+    # bundled modules.
     assert "my-personal-tool" not in names
     assert set(names) == {
-        "init", "build-pyz", "context", "env", "path", "overlays", "about", "findings", "launch",
+        "init", "build-pyz", "context", "env", "path", "overlays", "about", "mcp",
+        "findings", "launch",
     }
     # Built-ins are handed to `duho.app` via `commands=`, never `_subcommands_`.
     assert cli.Dotagents._subcommands_ == []

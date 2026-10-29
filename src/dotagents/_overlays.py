@@ -11,6 +11,7 @@ property of :class:`Overlay`. Manifest keys:
 * `rules` — overlay-relative paths to markdown files whose `- **…` bullet blocks
   are appended to "Always-on rules".
 * `requires` — overlay names this one needs; `overlays add` installs them first.
+* `mcp` — MCP servers and the skills they back; read by `dotagents._mcp_gateway_config`.
 * `name`, `description`, `priority` — see :meth:`Overlay.read_manifest`.
 
 The operations over a *set* of overlays stay module functions:

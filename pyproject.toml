@@ -51,13 +51,14 @@ dependencies = [
 uri = ["pathapi-uri>=0.1.0,<0.2"]
 # http(s) is part of `uri` now; kept so `dotagents-cli[http]` still installs.
 http = ["pathapi-uri>=0.1.0,<0.2"]
+mcp-http = ["syshttp>=0.1.0,<0.2"]
 sftp = ["pathapi-uri>=0.1.0,<0.2", "sftppath[paramiko]>=0.1.0,<0.2"]
 s3 = ["pathapi-uri>=0.1.0,<0.2", "objpath[s3]>=0.1.0,<0.2"]
 # github:, gitlab: and repo: (a repository's tree at a ref).
 repo = ["pathapi-uri>=0.1.0,<0.2", "repopath[uri]>=0.1.0,<0.2"]
 # YAML overlay-repo registries (dotagents.yaml / *.yml).
 yaml = ["pyyaml"]
-dev = ["build", "hatchling>=1.27", "pytest", "pyyaml", "pathapi-uri>=0.1.0,<0.2"]
+dev = ["build", "hatchling>=1.27", "pytest", "pyyaml", "pathapi-uri>=0.1.0,<0.2", "syshttp>=0.1.0,<0.2"]
 docs = [
     "mkdocs>=1.5",
     "mkdocs-material>=9.5",

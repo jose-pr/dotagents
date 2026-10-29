@@ -43,16 +43,34 @@ and an error saying a command is required, and exits 2.
 | `findings add\|list\|show\|done\|reopen\|remove\|index\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding, `done` moves it to `processed/` with a required resolution, `INDEX.md` regenerated on every change. The frontmatter is valid YAML (a value is double-quoted when it must be); `index --requote` fixes values written bare in existing files, touching nothing else. |
 | `about [--json]` | `dotagents-cli <version>`, then `<distribution> <version>` per bundled (`.pyz`) or installed package. |
 | `build-pyz [--out P] [--python SHEBANG] [--duho-version V] [--pathapi-version V] [--extras a,b] [--with-pip]` | Build a zipapp from a source checkout; errors elsewhere. `--with-pip` vendors the pinned pip wheel (`_pipwheel`) as `dotagents/_vendor/`. |
+| `mcp [--prefix TEMPLATE]` | Serve command and active overlay MCP tools over stdio; `{name}` in the template is the skill or server name. |
 
-**Every command but `env` is also an MCP tool.** With `DOTAGENTS_MCP=stdio` in its
-environment, `dotagents` serves the command set — built-in, bundled and discovered —
-over stdio instead of running one: a tool per leaf command, named with dots
+**Every command but `env` and `mcp` is also an MCP tool.** `dotagents mcp` (or
+`DOTAGENTS_MCP=stdio dotagents`, the same server) serves the command set — built-in,
+bundled and discovered — over stdio: a tool per leaf command, named with dots
 (`dotagents.findings.add`, `dotagents.overlays.list`), its input schema generated from
 the command's fields, its result the command's output. `env` is not served: it prints
-resolved, possibly secret values. The set is fixed when the server starts, for the
-scope it starts in. With `AGENT_HELP=1`, `--help` prints one
+resolved, possibly secret values. The command set is fixed when the server starts, for
+the scope it starts in. With `AGENT_HELP=1`, `--help` prints one
 JSON document (`duho/agent-help@1`) for the command tree it is asked about, in place
 of the human text.
+
+The same server forwards the tools of the MCP servers active overlays declare in
+`overlay.toml` (`[[mcp.servers]]`, `[[mcp.skills]]`; keys in
+`docs/guide/overlays.md`). Forwarded names are `<skill-or-server-name>.<tool>`, or
+`--prefix`'s template with `{name}` filled in, plus `.<tool>`. Gotchas:
+
+- An invalid `[mcp]` table in any active overlay stops the server from starting
+  (exit 2, the reason on stderr).
+- Overlay servers start on the first `tools/list`; one that fails to start, or a tool
+  whose name collides with one already listed, is left out with a warning.
+- A stdio server's environment is `PATH`, `HOME`, `USERPROFILE`, `SYSTEMROOT`,
+  `TEMP`, `TMP`, the variables named in `env_passthrough`, then `env`. An HTTP
+  server's credentials come only from the variables `headers_env` names.
+- Streamable HTTP needs the `mcp-http` extra (`syshttp`).
+- `dotagents.mcp.refresh` re-reads the declarations, closes every connection and
+  sends `notifications/tools/list_changed`; the next `tools/list` reconnects.
+- Only tools are forwarded: not resources, prompts, or a server's own requests.
 
 Scope flags: `-g` / `--global` selects the user store; `--agents-dir D` overrides the
 store the command resolves to (the project store for `init` / `overlays` / `findings`
@@ -152,7 +170,7 @@ The package's own data; library code, importing nothing from `dotagents.cli`.
   install. The archive also holds the vendored duho and pathapi; `env`
   exports it as `AGENTS_PYLIB`.
 
-## Commands — `dotagents.cli.init`, `dotagents.cli.overlays`, `dotagents.cli.context`, `dotagents.cli.env`, `dotagents.cli.path`, `dotagents.cli.about`, `dotagents.cli.build_pyz`
+## Commands — `dotagents.cli.init`, `dotagents.cli.overlays`, `dotagents.cli.context`, `dotagents.cli.env`, `dotagents.cli.path`, `dotagents.cli.about`, `dotagents.cli.build_pyz`, `dotagents.cli.mcp`
 
 One `duho` command class per command above; fields are the flags, `__call__()`
 returns the exit code.
@@ -176,10 +194,26 @@ returns the exit code.
   `bundle_manifest() -> Optional[dict]`, `installed_packages() -> dict[str, str]`,
   `packages() -> tuple[dict[str, str], Optional[dict]]` (the bundle's packages, else
   the installed ones; the CLI itself in neither).
+- `mcp.Mcp` — `prefix: Optional[str]`; exits 2 when the template uses a placeholder
+  other than `{name}` or does not format to a tool-name segment.
 - `build_pyz`: `EXTRA_REQUIREMENTS` — `{extra: (requirement, ...)}`, what each
-  dotagents-cli extra installs (`uri`, `http`, `sftp`, `s3`, `repo`), kept equal to
-  `pyproject.toml`; `--extras` vendors each requirement at its floor and refuses a
-  name not in it.
+  dotagents-cli extra installs (`uri`, `http`, `mcp-http`, `sftp`, `s3`, `repo`),
+  kept equal to `pyproject.toml`; `--extras` vendors each requirement at its floor
+  and refuses a name not in it.
+
+## `dotagents._mcp_gateway`, `dotagents._mcp_gateway_config`, `dotagents._mcp_gateway_clients`
+
+- `_mcp_gateway.serve(core, specs, *, stdin=None, stdout=None, output_var=None,
+  name_prefix=None, reload_specs=None) -> int` — the stdio server: duho's tools for
+  `core`, `dotagents.mcp.refresh`, and the tools of `specs`. Answers as
+  `duho.mcp.serve` does for duho's own tools (an unknown tool or bad arguments is a
+  JSON-RPC `-32602` error; bad arguments are a tool result from protocol
+  `2025-11-25` on).
+- `_mcp_gateway_config.discover(scope) -> list` — the validated server declarations
+  of the scope's active overlays; raises `GatewayConfigError` (a `ValueError`) on
+  the first invalid one, or on a `[[mcp.skills]]` entry without
+  `skills/<name>/SKILL.md`.
+- `_mcp_gateway_clients` — the stdio and Streamable HTTP clients; private.
 
 ## `dotagents._scope`
 
@@ -276,7 +310,8 @@ returns the exit code.
     `setup_timeout`, `scripts` (the `[scripts]` table as written: name -> path
     relative to the overlay, `/`-separated, plain file-name characters, no `..`,
     or `false`; any other entry is dropped with a warning); a missing or invalid
-    manifest gives empty contributions.
+    manifest gives empty contributions. `[mcp]` is read by
+    `_mcp_gateway_config.discover`, not here.
   - `scripts() -> dict[str, str]` — the scripts that get a launcher
     (`dotagents._launchers`): each top-level `bin/<name>.py` whose stem is a
     `SCRIPT_NAME_RE` name (so not `_private.py`, not `__init__.py`), then

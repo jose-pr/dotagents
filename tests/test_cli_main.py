@@ -40,6 +40,7 @@ HELP = {
     ("env",): _SCOPED + ["--format", "--diff"],
     ("context",): _SCOPED + ["--format", "--agents", "--write-agent", "--inline"],
     ("about",): ["--json"],
+    ("mcp",): ["--prefix"],
     ("build-pyz",): ["--out", "--python", "--duho-version", "--pathapi-version", "--pathlib-next-version", "--extras"],
     ("overlays", "add"): _SCOPED + ["--repo", "--copy", "--no-setup", "--no-requires", "--prune", "--dry-run"],
     ("overlays", "sync"): _SCOPED + ["--repo", "--copy", "--prune", "--no-setup", "--dry-run"],
