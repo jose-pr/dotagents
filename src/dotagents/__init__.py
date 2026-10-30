@@ -1,3 +1,3 @@
 """dotagents: installable CLI for the dotagents agent-config payload."""
 
-__version__ = "0.8.2"
+__version__ = "0.8.3"
