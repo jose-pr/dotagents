@@ -1,9 +1,10 @@
-"""Launchers for overlays' scripts: each top-level ``bin/<name>.py``, plus
-what ``overlay.toml`` declares (``Overlay.scripts``)::
+"""Launchers for overlays' python scripts (``Overlay.scripts``): each top-level
+``bin/<name>.py``, and what ``overlay.cfg`` declares under ``scripts``::
 
     [scripts]
     tool = "lib/tool/main.py"   # another path, or another name
     helper = false              # no launcher for bin/helper.py
+    check = { path = "tools/check.py", interpreter = "python", os = ["unix"] }
 
 Each becomes an executable named after the key in ``<venv>/overlays/`` of a
 dotagents venv (:mod:`dotagents._pyvenv`), which ``env`` puts first on
@@ -112,7 +113,7 @@ def _shell(name: str, var: str, script: str, python: str) -> bytes:
     path = '"$%s"%s' % (var, _sh_quote("/" + script))
     return "\n".join([
         "#!/bin/sh",
-        "# Made by dotagents from overlay.toml [scripts]; regenerated on overlays sync.",
+        "# Made by dotagents from overlay.cfg scripts; regenerated on overlays sync.",
         'if [ -z "${%s:-}" ] || [ ! -f %s ]; then' % (var, path),
         '    echo "%s" >&2' % message,
         "    exit 2",

@@ -217,16 +217,16 @@ _BLOCK_SCALAR = re.compile(r'^[>|][+-]?[0-9]?[+-]?$')
 
 
 def _strip_frontmatter(text: str) -> str:
-    """``text`` without a leading ``---`` frontmatter block (closed by ``---``
-    or ``...``). An overlay's manifest is its ``overlay.toml``; metadata an
-    older ``CONTEXT.md`` still carries (``priority:``, ``scope:``,
-    ``dependencies:``) is not context, so it is never emitted. An unclosed
-    block is left alone -- it is not frontmatter."""
+    """``text`` without a leading front matter block, as AOS defines it for
+    context files: after an optional byte-order mark, a first line that is
+    ``---``, up to the next line that is ``---`` or ``...`` (``LF`` or
+    ``CRLF``). Front matter is metadata, not context. An unclosed block is
+    left alone -- it is not front matter."""
     lines = text.lstrip("\ufeff").splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].rstrip("\r\n") != "---":
         return text
     for i, line in enumerate(lines[1:], start=1):
-        if line.strip() in ("---", "..."):
+        if line.rstrip("\r\n") in ("---", "..."):
             return "".join(lines[i + 1:])
     return text
 
@@ -275,16 +275,21 @@ def _collect_skills(scope: _scope.Scope) -> "list[tuple[str, str, Path]]":
 
     Skills are OPT-IN: the generator lists them so the user can choose to invoke
     one, but never inlines a skill body (that would defeat the user's
-    'skills I decide to use' model). The ``skills/`` dirs are walked in
-    contract-A order (:meth:`Scope.paths`: each store's overlays, then the
-    store; system, user, project), and a LATER same-named skill wins -- a
+    'skills I decide to use' model). Contract-A order (:meth:`Scope.paths`:
+    each store's overlays, then the store; system, user, project): an
+    overlay's skills are the ones it declares (:meth:`Overlay.skills`), a
+    store's every ``skills/<name>/``; a LATER same-named skill wins -- a
     project skill over the user's, like :meth:`Overlay.installed`. Listed in
     first-seen order."""
     found: "dict[str, tuple[str, str, Path]]" = {}
-    for _level, skills_dir, _root in scope.paths({"default": "skills", "project-root": ""}):
+    for _level, skills_dir, root in scope.paths({"default": "skills", "project-root": ""}):
         if not skills_dir.is_dir():
             continue
-        for skill_dir in sorted(skills_dir.iterdir()):
+        if root is not None:
+            candidates = [skills_dir / name for name in _overlays.Overlay(root).skills()]
+        else:
+            candidates = sorted(skills_dir.iterdir())
+        for skill_dir in candidates:
             skill_md = skill_dir / "SKILL.md"
             try:
                 if not skill_md.is_file():
@@ -357,25 +362,29 @@ def _resolve_and_filter_sources(
     Returns ``(sources, harness_loaded)`` -- the second is the resolved list of
     files the harness loads itself, so the inliner can skip them too."""
     sources = scope.paths(
-        {"overlay": "CONTEXT.md", "default": "AGENTS.md"},
+        {"overlay": "", "default": "AGENTS.md"},
         {"project": "AGENTS.local.md", "project-root": "AGENTS.local.md"},
     )
+    # An overlay's context is what it declares: `context`, then the active
+    # harness's `harness.<id>.context`.
+    for overlay in scope.overlays:
+        for rel in overlay.context_files(agent.harness_id or None):
+            sources.append((overlay.name, overlay.path.joinpath(*rel.split("/")), overlay.path))
     project_root = scope.project_root or _scope.project_root_default()
 
-    # Apply overlay priority: overlays first, in `Overlay.sort_key` order --
-    # (priority, manifest name, directory name), the order `_compose_block`
-    # folds overlay rules in -- so a lower priority reads earlier; then every
-    # non-overlay level (system/user/project/project-root) in the resolver's
-    # precedence order (the sort is stable). No priority value can move an
-    # overlay after a store's AGENTS.md.
+    # The base context first -- every store level (system/user/project/
+    # project-root) in the resolver's precedence order -- then the overlays'
+    # files in composition order, `Overlay.sort_key` (priority, manifest
+    # name, directory name), the order `_compose_block` folds overlay rules
+    # in, each overlay's in the order it declares them (the sort is stable).
     #
-    # An overlay entry is the one whose `root` is set: the resolver labels it
-    # with the overlay's NAME, not the literal "overlay".
+    # An overlay entry is the one whose `root` is set: it is labelled with
+    # the overlay's NAME, not the literal "overlay".
     def _sort_key(item):
         level, path, root = item
         if root is not None:
-            return (0,) + _overlays.Overlay(root).sort_key
-        return (1,)
+            return (1,) + _overlays.Overlay(root).sort_key
+        return (0,)
 
     sources.sort(key=_sort_key)
 
@@ -420,7 +429,7 @@ def _assemble(
             content = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        if path.name == "CONTEXT.md":
+        if root is not None:
             content = _strip_frontmatter(content)
         source_paths.append(str(path))
         emitted.append(path)

@@ -191,9 +191,10 @@ class Scope:
         raise ValueError("%s is not a store of %r" % (store, self))
 
     @property
-    def overlays(self) -> "list[Overlay]":
-        """Every overlay a session in this scope uses (:meth:`Overlay.installed`
-        over :attr:`stores`: the project's copy shadows a same-named store copy).
+    def installed_overlays(self) -> "list[Overlay]":
+        """Every overlay installed in this scope's stores (:meth:`Overlay.installed`
+        over :attr:`stores`: the project's copy shadows a same-named store
+        copy), whether or not it may be activated.
 
         Memoized on the stores and their ``overlays/`` listings: one ``env``
         run walks :meth:`paths` several times, and each rescan checked every
@@ -206,6 +207,15 @@ class Scope:
             memo = (key, Overlay.installed(*stores))
             self.__dict__["_overlays_memo"] = memo
         return list(memo[1])
+
+    @property
+    def overlays(self) -> "list[Overlay]":
+        """Every overlay a session in this scope uses: :attr:`installed_overlays`
+        less those refused because they do not match their pin
+        (:mod:`dotagents._activate`)."""
+        from dotagents import _activate
+
+        return _activate.active(self.installed_overlays)
 
     def paths(
         self, *names: "str | dict[str, str]", include_missing: bool = False
@@ -249,8 +259,7 @@ class Scope:
                 if template:
                     found.append((level, location / template, root))
 
-        # No manifest is required for an overlay to count -- neither
-        # ``CONTEXT.md`` nor ``overlay.toml`` (D84).
+        # No manifest is required for an overlay to count (D84).
         overlays = self.overlays  # shadowing already applied, store-stamped
         for store in self.stores:
             for overlay in overlays:

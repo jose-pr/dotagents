@@ -14,7 +14,8 @@ The autouse `_isolate` fixture below therefore, for EVERY test:
 
 - points HOME and USERPROFILE (what `Path.home()` reads on Windows) at an
   empty per-test home, so `~/.agents`, `~/.claude`, `~/.codex`, ... are tmp;
-- deletes every `AGENTS_*` / `DOTAGENTS_*` / `<NAME>_OVERLAY_ROOT` variable,
+- deletes every `AGENTS_*` / `DOTAGENTS_*` / `AOS_*` / `<NAME>_OVERLAY_ROOT` /
+  `<NAME>_OVERLAY_STATE` variable, `PYTHONPYCACHEPREFIX`,
   `AGENT`, the harness project-root vars (`CLAUDE_PROJECT_DIR`), each
   adapter's detection markers and model vars, `CLAUDE_ENV_FILE`,
   `CODEX_HOME` and `PI_CODING_AGENT_DIR`;
@@ -50,12 +51,12 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 #: The developer's real home, captured at import -- before any fixture moves it.
 REAL_HOME = Path.home()
 
-_CLEARED_PREFIXES = ("AGENTS_", "DOTAGENTS_", "CLAUDE_CODE_", "CODEX_SANDBOX")
-_CLEARED_SUFFIXES = ("_OVERLAY_ROOT",)
+_CLEARED_PREFIXES = ("AGENTS_", "DOTAGENTS_", "AOS_", "CLAUDE_CODE_", "CODEX_SANDBOX")
+_CLEARED_SUFFIXES = ("_OVERLAY_ROOT", "_OVERLAY_STATE")
 
 
 def _cleared_names() -> "set[str]":
-    names = {"AGENT", "CLAUDE_ENV_FILE", "CODEX_HOME", "PI_CODING_AGENT_DIR"}
+    names = {"AGENT", "CLAUDE_ENV_FILE", "CODEX_HOME", "PI_CODING_AGENT_DIR", "PYTHONPYCACHEPREFIX"}
     names.update(_scope._HARNESS_PROJECT_ROOT_VARS)
     for agent in _agents.get_all_agents():
         names.update(agent.detect_env_vars)

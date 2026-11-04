@@ -50,8 +50,10 @@ def _overlay(src: Path, name: str, *, requires=(), routing=(), rules=None, files
     toml += "requires = [%s]\n" % ", ".join('"%s"' % r for r in requires)
     toml += "routing = [%s]\n" % ", ".join('"%s"' % r for r in routing)
     if rules is not None:
-        toml += "rules = [%s]\n" % ", ".join('"%s"' % r for r in rules)
-    (ov / "overlay.toml").write_text(toml, encoding="utf-8")
+        toml += "rules = [%s]\n" % ", ".join(json.dumps(r) for r in rules)
+    if setup is not None:
+        toml += '[[setup]]\ninterpreter = "python"\npath = "setup.py"\n'
+    (ov / "overlay.cfg").write_text(toml, encoding="utf-8")
     for rel, body in files:
         (ov / rel).parent.mkdir(parents=True, exist_ok=True)
         (ov / rel).write_text(body, encoding="utf-8")
@@ -299,7 +301,7 @@ def test_relative_entries_of_non_http_url_registries_join_the_path():
 
 
 def test_a_relative_git_entry_is_cloned_beside_the_registry_not_the_cwd(tmp_path, monkeypatch):
-    _bare_repo(tmp_path, "shared", {"overlay.toml": 'name = "shared"\n', "kb/S.md": "s\n"})
+    _bare_repo(tmp_path, "shared", {"overlay.cfg": 'name = "shared"\n', "kb/S.md": "s\n"})
     reg_dir = tmp_path / "reg"
     reg_dir.mkdir()
     (reg_dir / "reg.json").write_text(json.dumps({"shared": "../shared.git@main"}), encoding="utf-8")
@@ -372,7 +374,7 @@ def test_a_credentialed_clone_keeps_the_credential_out_of_git_config(tmp_path, m
 # --------------------------------------------------------------------------
 
 def test_the_source_cache_root_ignores_everything_in_it(tmp_path):
-    bare = _bare_repo(tmp_path, "whole", {"overlay.toml": 'name = "whole"\n'})
+    bare = _bare_repo(tmp_path, "whole", {"overlay.cfg": 'name = "whole"\n'})
     cache_root = tmp_path / "store" / ".cache" / "overlays"
     _sources.SourceCache(cache_root).checkout(_sources.parse_spec(str(bare) + "@main"))
     ignore = cache_root / ".gitignore"
@@ -400,22 +402,10 @@ def test_a_pyz_in_the_store_never_makes_the_store_its_own_source(tmp_path, monke
 # overlays-13: the manifest is read as TOML
 # --------------------------------------------------------------------------
 
-@pytest.fixture(params=["toml", "hand"])
-def reader(request, monkeypatch):
-    """Run a manifest test under tomllib/tomli AND under the hand fallback."""
-    toml_module = getattr(_overlays, "_toml_module", lambda: None)
-    if request.param == "toml":
-        if toml_module() is None:
-            pytest.skip("neither tomllib nor tomli is importable")
-    else:
-        monkeypatch.setattr(_overlays, "_toml_module", lambda: None, raising=False)
-    return request.param
-
-
-def test_manifest_escapes_underscored_ints_and_tables(tmp_path, reader):
+def test_manifest_escapes_underscored_ints_and_tables(tmp_path):
     ov = tmp_path / "demo"
     ov.mkdir()
-    (ov / "overlay.toml").write_text(
+    (ov / "overlay.cfg").write_text(
         'name = "demo"\n'
         'description = "say \\"hi\\""\n'
         'routing = ["- Run \\"dotagents env\\" first -> x", \'- Path C:\\tools -> y\', "- Tab\\there -> z"]\n'
@@ -434,23 +424,24 @@ def test_manifest_escapes_underscored_ints_and_tables(tmp_path, reader):
 
 
 def test_an_invalid_manifest_is_a_warning_and_an_empty_manifest(tmp_path, caplog):
-    if _overlays._toml_module() is None:
-        pytest.skip("neither tomllib nor tomli is importable")
     ov = tmp_path / "broken"
     ov.mkdir()
-    (ov / "overlay.toml").write_text('routing = ["unterminated\n', encoding="utf-8")
+    (ov / "overlay.cfg").write_text('routing = ["unterminated\n', encoding="utf-8")
     with caplog.at_level(logging.WARNING):
         manifest = Overlay(ov).read_manifest()
     assert manifest["routing"] == [] and manifest["name"] == "broken"
-    assert any("not valid TOML" in r.getMessage() for r in caplog.records)
+    assert any("cannot be read (parse-error" in r.getMessage() for r in caplog.records)
 
 
 # --------------------------------------------------------------------------
 # overlays-05: requires / rules cannot escape the overlay or overlays/
 # --------------------------------------------------------------------------
 
-def test_invalid_requires_entries_are_dropped(tmp_path, reader):
+def test_invalid_requires_entries_refuse_the_manifest(tmp_path):
+    """AOS: a manifest with an invalid entry contributes nothing at all."""
     ov = _overlay(tmp_path, "top", requires=["../escape", "user", "ok", "Ok"])
+    assert Overlay(ov).read_manifest()["requires"] == []
+    ov = _overlay(tmp_path, "fine", requires=["ok", "Ok"])
     assert Overlay(ov).read_manifest()["requires"] == ["ok"]
 
 
@@ -458,16 +449,18 @@ def test_a_requires_path_never_installs_outside_overlays(world):
     src, store = world
     _overlay(src, "top", requires=["../escape"])
     _overlay(src / "..", "escape", files=[("kb/E.md", "e\n")])  # what `../escape` would find
-    assert _add(src, store, "top") == 0
+    with pytest.raises(SystemExit, match="requires/0"):
+        _add(src, store, "top")
     assert not (store / "escape").exists()
-    assert sorted(p.name for p in (store / "overlays").iterdir()) == ["top"]
+    assert not (store / "overlays" / "top").exists()
 
 
 def test_rules_outside_the_overlay_are_not_merged(world, tmp_path):
     src, store = world
     (tmp_path / "secret.md").write_text("- **Secret**: from outside\n", encoding="utf-8")
     _overlay(src, "top", rules=["../../secret.md", str(tmp_path / "secret.md")])
-    assert _add(src, store, "top") == 0
+    with pytest.raises(SystemExit, match="rules/0"):
+        _add(src, store, "top")
     assert "Secret" not in (store / "AGENTS.md").read_text(encoding="utf-8")
 
 
@@ -526,7 +519,7 @@ def test_a_dotted_install_from_an_older_rule_is_still_found(world):
     legacy = store / "overlays" / "foo.bar"  # what `add foo.bar` made before dots normalized
     shutil.copytree(str(src / "foo.bar"), str(legacy))
     assert _add(src, store, "foo.bar") == 0
-    assert sorted(p.name for p in (store / "overlays").iterdir()) == ["foo.bar"], "re-add reuses it"
+    assert sorted(p.name for p in (store / "overlays").iterdir() if not p.name.startswith(".")) == ["foo.bar"], "re-add reuses it"
     assert _run(OverlayRemove, name=["foo.bar"], global_scope=True, agents_dir=store, dry_run=False) == 0
     assert not legacy.exists()
 
@@ -626,7 +619,7 @@ def test_remove_unlinks_a_linked_overlay_and_keeps_its_target(world, tmp_path):
         _winapi.CreateJunction(str(dev), str(link))
     assert _run(OverlayRemove, name=["myov"], global_scope=True, agents_dir=store, dry_run=False) == 0
     assert not os.path.lexists(str(link))
-    assert (dev / "overlay.toml").is_file()
+    assert (dev / "overlay.cfg").is_file()
 
 
 # --------------------------------------------------------------------------
@@ -640,7 +633,7 @@ def test_a_failed_setup_rolls_back_that_overlay_and_merges_the_rest(world):
     _overlay(src, "ccc", routing=["- CCC-ROUTE -> z"])
     with pytest.raises(SystemExit, match="setup for overlay 'bbb' failed"):
         _add(src, store, "aaa", "bbb")
-    assert sorted(p.name for p in (store / "overlays").iterdir()) == ["aaa"]
+    assert sorted(p.name for p in (store / "overlays").iterdir() if not p.name.startswith(".")) == ["aaa"]
     assert not (store / "skills" / "bbb-skill").exists()
     assert "AAA-ROUTE" in (store / "AGENTS.md").read_text(encoding="utf-8")
     _add(src, store, "ccc")
@@ -659,13 +652,12 @@ def test_an_interrupted_fresh_install_leaves_nothing_behind(world, monkeypatch):
     monkeypatch.setattr(Overlay, "install_to", interrupted)
     with pytest.raises(KeyboardInterrupt):
         _add(src, store, "half")
-    left = sorted(p.name for p in (store / "overlays").iterdir()) if (store / "overlays").exists() else []
+    left = sorted(p.name for p in (store / "overlays").iterdir() if not p.name.startswith(".")) if (store / "overlays").exists() else []
     assert left == [], "neither a partial overlays/half nor a staging dir"
 
 
 # --------------------------------------------------------------------------
-# sync / add make the install exactly the source, but for what the overlay's
-# .gitignore / .ignore files match (and caches), which --prune clears too
+# sync / add make the install exactly the overlay's members
 # --------------------------------------------------------------------------
 
 def test_sync_replaces_an_edited_file_and_backs_it_up(world, caplog):
@@ -702,47 +694,56 @@ def test_sync_removes_whatever_the_source_does_not_ship(world):
     (ov / "kb" / "K.md").unlink()
     assert _sync(store, repo=[str(src)]) == 0
     assert sorted(p.relative_to(installed).as_posix() for p in installed.rglob("*") if p.is_file()) == [
-        ".dotagents-install.json", "overlay.toml", "pre.env.py",
-    ], "exactly the source (and the install record)"
+        "overlay.cfg", "pre.env.py",
+    ], "exactly the source; the install record lives beside it"
+    assert Overlay(installed).install_record_path == store / "overlays" / ".dotagents-install" / "demo.json"
+    assert Overlay(installed).install_record_path.is_file()
     backed = {p.name: p.read_text(encoding="utf-8") for p in (store / "install_backup").rglob("*") if p.is_file()}
     assert backed == {"K.md": "edited here\n", "mine.md": "never upstream\n"}, (
         "what dotagents did not put there is backed up; env.py was unedited"
     )
 
 
-def test_ignored_files_are_the_installs_own_until_prune(world):
+def test_an_ignore_file_is_a_member_and_means_nothing(world):
+    """AOS: an overlay's members are every file but the excluded names; its
+    .gitignore is a file like another, and the copy keeps its tree digest."""
     src, store = world
     ov = _overlay(src, "demo", files=[
-        ("kb/K.md", "k\n"), (".gitignore", "state/\n*.log\n"), (".ignore", "lib/cache.db\n"),
-        ("state/from-the-source.txt", "a source checkout's local file\n"),
-        # Only the root's ignore files count: this one is a template the overlay ships.
-        ("references/.gitignore", "*\n"), ("references/README.md", "template\n"),
+        ("kb/K.md", "k\n"), (".gitignore", "state/\n*.log\n"),
+        ("state/from-the-source.txt", "a member like any other\n"),
     ])
+    (ov / "__pycache__").mkdir()
+    (ov / "__pycache__" / "x.pyc").write_bytes(b"\0")
     _add(src, store, "demo")
     installed = store / "overlays" / "demo"
-    assert not (installed / "state").exists(), "an ignored file in the source is not the overlay"
-    assert (installed / "references" / ".gitignore").is_file() and (installed / "references" / "README.md").is_file()
-    (installed / "lib").mkdir()
-    (installed / "state").mkdir()
-    (installed / "state" / "token").write_text("setup wrote this\n", encoding="utf-8")
-    (installed / "run.log").write_text("log\n", encoding="utf-8")
-    (installed / "lib" / "cache.db").write_text("db\n", encoding="utf-8")
+    assert (installed / "state" / "from-the-source.txt").is_file() and (installed / ".gitignore").is_file()
+    assert not (installed / "__pycache__").exists()
+    assert Overlay(installed).tree_digest() == Overlay(ov).tree_digest()
+
+
+def test_sync_clears_what_is_not_part_of_the_overlay(world):
+    """Setup output, caches and bytecode left inside an install go: setup
+    writes into its state directory, and the copy keeps its digest."""
+    src, store = world
+    ov = _overlay(src, "demo", files=[("kb/K.md", "k\n")])
+    _add(src, store, "demo")
+    installed = store / "overlays" / "demo"
     (installed / "__pycache__").mkdir()
     (installed / "__pycache__" / "x.pyc").write_bytes(b"\0")
-    (ov / "kb" / "K.md").write_text("k2\n", encoding="utf-8")
+    (installed / "node_modules" / "p").mkdir(parents=True)
+    (installed / "node_modules" / "p" / "index.js").write_text("x\n", encoding="utf-8")
+    (installed / "kb" / "stray.pyc").write_bytes(b"\0")
+    (installed / ".dotagents-install.json").write_text("{}\n", encoding="utf-8")  # from before AOS
     assert _sync(store, repo=[str(src)]) == 0
-    assert (installed / "kb" / "K.md").read_text(encoding="utf-8") == "k2\n"
-    for kept in ("state/token", "run.log", "lib/cache.db", "__pycache__/x.pyc"):
-        assert (installed / kept).is_file(), kept
-    assert _sync(store, repo=[str(src)], prune=True) == 0
-    for gone in ("state", "run.log", "lib/cache.db", "__pycache__"):
+    for gone in ("__pycache__", "node_modules", "kb/stray.pyc", ".dotagents-install.json"):
         assert not (installed / gone).exists(), gone
-    assert (installed / "kb" / "K.md").is_file() and (installed / ".gitignore").is_file()
+    assert Overlay(installed).tree_digest() == Overlay(ov).tree_digest()
+    assert not list(store.rglob("install_backup/**/*.pyc")), "bytecode is never backed up"
 
 
 def test_re_adding_an_installed_overlay_matches_the_source_too(world):
     src, store = world
-    _overlay(src, "demo", files=[("kb/D.md", "d\n"), (".gitignore", "local/\n")])
+    _overlay(src, "demo", files=[("kb/D.md", "d\n")])
     _add(src, store, "demo")
     installed = store / "overlays" / "demo"
     (installed / "kb" / "D.md").write_text("mine\n", encoding="utf-8")
@@ -750,8 +751,6 @@ def test_re_adding_an_installed_overlay_matches_the_source_too(world):
     (installed / "local" / "x").write_text("x\n", encoding="utf-8")
     assert _add(src, store, "demo") == 0
     assert (installed / "kb" / "D.md").read_text(encoding="utf-8") == "d\n"
-    assert (installed / "local" / "x").is_file()
-    assert _add(src, store, "demo", prune=True) == 0
     assert not (installed / "local").exists()
 
 
@@ -900,7 +899,7 @@ def test_add_refuses_a_source_inside_the_install_root(world):
     with pytest.raises(SystemExit, match="inside"):
         _add(None, store, "mine")
     assert (mine / "kb" / "MINE.md").read_text(encoding="utf-8") == "only copy\n"
-    assert not (mine / Overlay.INSTALL_RECORD).exists()
+    assert not Overlay(mine).install_record_path.exists()
 
 
 def test_sync_refuses_a_source_inside_the_install_root(world, caplog):

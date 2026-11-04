@@ -1,5 +1,6 @@
-"""Overlay `lib/` dirs reach everything an overlay starts: a setup script run
-from a plain shell, and a command module, import another overlay's library.
+"""Overlay libraries (directories an overlay declares on PYTHONPATH) reach
+what an overlay starts: a setup script run from a plain shell imports the
+library of an overlay it requires, and a command module imports one.
 (The session's own PYTHONPATH is covered in test_env.py / test_fix_env.py.)
 
 tmp dirs only; the conftest isolates the home and the stores.
@@ -16,11 +17,11 @@ from _helpers import run_cmd as _run
 BASE_AGENTS = "<!-- dotagents:begin -->\n# BASE\n## Load on demand\n<!-- dotagents:end -->\n"
 
 
-def _overlay(src, name, *, requires=(), files=()):
+def _overlay(src, name, *, requires=(), files=(), extra=""):
     ov = src / name
     ov.mkdir(parents=True)
-    (ov / "overlay.toml").write_text(
-        'name = "%s"\nrequires = [%s]\n' % (name, ", ".join('"%s"' % r for r in requires)),
+    (ov / "overlay.cfg").write_text(
+        'name = "%s"\nrequires = [%s]\n' % (name, ", ".join('"%s"' % r for r in requires)) + extra,
         encoding="utf-8",
     )
     for rel, body in files:
@@ -39,16 +40,23 @@ def test_a_setup_script_imports_a_required_overlays_lib_and_sees_its_bin(tmp_pat
     (store / "AGENTS.md").write_text(BASE_AGENTS, encoding="utf-8")
     marker = tmp_path / "setup-saw.txt"
     _overlay(src, "base", files=[("lib/base_helpers.py", "VALUE = 'from base'\n"),
-                                 ("bin/base-tool", "#!/bin/sh\n")])
-    _overlay(src, "consumer", requires=["base"], files=[("setup.py", (
+                                 ("bin/base-tool", "#!/bin/sh\n")],
+             extra='[[paths]]\nvariable = "PATH"\npath = "bin"\n'
+                   '[[paths]]\nvariable = "PYTHONPATH"\npath = "lib"\n')
+    _overlay(src, "unrelated", files=[("lib/unrelated_helpers.py", "X = 1\n")],
+             extra='[[paths]]\nvariable = "PYTHONPATH"\npath = "lib"\n[env]\nUNRELATED = "set"\n')
+    _overlay(src, "consumer", requires=["base"],
+             extra='[[setup]]\ninterpreter = "python"\npath = "setup.py"\n', files=[("setup.py", (
         "import os, base_helpers\n"
-        "open(%r, 'w').write(base_helpers.VALUE + '|' + os.environ['PATH'])\n" % str(marker)
+        "open(%r, 'w').write(base_helpers.VALUE + '|' + os.environ.get('UNRELATED', '-') + '|'"
+        " + os.environ['PATH'])\n" % str(marker)
     ))])
-    rc = _run(OverlayAdd, name=["consumer"], repo=[str(src)], global_scope=True,
+    rc = _run(OverlayAdd, name=["unrelated", "consumer"], repo=[str(src)], global_scope=True,
               agents_dir=store, copy=True, dry_run=False)
     assert rc == 0
-    value, path = marker.read_text(encoding="utf-8").split("|", 1)
+    value, unrelated, path = marker.read_text(encoding="utf-8").split("|", 2)
     assert value == "from base"
+    assert unrelated == "-", "another overlay's env never reaches this overlay's setup"
     assert str(store / "overlays" / "base" / "bin") in path.split(os.pathsep)
 
 
@@ -59,7 +67,8 @@ def test_a_command_module_imports_an_overlays_lib_from_a_plain_shell(tmp_path, m
     cmds = store / "overlays" / "tools" / "cmds"
     lib.mkdir(parents=True)
     cmds.mkdir()
-    (store / "overlays" / "tools" / "overlay.toml").write_text('name = "tools"\n', encoding="utf-8")
+    (store / "overlays" / "tools" / "overlay.cfg").write_text(
+        'name = "tools"\n[[paths]]\nvariable = "PYTHONPATH"\npath = "lib"\n', encoding="utf-8")
     (lib / "tools_lib_probe.py").write_text("NAME = 'probe'\n", encoding="utf-8")
     (cmds / "probe.py").write_text(
         "from duho import Cmd, LoggingArgs\n"

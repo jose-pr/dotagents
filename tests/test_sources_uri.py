@@ -23,7 +23,7 @@ def _tree(root: Path):
     for name in ("one", "two"):
         d = root / "overlays" / name
         (d / "kb").mkdir(parents=True)
-        (d / "overlay.toml").write_text('name = "%s"\nrequires = []\nrouting = []\n' % name, encoding="utf-8")
+        (d / "overlay.cfg").write_text('name = "%s"\nrequires = []\nrouting = []\n' % name, encoding="utf-8")
         (d / "kb" / (name.upper() + ".md")).write_text("# %s\n" % name, encoding="utf-8")
     (root / "cfg").mkdir()
     (root / "cfg" / "reg.json").write_text(json.dumps({
@@ -55,7 +55,7 @@ def test_http_directory_listing_is_a_directory_of_overlays(served, tmp_path):
     repo = _sources.load_repo(url + "/overlays", cache)
     assert isinstance(repo, DirRepo) and sorted(repo.available()) == ["one", "two"]
     one = repo.overlay_dir("one")
-    assert (one / "overlay.toml").is_file() and (one / "kb" / "ONE.md").read_text(encoding="utf-8") == "# one\n"
+    assert (one / "overlay.cfg").is_file() and (one / "kb" / "ONE.md").read_text(encoding="utf-8") == "# one\n"
     assert str(one).startswith(str(tmp_path / "cache" / "uri")), "materialized into the cache"
     # Fetched once per process: a second load reuses the copy.
     assert _sources.load_repo(url + "/overlays", cache).overlay_dir("one") == one
@@ -68,7 +68,7 @@ def test_http_registry_resolves_relative_entries_beside_it(served, tmp_path):
     reg = _sources.load_repo(url + "/cfg/reg.json", cache)
     assert isinstance(reg, RegistryRepo) and reg.base == Spec("url", url + "/cfg/reg.json")
     assert (reg.overlay_dir("one") / "kb" / "ONE.md").is_file()
-    assert (reg.overlay_dir("two") / "overlay.toml").read_text(encoding="utf-8").startswith('name = "two"')
+    assert (reg.overlay_dir("two") / "overlay.cfg").read_text(encoding="utf-8").startswith('name = "two"')
 
 
 @needs_uri
@@ -154,7 +154,7 @@ def test_a_zip_at_a_url_is_read_straight_off_http(archives, tmp_path):
         spec = "zip:http://127.0.0.1:%d/o.zip!/overlays" % httpd.server_address[1]
         repo = _sources.load_repo(spec, SourceCache(tmp_path / "cache"))
         assert sorted(repo.available()) == ["one", "two"]
-        assert (repo.overlay_dir("two") / "overlay.toml").is_file()
+        assert (repo.overlay_dir("two") / "overlay.cfg").is_file()
     finally:
         httpd.shutdown()
         httpd.server_close()

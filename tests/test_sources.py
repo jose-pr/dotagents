@@ -94,9 +94,9 @@ def _repo_template(tmp_path_factory):
         _git("init", "-q", "-b", "main", cwd=work)
         _git("config", "user.email", "t@example.invalid", cwd=work)
         _git("config", "user.name", "t", cwd=work)
-        _write(work / "overlay.toml", 'name = "whole"\nrequires = []\nrouting = []\n')
+        _write(work / "overlay.cfg", 'name = "whole"\nrequires = []\nrouting = []\n')
         _write(work / "kb" / "WHOLE.md", "main\n")
-        _write(work / "overlays" / "inner" / "overlay.toml", 'name = "inner"\nrequires = []\nrouting = []\n')
+        _write(work / "overlays" / "inner" / "overlay.cfg", 'name = "inner"\nrequires = []\nrouting = []\n')
         _write(work / "overlays" / "inner" / "kb" / "INNER.md", "main\n")
         _git("add", "-A", cwd=work)
         _git("commit", "-q", "-m", "main", cwd=work)
@@ -154,7 +154,7 @@ def test_git_repo_as_a_whole_overlay_and_as_a_directory_of_overlays(repo, tmp_pa
     cache = SourceCache(tmp_path / "cache")
     # A registry entry with no path: the whole repository is the overlay.
     reg = RegistryRepo("r", {"whole": repo["url"] + "@main", "inner": repo["url"] + "@dev#overlays/inner"}, cache)
-    assert (reg.overlay_dir("whole") / "overlay.toml").is_file()
+    assert (reg.overlay_dir("whole") / "overlay.cfg").is_file()
     assert (reg.overlay_dir("inner") / "kb" / "INNER.md").read_text() == "dev\n"
     # A repo spec with a path to a directory: a directory of overlays.
     d = _sources.load_repo(repo["url"] + "@main#overlays", cache)
@@ -165,7 +165,7 @@ def test_git_repo_as_a_whole_overlay_and_as_a_directory_of_overlays(repo, tmp_pa
     # entry, i.e. a source).
     root = _sources.load_repo(repo["url"] + "@main", cache)
     assert isinstance(root, DirRepo)
-    assert (root.root / "overlay.toml").is_file() and (root.root / "overlays" / "inner").is_dir()
+    assert (root.root / "overlay.cfg").is_file() and (root.root / "overlays" / "inner").is_dir()
     assert root.root == d.root.parent
     with pytest.raises(SystemExit) as exc:
         _sources.load_repo(repo["url"] + "#overlays/missing", cache)
@@ -188,8 +188,8 @@ def test_registry_from_a_git_file(repo, tmp_path):
 # --------------------------------------------------------------------------
 
 def test_a_directory_repo_looks_up_the_overlay_by_name(tmp_path):
-    _write(tmp_path / "src" / "one" / "overlay.toml", 'name = "one"\n')
-    _write(tmp_path / "src" / "my_two" / "overlay.toml", 'name = "my-two"\n')
+    _write(tmp_path / "src" / "one" / "overlay.cfg", 'name = "one"\n')
+    _write(tmp_path / "src" / "my_two" / "overlay.cfg", 'name = "my-two"\n')
     d = _sources.load_repo(str(tmp_path / "src"), SourceCache(tmp_path / "cache"))
     assert isinstance(d, DirRepo) and sorted(d.available()) == ["my_two", "one"]
     assert d.overlay_dir("one") == tmp_path / "src" / "one"
@@ -211,9 +211,9 @@ def test_relative_entries_resolve_against_the_registry_file(tmp_path, monkeypatc
         "two": "./many",            # a directory of overlays holding two/
         "three": "many/three",      # no ./ needed
     }))
-    _write(tmp_path / "reg" / "one" / "overlay.toml", 'name = "one"\n')
-    _write(tmp_path / "reg" / "sub" / "many" / "two" / "overlay.toml", 'name = "two"\n')
-    _write(tmp_path / "reg" / "sub" / "many" / "three" / "overlay.toml", 'name = "three"\n')
+    _write(tmp_path / "reg" / "one" / "overlay.cfg", 'name = "one"\n')
+    _write(tmp_path / "reg" / "sub" / "many" / "two" / "overlay.cfg", 'name = "two"\n')
+    _write(tmp_path / "reg" / "sub" / "many" / "three" / "overlay.cfg", 'name = "three"\n')
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
@@ -285,8 +285,8 @@ def test_relative_entries_in_a_git_registry_stay_in_that_repo_and_ref(repo, tmp_
 
 def test_registry_documents_and_entry_forms(tmp_path):
     cache = SourceCache(tmp_path / "cache")
-    _write(tmp_path / "one" / "overlay.toml", 'name = "one"\n')
-    _write(tmp_path / "many" / "two" / "overlay.toml", 'name = "two"\n')
+    _write(tmp_path / "one" / "overlay.cfg", 'name = "one"\n')
+    _write(tmp_path / "many" / "two" / "overlay.cfg", 'name = "two"\n')
     _write(tmp_path / "r.json", json.dumps({
         "one": str(tmp_path / "one"),            # the overlay itself
         "two": str(tmp_path / "many"),           # a directory of overlays holding two/
@@ -349,8 +349,8 @@ def test_registry_files_first_suffix_per_store(tmp_path):
 
 def _repo_dir(tmp_path, who):
     root = tmp_path / who
-    _write(root / "shared" / "overlay.toml", 'name = "shared"\n')
-    _write(root / ("only_%s" % who) / "overlay.toml", 'name = "only_%s"\n' % who)
+    _write(root / "shared" / "overlay.cfg", 'name = "shared"\n')
+    _write(root / ("only_%s" % who) / "overlay.cfg", 'name = "only_%s"\n' % who)
     return root
 
 

@@ -1,5 +1,5 @@
-"""`dotagents path`, the setup-script timeout, and CONTEXT.md frontmatter being
-dropped from the assembled context (overlay.toml is the manifest).
+"""`dotagents path`, the setup timeout, and front matter being dropped from
+an overlay's declared context files.
 
 tmp dirs only; the conftest isolates the home and the stores.
 """
@@ -29,7 +29,7 @@ def test_context_md_frontmatter_is_not_context(tmp_path):
     store = tmp_path / "store"
     ov = store / "overlays" / "legacy"
     ov.mkdir(parents=True)
-    (ov / "overlay.toml").write_text('name = "legacy"\n', encoding="utf-8")
+    (ov / "overlay.cfg").write_text('name = "legacy"\ncontext = ["CONTEXT.md"]\n', encoding="utf-8")
     (ov / "CONTEXT.md").write_text(
         "---\npriority: 900\nscope: [runtime]\ndependencies: [gitlab]\n---\n# Legacy rules\nBODY\n",
         encoding="utf-8",
@@ -38,6 +38,20 @@ def test_context_md_frontmatter_is_not_context(tmp_path):
     text = _context.assemble_context(_agents.CodexAgent(), scope)
     assert "# Legacy rules\nBODY" in text
     assert "priority: 900" not in text and "dependencies:" not in text
+
+
+def test_context_md_is_context_by_default_and_context_lists_the_files(tmp_path):
+    """The root's CONTEXT.md is an overlay's context unless `context` lists
+    the files (an empty list: none)."""
+    store = tmp_path / "store"
+    ov = store / "overlays" / "plain"
+    ov.mkdir(parents=True)
+    (ov / "CONTEXT.md").write_text("DEFAULT-CONTEXT\n", encoding="utf-8")
+    (store / "AGENTS.md").write_text("base\n", encoding="utf-8")
+    scope = Scope.of(agents_dir=store, project_root=tmp_path / "proj", global_scope=True)
+    assert "DEFAULT-CONTEXT" in _context.assemble_context(_agents.CodexAgent(), scope)
+    (ov / "overlay.cfg").write_text("context = []\n", encoding="utf-8")
+    assert "DEFAULT-CONTEXT" not in _context.assemble_context(_agents.CodexAgent(), scope)
 
 
 def test_only_a_closed_leading_block_is_frontmatter():
@@ -58,7 +72,13 @@ def _store(tmp_path, monkeypatch):
     for name in ("aa", "bb"):
         ov = store / "overlays" / name
         (ov / "lib").mkdir(parents=True)
-        (ov / "overlay.toml").write_text('name = "%s"\n' % name, encoding="utf-8")
+        (ov / "overlay.cfg").write_text('name = "%s"\n' % name, encoding="utf-8")
+    # `aa` keeps the defaults (its bin/ and lib/ when they exist); `bb` turns
+    # both off.
+    (store / "overlays" / "aa" / "bin").mkdir()
+    with open(str(store / "overlays" / "bb" / "overlay.cfg"), "a", encoding="utf-8") as fh:
+        fh.write('[defaults]\nbin = false\nlib = false\n')
+    (store / "overlays" / "bb" / "bin").mkdir()
     (store / "lib").mkdir()
     monkeypatch.setenv("AGENTS_HOME", str(store))
     monkeypatch.delenv("AGENTS_PROJECT_ROOT", raising=False)
@@ -69,15 +89,14 @@ def test_path_lists_the_bins_highest_precedence_first(tmp_path, monkeypatch, cap
     store = _store(tmp_path, monkeypatch)
     assert _run(PathCmd, global_scope=True, format="json") == 0
     dirs = json.loads(capsys.readouterr().out)
-    assert dirs[0] == str(store / "bin")
-    assert set(dirs[1:]) == {str(store / "overlays" / n / "bin") for n in ("aa", "bb")}
+    assert dirs == [str(store / "bin"), str(store / "overlays" / "aa" / "bin")]
 
 
 def test_path_lib_lists_only_existing_lib_dirs(tmp_path, monkeypatch, capsys):
     store = _store(tmp_path, monkeypatch)
     assert _run(PathCmd, global_scope=True, lib=True, format="native") == 0
     out = capsys.readouterr().out.strip().split(os.pathsep)
-    assert out[0] == str(store / "lib") and len(out) == 3
+    assert out == [str(store / "lib"), str(store / "overlays" / "aa" / "lib")]
 
 
 def test_path_posix_is_colon_joined_msys_form_on_windows(tmp_path, monkeypatch, capsys):
@@ -103,10 +122,10 @@ def test_path_rejects_an_unknown_format(tmp_path, monkeypatch):
 def _slow_overlay(src, *, seconds, manifest_timeout=None):
     ov = src / "slow"
     ov.mkdir(parents=True)
-    toml = 'name = "slow"\n'
+    toml = 'name = "slow"\n[[setup]]\ninterpreter = "python"\npath = "setup.py"\n'
     if manifest_timeout is not None:
-        toml += "setup_timeout = %d\n" % manifest_timeout
-    (ov / "overlay.toml").write_text(toml, encoding="utf-8")
+        toml += "timeout = %d\n" % manifest_timeout
+    (ov / "overlay.cfg").write_text(toml, encoding="utf-8")
     (ov / "setup.py").write_text("import time\ntime.sleep(%s)\n" % seconds, encoding="utf-8")
     return ov
 
@@ -135,16 +154,17 @@ def test_setup_timeout_zero_means_no_limit(tmp_path):
     assert _add(src, tmp_path / "store", setup_timeout=0) == 0
 
 
-def test_the_flag_overrides_the_manifest_and_the_default(tmp_path):
+def test_the_variant_declares_the_timeout_and_300_is_the_default(tmp_path):
     ov = _overlays.Overlay(_slow_overlay(tmp_path / "src", seconds=0, manifest_timeout=7))
-    assert ov.setup_timeout() == 7
-    assert ov.setup_timeout(3) == 3 and ov.setup_timeout(0) == 0
-    bare = _overlays.Overlay(tmp_path / "none")
-    assert bare.setup_timeout() == _overlays.DEFAULT_SETUP_TIMEOUT == 300
+    assert ov.setup_variant()["timeout"] == 7
+    assert _overlays.DEFAULT_SETUP_TIMEOUT == 300
 
 
-def test_an_invalid_manifest_timeout_falls_back_to_the_default(tmp_path):
+def test_an_invalid_timeout_refuses_the_manifest(tmp_path):
     ov = tmp_path / "bad"
     ov.mkdir()
-    (ov / "overlay.toml").write_text('name = "bad"\nsetup_timeout = -5\n', encoding="utf-8")
-    assert _overlays.Overlay(ov).setup_timeout() == _overlays.DEFAULT_SETUP_TIMEOUT
+    (ov / "overlay.cfg").write_text(
+        'name = "bad"\n[[setup]]\ninterpreter = "python"\npath = "setup.py"\ntimeout = -5\n', encoding="utf-8")
+    overlay = _overlays.Overlay(ov)
+    assert overlay.setup_variant() is None
+    assert any("/setup/0/timeout" in p for p in overlay.manifest_problems())

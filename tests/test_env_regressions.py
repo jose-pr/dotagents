@@ -88,7 +88,7 @@ def test_managed_bins_lead_path_in_contract_a_order_whatever_the_caller_had(root
     agents_dir, project_root = roots
     overlay = agents_dir / "overlays" / "x"  # a bin that must sort AFTER the user bin
     overlay.mkdir(parents=True)
-    (overlay / "overlay.toml").write_text('name = "x"\n', encoding="utf-8")
+    (overlay / "overlay.cfg").write_text('name = "x"\n', encoding="utf-8")
     user_bin = str(agents_dir / "bin")
     other = str(tmp_path / "other-bin")
     base = {"PATH": os.pathsep.join([user_bin, other])}

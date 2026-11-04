@@ -109,7 +109,7 @@ def test_reinit_leaves_an_existing_dotagents_dir_alone(tmp_path):
 def _add_tiny(store, tmp_path, routing="- Tiny -> $TINY_OVERLAY_ROOT/kb/T.md"):
     src = tmp_path / "src" / "tiny"
     src.mkdir(parents=True, exist_ok=True)
-    (src / "overlay.toml").write_text('name = "tiny"\nrouting = ["%s"]\n' % routing, encoding="utf-8")
+    (src / "overlay.cfg").write_text('name = "tiny"\nrouting = ["%s"]\n' % routing, encoding="utf-8")
     cmd = OverlayAdd()
     cmd.name, cmd.repo, cmd.global_scope, cmd.agents_dir, cmd.copy, cmd.dry_run = (
         ["tiny"], [str(tmp_path / "src")], True, store, True, False)

@@ -168,7 +168,7 @@ def test_dry_run_links_nothing(tmp_path):
 
 def _overlay(src: Path, name: str, skill=None) -> Path:
     ov = src / name
-    write_text_lf(ov / "overlay.toml", 'name = "%s"\n' % name)
+    write_text_lf(ov / "overlay.cfg", 'name = "%s"\n' % name)
     if skill:
         _skill(ov / "skills", skill)
     return ov
@@ -385,10 +385,18 @@ def test_cached_env_sees_a_changed_environment(env_store, capsys, monkeypatch):
     assert _runs(env_store) == 2
 
 
-def test_cached_env_sees_a_new_overlay_env_file(env_store, capsys):
+def test_cached_env_sees_a_new_overlay_declaration(env_store, capsys):
     _env(capsys)
-    write_text_lf(env_store / "overlays" / "extra" / "env.py", "import json\nprint(json.dumps({'FROM_OVERLAY': '1'}))\n")
+    write_text_lf(env_store / "overlays" / "extra" / "overlay.cfg", '[env]\nFROM_OVERLAY = "1"\n')
     assert _env(capsys)["FROM_OVERLAY"] == "1"
+
+
+def test_cached_env_sees_an_edited_env_file_an_overlay_names(env_store, capsys):
+    write_text_lf(env_store / "overlays" / "extra" / "overlay.cfg", 'env_files = ["env/values.cfg"]\n')
+    write_text_lf(env_store / "overlays" / "extra" / "env" / "values.cfg", 'FROM_FILE = "one"\n')
+    assert _env(capsys)["FROM_FILE"] == "one"
+    write_text_lf(env_store / "overlays" / "extra" / "env" / "values.cfg", 'FROM_FILE = "two, longer"\n')
+    assert _env(capsys)["FROM_FILE"] == "two, longer"
 
 
 def test_cached_env_expires(env_store, capsys, monkeypatch):

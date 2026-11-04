@@ -1,18 +1,34 @@
 """Overlay support: the :class:`Overlay` type, plus the multi-overlay recompose.
 
-An overlay is a directory (optionally carrying an `overlay.toml` manifest) that
-installs as a unit into `<store>/overlays/<name>/`, its files keeping their
-relative paths inside that directory. Everything that
-depends only on ONE overlay -- its name rules, its manifest, its setup script,
-its files, what it contributes to the managed `AGENTS.md` block -- is a method or
-property of :class:`Overlay`. Manifest keys:
+An overlay is an AOS overlay (:mod:`dotagents._aos`): a directory, optionally
+carrying an ``overlay.cfg`` manifest, that installs as a unit into
+``<store>/overlays/<name>/``, its members keeping their relative paths.
+Everything that depends only on ONE overlay -- its name rules, its manifest,
+its setup, its members, its digest, what it contributes to the managed
+``AGENTS.md`` block -- is a method or property of :class:`Overlay`. Nothing an
+overlay holds means anything by its file name alone except ``overlay.cfg`` and
+``skills/<name>/SKILL.md``: its environment, search paths, setup, context,
+dependencies and commands are what the manifest declares. Manifest keys
+dotagents applies:
 
-* `routing` — lines appended to the core's "Load on demand" list.
-* `rules` — overlay-relative paths to markdown files whose `- **…` bullet blocks
-  are appended to "Always-on rules".
-* `requires` — overlay names this one needs; `overlays add` installs them first.
-* `mcp` — MCP servers and the skills they back; read by `dotagents._mcp_gateway_config`.
-* `name`, `description`, `priority` — see :meth:`Overlay.read_manifest`.
+* ``routing`` -- lines appended to the core's "Load on demand" list.
+* ``rules`` -- overlay-relative paths to markdown files whose ``- **...`` bullet
+  blocks are appended to "Always-on rules".
+* ``requires`` -- overlay names this one needs; ``overlays add`` installs them first.
+* ``context``, ``skills``, ``harness`` -- read by ``context`` and the skills publisher.
+* ``env``, ``env_files``, ``paths``, ``env_scripts`` -- applied by ``dotagents env``.
+* ``runtime``, ``setup`` -- probed and run by ``overlays add`` / ``sync``.
+* ``scripts`` -- launchers (:mod:`dotagents._launchers`).
+* ``mcp`` -- MCP servers and the skills they back; read by ``dotagents._mcp_gateway_config``.
+* ``name``, ``description``, ``priority`` -- see :meth:`Overlay.read_manifest`.
+
+A manifest that cannot be read or does not validate contributes nothing at
+all, with a warning naming where it is wrong.
+
+An installed overlay's install record and state live beside it, never in it:
+``<store>/overlays/.dotagents-install/<name>.json`` and
+``<store>/overlays/.dotagents-state/<name>/<os>-<digest>/``, so the installed
+copy holds exactly the overlay's members and keeps its tree digest.
 
 The operations over a *set* of overlays stay module functions:
 ``_compose_block`` folds their rules and routing into a base block, and
@@ -26,8 +42,11 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Iterable, Optional
+
+from dotagents import _aos
 
 _log = logging.getLogger("dotagents")
 _warned: "set[str]" = set()
@@ -47,334 +66,50 @@ def _warn_once(message: str, *args: object) -> None:
 # sort before (0..499) or after (501..) the unprioritized default.
 DEFAULT_PRIORITY = 500
 
-#: Seconds an overlay's setup script may run before it is stopped, unless its
-#: manifest sets ``setup_timeout`` or the command passes ``--setup-timeout``.
-#: ``0`` (from either) means no limit.
+#: Seconds a setup variant may run when it declares no ``timeout``.
 DEFAULT_SETUP_TIMEOUT = 300
 
 
-def _setup_timeout(value: object, name: str) -> "Optional[int]":
-    """A manifest ``setup_timeout``: a non-negative integer, else ``None``
-    (with a warning when it was set to something else)."""
-    if value is None:
-        return None
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-        return value
-    _warn_once("overlay %s: ignoring setup_timeout %r (seconds, 0 = no limit)", name, value)
-    return None
-
-
 # --------------------------------------------------------------------------- #
-# Manifest text parsing (pure functions over TOML source; no overlay needed).
-#
-# `tomllib` (3.11+) or `tomli` reads the manifest. `tomli` is a declared
-# dependency below 3.11 and is vendored in the .pyz, so the small hand reader
-# below only runs in an install that skipped its dependencies; it covers what
-# a manifest uses: top-level strings, arrays of strings and an integer, and
-# the `[scripts]` table of strings, with TOML's escapes.
+# Reading the manifest: ``overlay.cfg`` through :mod:`dotagents._aos`.
 # --------------------------------------------------------------------------- #
 
+#: ``str(path) -> (stat signature, document, problems)``: a manifest is read
+#: once per change, however often a command asks for it.
+_MANIFESTS: "dict[str, tuple[tuple[int, int], dict[str, Any], list[str]]]" = {}
 
-def _toml_module() -> "Any":
-    """``tomllib`` / ``tomli`` when importable, else ``None`` (seam for tests)."""
+
+def load_manifest(path: Path) -> "tuple[dict[str, Any], list[str]]":
+    """``(document, problems)`` of the manifest at ``path``: the validated
+    data model, or ``{}`` with the reasons it was refused. An absent file is
+    ``({}, [])``: an overlay need not have a manifest."""
     try:
-        import tomllib  # type: ignore[import-not-found]
-
-        return tomllib
-    except ImportError:
-        pass
+        st = os.stat(str(path))
+    except OSError:
+        return {}, []
+    key = str(path)
+    sig = (st.st_mtime_ns, st.st_size)
+    cached = _MANIFESTS.get(key)
+    if cached is not None and cached[0] == sig:
+        return cached[1], cached[2]
     try:
-        import tomli  # type: ignore[import-not-found]
-
-        return tomli
-    except ImportError:
-        return None
-
-
-_ESCAPES = {"b": "\b", "t": "\t", "n": "\n", "f": "\f", "r": "\r", '"': '"', "\\": "\\", "e": "\x1b"}
-
-
-def _unescape(text: str) -> str:
-    """Decode a TOML basic string's escapes (``\\"``, ``\\\\``, ``\\n``, ``\\uXXXX``...)."""
-
-    def one(m: "re.Match[str]") -> str:
-        esc = m.group(1)
-        if esc[0] in "uU":
-            try:
-                return chr(int(esc[1:], 16))
-            except ValueError:
-                return m.group(0)
-        return _ESCAPES.get(esc, m.group(0))
-
-    return re.sub(r"\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)", one, text)
-
-
-def _top_level(text: str) -> str:
-    """The (comment-stripped) text before the first ``[table]`` header, so a
-    ``key =`` inside a table is never read as a top-level key. Quote- and
-    bracket-aware: a ``[`` inside a string or an array does not count."""
-    i, n, depth = 0, len(text), 0
-    quote: "Optional[str]" = None
-    line_start = True
-    while i < n:
-        c = text[i]
-        if quote:
-            if text.startswith(quote, i):
-                i += len(quote)
-                quote = None
-            elif c == "\\" and quote in ('"', '"""') and i + 1 < n:
-                i += 2
-            else:
-                i += 1
-            continue
-        if c == "\n":
-            line_start = True
-            i += 1
-            continue
-        if line_start and c in " \t":
-            i += 1
-            continue
-        if line_start and c == "[" and depth == 0:
-            return text[:i]
-        line_start = False
-        if text.startswith('"""', i) or text.startswith("'''", i):
-            quote = text[i : i + 3]
-            i += 3
-        elif c in ('"', "'"):
-            quote = c
-            i += 1
-        else:
-            if c == "[":
-                depth += 1
-            elif c == "]":
-                depth = max(0, depth - 1)
-            i += 1
-    return text
-
-
-def _strip_comments(text: str) -> str:
-    """Drop `#` comments -- whole-line AND trailing -- leaving string contents
-    untouched: a `#` inside `"..."`, `'...'`, `\"\"\"...\"\"\"` or `'''...'''`
-    (multi-line included) is data. Trailing comments must go too, or
-    `routing = ["a"] # note` reaches the array reader with text after its `]`."""
-    out = []
-    i, n = 0, len(text)
-    quote: "Optional[str]" = None
-    while i < n:
-        c = text[i]
-        if quote:
-            if text.startswith(quote, i):
-                out.append(quote)
-                i += len(quote)
-                quote = None
-            elif c == "\\" and quote in ('"', '"""') and i + 1 < n:
-                out.append(text[i : i + 2])  # an escape inside a basic string
-                i += 2
-            else:
-                out.append(c)
-                i += 1
-            continue
-        if text.startswith('"""', i) or text.startswith("'''", i):
-            quote = text[i : i + 3]
-            out.append(quote)
-            i += 3
-        elif c in ('"', "'"):
-            quote = c
-            out.append(c)
-            i += 1
-        elif c == "#":
-            while i < n and text[i] != "\n":
-                i += 1
-        else:
-            out.append(c)
-            i += 1
-    return "".join(out)
-
-
-def _array_body(text: str, key: str) -> "Optional[str]":
-    """The text between the `[` and its matching `]` of a top-level
-    `key = [...]`, found by a quote-aware scan -- so a `]` inside a string
-    (a markdown link in a routing line) or the NEXT key's array can never be
-    mistaken for this array's end, and the closing bracket may sit on the same
-    line, on its own line, indented, or right after a multi-line string."""
-    m = re.search(r"(?m)^%s\s*=\s*\[" % re.escape(key), text)
-    if m is None:
-        return None
-    i, n = m.end(), len(text)
-    start = i
-    quote: "Optional[str]" = None
-    while i < n:
-        c = text[i]
-        if quote:
-            if text.startswith(quote, i):
-                i += len(quote)
-                quote = None
-            elif c == "\\" and quote in ('"', '"""') and i + 1 < n:
-                i += 2
-            else:
-                i += 1
-            continue
-        if text.startswith('"""', i) or text.startswith("'''", i):
-            quote = text[i : i + 3]
-            i += 3
-        elif c in ('"', "'"):
-            quote = c
-            i += 1
-        elif c == "]":
-            return text[start:i]
-        else:
-            i += 1
-    return None  # unterminated: treat as absent
-
-
-def _parse_string_array(text: str, key: str) -> "list[str]":
-    """Read a top-level `key = [...]` array of strings from (comment-stripped)
-    TOML source.
-
-    The fallback when neither `tomllib` nor `tomli` is importable (the Python
-    3.9 floor has no `tomllib`). Handles `"..."` (escapes decoded),
-    `'...'`, and the multi-line
-    `\"\"\"...\"\"\"` / `'''...'''` -- one or many per array, with the closing
-    `]` on the same line or on its own (indented or not)."""
-    body = _array_body(text, key)
-    if body is None:
-        return []
-    # One pass, in order: triple-quoted forms first so their content is never
-    # re-matched as single-quoted; basic strings decode their escapes.
-    pattern = re.compile(
-        r'"""((?:[^\\]|\\.)*?)"""|\'\'\'(.*?)\'\'\'|"((?:[^"\\\n]|\\.)*)"|\'([^\'\n]*)\'',
-        re.DOTALL,
-    )
-    items = []
-    for basic_ml, literal_ml, basic, literal in pattern.findall(body):
-        if basic_ml or basic:
-            items.append(_unescape(basic_ml or basic))
-        else:
-            items.append(literal_ml or literal)
-    return [s.strip("\n") for s in items if s.strip()]
-
-
-def _parse_string(text: str, key: str) -> "Optional[str]":
-    """A top-level single-line `key = "..."` / `key = '...'` string, or None."""
-    m = re.search(
-        r"""(?m)^%s\s*=\s*(?:"((?:[^"\\\n]|\\.)*)"|'([^'\n]*)')\s*$""" % re.escape(key), text
-    )
-    if m is None:
-        return None
-    return _unescape(m.group(1)) if m.group(1) is not None else m.group(2)
-
-
-def _parse_priority(text: str) -> int:
-    """Read a top-level `priority = <int>` from (comment-stripped) TOML source.
-    Missing/unparseable -> DEFAULT_PRIORITY."""
-    m = re.search(r"(?m)^priority\s*=\s*([+-]?\d(?:_?\d)*)\s*$", text)
-    if m is None:
-        return DEFAULT_PRIORITY
-    return int(m.group(1).replace("_", ""))  # the pattern admits only valid ints
-
-
-def _parse_table_strings(text: str, table: str) -> "dict[str, object]":
-    """The single-line ``key = "..."`` / ``key = '...'`` / ``key = true|false``
-    entries of the ``[table]`` section of (comment-stripped) TOML source; bare
-    or quoted keys."""
-    m = re.search(r"(?m)^[ \t]*\[%s\][ \t]*$" % re.escape(table), text)
-    if m is None:
-        return {}
-    end = re.search(r"(?m)^[ \t]*\[", text[m.end():])
-    body = text[m.end(): m.end() + end.start()] if end else text[m.end():]
-    entry = re.compile(
-        r"""(?m)^[ \t]*(?:([A-Za-z0-9_-]+)|"((?:[^"\\\n]|\\.)*)")[ \t]*=[ \t]*"""
-        r"""(?:"((?:[^"\\\n]|\\.)*)"|'([^'\n]*)'|(true|false))[ \t]*$"""
-    )
-    out: "dict[str, object]" = {}
-    for bare, quoted, basic, literal, boolean in entry.findall(body):
-        key = bare or _unescape(quoted)
-        if boolean:
-            out[key] = boolean == "true"
-        else:
-            out[key] = _unescape(basic) if basic or not literal else literal
-    return out
-
-
-def _hand_parse(text: str) -> "dict[str, object]":
-    """The fallback reader's view of a manifest, as the keys ``tomllib`` would
-    give (absent keys omitted)."""
-    raw = _top_level(_strip_comments(text))
-    doc: "dict[str, object]" = {
-        "routing": _parse_string_array(raw, "routing"),
-        "rules": _parse_string_array(raw, "rules"),
-        "requires": _parse_string_array(raw, "requires"),
-        "priority": _parse_priority(raw),
-    }
-    for key in ("name", "description"):
-        value = _parse_string(raw, key)
-        if value is not None:
-            doc[key] = value
-    scripts = _parse_table_strings(_strip_comments(text), "scripts")
-    if scripts:
-        doc["scripts"] = scripts
-    return doc
-
-
-def parse_manifest_text(text: str, origin: str = "overlay.toml") -> "Optional[dict[str, object]]":
-    """The manifest document: ``tomllib``/``tomli`` when importable, else the
-    hand reader. ``None`` (and a warning naming ``origin``) when it is not
-    valid TOML."""
-    toml = _toml_module()
-    if toml is None:
-        return _hand_parse(text)
-    try:
-        return toml.loads(text)
-    except ValueError as exc:  # TOMLDecodeError is a ValueError
-        _warn_once("%s is not valid TOML (%s); ignoring it", origin, exc)
-        return None
-
-
-#: A ``[scripts]`` name: the launcher's file name in ``<venv>/overlays/``
-#: (``.exe`` added on Windows), so a plain file name.
-SCRIPT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-
-
-#: A ``[scripts]`` path: ``/``-separated, relative, plain file-name
-#: characters only, so a launcher can embed it in sh and Python unquoted.
-_SCRIPT_PATH_RE = re.compile(r"^[A-Za-z0-9_+-][A-Za-z0-9._+-]*(?:/[A-Za-z0-9_+-][A-Za-z0-9._+-]*)*$")
-
-
-def _script_path_ok(path: object) -> bool:
-    """A path inside the overlay: :data:`_SCRIPT_PATH_RE`, so no ``..``, no
-    absolute path or drive, no backslash, no empty part."""
-    return isinstance(path, str) and _SCRIPT_PATH_RE.match(path) is not None
-
-
-def _scripts(value: object, overlay: str) -> "dict[str, object]":
-    """``[scripts]``: launcher name -> script path relative to the overlay, or
-    ``False`` to make no launcher for a detected ``bin/<name>.py``; an entry
-    that is neither is dropped with a warning."""
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        _warn_once("overlay %s: ignoring scripts (a table of name = \"path\" expected)", overlay)
-        return {}
-    out: "dict[str, str]" = {}
-    for name, path in value.items():
-        stem = name.split(".")[0].lower() if isinstance(name, str) else ""
-        if not (isinstance(name, str) and SCRIPT_NAME_RE.match(name)) or name.lower().endswith(".exe")                 or stem in Overlay.RESERVED_NAMES:
-            _warn_once("overlay %s: ignoring invalid script name %r", overlay, name)
-            continue
-        if path is False:
-            out[name] = False
-            continue
-        if not _script_path_ok(path):
-            _warn_once("overlay %s: ignoring script %s: %r is neither a path inside the overlay nor false",
-                       overlay, name, path)
-            continue
-        out[name] = path  # type: ignore[assignment]
-    return out
+        with open(key, "rb") as fh:
+            data = fh.read()
+        doc = _aos.read_document(data)
+        problems = ["%s at %s" % (code, at or "/") for code, at in _aos.validate(doc)]
+    except _aos.ReadError as exc:
+        doc, problems = {}, ["cannot be read (%s)" % exc]
+    except OSError as exc:
+        doc, problems = {}, ["cannot be read (%s)" % exc]
+    if problems:
+        doc = {}
+    _MANIFESTS[key] = (sig, doc, problems)
+    return doc, problems
 
 
 def _string_list(value: object) -> "list[str]":
-    """The string items of an array (anything else dropped), multi-line
-    strings trimmed of their surrounding newlines, blanks dropped."""
+    """Routing lines with their surrounding newlines trimmed (a TOML
+    multi-line string starts with one), blanks dropped."""
     if not isinstance(value, list):
         return []
     return [v.strip("\n") for v in value if isinstance(v, str) and v.strip()]
@@ -461,13 +196,9 @@ class Overlay:
     )
 
     #: The optional manifest an overlay may carry at its root.
-    MANIFEST_NAME = "overlay.toml"
-
-    #: An overlay's optional idempotent setup script: ``setup.py``, run under
-    #: ``AGENTS_PYTHON`` (the scope venv), else the interpreter that runs
-    #: dotagents, so it works on every platform.
-    #: Presence = opt-in; absence = nothing to run.
-    SETUP_SCRIPT_NAMES = ("setup.py",)
+    MANIFEST_NAME = "overlay.cfg"
+    #: Not a manifest: an overlay that has only this gets a warning naming it.
+    OLD_MANIFEST_NAME = "overlay.toml"
 
     DEFAULT_PRIORITY = DEFAULT_PRIORITY
 
@@ -638,74 +369,132 @@ class Overlay:
 
     # -- manifest -------------------------------------------------------------
 
-    def read_manifest(self) -> "dict[str, object]":
-        """Parse `overlay.toml`, returning name / description / routing / rules /
-        requires / priority / setup_timeout (seconds, ``0`` = none; ``None``
-        when the manifest does not set it) / scripts (``[scripts]`` as
-        written: launcher name -> script path relative to the overlay, or
-        ``False``; :meth:`scripts` adds the detected ones).
+    def document(self) -> "dict[str, Any]":
+        """The manifest's data model, validated (``{}`` when there is none, or
+        when it cannot be read or validated: :meth:`manifest_problems` says why,
+        and a warning names it once)."""
+        doc, problems = load_manifest(self.manifest_path)
+        if problems:
+            _warn_once("overlay %s: %s is ignored, none of its declarations apply: %s",
+                       self.name, self.manifest_path, "; ".join(problems))
+        elif not doc and not self.manifest_path.exists() and (self.path / self.OLD_MANIFEST_NAME).is_file():
+            _warn_once("overlay %s: %s is not read; its manifest is %s (AOS)",
+                       self.name, self.OLD_MANIFEST_NAME, self.MANIFEST_NAME)
+        return doc
 
-        A missing or unreadable manifest yields empty contributions -- an overlay
-        is allowed to be just a directory of files."""
-        empty: "dict[str, object]" = {
-            "name": self.name, "description": "", "routing": [], "rules": [],
-            "requires": [], "priority": DEFAULT_PRIORITY, "setup_timeout": None, "scripts": {},
-        }
-        path = self.manifest_path
-        if not path.is_file():
-            return empty
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            _warn_once("cannot read %s (%s); ignoring it", path, exc)
-            return empty
-        doc = parse_manifest_text(text, str(path))
-        if doc is None:
-            return empty
-        name, description, priority = doc.get("name"), doc.get("description"), doc.get("priority")
-        # `requires` names become install paths (`<scope>/overlays/<name>`):
-        # only a valid overlay name may pass, so `../x` or a level name can
-        # never escape `overlays/` or leave an orphan the commands cannot see.
+    def manifest_problems(self) -> "list[str]":
+        """Why the manifest was refused; empty when it is valid or absent."""
+        return load_manifest(self.manifest_path)[1]
+
+    def read_manifest(self) -> "dict[str, Any]":
+        """The manifest's core fields as dotagents uses them: name (the
+        directory name when absent or empty), description, routing (lines
+        trimmed of surrounding newlines, blanks dropped), rules, requires
+        (normalized, de-duplicated), priority (default ``DEFAULT_PRIORITY``),
+        and ``doc``, the whole validated document.
+
+        An overlay is allowed to be just a directory of files: a missing
+        manifest, or one refused (:meth:`document`), yields the defaults."""
+        doc = self.document()
         requires: "list[str]" = []
-        for raw in _string_list(doc.get("requires")):
-            if not self.is_valid_name(raw):
-                _warn_once("overlay %s: ignoring invalid requires entry %r", self.name, raw)
-                continue
+        for raw in doc.get("requires", []):
             dep = self.normalize_name(raw)
             if dep not in requires:
                 requires.append(dep)
+        name = doc.get("name")
         return {
-            "name": name if isinstance(name, str) and name else self.name,
-            "description": description if isinstance(description, str) else "",
+            "name": name if name else self.name,
+            "description": doc.get("description", ""),
             "routing": _string_list(doc.get("routing")),
-            "rules": _string_list(doc.get("rules")),
+            "rules": list(doc.get("rules", [])),
             "requires": requires,
-            "priority": priority if isinstance(priority, int) and not isinstance(priority, bool)
-            else DEFAULT_PRIORITY,
-            "setup_timeout": _setup_timeout(doc.get("setup_timeout"), self.name),
-            "scripts": _scripts(doc.get("scripts"), self.name),
+            "priority": doc.get("priority", DEFAULT_PRIORITY),
+            "doc": doc,
         }
 
-    def scripts(self) -> "dict[str, str]":
-        """The scripts that get a launcher (:mod:`dotagents._launchers`):
-        each top-level ``bin/<name>.py`` whose stem is a valid script name,
-        then ``[scripts]`` from the manifest, which adds or replaces a path
-        by name, or with ``false`` drops a detected one."""
-        found: "dict[str, str]" = {}
+    def skills(self) -> "list[str]":
+        """The overlay's skills: its ``skills`` list, else every
+        ``skills/<name>/`` holding a ``SKILL.md``."""
+        doc = self.document()
+        if "skills" in doc:
+            return list(doc["skills"])
+        skills_dir = self.path / "skills"
+        if not skills_dir.is_dir():
+            return []
+        return sorted(d.name for d in skills_dir.iterdir() if (d / "SKILL.md").is_file())
+
+    def context_files(self, harness_id: "Optional[str]" = None) -> "list[str]":
+        """The files the overlay adds to an agent's initial context: its
+        ``context`` (when absent, ``CONTEXT.md`` if the root has one), then
+        ``harness.<harness_id>.context``."""
+        doc = self.document()
+        if "context" in doc:
+            out = list(doc["context"])
+        else:
+            out = ["CONTEXT.md"] if (self.path / "CONTEXT.md").is_file() else []
+        if harness_id:
+            out += list(doc.get("harness", {}).get(harness_id, {}).get("context", []))
+        return out
+
+    def harness_hints(self, harness_id: str) -> "dict[str, Any]":
+        """``harness.<harness_id>``: ``context``, ``skills``, ``model``,
+        ``effort``, and that harness's own keys, which dotagents never applies."""
+        return dict(self.document().get("harness", {}).get(harness_id, {}))
+
+    def setup_variant(self, os_name: "Optional[str]" = None) -> "Optional[dict[str, Any]]":
+        """The ``setup`` variant that applies on ``os_name`` (this OS); with no
+        ``setup`` declared, the default ``setup.<ext>`` at the root, the first
+        this OS can run (:func:`dotagents._aos.default_script`); else None."""
+        doc = self.document()
+        if "setup" in doc:
+            return _aos.first_variant(doc["setup"], os_name or _aos.current_os())
+        return self.default_setup()[0]
+
+    def default_setup(self) -> "tuple[Optional[dict[str, Any]], list[str]]":
+        """``(variant, skipped)``: the default ``setup.<ext>`` that runs here, and
+        those present that cannot (``[defaults] setup = false``: none)."""
+        from dotagents._run import can_run
+
+        return _aos.default_script(self.document(), "setup", lambda rel: (self.path / rel).is_file(), can_run)
+
+    def declared_scripts(self, os_name: "Optional[str]" = None) -> "dict[str, tuple[str, str]]":
+        """The overlay's commands on ``os_name`` (this OS), as ``{name: (path,
+        interpreter)}``: by default each top-level ``bin/<name>.py`` (unless
+        ``[defaults] bin = false``), then its ``scripts``, which add, replace
+        or, with ``false``, drop one by name."""
+        os_name = os_name or _aos.current_os()
+        doc = self.document()
+        out: "dict[str, tuple[str, str]]" = {}
         bin_dir = self.path / "bin"
-        if bin_dir.is_dir():
+        if doc.get("defaults", {}).get("bin", True) and bin_dir.is_dir():
             for entry in sorted(bin_dir.iterdir()):
                 stem = entry.name[:-3]
-                if entry.name.endswith(".py") and entry.is_file() and SCRIPT_NAME_RE.match(stem) \
+                if entry.name.endswith(".py") and entry.is_file() and _aos._SCRIPT_NAME.match(stem) \
                         and stem.split(".")[0].lower() not in self.RESERVED_NAMES:
-                    found[stem] = "bin/" + entry.name
-        for name, path in self.read_manifest()["scripts"].items():  # type: ignore[union-attr]
-            if path is False:
-                found.pop(name, None)
+                    out[stem] = ("bin/" + entry.name, "python")
+        for name, target in doc.get("scripts", {}).items():
+            if target is False:
+                out.pop(name, None)
+                continue
+            if isinstance(target, dict):
+                if _aos.os_matches(target, os_name):
+                    out[name] = (target["path"], target["interpreter"])
             else:
-                found[name] = path  # type: ignore[assignment]
-        return found
+                out[name] = (target, _aos.script_interpreter(target) or "")
+        return out
 
+    def scripts(self) -> "dict[str, str]":
+        """The scripts that get a launcher (:mod:`dotagents._launchers`): the
+        declared ones that run under ``python``. A launcher runs its script
+        under the scope venv's Python, so a script naming another interpreter
+        gets none (``overlays add`` refuses such an overlay)."""
+        return {name: path for name, (path, interpreter) in self.declared_scripts().items()
+                if interpreter == "python"}
+
+    def unsupported_scripts(self) -> "dict[str, str]":
+        """``{name: interpreter}`` of declared scripts dotagents cannot launch."""
+        return {name: interpreter for name, (_path, interpreter) in self.declared_scripts().items()
+                if interpreter != "python"}
     @property
     def priority(self) -> int:
         """The manifest ``priority``, ``DEFAULT_PRIORITY`` when absent or
@@ -737,166 +526,133 @@ class Overlay:
         always land last. See :attr:`sort_key`."""
         return sorted((cls(o) for o in overlays), key=lambda o: o.sort_key)
 
-    # -- setup script ---------------------------------------------------------
-
-    def find_setup_script(self) -> "Optional[Path]":
-        """The overlay's setup script, or ``None`` if it ships none.
-
-        Call this on the *installed* overlay: setup runs against the copy under
-        ``<scope>/overlays/<name>/`` with that as its cwd, so a script can
-        reference its own sibling files by relative path."""
-        for name in self.SETUP_SCRIPT_NAMES:
-            candidate = self.path / name
-            if candidate.is_file():
-                return candidate
-        return None
-
-    def setup_timeout(self, override: "Optional[int]" = None) -> int:
-        """Seconds the setup script may run: ``override`` (``--setup-timeout``),
-        else the manifest's ``setup_timeout``, else
-        :data:`DEFAULT_SETUP_TIMEOUT`. ``0`` means no limit."""
-        if override is not None:
-            return max(0, override)
-        manifest = self.read_manifest()["setup_timeout"]
-        return DEFAULT_SETUP_TIMEOUT if manifest is None else manifest  # type: ignore[return-value]
+    # -- setup ---------------------------------------------------------------
 
     def run_setup(
-        self, *, agents_dir: Path, dry_run: bool, logger,
-        scope_root: "Optional[Path]" = None, scope_level: "Optional[str]" = None,
-        base_env: "Optional[dict[str, str]]" = None, timeout: "Optional[int]" = None,
-    ) -> "Optional[int]":
-        """Run the overlay's idempotent ``setup`` script if it ships one.
+        self, variant: "dict[str, Any]", *, env: "dict[str, str]", python: str,
+        base_path: "Optional[str]", dry_run: bool, logger, timeout: "Optional[int]" = None,
+    ) -> int:
+        """Run one ``setup`` variant (:meth:`setup_variant`) and return its exit
+        status, ``0`` on success.
 
-        Returns the script's exit code, or ``None`` when the overlay has no setup
-        script (nothing to run -- not an error). Presence of ``setup.py`` at the
-        overlay root is the opt-in; the runner never second-guesses a script the
-        user chose to install.
+        It runs as AOS says a step does: its interpreter (``python`` is the
+        scope venv's, the others are found on ``base_path``, the base
+        environment's ``PATH``) with the script's absolute path and its
+        ``args`` as a list; the working directory the overlay root; ``env``
+        (the caller builds it: the overlay's own environment and the
+        ``AOS_OVERLAY_*`` variables); stopped after ``timeout`` (the
+        command's override), else the variant's, else
+        :data:`DEFAULT_SETUP_TIMEOUT` seconds (``0``: no limit), a stop being
+        a failure, :data:`dotagents._run.TIMED_OUT`; and everything it
+        started ends with it. An interpreter dotagents cannot run is a
+        failure before anything runs (exit 127)."""
+        from dotagents import _run
 
-        **Idempotency is the overlay author's contract**: the script must be safe
-        to run on every ``add``/``sync`` (check-then-act). The runner only
-        invokes it:
-
-        * **cwd** = the installed overlay dir, so the script sees its own files.
-        * **env** is ``base_env`` (default ``os.environ``; ``overlays`` passes the
-          assembled ``dotagents env``, so the script imports any overlay's
-          ``lib`` and calls any overlay's ``bin`` by name), plus
-          ``AGENTS_HOME`` = ``agents_dir``, the USER store
-          -- what the variable means everywhere else, so a ``dotagents``
-          call the script makes resolves the same stores -- plus
-          ``AGENTS_SCOPE_ROOT`` = the store the overlay is installed into
-          (``scope_root``; the user store for a ``-g`` install, the project's
-          ``.agents`` otherwise), ``AGENTS_SCOPE`` = ``user`` / ``project``
-          (``scope_level``, when given) and ``AGENTS_OVERLAY_DIR`` = its own
-          installed dir.
-        * the script runs under ``AGENTS_PYTHON`` from that env (the scope
-          venv, which has every overlay's requirements and libs), else the
-          interpreter running dotagents.
-        * it is stopped after ``timeout`` seconds -- else the manifest's
-          ``setup_timeout``, else :data:`DEFAULT_SETUP_TIMEOUT`; ``0`` means no
-          limit -- and a stopped script is a failure (exit 124).
-
-        A non-zero exit is returned so the caller can raise a clear error --
-        never a silent skip."""
-        script = self.find_setup_script()
-        if script is None:
-            return None
-
-        logger.info("running setup for %s (%s)", self.name, script.name)
-        if dry_run:
-            logger.info("[dry-run] would run %s in %s", script.name, self.path)
-            return 0
-
-        env = dict(os.environ if base_env is None else base_env)
-        env["AGENTS_HOME"] = str(agents_dir)
-        env["AGENTS_SCOPE_ROOT"] = str(scope_root if scope_root is not None else agents_dir)
-        if scope_level:
-            env["AGENTS_SCOPE"] = scope_level
-        env["AGENTS_OVERLAY_DIR"] = str(self.path)
-
-        from dotagents._env import interpreter
-
-        # AGENTS_PYTHON when the env names one (the scope venv: overlay libs
-        # and requirements importable), else the interpreter running dotagents.
-        cmd = [interpreter(env), str(script)]
-
+        limit = variant.get("timeout", DEFAULT_SETUP_TIMEOUT) if timeout is None else max(0, timeout)
+        logger.info("running setup for %s (%s %s)", self.name, variant["interpreter"], variant["path"])
         try:
-            res = subprocess.run(cmd, cwd=str(self.path), env=env,
-                                 timeout=self.setup_timeout(timeout) or None)
-        except subprocess.TimeoutExpired:
-            logger.error(
-                "setup for %s did not finish in %ds and was stopped (raise it with "
-                "setup_timeout in overlay.toml or --setup-timeout; 0 = no limit)",
-                self.name, self.setup_timeout(timeout),
-            )
-            return 124
+            argv = _run.interpreter_command(variant["interpreter"], python=python, base_path=base_path)
+        except _run.InterpreterError as exc:
+            logger.error("setup for %s: %s", self.name, exc)
+            return 127
+        if dry_run:
+            logger.info("[dry-run] would run %s in %s", variant["path"], self.path)
+            return 0
+        script = _aos.resolve_path(str(self.path), variant["path"], os.name == "nt")
+        try:
+            status, _out = _run.run_step(argv + [script] + list(variant.get("args", [])),
+                                         cwd=str(self.path), env=env, timeout=limit)
         except OSError as exc:
             logger.error("setup for %s failed to start: %s", self.name, exc)
             return 1
-        if res.returncode != 0:
-            logger.error("setup for %s exited %d", self.name, res.returncode)
-        return res.returncode
+        if status == _run.TIMED_OUT:
+            logger.error("setup for %s did not finish in %ds and was stopped (raise its timeout in "
+                         "overlay.cfg or with --setup-timeout; 0 = no limit)", self.name, limit)
+        elif status != 0:
+            logger.error("setup for %s exited %d", self.name, status)
+        return status
 
-    # -- files + what they contribute -----------------------------------------
+    # -- members, digest, state -----------------------------------------------
 
-    #: Path components never installed: VCS metadata (a whole-repository
-    #: overlay's clone root carries `.git`) and tool caches. Named, not "every
-    #: dot-name": an overlay may ship real dotfiles (a `references/.gitignore`).
-    SKIP_PARTS = frozenset({
-        ".git", ".hg", ".svn", "__pycache__", ".mypy_cache", ".pytest_cache",
-        ".ruff_cache", ".tox", ".venv", "node_modules",
-    })
+    #: Beside the store's overlays: one install record per overlay.
+    RECORDS_DIR = ".dotagents-install"
+    #: Beside the store's overlays: ``<name>/<os>-<digest>/`` state directories.
+    STATE_DIR = ".dotagents-state"
+    #: An install record kept inside the overlay: read when the record beside
+    #: it is absent, and removed by the next install.
+    OLD_INSTALL_RECORD = ".dotagents-install.json"
 
-    #: Beside an INSTALLED overlay's files: where it came from and the digest of
-    #: every file dotagents wrote, so ``sync`` resolves from the same repo and
-    #: can tell a file deleted upstream (and untouched here) from a hand edit.
-    INSTALL_RECORD = ".dotagents-install.json"
+    def members(self) -> "list[str]":
+        """The overlay's members, relative and sorted: every regular file
+        except what AOS excludes. Raises :class:`dotagents._aos.DigestError`
+        for a tree that holds a link, a special file or a name AOS refuses."""
+        return _aos.members(self.path)
 
     def files(self) -> "list[Path]":
-        """Files the overlay installs: everything except its manifest, its
-        install record, VCS metadata and tool caches (:attr:`SKIP_PARTS`) and
-        compiled ``*.pyc``."""
-        out = []
-        for p in sorted(self.path.rglob("*")):
-            rel = p.relative_to(self.path)
-            if (
-                p.is_file()
-                and p.name != self.MANIFEST_NAME
-                and rel.parts != (self.INSTALL_RECORD,)
-                and p.suffix != ".pyc"
-                and not self.SKIP_PARTS.intersection(rel.parts)
-            ):
-                out.append(p)
-        return out
+        """The members as paths (:meth:`members`)."""
+        return [self.path.joinpath(*rel.split("/")) for rel in self.members()]
+
+    def tree_digest(self) -> str:
+        """The AOS tree digest of the overlay. Raises
+        :class:`dotagents._aos.DigestError`."""
+        return _aos.tree_digest(self.path)
+
+    def state_dir(self, digest: str, os_name: "Optional[str]" = None) -> Path:
+        """The state directory of an installed overlay at ``digest`` on
+        ``os_name`` (this OS): outside the overlay root, its own."""
+        return self.path.parent / self.STATE_DIR / self.name / (
+            "%s-%s" % (os_name or _aos.current_os(), digest.split(":", 1)[-1][:16].lower()))
+
+    def setup_marker(self, digest: str) -> Path:
+        """Beside :meth:`state_dir`: written once setup succeeded for that digest."""
+        state = self.state_dir(digest)
+        return state.with_name(state.name + ".setup")
 
     # -- the install record ---------------------------------------------------
 
     @property
     def install_record_path(self) -> Path:
-        return self.path / self.INSTALL_RECORD
+        return self.path.parent / self.RECORDS_DIR / (self.name + ".json")
 
     def read_install_record(self) -> "dict[str, Any]":
-        """``{"source": {...} | None, "files": {rel: sha256}}`` of an installed
-        overlay; empty for a source dir or an install that predates records."""
+        """``{"source": {...} | None, "files": {rel: sha256}, "digest": ...,
+        "commit": ...}`` of an installed overlay; empty for a source dir or an
+        install without one. A record inside the overlay
+        (:attr:`OLD_INSTALL_RECORD`) is read when there is none beside it."""
         import json
 
-        try:
-            data = json.loads(self.install_record_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-        if not isinstance(data, dict):
-            return {}
-        files = data.get("files")
-        data["files"] = {
-            str(k): str(v) for k, v in files.items() if isinstance(v, str)
-        } if isinstance(files, dict) else {}
-        return data
+        for path in (self.install_record_path, self.path / self.OLD_INSTALL_RECORD):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            files = data.get("files")
+            data["files"] = {
+                str(k): str(v) for k, v in files.items() if isinstance(v, str)
+            } if isinstance(files, dict) else {}
+            return data
+        return {}
 
     def _write_install_record(self, record: "dict[str, Any]") -> None:
         import json
 
         from dotagents._fs import write_text_lf
 
+        self.install_record_path.parent.mkdir(parents=True, exist_ok=True)
         write_text_lf(self.install_record_path, json.dumps(record, indent=1, sort_keys=True) + "\n")
+
+    def forget(self) -> None:
+        """Delete what the store keeps beside an overlay it removed: its install
+        record and state directories."""
+        try:
+            self.install_record_path.unlink()
+        except OSError:
+            pass
+        state = self.path.parent / self.STATE_DIR / self.name
+        if state.is_dir():
+            shutil.rmtree(str(state), ignore_errors=True)
 
     def rule_blocks(self, rel_paths: "list[str]") -> "tuple[list[str], list[str]]":
         """Extract `- **…` bullet blocks from each referenced markdown file.
@@ -946,46 +702,42 @@ class Overlay:
             blocks.append(body.rstrip())
         return blocks, warnings
 
-    def ignore_rules(self):
-        """The rules of the ``.gitignore`` / ``.ignore`` at the overlay's root
-        (:mod:`dotagents._ignore`); one in a subdirectory is an ordinary file."""
-        from dotagents._ignore import IgnoreRules
-
-        return IgnoreRules.for_root(self.path)
-
     def install_to(
         self,
         dest_overlay_dir: Path,
         dry_run: bool,
         *,
-        prune: bool = False,
         backup_root: "Optional[Path]" = None,
         source: "Optional[dict[str, Any]]" = None,
+        commit: "Optional[str]" = None,
     ) -> "InstallResult":
-        """Make `dest_overlay_dir` (`<scope>/overlays/<name>/`) exactly this
-        overlay: every file it ships (see :meth:`files`) is installed or
-        replaced, its `overlay.toml` refreshed, and every other file in the
-        install is removed -- except what the ``.gitignore`` / ``.ignore`` at
-        the overlay's root match, plus its install record and tool caches
-        (:attr:`SKIP_PARTS`): those are the install's own (setup output,
-        local state) and are never copied, replaced or removed. `prune`
-        clears them too, leaving exactly the upstream files (and the record).
+        """Make `dest_overlay_dir` (`<scope>/overlays/<name>/`) hold exactly
+        this overlay's members (:meth:`members`): each is installed or
+        replaced, and everything else in the install is removed -- tool caches,
+        ``__pycache__``, setup output, :attr:`OLD_INSTALL_RECORD` --
+        so the installed copy has the overlay's tree digest. Setup writes into
+        its state directory instead (:meth:`state_dir`).
 
-        A file replaced or removed that is not what dotagents installed there
-        (edited here, or never installed by it) is first copied to
-        `backup_root` when one is given (:attr:`InstallResult.backed_up`,
-        :attr:`InstallResult.replaced`); what `prune` clears is not backed up.
+        A member replaced, or a file removed, that is not what dotagents
+        installed there (edited here, or never installed by it) is first
+        copied to `backup_root` when one is given (:attr:`InstallResult.backed_up`,
+        :attr:`InstallResult.replaced`); excluded entries are not backed up.
 
-        The install record (:attr:`INSTALL_RECORD`) keeps the digest of every
-        file written and `source` (where the overlay came from; the previous
-        value when `None`)."""
+        The install record (:attr:`install_record_path`, beside the overlay)
+        keeps the digest of every member written, the tree digest, `source`
+        (where the overlay came from; the previous value when `None`) and the
+        resolved `commit`. Raises :class:`dotagents._aos.DigestError` before
+        writing anything when the overlay holds a link or a refused name."""
+        from datetime import datetime, timezone
+
         dest = Path(dest_overlay_dir)
         installed = Overlay(dest)
         record = installed.read_install_record()
         old_files: "dict[str, str]" = record.get("files", {})
         new_files: "dict[str, str]" = {}
         result = InstallResult()
-        rules = self.ignore_rules()
+        members = self.members()
+        digest = self.tree_digest()
 
         def local(rel: str, target: Path) -> bool:
             """Is `target` something dotagents did not put there?"""
@@ -999,19 +751,11 @@ class Overlay:
             shutil.copy2(str(target), str(saved))
             result.backed_up.append(rel)
 
-        def write(src: Path, target: Path) -> None:
-            if not dry_run:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(src), str(target))
-
-        for src in self.files():
-            rel = src.relative_to(self.path).as_posix()
-            if rules.ignored(rel):
-                continue  # the source's local state, not the overlay
-            target = dest / rel
-            digest = _file_digest(src)
-            new_files[rel] = digest
-            if target.is_file():
+        for rel in members:
+            src = self.path.joinpath(*rel.split("/"))
+            target = dest.joinpath(*rel.split("/"))
+            new_files[rel] = _file_digest(src)
+            if target.is_file() and not os.path.islink(str(target)):
                 if _same_content(src, target):
                     result.lines.append("skip (exists): %s" % rel)
                     result.unchanged += 1
@@ -1022,81 +766,91 @@ class Overlay:
                 result.lines.append("update: %s" % rel)
             else:
                 result.lines.append("install: %s" % rel)
-            write(src, target)
+            if not dry_run:
+                if os.path.lexists(str(target)) and not target.is_file():
+                    _remove_any(target)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(str(src), str(target))
+                shutil.copymode(str(src), str(target))
             result.written += 1
 
-        # The manifest is dotagents' own metadata: always the source's.
-        if self.manifest_path.is_file():
-            target = dest / self.MANIFEST_NAME
-            if target.is_file() and _same_content(self.manifest_path, target):
-                result.unchanged += 1
-            else:
-                result.lines.append(
-                    "%s: %s" % ("update" if target.is_file() else "install", self.MANIFEST_NAME)
-                )
-                write(self.manifest_path, target)
-                result.written += 1
-
-        # Everything else in the install: removed, unless it is the install's
-        # own (ignored, a cache) and `prune` was not asked for. An own
-        # directory is never walked into (a `.venv` can be large): skipped
-        # whole, or with `prune` removed whole.
+        # Everything else in the install goes. An excluded directory (a
+        # `.venv`, a `__pycache__`) is removed whole, never walked into.
         if dest.is_dir():
-            keep = {self.MANIFEST_NAME, self.INSTALL_RECORD}
-
-            def join(base: str, name: str) -> str:
-                return "%s/%s" % (base, name) if base else name
-
-            def drop(rel: str, target: Path, own: bool) -> None:
-                if not own and local(rel, target):
-                    backup(rel, target)
-                result.lines.append("remove (%s): %s" % ("pruned" if own else "not in the source", rel))
-                result.removed.append(rel)
-                if not dry_run:
-                    target.unlink()
-
             for dirpath, dirnames, filenames in os.walk(str(dest)):
-                base = Path(dirpath).relative_to(dest).as_posix()
+                here = Path(dirpath)
+                base = here.relative_to(dest).as_posix()
                 base = "" if base == "." else base
                 descend = []
                 for name in sorted(dirnames):
-                    rel = join(base, name)
-                    target = Path(dirpath) / name
-                    if target.is_symlink():
-                        filenames.append(name)  # a link is an entry, not a tree
-                        continue
-                    own = name in self.SKIP_PARTS or rules.ignored(rel, True)
-                    if not own:
-                        descend.append(name)
-                    elif prune:
-                        result.lines.append("remove (pruned): %s/" % rel)
+                    target = here / name
+                    rel = "%s/%s" % (base, name) if base else name
+                    if os.path.islink(str(target)) or name in _aos.EXCLUDED_COMPONENTS or _is_junction(target):
+                        result.lines.append("remove (not part of the overlay): %s" % rel)
                         result.removed.append(rel + "/")
                         if not dry_run:
-                            shutil.rmtree(str(target))
+                            _remove_any(target)
+                    else:
+                        descend.append(name)
                 dirnames[:] = descend
                 for name in sorted(filenames):
-                    rel = join(base, name)
-                    if rel in keep or rel in new_files:
+                    rel = "%s/%s" % (base, name) if base else name
+                    if rel in new_files:
                         continue
-                    own = name.endswith(".pyc") or rules.ignored(rel)
-                    if own and not prune:
-                        continue
-                    drop(rel, Path(dirpath) / name, own)
+                    target = here / name
+                    excluded = name.endswith(".pyc") or rel == self.OLD_INSTALL_RECORD
+                    if not excluded and not os.path.islink(str(target)) and local(rel, target):
+                        backup(rel, target)
+                    result.lines.append("remove (%s): %s" % (
+                        "not part of the overlay" if excluded else "not in the source", rel))
+                    result.removed.append(rel)
+                    if not dry_run:
+                        target.unlink()
             if not dry_run:
-                for dirpath, dirnames, filenames in os.walk(str(dest), topdown=False):
+                for dirpath, _dirnames, _filenames in os.walk(str(dest), topdown=False):
                     here = Path(dirpath)
                     if here != dest and not any(here.iterdir()):
-                        rel = here.relative_to(dest).as_posix()
-                        if prune or not rules.ignored(rel, True):
-                            here.rmdir()
+                        here.rmdir()
 
         if not dry_run:
             dest.mkdir(parents=True, exist_ok=True)
             installed._write_install_record({
                 "source": source if source is not None else record.get("source"),
+                "commit": commit,
+                "digest": digest,
                 "files": new_files,
+                "installed": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             })
         return result
+
+
+def _is_junction(path: Path) -> bool:
+    if hasattr(os.path, "isjunction"):
+        return os.path.isjunction(str(path))
+    try:
+        return bool(getattr(os.lstat(str(path)), "st_file_attributes", 0) & 0x400)
+    except OSError:
+        return False
+
+
+def _remove_any(path: Path) -> None:
+    """Remove a file, a link (never followed) or a whole directory."""
+    if os.path.islink(str(path)) or _is_junction(path):
+        try:
+            os.unlink(str(path))
+        except OSError:
+            os.rmdir(str(path))
+    elif path.is_dir():
+        def retry(func, p, _exc):
+            os.chmod(p, 0o700)
+            func(p)
+
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(str(path), onexc=retry)
+        else:  # pragma: no cover -- exercised on the 3.9 leg
+            shutil.rmtree(str(path), onerror=retry)
+    else:
+        path.unlink()
 
 
 # --------------------------------------------------------------------------- #

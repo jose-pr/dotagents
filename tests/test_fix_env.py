@@ -369,6 +369,7 @@ def test_a_process_the_session_starts_imports_an_overlay_lib(roots):
     lib = agents_dir / "overlays" / "base" / "lib"
     lib.mkdir(parents=True)
     (lib / "base_helpers.py").write_text("VALUE = 'from base'\n", encoding="utf-8")
+    (lib.parent / "overlay.cfg").write_text('[[paths]]\nvariable = "PYTHONPATH"\npath = "lib"\n', encoding="utf-8")
     base = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env = _run(agents_dir, project_root, base)
     assert env["PYTHONPATH"] == env["AGENTS_PYTHONPATH"] == str(lib)
@@ -472,6 +473,8 @@ def test_relative_roots_are_emitted_absolute(tmp_path, monkeypatch):
     """`env --agents-dir ./storeB --diff` emitted "AGENTS_HOME": "storeB",
     which resolves differently in a child running in another cwd."""
     (tmp_path / "storeB" / "overlays" / "foo" / "bin").mkdir(parents=True)
+    (tmp_path / "storeB" / "overlays" / "foo" / "overlay.cfg").write_text(
+        '[[paths]]\nvariable = "PATH"\npath = "bin"\n', encoding="utf-8")
     (tmp_path / "proj" / ".agents").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
     env = _env.get_environment(

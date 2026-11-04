@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import threading
 
-from dotagents import __version__
+from dotagents import __version__, _aos
 from dotagents._mcp_gateway_config import (
     _HTTP_PROTOCOLS,
     _MAX_LINE,
@@ -37,12 +37,23 @@ class _StdioClient:
 
     def start(self):
         env = {key: os.environ[key] for key in _BASE_ENV if key in os.environ}
-        env.update({key: os.environ[key] for key in self.spec.env_passthrough if key in os.environ})
-        env.update(self.spec.env)
-        command = shutil.which(self.spec.command, path=env.get("PATH"))
+        for key in self.spec.env_passthrough:
+            if key in os.environ and self.spec.granted(key):
+                env[key] = os.environ[key]
+                self.spec.resolved.append(os.environ[key])
+        env.update(self.spec.server_env())
+        root = str(self.spec.root) if self.spec.root is not None else None
+        if root is not None:
+            env[_aos.root_variable(self.spec.overlay)] = root
+        if ("/" in self.spec.command or "\\" in self.spec.command) and root is not None:
+            # A relative path under the overlay root, never one outside it.
+            command = _aos.resolve_path(root, self.spec.command, os.name == "nt")
+            command = command if os.path.isfile(command) else None
+        else:
+            command = shutil.which(self.spec.command, path=env.get("PATH"))
         if command is None:
             raise RuntimeError(
-                "MCP command %r was not found on PATH; install it or fix overlay.toml" % self.spec.command
+                "MCP command %r was not found; install it or fix overlay.cfg" % self.spec.command
             )
         if os.name == "nt" and command.lower().endswith((".cmd", ".bat")):
             raise RuntimeError("MCP command %r cannot use a .cmd or .bat shim" % self.spec.command)
@@ -51,6 +62,7 @@ class _StdioClient:
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,
             "env": env,
+            "cwd": root,
         }
         if os.name == "nt":
             options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -225,6 +237,9 @@ class _HTTPClient:
         self.tools = []
         self.headers = {}
         for header, var in spec.headers_env.items():
+            if not spec.granted(var):
+                raise RuntimeError("MCP server %s: header %s reads %s, which is not granted" % (
+                    spec.name, header, var))
             value = os.environ.get(var)
             if value is None:
                 raise RuntimeError("required HTTP header environment variable %s is unset" % var)
@@ -379,7 +394,7 @@ def _server_error(exc, spec):
         value = os.environ.get(name)
         if value:
             message = message.replace(value, "[redacted]")
-    for value in spec.env.values():
-        if value:
+    for value in list(spec.env.values()) + list(spec.resolved):
+        if isinstance(value, str) and value:
             message = message.replace(value, "[redacted]")
     return message

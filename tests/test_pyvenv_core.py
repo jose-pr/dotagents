@@ -30,12 +30,20 @@ def make_wheel(directory: Path, name: str, source: str = "X = 1\n", version: str
     return path
 
 
+DECLARE_LIB = '[[paths]]\nvariable = "PYTHONPATH"\npath = "lib"\n'
+
+
 def _store_with_lib_overlay(store: Path, name: str, requirement: "str | None" = None) -> Path:
+    """An overlay declaring its lib/ on PYTHONPATH and, with ``requirement``,
+    its Python dependencies (runtime.python requirements)."""
     overlay = store / "overlays" / name
     (overlay / "lib").mkdir(parents=True)
     (overlay / "lib" / ("%s_lib.py" % name)).write_text("WHO = %r\n" % name, encoding="utf-8")
+    manifest = DECLARE_LIB
     if requirement:
         (overlay / "requirements.txt").write_text(requirement + "\n", encoding="utf-8")
+        manifest += '[[runtime.python]]\nrequirements = "requirements.txt"\n'
+    (overlay / "overlay.cfg").write_text(manifest, encoding="utf-8")
     return overlay
 
 
@@ -90,17 +98,22 @@ def _fake_venv(store: Path, pth: "list[str]") -> Path:
     return venv
 
 
-def test_env_runs_skills_under_the_venv_and_keeps_its_libs_off_pythonpath(tmp_path, monkeypatch):
+def test_env_runs_skills_under_the_venv_and_keeps_the_store_lib_off_pythonpath(tmp_path, monkeypatch):
+    """A store's own lib the venv layers stays off PYTHONPATH; an overlay's
+    declared PYTHONPATH directory is a declaration, applied as declared."""
     monkeypatch.delenv("AGENTS_NO_PYVENV")
     user = tmp_path / "home" / ".agents"
     lib = _store_with_lib_overlay(user, "u1") / "lib"
-    venv = _fake_venv(user, [str(lib)])
+    (user / "lib").mkdir()
+    venv = _fake_venv(user, [str(user / "lib"), str(lib)])
     scope = Scope("user", user)
     env = _env.get_environment(scope, base_env={"PATH": os.environ.get("PATH", "")})
     assert env["AGENTS_PYTHON"] == str(_pyvenv.venv_python(venv))
     assert env["AGENTS_PYVENV"] == str(venv)
     assert str(lib) in env["AGENTS_PYTHONPATH"].split(os.pathsep)
-    assert str(lib) not in env.get("PYTHONPATH", "").split(os.pathsep)
+    assert str(user / "lib") in env["AGENTS_PYTHONPATH"].split(os.pathsep)
+    assert str(user / "lib") not in env.get("PYTHONPATH", "").split(os.pathsep)
+    assert str(lib) in env["PYTHONPATH"].split(os.pathsep)
 
 
 def test_a_venv_no_sync_made_is_never_the_agents_venv(tmp_path, monkeypatch):
@@ -157,7 +170,8 @@ def test_sync_installs_layers_and_skips_pip_when_unchanged(tmp_path, monkeypatch
 
     user, project = tmp_path / "home" / ".agents", tmp_path / "proj" / ".agents"
     u1 = _store_with_lib_overlay(user, "u1")
-    (u1 / "overlay.toml").write_text('name = "u1"\n[scripts]\nu1tool = "lib/u1_lib.py"\n', encoding="utf-8")
+    (u1 / "overlay.cfg").write_text('name = "u1"\n' + DECLARE_LIB + '[scripts]\nu1tool = "lib/u1_lib.py"\n',
+                                    encoding="utf-8")
     _store_with_lib_overlay(project, "p1", requirement="projdep")
     scope = Scope("project", project, user_root=user, project_root=project.parent)
 
@@ -194,7 +208,7 @@ def _overlay_repo(tmp_path: Path) -> Path:
     overlay = repo / "needsreq"
     overlay.mkdir(parents=True)
     (overlay / "requirements.txt").write_text("somedep\n", encoding="utf-8")
-    (overlay / "overlay.toml").write_text('name = "needsreq"\ndescription = "x"\n', encoding="utf-8")
+    (overlay / "overlay.cfg").write_text('name = "needsreq"\ndescription = "x"\n', encoding="utf-8")
     return repo
 
 

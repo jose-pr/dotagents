@@ -148,7 +148,7 @@ def test_installed_overlay_cmds_are_discovered(monkeypatch, tmp_path):
     # An installed overlay shipping a command at <overlay-root>/cmds/*.py is
     # discovered (D84 per-overlay cmds via the Scope.paths Contract-A walk).
     # Presence-by-directory: a BARE overlay dir (no manifest at all -- no
-    # overlay.toml, no CONTEXT.md) still counts, matching discover_overlays.
+    # overlay.cfg, no CONTEXT.md) still counts, matching discover_overlays.
     user_root = tmp_path / "user" / ".agents"
     overlay = user_root / "overlays" / "toybox"
     _write(overlay / "cmds" / "toy.py", TOY)

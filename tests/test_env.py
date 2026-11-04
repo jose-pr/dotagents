@@ -42,7 +42,7 @@ from _helpers import py_emit as _py_emit
 # --------------------------------------------------------------------------
 
 def test_paths_resolves_bare_overlay_dir(tmp_path):
-    """A BARE overlay dir (no CONTEXT.md, no overlay.toml) with a bin/ subdir is
+    """A BARE overlay dir (no CONTEXT.md, no overlay.cfg) with a bin/ subdir is
     resolved by Scope.paths -- the old CONTEXT.md gate (a precursor leftover)
     silently excluded every real dotagents overlay from the Contract-A walk."""
     agents_dir = tmp_path / "agents"
@@ -105,6 +105,10 @@ def tree(tmp_path):
     return agents_dir, project_root
 
 
+def _manifest(overlay_dir, text):
+    (overlay_dir / "overlay.cfg").write_text(text, encoding="utf-8")
+
+
 def _run(agents_dir, project_root, base_env, global_scope=False, **kw):
     return _env.get_environment(
         Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=global_scope),
@@ -157,23 +161,36 @@ def test_overlay_root_var_skips_invalid_overlay_dirs(tree):
     }
 
 
-def test_overlay_root_var_respects_upstream_pin(tree):
+def test_overlay_root_var_names_the_copy_in_play_whatever_was_inherited(tree):
+    """AOS: the root variable is the root the consumer exposes, even when the
+    base environment holds another value."""
     agents_dir, project_root = tree
     base = {"PATH": "/usr/bin", "AA_OVERLAY_ROOT": "/pinned/aa"}
     env = _run(agents_dir, project_root, base)
-    # Already set upstream -> not re-seeded (absent from the change set).
-    assert "AA_OVERLAY_ROOT" not in env
+    assert env["AA_OVERLAY_ROOT"] == str(agents_dir / "overlays" / "aa")
     assert env["BB_OVERLAY_ROOT"] == str(agents_dir / "overlays" / "bb")
 
 
 def test_env_py_sees_overlay_root_var(tree):
-    """Seeded BEFORE the chain: an env.py can read its overlay's root."""
+    """Seeded BEFORE the stores' chain: a store's env.py can read an overlay's root."""
     agents_dir, project_root = tree
-    (agents_dir / "overlays" / "aa" / "env.py").write_text(
+    (agents_dir / "env.py").write_text(
         _py_echo_seen("AA_OVERLAY_ROOT", "SEEN_AA_ROOT"), encoding="utf-8"
     )
     env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
     assert env["SEEN_AA_ROOT"] == str(agents_dir / "overlays" / "aa")
+
+
+def test_an_overlays_env_py_is_its_default_env_script_and_pre_env_nothing(tree):
+    """An overlay's env.py runs by default, as an AOS env script; its
+    pre.env.py is a file like another (the pre tier is the stores')."""
+    agents_dir, project_root = tree
+    (agents_dir / "overlays" / "aa" / "env.py").write_text(
+        "import json\nprint(json.dumps({'RAN_AA': '1'}))\n", encoding="utf-8")
+    (agents_dir / "overlays" / "aa" / "pre.env.py").write_text(
+        "import json\nprint(json.dumps({'RAN_AA_PRE': '1'}))\n", encoding="utf-8")
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert env["RAN_AA"] == "1" and "RAN_AA_PRE" not in env
 
 
 def test_no_overlays_dir_emits_no_overlay_root_vars(tmp_path):
@@ -191,13 +208,15 @@ def test_no_overlays_dir_emits_no_overlay_root_vars(tmp_path):
 
 def test_bins_prepended_to_path_first(tree):
     agents_dir, project_root = tree
+    _manifest(agents_dir / "overlays" / "bb", '[defaults]\nbin = false\n')
     base = {"PATH": os.pathsep.join(["/usr/bin", "/bin"])}
     env = _run(agents_dir, project_root, base)
     parts = env["PATH"].split(os.pathsep)
-    # Every level's bin dir EXCEPT project-root is prepended, ahead of the
-    # inherited PATH. Overlay bins, user bin, project(.agents) bin all present.
+    # Every store's bin dir EXCEPT project-root is prepended, ahead of the
+    # inherited PATH, and an overlay's existing bin by default, unless its
+    # manifest turns that off.
     assert str(agents_dir / "overlays" / "aa" / "bin") in parts
-    assert str(agents_dir / "overlays" / "bb" / "bin") in parts
+    assert str(agents_dir / "overlays" / "bb" / "bin") not in parts
     assert str(agents_dir / "bin") in parts
     assert str(project_root / ".agents" / "bin") in parts
     # The inherited entries remain, AFTER the prepended bins.
@@ -229,6 +248,8 @@ def test_bin_paths_excludes_project_root(tree):
 def test_lib_dirs_lead_pythonpath_and_are_published_in_agents_pythonpath(tree):
     agents_dir, project_root = tree
     (agents_dir / "overlays" / "aa" / "lib").mkdir()
+    (agents_dir / "overlays" / "bb" / "lib").mkdir()  # turned off: not a lib
+    _manifest(agents_dir / "overlays" / "bb", '[defaults]\nlib = false\n')
     (agents_dir / "lib").mkdir()
     (project_root / ".agents" / "lib").mkdir()
     base = {"PATH": "/usr/bin", "PYTHONPATH": "/site/extra"}
@@ -240,9 +261,10 @@ def test_lib_dirs_lead_pythonpath_and_are_published_in_agents_pythonpath(tree):
         str(agents_dir / "lib"),
         str(agents_dir / "overlays" / "aa" / "lib"),
     ]
-    # The session's PYTHONPATH carries them first, the inherited entries after:
-    # a skill script or bin launcher an overlay starts imports any overlay's lib.
-    assert env["PYTHONPATH"].split(os.pathsep) == parts + ["/site/extra"]
+    # The session's PYTHONPATH: the stores' libs first, the inherited entries,
+    # then an overlay's lib, appended by default -- a skill script or launcher
+    # an overlay starts imports any overlay's lib, and none shadows the others.
+    assert env["PYTHONPATH"].split(os.pathsep) == parts[:2] + ["/site/extra", parts[2]]
 
 
 def test_no_lib_dirs_leaves_pythonpath_alone(tree):
@@ -268,6 +290,7 @@ def test_env_py_can_import_from_overlay_lib(tree):
     lib = agents_dir / "overlays" / "aa" / "lib"
     lib.mkdir()
     (lib / "aa_helper.py").write_text("VALUE = 'from-aa-lib'\n", encoding="utf-8")
+    _manifest(agents_dir / "overlays" / "aa", '[[paths]]\nvariable = "PYTHONPATH"\npath = "lib"\n')
     (agents_dir / "env.py").write_text(
         "import json, aa_helper\nprint(json.dumps({'SEEN_LIB': aa_helper.VALUE}))\n",
         encoding="utf-8",
@@ -309,10 +332,10 @@ def test_resolved_file_order(tree):
     main_start = min(i for i, (_l, n) in enumerate(order) if not n.startswith("pre."))
     assert pre_end < main_start
 
-    # Within the main tier: overlay(s) -> user -> project; no project root.
+    # Within the main tier: user -> project; no overlay, no project root.
     main = [(lvl, n) for lvl, n in order if not n.startswith("pre.")]
     levels = [lvl for lvl, _ in main]
-    assert levels.index("aa") < levels.index("user")
+    assert "aa" not in levels
     assert levels.index("user") < levels.index("project")
     assert "project-root" not in [lvl for lvl, _ in order]
 

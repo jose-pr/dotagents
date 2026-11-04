@@ -477,7 +477,8 @@ class ClaudeAgent(Agent):
             if logger:
                 logger.info("no skills to link (%s has none)", shared_skills)
             return
-        result = _skills.link_skills_into(shared_skills, target, dry_run=dry_run, logger=logger)
+        result = _skills.link_skills_into(shared_skills, target, dry_run=dry_run, logger=logger,
+                                          exclude=_skills.harness_excluded(Path(dest), self.harness_id))
         if result.copied and logger:
             logger.warning(
                 "skill(s) %s were COPIED, not linked (no symlink or junction support "

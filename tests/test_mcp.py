@@ -118,10 +118,12 @@ def test_mcp_bad_calls_are_json_rpc_errors_until_2025_11_25(tmp_path):
     assert newer[3]["result"]["isError"] is True
 
 
-def test_mcp_refuses_to_start_on_an_invalid_declaration(tmp_path):
+def test_an_invalid_declaration_declares_nothing_and_says_so(tmp_path):
+    """AOS: nothing of a manifest that does not validate is applied -- no
+    server is started from it -- and the warning says where it is wrong."""
     overlay = tmp_path / ".agents" / "overlays" / "sample"
     overlay.mkdir(parents=True)
-    (overlay / "overlay.toml").write_bytes(
+    (overlay / "overlay.cfg").write_bytes(
         b'[mcp]\n\n[[mcp.servers]]\nname = "builder"\ntransport = "carrier-pigeon"\n'
     )
     proc = subprocess.run(
@@ -133,9 +135,9 @@ def test_mcp_refuses_to_start_on_an_invalid_declaration(tmp_path):
         env=_mcp_environment(tmp_path),
         timeout=30,
     )
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert "transport must be stdio or streamable-http" in proc.stderr
+    assert "none of its declarations apply" in proc.stderr
+    assert "/mcp/servers/0/transport" in proc.stderr
+    assert "builder" not in proc.stdout
 
 
 def _peer_script():
@@ -171,17 +173,20 @@ def _write_overlay(root, skill):
         "name = %s\n"
         "server = \"builder\"\n"
     ) % (
-        json.dumps(sys.executable),
+        # A bare name, found on PATH (_mcp_environment puts this interpreter's
+        # directory first): a command with a separator is a path in the overlay.
+        json.dumps("python"),
         json.dumps("-c"),
         json.dumps(_peer_script()),
         json.dumps(skill),
     )
-    (overlay / "overlay.toml").write_bytes(manifest.encode("utf-8"))
+    (overlay / "overlay.cfg").write_bytes(manifest.encode("utf-8"))
 
 
 def _mcp_environment(tmp_path):
     env = dict(os.environ)
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+    env["PATH"] = os.pathsep.join([os.path.dirname(sys.executable), env.get("PATH", "")])
     env.pop("AGENTS_PROJECT_ROOT", None)
     env.pop("CLAUDE_PROJECT_DIR", None)
     return env
@@ -234,7 +239,7 @@ def test_mcp_gateway_forwards_to_streamable_http_peer(tmp_path):
     thread.start()
     overlay = tmp_path / ".agents" / "overlays" / "sample"
     overlay.mkdir(parents=True)
-    (overlay / "overlay.toml").write_text(
+    (overlay / "overlay.cfg").write_text(
         "[mcp]\n\n[[mcp.servers]]\nname = \"builder\"\n"
         "transport = \"streamable-http\"\nurl = \"http://127.0.0.1:%d/mcp\"\n" % server.server_port,
         encoding="utf-8",

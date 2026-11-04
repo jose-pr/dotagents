@@ -97,7 +97,7 @@ def test_probe_with_a_forbidden_pattern_fails(tmp_path):
 def _overlay(root, name, manifest, rules=()):
     d = root / name
     d.mkdir(parents=True)
-    (d / "overlay.toml").write_text(manifest, encoding="utf-8")
+    (d / "overlay.cfg").write_text(manifest, encoding="utf-8")
     for rel in rules:
         (d / rel).parent.mkdir(parents=True, exist_ok=True)
         (d / rel).write_text("- **Rule**: text\n", encoding="utf-8")

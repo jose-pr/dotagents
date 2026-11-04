@@ -135,12 +135,12 @@ def test_agents_dir_overrides_the_project_store(tmp_path):
 
 
 def test_project_scope_overlays_are_walked(roots):
-    """`overlays add` installs into the project scope by default; its bin/env/
-    root var were invisible to the chain (only the store's overlays were walked)."""
+    """`overlays add` installs into the project scope by default; its declared
+    environment and root var were invisible (only the store's overlays were walked)."""
     agents_dir, project_root = roots
     pov = project_root / ".agents" / "overlays" / "projov"
     (pov / "bin").mkdir(parents=True)
-    (pov / "env.py").write_text(_py_emit({"FROM_PROJECT_OVERLAY": "1"}), encoding="utf-8")
+    (pov / "overlay.cfg").write_text('[env]\nFROM_PROJECT_OVERLAY = "1"\n' + '[[paths]]\nvariable = "PATH"\npath = "bin"\n', encoding="utf-8")
     env = _run(agents_dir, project_root)
     assert env["FROM_PROJECT_OVERLAY"] == "1"
     assert env["PROJOV_OVERLAY_ROOT"] == str(pov)
@@ -151,14 +151,15 @@ def test_project_scope_overlays_are_walked(roots):
 
 
 def test_project_overlay_shadows_a_same_named_store_overlay(roots):
-    """One name, two scopes = ONE overlay, the project's: its root var, bin and
-    env.py are the only ones in play; the store's copy contributes nothing."""
+    """One name, two scopes = ONE overlay, the project's: its root var and
+    declarations are the only ones in play; the store's copy contributes nothing."""
     agents_dir, project_root = roots
     store = agents_dir / "overlays" / "same"
     proj = project_root / ".agents" / "overlays" / "same"
     for ov, tag in ((store, "store"), (proj, "project")):
         (ov / "bin").mkdir(parents=True)
-        (ov / "env.py").write_text(_py_emit({"WHICH": tag, tag.upper(): "1"}), encoding="utf-8")
+        (ov / "overlay.cfg").write_text('[env]\nWHICH = "%s"\n%s = "1"\n' % (tag, tag.upper())
+                                        + '[[paths]]\nvariable = "PATH"\npath = "bin"\n', encoding="utf-8")
     env = _run(agents_dir, project_root)
     assert env["SAME_OVERLAY_ROOT"] == str(proj)
     assert env["WHICH"] == "project" and "STORE" not in env

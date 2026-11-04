@@ -45,7 +45,7 @@ def layout(tmp_path):
     (kb / "PYTHON.md").write_text("PYTHON-KB-BODY", encoding="utf-8")
     (kb / "GIT.md").write_text("GIT-KB-BODY", encoding="utf-8")
 
-    # Two overlays with CONTEXT.md and differing priority.
+    # Two overlays declaring a CONTEXT.md, with differing priority.
     ov = agents_dir / "overlays"
     ov.mkdir()
     # Priority order is the REVERSE of alphabetical order on purpose: with
@@ -54,11 +54,15 @@ def layout(tmp_path):
     early = ov / "zeta"
     early.mkdir()
     (early / "CONTEXT.md").write_text("ZETA-CONTEXT root=<ZETA_OVERLAY_ROOT>", encoding="utf-8")
-    (early / "overlay.toml").write_text('name = "zeta"\npriority = 100\n', encoding="utf-8")
+    (early / "overlay.cfg").write_text('name = "zeta"\npriority = 100\ncontext = ["CONTEXT.md"]\n',
+                                       encoding="utf-8")
     late = ov / "alpha"
     late.mkdir()
     (late / "CONTEXT.md").write_text("ALPHA-CONTEXT", encoding="utf-8")
-    (late / "overlay.toml").write_text('name = "alpha"\npriority = 900\n', encoding="utf-8")
+    (late / "overlay.cfg").write_text(
+        'name = "alpha"\npriority = 900\ncontext = ["CONTEXT.md"]\n'
+        '[harness.gemini-cli]\ncontext = ["GEMINI-ONLY.md"]\n', encoding="utf-8")
+    (late / "GEMINI-ONLY.md").write_text("---\nmeta: x\n---\nALPHA-FOR-GEMINI", encoding="utf-8")
 
     # A skill (must be LISTED, never inlined).
     skills = agents_dir / "skills"
@@ -222,6 +226,7 @@ def test_project_overlay_shadows_the_store_copy_in_context(layout):
     pov = project_root / ".agents" / "overlays" / "zeta"   # same name as the store's
     pov.mkdir(parents=True)
     (pov / "CONTEXT.md").write_text("ZETA-FROM-PROJECT", encoding="utf-8")
+    (pov / "overlay.cfg").write_text('context = ["CONTEXT.md"]\n', encoding="utf-8")
     gemini = _agents.GeminiAgent()
     text = _context.assemble_context(gemini, S(agents_dir, project_root, False))
     assert "ZETA-FROM-PROJECT" in text and "ZETA-CONTEXT" not in text
@@ -229,12 +234,13 @@ def test_project_overlay_shadows_the_store_copy_in_context(layout):
 
 
 def test_project_scope_overlays_are_context_sources(layout):
-    """`overlays add` installs into the PROJECT scope by default; its CONTEXT.md
-    must be a source (only the store's overlays were walked before)."""
+    """`overlays add` installs into the PROJECT scope by default; its declared
+    context must be a source (only the store's overlays were walked before)."""
     agents_dir, project_root = layout
     pov = project_root / ".agents" / "overlays" / "projov"
     pov.mkdir(parents=True)
     (pov / "CONTEXT.md").write_text("PROJECT-OVERLAY-CONTEXT", encoding="utf-8")
+    (pov / "overlay.cfg").write_text('context = ["CONTEXT.md"]\n', encoding="utf-8")
     gemini = _agents.GeminiAgent()
     assert "PROJECT-OVERLAY-CONTEXT" in _context.assemble_context(gemini, S(agents_dir, project_root, False))
     assert "PROJECT-OVERLAY-CONTEXT" not in _context.assemble_context(gemini, S(agents_dir, project_root, True))
@@ -267,6 +273,17 @@ def test_overlay_priority_orders_by_manifest(layout):
     assert text.index("ZETA-CONTEXT") < text.index("ALPHA-CONTEXT")
 
 
+def test_harness_context_reaches_only_that_harness(layout):
+    """`harness.<id>.context` is added after the overlay's own context, for
+    that harness alone, front matter dropped."""
+    agents_dir, project_root = layout
+    gemini = _context.assemble_context(_agents.GeminiAgent(), S(agents_dir, project_root, True))
+    codex = _context.assemble_context(_agents.CodexAgent(), S(agents_dir, project_root, True))
+    assert gemini.index("ALPHA-CONTEXT") < gemini.index("ALPHA-FOR-GEMINI")
+    assert "meta: x" not in gemini
+    assert "ALPHA-FOR-GEMINI" not in codex
+
+
 def test_default_priority_is_500():
     assert _overlays.DEFAULT_PRIORITY == 500
 
@@ -274,13 +291,13 @@ def test_default_priority_is_500():
 def test_manifest_reports_priority(tmp_path):
     ov = tmp_path / "ov"
     ov.mkdir()
-    (ov / "overlay.toml").write_text('name = "ov"\npriority = 42\n', encoding="utf-8")
+    (ov / "overlay.cfg").write_text('name = "ov"\npriority = 42\n', encoding="utf-8")
     assert _overlays.Overlay(ov).read_manifest()["priority"] == 42
     assert _overlays.Overlay(ov).priority == 42
     # Missing priority -> default.
     ov2 = tmp_path / "ov2"
     ov2.mkdir()
-    (ov2 / "overlay.toml").write_text('name = "ov2"\n', encoding="utf-8")
+    (ov2 / "overlay.cfg").write_text('name = "ov2"\n', encoding="utf-8")
     assert _overlays.Overlay(ov2).read_manifest()["priority"] == _overlays.DEFAULT_PRIORITY
     assert _overlays.Overlay(ov2).priority == _overlays.DEFAULT_PRIORITY
 

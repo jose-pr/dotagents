@@ -43,7 +43,9 @@ def _overlay(src: Path, name: str, *, routing=None, requires=(), skill=None, set
     toml += "routing = [%s] # single-line array with a trailing comment\n" % (
         ", ".join('"%s"' % r for r in (routing or []))
     )
-    (ov / "overlay.toml").write_text(toml, encoding="utf-8")
+    if setup or any(rel == "setup.py" for rel, _body in files):
+        toml += '[[setup]]\ninterpreter = "python"\npath = "setup.py"\n'
+    (ov / "overlay.cfg").write_text(toml, encoding="utf-8")
     for rel, body in files:
         (ov / rel).parent.mkdir(parents=True, exist_ok=True)
         (ov / rel).write_text(body, encoding="utf-8")
@@ -81,9 +83,9 @@ def test_add_installs_a_source_dir_spelled_with_underscores(world):
     src, scope_root = world
     _overlay(src, "my_overlay", routing=["- Route -> ~/.agents/kb/X.md"])
     assert _add(src, scope_root, "my_overlay") == 0
-    assert (scope_root / "overlays" / "my-overlay" / "overlay.toml").is_file()
+    assert (scope_root / "overlays" / "my-overlay" / "overlay.cfg").is_file()
     assert _add(src, scope_root, "My_Overlay") == 0  # same overlay, no second dir
-    assert sorted(p.name for p in (scope_root / "overlays").iterdir()) == ["my-overlay"]
+    assert sorted(p.name for p in (scope_root / "overlays").iterdir() if not p.name.startswith(".")) == ["my-overlay"]
 
 
 def test_remove_normalizes_and_unmerges(world):
@@ -184,13 +186,13 @@ def test_add_installs_requires_first(world, caplog):
     _overlay(src, "top", requires=["mid", "ghost"])
     with caplog.at_level(logging.WARNING):
         assert _add(src, scope_root, "top") == 0
-    installed = sorted(p.name for p in (scope_root / "overlays").iterdir())
+    installed = sorted(p.name for p in (scope_root / "overlays").iterdir() if not p.name.startswith("."))
     assert installed == ["base", "mid", "top"]
     assert any("ghost" in r.getMessage() for r in caplog.records)
     # --no-requires installs only what was asked for.
     _run(OverlayRemove, name=["base", "mid", "top"], global_scope=True, agents_dir=scope_root, dry_run=False)
     assert _add(src, scope_root, "top", no_requires=True) == 0
-    assert sorted(p.name for p in (scope_root / "overlays").iterdir()) == ["top"]
+    assert sorted(p.name for p in (scope_root / "overlays").iterdir() if not p.name.startswith(".")) == ["top"]
 
 
 def test_an_installed_requirement_is_satisfied_not_redone(world, caplog):
@@ -206,11 +208,19 @@ def test_an_installed_requirement_is_satisfied_not_redone(world, caplog):
     assert any("requires base: already installed" in m for m in msgs)
     assert not any("installing it too" in m for m in msgs)
     assert not any("running setup for base" in m for m in msgs)
-    assert sorted(p.name for p in (scope_root / "overlays").iterdir()) == ["base", "mid"]
-    # Asked for by name, the installed overlay is set up again as always.
+    assert sorted(p.name for p in (scope_root / "overlays").iterdir() if not p.name.startswith(".")) == ["base", "mid"]
+    # Asked for by name, it is made to match its source; setup ran for this
+    # digest already, so it runs again only when asked to.
     caplog.clear()
     with caplog.at_level(logging.INFO):
         assert _add(src, scope_root, "base") == 0
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("already ran for this digest" in m for m in msgs)
+    assert not any("running setup for base" in m for m in msgs)
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        assert _run(OverlayAdd, name=["base"], repo=[str(src)], global_scope=True, agents_dir=scope_root,
+                    copy=True, dry_run=False, rerun_setup=True) == 0
     assert any("running setup for base" in m for m in (r.getMessage() for r in caplog.records))
 
 
@@ -233,7 +243,7 @@ def test_a_requirement_in_the_user_store_satisfies_a_project_add(world, tmp_path
         )
     assert rc == 0
     assert any("requires base: already installed" in r.getMessage() for r in caplog.records)
-    assert sorted(p.name for p in (project_store / "overlays").iterdir()) == ["mid"]
+    assert sorted(p.name for p in (project_store / "overlays").iterdir() if not p.name.startswith(".")) == ["mid"]
 
 
 def test_requires_cycle_is_an_error(world):
@@ -251,7 +261,8 @@ def test_show_describes_installed_then_source(world, capsys):
     info = json.loads(capsys.readouterr().out)
     assert info["where"] == "source"
     assert info["description"] == "the shown overlay"
-    assert info["requires"] == ["base"] and info["skills"] == ["sk"] and info["setup"] == "setup.py"
+    assert info["requires"] == ["base"] and info["skills"] == ["sk"]
+    assert info["setup"]["interpreter"] == "python" and info["setup"]["path"] == "setup.py"
     assert info["root_var"] == "SHOWN_OVERLAY_ROOT"
     _overlay(src, "base")
     _add(src, scope_root, "shown")
@@ -399,7 +410,7 @@ def test_the_acl_check_survives_a_powershell_7_parent(monkeypatch):
 def test_manifest_reader_handles_comments_indentation_and_quotes(tmp_path):
     ov = tmp_path / "ov"
     ov.mkdir()
-    (ov / "overlay.toml").write_text(
+    (ov / "overlay.cfg").write_text(
         'name = "ov" # the name\n'
         "priority = 5 # low\n"
         'routing = ["a #not-a-comment"] # trailing\n'
@@ -407,16 +418,27 @@ def test_manifest_reader_handles_comments_indentation_and_quotes(tmp_path):
         '    "r1.md",\n'
         "    'r2.md',\n"
         "  ]\n"
-        'requires = ["""multi\nline""", """\nnet\n"""]\n',
+        'requires = ["Net"]\n',
         encoding="utf-8",
     )
     m = _overlays.Overlay(ov).read_manifest()
     assert m["priority"] == 5
     assert m["routing"] == ["a #not-a-comment"], "a trailing comment must not swallow the next array"
     assert m["rules"] == ["r1.md", "r2.md"]
-    # Multi-line strings are read (surrounding newlines trimmed); `multi\nline`
-    # is not a valid overlay name, so it is dropped from `requires`.
-    assert m["requires"] == ["net"]
+    assert m["requires"] == ["net"]  # normalized
+
+
+def test_a_manifest_with_one_invalid_field_contributes_nothing(tmp_path, caplog):
+    """AOS: a consumer applies nothing of a manifest it could not validate --
+    not even its valid fields."""
+    ov = tmp_path / "ov"
+    ov.mkdir()
+    (ov / "overlay.cfg").write_text(
+        'routing = ["- kept?"]\nrequires = ["""multi\nline"""]\n', encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        m = _overlays.Overlay(ov).read_manifest()
+    assert m["routing"] == [] and m["requires"] == []
+    assert "none of its declarations apply" in caplog.text and "/requires/0" in caplog.text
 
 
 def test_compose_block_explains_overlay_root_vars_once(tmp_path):
@@ -441,7 +463,7 @@ def test_compose_block_without_load_on_demand_heading_keeps_rules(tmp_path):
     ov = tmp_path / "ov"
     ov.mkdir()
     (ov / "rules.md").write_text("- **Rule**: keep me.\n", encoding="utf-8")
-    (ov / "overlay.toml").write_text('name = "ov"\nrules = ["rules.md"]\n', encoding="utf-8")
+    (ov / "overlay.cfg").write_text('name = "ov"\nrules = ["rules.md"]\n', encoding="utf-8")
     base = "<!-- dotagents:begin -->\n# Directives\n<!-- dotagents:end -->\n"
     out = _compose_block(base, [ov], _logger())
     assert "- **Rule**: keep me." in out
@@ -496,12 +518,15 @@ def _open(issue, why):
 
 
 def test_requires_cannot_install_outside_the_overlays_dir(world, tmp_path):
+    """A `requires` entry that is a path or a scope label makes the manifest
+    invalid: the overlay is refused before anything of it is written."""
     src, scope_root = world
     _overlay(tmp_path, "escape")  # beside the source, reachable as ../escape
     _overlay(src, "top", requires=["../escape", "user"])
-    _add(src, scope_root, "top")
+    with pytest.raises(SystemExit, match="requires/0"):
+        _add(src, scope_root, "top")
     assert not (scope_root / "escape").exists(), "a requires entry installed outside overlays/"
-    assert sorted(p.name for p in (scope_root / "overlays").iterdir()) == ["top"]
+    assert not (scope_root / "overlays" / "top").exists()
 
 
 def test_rules_cannot_merge_a_file_outside_the_overlay(world, tmp_path):
@@ -509,14 +534,16 @@ def test_rules_cannot_merge_a_file_outside_the_overlay(world, tmp_path):
     secret = tmp_path / "secret.md"
     secret.write_text("- **Secret**: must not be merged.\n", encoding="utf-8")
     top = _overlay(src, "top")
-    manifest = top / "overlay.toml"
+    manifest = top / "overlay.cfg"
     manifest.write_text(
         manifest.read_text(encoding="utf-8")
         + "rules = [%s, %s]\n" % (json.dumps(str(secret)), json.dumps("../../../secret.md")),
         encoding="utf-8",
     )
-    _add(src, scope_root, "top")
-    assert "Secret" not in (scope_root / "AGENTS.md").read_text(encoding="utf-8")
+    with pytest.raises(SystemExit, match="rules/0"):
+        _add(src, scope_root, "top")
+    agents_md = scope_root / "AGENTS.md"
+    assert not agents_md.is_file() or "Secret" not in agents_md.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("name, text", [
@@ -574,7 +601,7 @@ def test_remove_unlinks_a_symlinked_overlay_and_keeps_its_target(world, tmp_path
         pytest.skip("cannot create a directory link here")
     assert _run(OverlayRemove, name=["myov"], global_scope=True, agents_dir=scope_root, dry_run=False) == 0
     assert not os.path.lexists(str(scope_root / "overlays" / "myov"))
-    assert (target / "overlay.toml").is_file(), "the link's target is the user's, not ours to delete"
+    assert (target / "overlay.cfg").is_file(), "the link's target is the user's, not ours to delete"
 
 
 def test_sync_keeps_the_repo_an_overlay_was_added_from(world, tmp_path, monkeypatch):

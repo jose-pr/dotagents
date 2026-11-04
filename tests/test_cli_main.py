@@ -42,8 +42,9 @@ HELP = {
     ("about",): ["--json"],
     ("mcp",): ["--prefix"],
     ("build-pyz",): ["--out", "--python", "--duho-version", "--pathapi-version", "--pathlib-next-version", "--extras"],
-    ("overlays", "add"): _SCOPED + ["--repo", "--copy", "--no-setup", "--no-requires", "--prune", "--dry-run"],
-    ("overlays", "sync"): _SCOPED + ["--repo", "--copy", "--prune", "--no-setup", "--dry-run"],
+    ("overlays", "add"): _SCOPED + ["--repo", "--copy", "--no-setup", "--rerun-setup", "--no-requires",
+                                    "--dry-run"],
+    ("overlays", "sync"): _SCOPED + ["--repo", "--copy", "--no-setup", "--rerun-setup", "--dry-run"],
     ("overlays", "list"): _SCOPED + ["--repo", "--json"],
     ("overlays", "remove"): _SCOPED + ["--dry-run"],
     ("overlays", "show"): _SCOPED + ["--repo", "--json"],
@@ -117,7 +118,7 @@ def test_reinit_after_overlays_add_keeps_the_overlay_routing(tmp_path):
     store = tmp_path / "store"
     src = tmp_path / "src" / "tiny"
     src.mkdir(parents=True)
-    (src / "overlay.toml").write_text(
+    (src / "overlay.cfg").write_text(
         'name = "tiny"\nrouting = ["- Tiny -> $TINY_OVERLAY_ROOT/kb/T.md"]\n', encoding="utf-8"
     )
     init = ["init", "--dest", str(store), "--agents", "codex", "--no-hooks"]

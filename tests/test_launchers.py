@@ -1,5 +1,5 @@
-"""Launchers for overlays' scripts (`dotagents._launchers`): each top-level
-``bin/<name>.py`` and each ``[scripts]`` entry, written into
+"""Launchers for overlays' scripts (`dotagents._launchers`): each ``scripts``
+entry of ``overlay.cfg`` that runs under python, written into
 ``<venv>/overlays/`` on every venv sync, put first on PATH by `env` for the
 active venv, and resolving the script at run time through the overlay's
 ``<NAME>_OVERLAY_ROOT``."""
@@ -40,7 +40,7 @@ def _overlay(store: Path, name: str, scripts: "dict[str, object]", probe: bool =
     (path / "bin").mkdir(parents=True, exist_ok=True)
     lines = ['name = "%s"' % name, "", "[scripts]"]
     lines += ["%s = %s" % (key, "false" if value is False else '"%s"' % value) for key, value in scripts.items()]
-    (path / "overlay.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (path / "overlay.cfg").write_text("\n".join(lines) + "\n", encoding="utf-8")
     if probe:
         for script in (v for v in scripts.values() if v is not False):
             (path / script).parent.mkdir(parents=True, exist_ok=True)
@@ -61,26 +61,36 @@ def _env_for(overlay: Overlay, target: Path, log: Path) -> dict:
     return env
 
 
-# -- overlay.toml ---------------------------------------------------------------
+# -- overlay.cfg ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize("reader", ["toml", "hand"])
-def test_the_manifest_reads_scripts_and_drops_what_cannot_be_one(tmp_path, monkeypatch, reader):
-    if reader == "hand":
-        monkeypatch.setattr(_overlays, "_toml_module", lambda: None)
+def test_the_manifest_declares_scripts_by_path_or_mapping(tmp_path):
+    path = tmp_path / "demo"
+    path.mkdir()
+    (path / "overlay.cfg").write_text(
+        'name = "demo"\n\n[scripts]\ntool = "bin/tool.py"  # the entry\n"a.b" = \'lib/x/y.py\'\n'
+        'lint = { path = "tools/lint.sh", interpreter = "sh", os = ["unix"] }\n'
+        'win = { path = "tools/win.py", interpreter = "python", os = ["windows"] }\noff = false\n',
+        encoding="utf-8",
+    )
+    overlay = Overlay(path)
+    expected = {"tool": "bin/tool.py", "a.b": "lib/x/y.py"}
+    if os.name == "nt":
+        expected["win"] = "tools/win.py"
+    assert overlay.scripts() == expected
+    assert overlay.unsupported_scripts() == ({} if os.name == "nt" else {"lint": "sh"})
+
+
+def test_one_invalid_script_entry_refuses_the_whole_manifest(tmp_path, monkeypatch):
     monkeypatch.setattr(_overlays, "_warned", set(), raising=False)
     path = tmp_path / "demo"
     path.mkdir()
-    (path / "overlay.toml").write_text(
-        'name = "demo"\n\n[scripts]\ntool = "bin/tool.py"  # the entry\n"a.b" = \'lib/x/y.py\'\n'
-        'up = "../x.py"\nabs = "/etc/x.py"\nwin = "bin\\\\x.py"\n"bad name" = "bin/x.py"\n'
-        'con = "bin/x.py"\n"t.exe" = "bin/x.py"\noff = false\non = true\n',
-        encoding="utf-8",
-    )
-    assert Overlay(path).read_manifest()["scripts"] == {"tool": "bin/tool.py", "a.b": "lib/x/y.py", "off": False}
+    (path / "overlay.cfg").write_text('[scripts]\ntool = "bin/tool.py"\nup = "../x.py"\n', encoding="utf-8")
+    assert Overlay(path).scripts() == {}
+    assert any("/scripts/up" in problem for problem in Overlay(path).manifest_problems())
 
 
-def test_bin_scripts_are_detected_and_the_manifest_adds_replaces_or_drops(tmp_path):
+def test_bin_scripts_are_commands_by_default_and_scripts_adds_replaces_or_drops(tmp_path):
     path = tmp_path / "demo"
     (path / "bin" / "sub").mkdir(parents=True)
     for name in ("tool.py", "helper.py", "replaced.py", "_private.py", "__init__.py", "con.py", "shell", "x.txt"):
@@ -88,17 +98,20 @@ def test_bin_scripts_are_detected_and_the_manifest_adds_replaces_or_drops(tmp_pa
     (path / "bin" / "sub" / "deep.py").write_text("", encoding="utf-8")
     overlay = Overlay(path)
     assert overlay.scripts() == {"tool": "bin/tool.py", "helper": "bin/helper.py", "replaced": "bin/replaced.py"}
-    (path / "overlay.toml").write_text(
+    (path / "overlay.cfg").write_text(
         '[scripts]\nhelper = false\nreplaced = "lib/main.py"\nextra = "lib/extra.py"\nmissing = false\n',
         encoding="utf-8",
     )
     assert overlay.scripts() == {"tool": "bin/tool.py", "replaced": "lib/main.py", "extra": "lib/extra.py"}
+    (path / "overlay.cfg").write_text('[defaults]\nbin = false\n[scripts]\nextra = "lib/extra.py"\n',
+                                      encoding="utf-8")
+    assert overlay.scripts() == {"extra": "lib/extra.py"}
 
 
 def test_a_manifest_without_scripts_declares_none(tmp_path):
-    (tmp_path / "overlay.toml").write_text('name = "plain"\n', encoding="utf-8")
-    assert Overlay(tmp_path).read_manifest()["scripts"] == {}
-    assert Overlay(tmp_path / "missing").read_manifest()["scripts"] == {}
+    (tmp_path / "overlay.cfg").write_text('name = "plain"\n', encoding="utf-8")
+    assert Overlay(tmp_path).scripts() == {}
+    assert Overlay(tmp_path / "missing").scripts() == {}
 
 
 # -- generation -----------------------------------------------------------------
@@ -146,11 +159,10 @@ def test_launchers_no_overlay_declares_are_removed_and_others_left(tmp_path):
     assert sorted(os.listdir(str(target))) == ["someone-elses"], "the manifest goes, foreign files stay"
 
 
-@pytest.mark.parametrize("declared", [True, False])
-def test_two_overlays_with_one_script_name_is_an_error_naming_both(tmp_path, declared):
+def test_two_overlays_with_one_script_name_is_an_error_naming_both(tmp_path):
     store = tmp_path / ".agents"
-    a = _overlay(store, "alpha", {"tool": "bin/tool.py"} if declared else {})
-    b = _overlay(store, "beta", {"tool": "lib/other.py"} if declared else {})
+    a = _overlay(store, "alpha", {"tool": "bin/tool.py"})
+    b = _overlay(store, "beta", {"tool": "lib/other.py"})
     for overlay in (a, b):
         (overlay.path / "bin" / "tool.py").write_text(PROBE, encoding="utf-8")
     with pytest.raises(_launchers.LauncherError) as caught:

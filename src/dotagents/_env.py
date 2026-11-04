@@ -1,27 +1,35 @@
-"""Chained env-file assembly + ``env.py`` execution (contract B).
+"""The session environment: overlays' declared environment (AOS) and the
+stores' chained env files (contract B).
 
-Contract B, the exact sequence :func:`get_environment` performs:
+Overlays contribute only what their manifest declares
+(:mod:`dotagents._aos`): after the root variables, each active overlay in
+composition order applies its ``env_files``, ``env`` and ``paths``, then its
+``env_scripts`` when its store enabled them (:func:`_apply_declarations`).
+Nothing in an overlay is put on a search path, executed or sourced because of
+its file name. An overlay whose declarations cannot be applied (an
+unresolved secret, a missing env file) contributes nothing, and says so.
 
-  1. **Bins onto PATH FIRST**, before any env eval. Each level's ``bin`` dir
-     (contract-A precedence order, *except* project-root) is prepended to
-     ``PATH`` so env scripts can call overlay helpers by name, and ahead of
+The stores (system, user, project) keep contract B, the sequence
+:func:`get_environment` performs after the overlays:
+
+  1. **Bins onto PATH**. Each store's ``bin`` dir (contract-A precedence
+     order, *except* project-root) is prepended to ``PATH``, and ahead of
      them the active venv's launcher dir (:func:`_launcher_path`). **Libs go on
-     ``PYTHONPATH`` the same way**: each level's ``lib`` dir that EXISTS
-     (:func:`get_lib_paths`) is prepended to ``PYTHONPATH`` and listed,
+     ``PYTHONPATH`` the same way**: each store's ``lib`` dir that EXISTS is
+     prepended to ``PYTHONPATH``; it and every directory an overlay declares
+     on ``PYTHONPATH`` (:func:`get_lib_paths`) are listed,
      ``os.pathsep``-joined, in ``AGENTS_PYTHONPATH`` -- so an ``env.py``, a
-     skill script, a ``bin`` launcher and everything they start can
-     ``import`` an overlay's library (an overlay ships ``lib/<module>.py``
-     beside its ``cmds/``), including another overlay's. The price: an
-     overlay module comes before site-packages and the stdlib, so a lib must
-     not reuse a package name it does not mean to replace.
+     skill script, a launcher and everything they start can ``import`` an
+     agent library, including another overlay's. The price: such a module
+     comes before site-packages and the stdlib, so a lib must not reuse a
+     package name it does not mean to replace.
   2. **Two tiers, in order**: ALL ``pre.env.py`` / ``pre.env`` / ``pre.local.env``
      first, THEN ALL ``env.py`` / ``env`` / ``local.env`` -- the concatenation of
-     two contract-A resolutions (:func:`resolve_env_files`). The project-root
-     level resolves NOTHING: a checkout's own top-level ``env.py`` / ``env`` /
-     ``local.env`` is never executed or sourced.
-  3. **Within each tier**, files are in the contract-A precedence order: each
-     store in ``Scope.stores`` -- system, user, project -- with its overlays
-     first and itself second.
+     two contract-A resolutions (:func:`resolve_env_files`) over the stores,
+     never an overlay. The project-root level resolves NOTHING: a checkout's
+     own top-level ``env.py`` / ``env`` / ``local.env`` is never executed or
+     sourced.
+  3. **Within each tier**, files are in the store order: system, user, project.
   4. **Chained, later-overrides-earlier**: each file is evaluated against the
      ACCUMULATED environment of every file before it; the result also
      accumulates. Later files win on conflicting keys.
@@ -55,12 +63,13 @@ The identity/proxy model is wired into the output around the file chain:
     directory holds, any other is replaced (in a user-scope walk, which walks
     no project, ``AGENTS_PROJECT_ROOT`` is only-if-unset). Only-if-unset: the
     interpreter ``AGENTS_PYTHON`` (``sys.executable`` -- the Python the CLI
-    is running under, a default any shim or helper can trust), and one
-    ``<NAME>_OVERLAY_ROOT`` per installed overlay (:attr:`Scope.overlays`,
-    the same set :func:`get_overlay_roots` lists, named by
-    :attr:`_overlays.Overlay.root_var` --
-    the same name ``dotagents context`` expands as a placeholder), so an env
-    file can reference an overlay's install dir by name. ``AGENTS_PYLIB``
+    is running under, a default any shim or helper can trust) and
+    ``PYTHONPYCACHEPREFIX`` (outside every overlay root). Always: one
+    ``<NAME>_OVERLAY_ROOT`` per active overlay (:attr:`Scope.overlays`, the
+    same set :func:`get_overlay_roots` lists, named by
+    :attr:`_overlays.Overlay.root_var` -- the same name ``dotagents context``
+    expands as a placeholder), and ``<NAME>_OVERLAY_STATE`` for one with a
+    state directory. ``AGENTS_PYLIB``
     (:data:`PYLIB_VAR`) names the ``.pyz`` when dotagents runs from one --
     where its own libraries (duho, pathapi) import from for an overlay
     built on them; never put on ``PYTHONPATH``.
@@ -77,7 +86,8 @@ The identity/proxy model is wired into the output around the file chain:
 
 Trust model: ``env.py`` runs arbitrary code, from every store the walk
 visits -- the system store (only when administrators alone can write it), the
-user store, and the project's ``<project>/.agents`` with their overlays. A
+user store, and the project's ``<project>/.agents``; an overlay's env scripts
+run only where its store enabled them, and are reported each time. A
 project's ``.agents/`` is trusted like a harness's own ``.claude/settings.json``:
 opening a session in a repo trusts it. The project ROOT outside ``.agents/``
 never contributes code. Security (Leakage rule): never log the
@@ -96,6 +106,7 @@ import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
+from dotagents import _activate, _aos
 from dotagents._scope import Scope, project_root_default
 
 #: Names the ``.pyz`` dotagents runs from (unset for an installed dotagents,
@@ -796,9 +807,11 @@ def get_env_from_file(
 
 
 def get_bin_paths(scope: Scope) -> "list[Path]":
-    """Each level's ``bin`` dir in contract-A precedence order, EXCEPT project-root.
+    """Each STORE's ``bin`` dir in contract-A precedence order, EXCEPT
+    project-root. An overlay's directories reach ``PATH`` only through its
+    declared ``paths``.
 
-    Uses ``include_missing=True``: a bin dir is offered for every level even
+    Uses ``include_missing=True``: a bin dir is offered for every store even
     if absent, and
     :func:`get_environment` prepends ALL of them to ``PATH`` -- including the
     ones that do not exist (so a later-created ``<store>/bin`` is found without
@@ -806,34 +819,60 @@ def get_bin_paths(scope: Scope) -> "list[Path]":
     (``{"project-root": ""}``): a project's own top-level ``bin`` is not an
     agent bin.
     """
-    resolved = scope.paths({"default": "bin", "project-root": ""}, include_missing=True)
+    resolved = scope.paths({"default": "bin", "overlay": "", "project-root": ""}, include_missing=True)
     return [path for _level, path, _root in resolved]
 
 
 def get_overlay_roots(scope: Scope) -> "list[Path]":
-    """The installed overlay dirs of the scope (:attr:`Scope.overlays` -- the
+    """The active overlay dirs of the scope (:attr:`Scope.overlays` -- the
     user store's, then the project's, a same-named project overlay shadowing
-    the store's copy): the set of overlays that get a ``<NAME>_OVERLAY_ROOT``
-    var is exactly the set whose ``bin``/``env`` files the contract-A walk
-    resolves."""
+    the store's copy): exactly the overlays that get a ``<NAME>_OVERLAY_ROOT``."""
     return [overlay.path for overlay in scope.overlays]
 
 
-def get_lib_paths(scope: Scope) -> "list[Path]":
-    """Each level's ``lib`` dir in contract-A precedence order, EXCEPT project-root
-    -- what :func:`get_environment` puts at the front of the session's
-    ``PYTHONPATH`` and publishes as ``AGENTS_PYTHONPATH`` (in reverse, highest
-    precedence first), and what command discovery appends to ``sys.path``.
+def get_path_dirs(scope: Scope) -> "list[Path]":
+    """Every dir a session's ``PATH`` gains, contract-A precedence order: for
+    each store, the directories its active overlays declare on ``PATH`` (on
+    this OS), then the store's own ``bin``; absent ones included."""
+    overlays = scope.overlays
+    out: "list[Path]" = []
+    stores = {str(Path(p).parent): p for p in get_bin_paths(scope)}
+    for store in scope.stores:
+        for overlay in overlays:
+            if overlay.store == store:
+                out += declared_paths(overlay, "PATH")
+        if str(store) in stores:
+            out.append(stores[str(store)])
+    return out
 
-    Only dirs that EXIST are returned (unlike ``bin``): a dozen absent entries
-    on a search path are noise a reader has to rule out. project-root's
-    ``lib`` is excluded for the same reason as its ``bin``: a project's own
-    top-level ``lib`` is not an agent library.
-    """
-    resolved = scope.paths({"default": "lib", "project-root": ""}, include_missing=False)
+
+def get_store_lib_paths(scope: Scope) -> "list[Path]":
+    """Each STORE's existing ``lib`` dir, contract-A order, EXCEPT project-root."""
+    resolved = scope.paths({"default": "lib", "overlay": "", "project-root": ""}, include_missing=False)
     return [path for _level, path, _root in resolved if path.is_dir()]
 
 
+def get_lib_paths(scope: Scope) -> "list[Path]":
+    """Every agent library dir in contract-A precedence order: for each store,
+    the existing directories its active overlays declare on ``PYTHONPATH``
+    (``paths``), then the store's own ``lib``; project-root's ``lib`` is not
+    an agent library. What :func:`get_environment` publishes as
+    ``AGENTS_PYTHONPATH`` (in reverse, highest precedence first), what the
+    scope venvs layer and what command discovery appends to ``sys.path``.
+
+    Only dirs that EXIST are returned: a dozen absent entries on a search path
+    are noise a reader has to rule out.
+    """
+    overlays = scope.overlays
+    out: "list[Path]" = []
+    for store in scope.stores:
+        for overlay in overlays:
+            if overlay.store == store:
+                out += [p for p in declared_paths(overlay, "PYTHONPATH") if p.is_dir()]
+        lib = Path(store) / "lib"
+        if lib.is_dir():
+            out.append(lib)
+    return out
 def _prepend_missing(path_entries: "list[str]", new_entries: "list[str]") -> "list[str]":
     """Prepend each new entry not already present.
 
@@ -912,13 +951,13 @@ def resolve_env_files(scope: Scope) -> "list[tuple[str, Path, Optional[Path]]]":
     user's own local overrides live in ``<project>/.agents/local.env``.
     """
     pre_tier = scope.paths(
-        {"default": "pre.env.py", "project-root": ""},
-        {"default": "pre.env", "project-root": ""},
+        {"default": "pre.env.py", "overlay": "", "project-root": ""},
+        {"default": "pre.env", "overlay": "", "project-root": ""},
         {"project": "pre.local.env"},
     )
     main_tier = scope.paths(
-        {"default": "env.py", "project-root": ""},
-        {"default": "env", "project-root": ""},
+        {"default": "env.py", "overlay": "", "project-root": ""},
+        {"default": "env", "overlay": "", "project-root": ""},
         {"project": "local.env"},
     )
     return [item for item in pre_tier + main_tier if item[1].is_file()]
@@ -975,6 +1014,175 @@ def apply_proxy_model(osenv: "dict[str, str]") -> "dict[str, str]":
 
 
 # --------------------------------------------------------------------------- #
+# Overlays: their declared environment (AOS).
+# --------------------------------------------------------------------------- #
+
+
+def _ordered(overlays: "list") -> "list":
+    """``overlays`` in composition order: ascending (priority, name, identity)."""
+    return sorted(overlays, key=lambda o: o.sort_key)
+
+
+def declared_paths(overlay, variable: str) -> "list[Path]":
+    """The directories ``overlay`` adds to ``variable`` on this OS, absolute:
+    its default ones (an existing ``bin`` on ``PATH``, ``lib`` on
+    ``PYTHONPATH``, unless ``[defaults]`` turns one off), then its ``paths``
+    in declaration order."""
+    windows = os.name == "nt"
+    want = variable.upper() if windows else variable
+    out: "list[Path]" = []
+    root = os.path.abspath(str(overlay.path))
+    for entry in _activate.default_paths(overlay) + list(overlay.document().get("paths", [])):
+        name = entry["variable"].upper() if windows else entry["variable"]
+        if name == want and _aos.os_matches(entry, _aos.current_os()):
+            found = Path(_aos.resolve_path(root, entry["path"], windows))
+            if found not in out:  # an entry listed twice counts once, at its first position
+                out.append(found)
+    return out
+
+
+def _run_env_script(overlay, script: "dict", own: "_aos.Environment", ctx: "_aos.Context", *, python: str,
+                    logger) -> "Optional[list[tuple[str, Optional[str]]]]":
+    """One env script's changes, or None (reported) when it failed: it runs
+    as a setup step does, with the environment built so far for its overlay."""
+    from dotagents import _run
+
+    env = dict(own.values)
+    env["AOS_OVERLAY_ROOT"] = ctx.root
+    env["AOS_OVERLAY_NAME"] = overlay.normalized_name
+    state = _activate.state_dir(overlay)
+    if state is not None:
+        state.mkdir(parents=True, exist_ok=True)
+        env["AOS_OVERLAY_STATE"] = str(state)
+    try:
+        argv = _run.interpreter_command(script["interpreter"], python=python,
+                                        base_path=os.environ.get("PATH"))
+        status, out = _run.run_step(
+            argv + [_aos.resolve_path(ctx.root, script["path"], ctx.windows)] + script["args"],
+            cwd=ctx.root, env=_spawn_env(env), timeout=script["timeout"], capture=True,
+        )
+        if status != 0:
+            raise _aos.Refused("env-script-failed", script["path"], "exit %d" % status)
+        return _aos.env_script_changes(out)
+    except (_aos.Refused, _run.InterpreterError, OSError) as exc:
+        if logger:
+            logger.error("overlay %s: env script %s failed, nothing of it applies (%s)",
+                         overlay.name, script["path"], getattr(exc, "detail", "") or exc)
+        return None
+
+
+def _apply_declarations(overlay, osenv: "dict[str, str]", own_base: "dict[str, str]", *, python: str,
+                        logger, host_env: "Optional[dict[str, str]]" = None,
+                        ) -> "Optional[tuple[EnvChanges, list[tuple[str, str]]]]":
+    """``overlay``'s declarations applied over ``osenv``: the change set and
+    the weakenings, or None (reported) when they cannot be applied, in which
+    case nothing of the overlay applies. Its env scripts run in
+    ``own_base`` (the base environment and the root variables) with only
+    this overlay's declarations, so another overlay's secrets never reach
+    them. ``host_env`` is dotagents' own environment, where the ``env``
+    provider reads (default ``os.environ``)."""
+    ctx = _activate.context(overlay, host_env=host_env)
+    doc = overlay.document()
+    if logger and not ctx.default_env_scripts:
+        _script, skipped = _activate.default_env_script(overlay)
+        if skipped:
+            logger.warning("overlay %s: %s cannot run here (no interpreter for it); skipped",
+                           overlay.name, ", ".join(skipped))
+    windows = os.name == "nt"
+    session = _aos.Environment(osenv, windows)
+    weakenings: "list[tuple[str, str]]" = []
+    try:
+        scripts = _aos.apply_overlay(session, doc, ctx, weakenings)
+        own = _aos.Environment(own_base, windows)
+        if scripts:
+            _aos.apply_overlay(own, doc, ctx, [])
+    except _aos.Refused as refused:
+        if logger:
+            logger.error("overlay %s: its environment is not applied: %s %s%s", overlay.name, refused.code,
+                         refused.subject, " (%s)" % refused.detail if refused.detail else "")
+        return None
+    for script in scripts:
+        changes = _run_env_script(overlay, script, own, ctx, python=python, logger=logger)
+        for name, value in changes or ():
+            if value is None:
+                session.unset(name)
+                own.unset(name)
+                continue
+            if _aos.is_sensitive(name):
+                weakenings.append(("env-sensitive", name))
+            session.set(name, value)
+            own.set(name, value)
+    out = EnvChanges(removed=[k for k in osenv if k not in session.values])
+    for key, value in session.values.items():
+        if osenv.get(key) != value:
+            out[key] = value
+    return out, weakenings
+
+
+def overlay_process_env(scope: Scope, overlay, *, base_env: "Optional[dict[str, str]]" = None,
+                        logger=None) -> "Optional[dict[str, str]]":
+    """The environment of a process ``overlay`` runs (its setup, an MCP
+    server): the base environment, dotagents' own variables, every active
+    overlay's root variable, the path additions of the overlays it requires,
+    this overlay's declarations, and the ``AOS_OVERLAY_*`` variables. No
+    other overlay's ``env``, env files or secrets. None (reported) when its
+    declarations cannot be applied."""
+    from dotagents import _pyvenv
+    from dotagents._run import pycache_prefix
+
+    scope = _absolute_scope(scope)
+    env = dict(os.environ if base_env is None else base_env)
+    env["AGENTS_HOME"] = str(scope.user_root)
+    venv = _pyvenv.active_venv(scope, env)
+    if venv is not None:
+        env["AGENTS_PYTHON"] = str(_pyvenv.venv_python(venv))
+    env.setdefault("AGENTS_PYTHON", sys.executable)
+    env.setdefault("PYTHONPYCACHEPREFIX", pycache_prefix(scope.user_root))
+    active = {other.normalized_name: other for other in scope.overlays}
+    for other in active.values():
+        env[other.root_var] = os.path.abspath(str(other.path))
+        state = _activate.state_dir(other)
+        if state is not None:
+            env[_aos.state_variable(other.name)] = str(state)
+    # The path additions -- directories, never values or secrets -- of the
+    # overlays it requires, so an overlay built on another's library or
+    # commands finds them (D95).
+    required: "list" = []
+
+    def need(name: str) -> None:
+        other = active.get(name)
+        if other is None or other in required or other == overlay:
+            return
+        required.append(other)
+        for dep in other.read_manifest()["requires"]:
+            need(dep)
+
+    for dep in overlay.read_manifest()["requires"]:
+        need(dep)
+    windows = os.name == "nt"
+    for other in _ordered(required):
+        built = _aos.Environment(env, windows)
+        ctx = _activate.context(other)
+        _aos.apply_paths(built, ctx.default_paths + list(other.document().get("paths", [])), ctx, [])
+        env = built.values
+    found = _apply_declarations(overlay, env, env, python=interpreter(env), logger=logger,
+                                host_env=dict(os.environ if base_env is None else base_env))
+    if found is None:
+        return None
+    changes, _weakenings = found
+    env.update(changes)
+    for name in changes.removed:
+        env.pop(name, None)
+    env["AOS_OVERLAY_ROOT"] = os.path.abspath(str(overlay.path))
+    env["AOS_OVERLAY_NAME"] = overlay.normalized_name
+    state = _activate.state_dir(overlay)
+    if state is not None:
+        env["AOS_OVERLAY_STATE"] = str(state)
+        env[_aos.state_variable(overlay.name)] = str(state)
+    return env
+
+
+# --------------------------------------------------------------------------- #
 # Assembly (contract B).
 # --------------------------------------------------------------------------- #
 
@@ -1027,6 +1235,7 @@ def get_environment(
     global_scope = scope.global_scope
 
     osenv = dict(base_env if base_env is not None else os.environ)
+    host_env = dict(osenv)
     base_keys = frozenset(osenv)
     env = EnvChanges()
 
@@ -1047,6 +1256,11 @@ def get_environment(
         """Only-if-unset: a value already set upstream (user, harness, an
         earlier layer) holds; an empty value is never written."""
         if value and not osenv.get(key):
+            _apply({key: value})
+
+    def _set(key: str, value: str) -> None:
+        """Always this walk's value."""
+        if osenv.get(key) != value:
             _apply({key: value})
 
     def _pin_walked(key: str, value: str) -> None:
@@ -1104,24 +1318,83 @@ def get_environment(
     if pylib and osenv.get(PYLIB_VAR) != pylib:
         _apply({PYLIB_VAR: pylib})
 
-    # --- Overlay roots --- one `<NAME>_OVERLAY_ROOT` per installed overlay, the
-    # same name `dotagents context` expands as a `<NAME_OVERLAY_ROOT>` placeholder
-    # (`Overlay.root_var` is the single naming rule). Seeded before the chain so
-    # env files can reference an overlay's install dir; only-if-unset, like the
-    # scope roots, so an upstream pin holds.
-    for overlay in scope.overlays:
-        pinned = osenv.get(overlay.root_var)
-        store_copy = str(Path(agents_dir) / "overlays" / overlay.name)
-        if not pinned:
-            _apply({overlay.root_var: str(overlay.path)})
-        elif pinned == store_copy and str(overlay.path) != store_copy:
-            # The session pinned the STORE's copy (as the SessionStart env does),
-            # and a same-named PROJECT overlay now shadows it: re-point to the
-            # copy that is actually in play. Any other pin (a harness's own
-            # value) is respected.
-            _apply({overlay.root_var: str(overlay.path)})
+    # --- Overlay roots --- one `<NAME>_OVERLAY_ROOT` per active overlay, set
+    # to the copy in play whatever the base environment held (AOS: a root
+    # variable names the root the consumer exposes), and `<NAME>_OVERLAY_STATE`
+    # for one with a state directory. The same names `dotagents context`
+    # expands as placeholders (`Overlay.root_var` is the one naming rule).
+    overlays = _ordered(scope.overlays)
+    for overlay in overlays:
+        _set(overlay.root_var, os.path.abspath(str(overlay.path)))
+        state = _activate.state_dir(overlay)
+        if state is not None:
+            _set(_aos.state_variable(overlay.name), str(state))
+    # Python started for an overlay keeps its bytecode outside every overlay
+    # root, so no `__pycache__` changes a verified copy.
+    from dotagents._run import pycache_prefix
 
-    # --- Contract B step 1: bins onto PATH FIRST. ---
+    _seed("PYTHONPYCACHEPREFIX", pycache_prefix(agents_dir))
+
+    # Libs a previous walk listed (another scope's, before a `cd`) leave
+    # PYTHONPATH before this walk adds its own.
+    stale = {
+        os.path.normcase(p) for p in (osenv.get("AGENTS_PYTHONPATH") or "").split(os.pathsep) if p
+    }
+    inherited = osenv.get("PYTHONPATH") or ""
+    kept = [e for e in inherited.split(os.pathsep) if e and os.path.normcase(e) not in stale]
+    if os.pathsep.join(kept) != inherited:
+        if kept:
+            _apply({"PYTHONPATH": os.pathsep.join(kept)})
+        else:
+            _apply(EnvChanges(removed=["PYTHONPATH"]))
+
+    # --- The stores' env files, chained, later-overrides-earlier, in two
+    # tiers: every store's pre.* files now, before any overlay, so an
+    # overlay's env file or script sees what they set; every store's main
+    # files after the overlays. One broken layer contributes nothing; it
+    # never takes the rest of the env with it (the hooks send stderr to
+    # /dev/null, so a crash here would silently empty every session).
+    # Logged by file name only.
+    def _run_tier(files: "list[tuple[str, Path, Optional[Path]]]") -> None:
+        for level, path, _root in files:
+            try:
+                if path.suffix == ".py":
+                    changes = get_env_from_py(
+                        path, osenv, level=level, global_scope=global_scope, logger=logger
+                    )
+                else:
+                    changes = get_env_from_file(path, osenv, logger=logger)
+            except Exception as e:  # noqa: BLE001 - see above
+                if logger:
+                    logger.warning("env layer skipped: %s (%s)", path, type(e).__name__)
+                continue
+            _apply(changes)
+
+    env_files = resolve_env_files(scope)
+    main_tier = [item for item in env_files if not item[1].name.startswith("pre.")]
+    _run_tier([item for item in env_files if item[1].name.startswith("pre.")])
+
+    # --- AOS: each active overlay's env files, env, paths and env scripts
+    # (declared or default, unless its store turned them off), in composition
+    # order (priority, name, identity). An overlay whose declarations cannot
+    # be applied contributes nothing.
+    weakenings: "list[tuple[str, str, str]]" = []
+    python_now = osenv.get("AGENTS_PYTHON") or sys.executable
+    # Before any overlay's declarations: what an overlay's own processes start from.
+    own_base = dict(osenv)
+    for overlay in overlays:
+        if not _activate.is_pinned(overlay):
+            weakenings.append((overlay.name, "unpinned", ""))
+        found = _apply_declarations(overlay, osenv, own_base, python=python_now, logger=logger,
+                                    host_env=host_env)
+        if found is None:
+            continue
+        changes, overlay_weakenings = found
+        _apply(changes)
+        weakenings += [(overlay.name, ident, subject) for ident, subject in overlay_weakenings]
+    _activate.report(logger, weakenings)
+
+    # --- Contract B step 1: store bins onto PATH. ---
     bin_paths = [str(p) for p in get_bin_paths(scope)]
     updated = _prepended_path_var(osenv, "PATH", bin_paths)
     if updated is not None:
@@ -1131,67 +1404,38 @@ def get_environment(
     if updated is not None:
         _apply({"PATH": updated})
 
-    # --- Libs: on PYTHONPATH, and published as AGENTS_PYTHONPATH, same moment.
-    # Everything an overlay starts -- a skill script the agent runs, a `bin`
-    # launcher, an env.py, a setup script -- must import the overlays' `lib`
-    # modules, or an overlay built on another's lib breaks; the session's
-    # PYTHONPATH is the one thing all of them inherit. Highest precedence first
-    # (the project's lib before the user store's), existing dirs only (see
-    # `get_lib_paths`). The value is this walk's: the libs an inherited
-    # AGENTS_PYTHONPATH named (another scope's, before a `cd`) leave PYTHONPATH
-    # before this walk's go to its front. AGENTS_PYTHONPATH says which
-    # PYTHONPATH entries are dotagents', for a process that builds its own.
+    # --- Libs: a store's own `lib` on PYTHONPATH; every lib -- those and
+    # the overlays' declared PYTHONPATH directories -- listed in
+    # AGENTS_PYTHONPATH, highest precedence first, for a process that builds
+    # its own path (an env.py, a launcher, command discovery).
     lib_paths: "list[str]" = []
     for p in reversed(get_lib_paths(scope)):
         if str(p) not in lib_paths:
             lib_paths.append(str(p))
-    stale = {
-        os.path.normcase(p) for p in (osenv.get("AGENTS_PYTHONPATH") or "").split(os.pathsep) if p
-    }
     if lib_paths:
         if osenv.get("AGENTS_PYTHONPATH") != os.pathsep.join(lib_paths):
             _apply({"AGENTS_PYTHONPATH": os.pathsep.join(lib_paths)})
     elif "AGENTS_PYTHONPATH" in osenv:
         _apply(EnvChanges(removed=["AGENTS_PYTHONPATH"]))
-    inherited = osenv.get("PYTHONPATH") or ""
-    kept = [
-        e for e in inherited.split(os.pathsep)
-        if e and os.path.normcase(e) not in stale
-    ]
     # A lib the scope venv's .pth already layers stays off PYTHONPATH: the
     # venv's interpreter (AGENTS_PYTHON) imports it anyway, and no other
-    # Python in the session should. AGENTS_PYTHONPATH still names them all.
+    # Python in the session should.
     layered = {
         os.path.normcase(e) for e in (_pyvenv.read_state(venv).get("pth") or [] if venv else [])
     }
-    on_path = [p for p in lib_paths if os.path.normcase(p) not in layered]
-    pythonpath = _prepended_path_var({"PYTHONPATH": os.pathsep.join(kept)}, "PYTHONPATH",
-                                     list(reversed(on_path)))
-    if pythonpath is None:
-        pythonpath = os.pathsep.join(kept)
-    if pythonpath != inherited:
+    store_libs = [str(p) for p in reversed(get_store_lib_paths(scope))]
+    on_path = [p for p in store_libs if os.path.normcase(p) not in layered]
+    current = osenv.get("PYTHONPATH") or ""
+    pythonpath = _prepended_path_var({"PYTHONPATH": current}, "PYTHONPATH", list(reversed(on_path)))
+    if pythonpath is not None and pythonpath != current:
         if pythonpath:
             _apply({"PYTHONPATH": pythonpath})
         elif "PYTHONPATH" in osenv:
             _apply(EnvChanges(removed=["PYTHONPATH"]))
 
-    # --- Contract B steps 2-5: the two tiers, chained, later-overrides-earlier. ---
-    # One broken layer contributes nothing; it never takes the rest of the
-    # env with it (the hooks send stderr to /dev/null, so a crash here would
-    # silently empty every session). Logged by file name only.
-    for level, path, _root in resolve_env_files(scope):
-        try:
-            if path.suffix == ".py":
-                changes = get_env_from_py(
-                    path, osenv, level=level, global_scope=global_scope, logger=logger
-                )
-            else:
-                changes = get_env_from_file(path, osenv, logger=logger)
-        except Exception as e:  # noqa: BLE001 - see above
-            if logger:
-                logger.warning("env layer skipped: %s (%s)", path, type(e).__name__)
-            continue
-        _apply(changes)
+    # --- Contract B steps 2-5: the stores' main tier, after the overlays, so a
+    # store's env files read and override what an overlay set. ---
+    _run_tier(main_tier)
 
     # --- Proxy normalization --- after the chain so file-set proxies
     #     are normalized too.
@@ -1243,11 +1487,11 @@ _ENV_CACHE_CLOCK_SLACK = 2.0
 
 #: Every env-file name the two tiers resolve (see :func:`resolve_env_files`).
 _ENV_FILE_NAMES = (
-    {"default": "pre.env.py", "project-root": ""},
-    {"default": "pre.env", "project-root": ""},
+    {"default": "pre.env.py", "overlay": "", "project-root": ""},
+    {"default": "pre.env", "overlay": "", "project-root": ""},
     {"project": "pre.local.env"},
-    {"default": "env.py", "project-root": ""},
-    {"default": "env", "project-root": ""},
+    {"default": "env.py", "overlay": "", "project-root": ""},
+    {"default": "env", "overlay": "", "project-root": ""},
     {"project": "local.env"},
 )
 
@@ -1294,10 +1538,30 @@ def env_cache_key(scope: Scope, base_env: "dict[str, str]", *parts: str) -> str:
         "%s %s %s" % (level, path, _stat_sig(path))
         for level, path, _root in scope.paths(*_ENV_FILE_NAMES, include_missing=True)
     ]
-    for _level, path, _root in scope.paths({"default": "lib", "project-root": ""}, include_missing=True):
+    for _level, path, _root in scope.paths({"default": "lib", "overlay": "", "project-root": ""},
+                                           include_missing=True):
         items.append("lib %s %s" % (path, _stat_sig(path)))
         if path.is_dir():
             items += _tree_sig(path)
+    # An overlay's environment is its manifest, the env files it names and
+    # its store's settings (pins, grants); its declared libs are walked like
+    # a store's.
+    from dotagents._sources import registry_files
+
+    items += ["registry %s %s" % (path, _stat_sig(path)) for path in registry_files(*scope.stores)]
+    for overlay in scope.installed_overlays:
+        items.append("manifest %s %s" % (overlay.manifest_path, _stat_sig(overlay.manifest_path)))
+        for rel in ("bin", "lib"):
+            items.append("default %s %s" % (overlay.path / rel, _stat_sig(overlay.path / rel)))
+        items.append("record %s %s" % (overlay.install_record_path, _stat_sig(overlay.install_record_path)))
+        doc = overlay.document()
+        for entry in doc.get("env_files", []):
+            rel = entry if isinstance(entry, str) else entry["path"]
+            path = overlay.path.joinpath(*rel.split("/"))
+            items.append("env_file %s %s" % (path, _stat_sig(path)))
+        for path in declared_paths(overlay, "PYTHONPATH"):
+            if path.is_dir():
+                items += _tree_sig(path)
     # A venv sync (`_pyvenv`) changes AGENTS_PYTHON and what stays off PYTHONPATH.
     from dotagents import _pyvenv
 

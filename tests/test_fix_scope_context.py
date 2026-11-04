@@ -36,6 +36,7 @@ def home_store(tmp_path, monkeypatch):
     ov.mkdir(parents=True)
     write_text_lf(store / "AGENTS.md", "STORE-RULES\n")
     write_text_lf(ov / "CONTEXT.md", "OV-CONTEXT\n")
+    write_text_lf(ov / "overlay.cfg", 'context = ["CONTEXT.md"]\n')
     counter = (
         "import json, os\n"
         "print(json.dumps({'COUNT': str(int(os.environ.get('COUNT', '0')) + 1)}))\n"
@@ -62,8 +63,10 @@ def test_home_project_is_the_user_scope(home_store):
 def test_home_project_runs_each_env_file_once(home_store):
     home, store = home_store
     scope = Scope.of(agents_dir=store, project_root=home)
+    # The store's env files; the overlay's env.py runs as its default env
+    # script, before the store's main tier: each once.
     files = [(lvl, p.name) for lvl, p, _r in _env.resolve_env_files(scope)]
-    assert files == [("ov", "env.py"), ("user", "env.py")]
+    assert files == [("user", "env.py")]
     base = {k: v for k, v in os.environ.items() if k != "COUNT"}
     changes = _env.get_environment(scope, base_env=base, explicit="gemini")
     assert changes["COUNT"] == "2"
@@ -198,6 +201,7 @@ def test_inline_resolves_overlay_variable_refs_and_each_sources_own_dir(ctx):
     write_text_lf(store / "AGENTS.md", "- Python work -> $PY_OVERLAY_ROOT/kb/PYTHON.md\n")
     write_text_lf(store / "kb" / "PYTHON.md", "STORE-KB-SHADOWS-OVERLAY\n")
     write_text_lf(ov / "CONTEXT.md", "Read kb/PYTHON.md, and `${PY_OVERLAY_ROOT}/kb/STYLE.md`.\n")
+    write_text_lf(ov / "overlay.cfg", 'context = ["CONTEXT.md"]\n')
     write_text_lf(ov / "kb" / "PYTHON.md", "PY-KB-BODY\n")
     write_text_lf(ov / "kb" / "STYLE.md", "PY-STYLE-BODY\n")
     write_text_lf(project / ".agents" / "AGENTS.md", "Before a release read kb/RELEASE.md.\n")
@@ -325,7 +329,7 @@ def test_an_empty_assembly_gets_no_reminder_wrapper(ctx, capsys):
 
 
 # --------------------------------------------------------------------------
-# scope-context-10: overlay sources sort by Overlay.sort_key, before stores
+# scope-context-10: overlay sources sort by Overlay.sort_key, after the stores (AOS)
 # --------------------------------------------------------------------------
 
 def test_context_orders_overlays_like_the_managed_block(ctx):
@@ -334,11 +338,12 @@ def test_context_orders_overlays_like_the_managed_block(ctx):
     overlays = (("a-dir", "zzz", 500), ("b-dir", "aaa", 500), ("late", "late", 20000))
     for dirname, name, priority in overlays:
         d = store / "overlays" / dirname
-        write_text_lf(d / "overlay.toml", 'name = "%s"\npriority = %d\n' % (name, priority))
+        write_text_lf(d / "overlay.cfg", 'name = "%s"\npriority = %d\ncontext = ["CONTEXT.md"]\n'
+                      % (name, priority))
         write_text_lf(d / "CONTEXT.md", "CTX-%s\n" % dirname)
     scope = Scope.of(agents_dir=store, project_root=project, global_scope=True)
     text = _gemini(scope)
-    order = [text.index(m) for m in ("CTX-b-dir", "CTX-a-dir", "CTX-late", "STORE-RULES")]
+    order = [text.index(m) for m in ("STORE-RULES", "CTX-b-dir", "CTX-a-dir", "CTX-late")]
     assert order == sorted(order)
 
 

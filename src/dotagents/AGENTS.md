@@ -15,8 +15,18 @@ Terms used throughout:
   the stores a session reads (a `Scope`).
 - **contract A** — the precedence walk: store by store (system, user, project), each
   store's installed overlays first, then the store itself; then the project root.
-- **overlay** — a directory installed as `<store>/overlays/<name>/`; its root is
-  exported as `$<NAME>_OVERLAY_ROOT`.
+- **overlay** — an AOS overlay (the Agent Overlay Specification, edition
+  `0.1.0-draft`, https://boriken-dev.github.io/agent-overlay-spec/): a directory,
+  optionally with an `overlay.cfg` manifest, installed as `<store>/overlays/<name>/`;
+  its root is exported as `$<NAME>_OVERLAY_ROOT`. What it declares is applied,
+  and by default: its existing `bin/` prepended to `PATH`, `lib/` appended to
+  `PYTHONPATH`, its root `env` read as a dotenv env file, the first `env.<ext>`
+  and `setup.<ext>` this OS can run (`.py`, `.ps1`, `.bash`, `.sh`, `.js`, `.mjs`)
+  as its env script and setup, its `skills/<name>/SKILL.md` as its skills and its
+  `CONTEXT.md` as its context. `[defaults] bin` / `lib` / `env` / `setup = false`
+  turns one off; its `pre.env*` and `local.env` mean nothing.
+- **active overlay** — an installed overlay that is not refused: one whose store
+  pins it (`_policy`) is active only while its tree digest is the pin.
 
 `dotagents.__version__` is the package version.
 
@@ -31,13 +41,13 @@ and an error saying a command is required, and exits 2.
 | Command | Contract |
 | --- | --- |
 | `init [-g] [--dest D] [--from SRC] [--bin-dir D] [--agents a,b] [--no-hooks] [--powershell-env-hook] [--no-venv] [--force] [--dry-run]` | Merge the base block into `<store>/AGENTS.md`, write `<store>/bin/dotagents[.cmd]`, and per active agent (`--agents`, else detected + `claude`) write its include and hooks. Then bring the scope's Python venvs up to date (`_pyvenv.sync_venvs`; a failure is a warning; not with `--dest` or `--no-venv`). `--force` replaces `AGENTS.md`'s content, backed up under `<store>/install_backup/<timestamp>/`. `--from` records its base in `<store>/dotagents/config.toml`. |
-| `overlays add NAME\|GLOB... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--no-venv] [--prune] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does; `--prune` clears its ignored files too), publish its skills, install every overlay's `requirements.txt` into the scope venv (`_pyvenv`; not with `--no-venv`), run its `setup.py`, recompose the managed block. A glob (`'*'`, `'py*'`) stands for every name the repos offer that matches it; one matching nothing is an error. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused. An overlay whose copy, requirements or setup fail is logged and skipped, along with what requires it; the others still install, and the command exits 1 naming each failure. One this run was installing for the first time is removed again; one already installed stays. No name: exit 2. |
+| `overlays add NAME\|GLOB... [-g] [--repo SPEC]... [--copy] [--no-setup] [--rerun-setup] [--setup-timeout S] [--no-requires] [--no-venv] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does), publish its skills, install the Python dependencies its `runtime.python` declares into the scope venv (`_pyvenv`; not with `--no-venv`), run its declared `setup` once per tree digest (`--rerun-setup`: again), recompose the managed block. Before anything of an overlay is written it is refused when its `overlay.cfg` does not validate (named files included), its tree has no digest (a link, a refused name), its git commit holds a link or submodule, this machine lacks what its `runtime`, setup or scripts need, or its store pins another digest. A glob (`'*'`, `'py*'`) stands for every name the repos offer that matches it; one matching nothing is an error. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused. An overlay whose copy, requirements or setup fail is logged and skipped, along with what requires it; the others still install, and the command exits 1 naming each failure. One this run was installing for the first time is removed again; one already installed stays. No name: exit 2. |
 | `overlays remove NAME... [-g] [--force] [--no-venv] [--dry-run]` | Delete the overlay dirs, unpublish the skills they published, recompose the block, rewrite the venv layering (installed requirements stay). Refuses an overlay another installed overlay requires unless `--force`. No name: exit 2. |
-| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--prune] [--no-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it): the install is made to match the source exactly: new and changed files land, `overlay.toml` is refreshed, files the source does not ship are removed; a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. What the `.gitignore` / `.ignore` at the overlay's root match (setup output, local state) and tool caches are left alone; `--prune` clears them too. Installs new `requires`, then the venv requirements (when they changed) before each setup. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/`, or its requirements or setup fail. |
-| `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` flagged) and what the repos offer. |
-| `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; manifest, setup, skills, file count, recorded source. No name: exit 2. |
+| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--no-setup] [--rerun-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it), checked as `add` checks a source: the install is made to hold exactly the overlay's members (new and changed files land, everything else goes, caches and setup output left inside it included); a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`, then the venv dependencies (when they changed), then setup when the digest changed. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/` or is refused, or its dependencies or setup fail. |
+| `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` and refused overlays flagged) and what the repos offer. |
+| `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; its declarations, a refused manifest's problems, tree digest, pin, what this machine lacks for it, its weakenings, skills, member count, recorded source and commit. No name: exit 2. |
 | `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
-| `path [-g] [--lib] [--format list\|native\|posix\|json]` | Print the bin dirs `env` puts on `PATH` (`--lib`: the existing lib dirs it puts on `PYTHONPATH`), highest precedence first; runs no env file. `posix` is `:`-joined, MSYS2 form on Windows. |
+| `path [-g] [--lib] [--format list\|native\|posix\|json]` | Print the dirs `env` adds to `PATH` -- each store's `bin` and each active overlay's `PATH` additions (`--lib`: the existing agent library dirs, `PYTHONPATH`) -- highest precedence first; runs no env file. `posix` is `:`-joined, MSYS2 form on Windows. |
 | `env [-g] [--format F] [--diff] [--cache] [--into FILE]` | Print the assembled environment (`--diff`: only what differs from the caller's; `--cache`: replay the previous output while `env_cache_key` holds, up to `ENV_CACHE_TTL`; `--into FILE`: write it into FILE as the one block this command owns there) in format `F`: `auto` (default: the calling shell), `export`/`posix`/`sh`/`bash`, `dotenv`/`env`, `powershell`/`pwsh`/`ps`, `cmd`/`bat`/`batch`, `fish`, `json`, `ini`, `yaml`. |
 | `launch [AGENT] [-g] [--command PROG] [--no-context] [--inline] [--write-agent] [--dry-run] [-- ARGS...]` | Run the agent's CLI with the env applied and the context handed over; the exit code is the harness's (`128+N` on signal N). |
 | `findings add\|list\|show\|done\|reopen\|remove\|index\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding, `done` moves it to `processed/` with a required resolution, `INDEX.md` regenerated on every change. The frontmatter is valid YAML (a value is double-quoted when it must be); `index --requote` fixes values written bare in existing files, touching nothing else. |
@@ -56,7 +66,7 @@ JSON document (`duho/agent-help@1`) for the command tree it is asked about, in p
 of the human text.
 
 The same server forwards the tools of the MCP servers active overlays declare in
-`overlay.toml` (`[[mcp.servers]]`, `[[mcp.skills]]`; keys in
+`overlay.cfg` (`[[mcp.servers]]`, `[[mcp.skills]]`; keys in
 `docs/guide/overlays.md`). Forwarded names are `<skill-or-server-name>.<tool>`, or
 `--prefix`'s template with `{name}` filled in, plus `.<tool>`. Gotchas:
 
@@ -132,22 +142,132 @@ are skipped.
   `OVERLAY_ROOT_NOTE` (`dotagents._overlays`), `resolve_user_store`
   (`dotagents._scope`).
 
-## `dotagents._ignore`
+## `dotagents._aos`
 
-The `.gitignore` / `.ignore` at the ROOT of a directory, read as git reads a
-`.gitignore` (pure stdlib) -- what an installed overlay keeps as its own when `add`
-/ `sync` mirror its source. An ignore file in a subdirectory is an ordinary file;
-nothing above the root is read.
+The AOS format, pure and filesystem-free except for the tree digest: what
+`overlay.cfg` and env files read as, validation, the tree digest, and applying
+one overlay's `env`, `env_files` and `paths`. Passes the specification's
+conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
 
-- `IGNORE_FILES = (".gitignore", ".ignore")` — read at the root in that order, so
-  `.ignore` wins (ripgrep's precedence).
-- `parse(text, base="") -> list` — one file's rules (`base`: its directory):
-  comments, `\#` / `\!` escapes, `!` negation, leading/middle `/` anchoring,
-  trailing `/` directory-only, `*`, `?`, `[...]`, `**`.
-- `class IgnoreRules(rules=())` — `for_root(root)` reads `root`'s two files;
-  `ignored(rel, is_dir=False) -> bool` decides a `/`-joined path (a pattern without
-  a slash matches at any depth), a path under an ignored directory staying ignored
-  whatever a later `!` says, as in git.
+- `EDITION = "0.1.0-draft"`. `FORMATS` (format-line name → format),
+  `supported_formats() -> list[str]` (`toml`, `json`, and `yaml` when PyYAML
+  imports), `DEFAULT_MAX_BYTES = 1 MiB`, `DEFAULT_MAX_DEPTH = 64`.
+- `class ReadError(ValueError)` — `code` is the vectors' class (`parse-error`,
+  `null-value`, `duplicate-key`, `unsupported-format`, `too-large`, ...).
+  `select_format(data) -> (name, payload)`; `read_document(data, *, max_bytes,
+  max_depth) -> dict` — the format line (`#!json`, `#!yaml`; TOML by default),
+  static reading, the data model (no null, date, non-finite float, integer outside
+  64 bits; YAML without tags, anchors, merge keys, directives). `read_dotenv(data)
+  -> dict[str, str]` — the `dotenv` env-file grammar.
+- Names: `valid_overlay_name`, `normalize_name`, `root_variable(identity)`,
+  `state_variable(identity)` (`<NAME>_OVERLAY_ROOT` / `_STATE`),
+  `RESERVED_OVERLAY_NAMES`, `DEVICE_NAMES`, `OVERLAY_NAME`, `valid_relpath(path)`
+  (the manifest's relative path), `EXCLUDED_COMPONENTS`, `valid_variable_name`,
+  `is_reserved_variable` (`AOS_*`, `*_OVERLAY_ROOT`, `*_OVERLAY_STATE`),
+  `is_sensitive(name)` with `SENSITIVE_NAMES` / `SENSITIVE_PREFIXES` /
+  `SENSITIVE_SUFFIXES` / `PATH_VARIABLES`.
+- `validate(doc, files=None) -> list[tuple[code, pointer]]` — the schema and the
+  semantic rules; `files` (the overlay's relative paths) also requires every named
+  file, listed skill and MCP skill to exist. `named_files(doc)`. `TIMEOUT_MAX`,
+  `SCRIPT_EXTENSIONS`, `script_interpreter(target)`.
+- Digest: `class DigestError(ValueError)` (`symlink`, `special-file`,
+  `non-utf8-name`, `invalid-name`, `case-collision`), `sha256_digest(data)`,
+  `file_digest(path)`, `same_digest(a, b)` (hex without regard to case; `ValueError`
+  for another form), `DIGEST_FORM`, `EMPTY_DIGEST`, `digest_entries(entries) ->
+  (digest, lines)`, `tree_entries(root)`, `tree_digest(root) -> str`,
+  `members(root) -> list[str]`, `foreign_entries(root) -> list[str]` (excluded
+  names present: a mismatch in a verified copy).
+- OS and variants: `UNIX_NAMES`, `INTERPRETERS`, `current_os()`, `os_matches(entry,
+  os)`, `first_variant(variants, os)`, `version_tuple(text)`.
+- `check_requirements(text, *, locked) -> list[str]` — a requirements or lock
+  file: requirement lines only (no option, URL or path), a lock pinned with `==`
+  and `--hash=sha256:`.
+- Applying: `class Refused(Exception)` (`code`, `subject`, `detail`; never a
+  value), `class Environment(values, windows)` (names case-blind on Windows:
+  `key`, `get`, `set`, `unset`, `copy`), `resolve_path(root, rel, windows)`,
+  `reference_name(entry)`, `is_reference(entry)`, `class Secrets(*, grants,
+  host_env, named, read_file, providers, provider_values, windows)` (`granted`,
+  `resolve`: a reference resolves only when granted), `class Context(*, os_name,
+  root, identity, read, secrets=None, env_scripts_enabled=False, default_paths=())`,
+  `DEFAULT_PATHS`, `default_paths(manifest, is_dir) -> list[dict]` (an existing
+  `bin` prepended to `PATH`, `lib` appended to `PYTHONPATH`, unless `[defaults]`
+  turns one off), `default_env_file(manifest, is_file)` (the root `env`, as
+  `dotenv`), `DEFAULT_SCRIPT_ORDER` (`.py`, `.ps1`, `.bash`, `.sh`, `.js`, `.mjs`),
+  `default_script(manifest, stem, is_file, can_run) -> (script, skipped)` (the
+  first runnable `env.<ext>` / `setup.<ext>`; `[defaults] env` / `setup = false`
+  turns it off), `apply_paths(env, paths, ctx, weakenings)`, `read_env_file(item,
+  ctx, listed)`, `apply_overlay(env, manifest, ctx, weakenings) -> list[env script]`
+  (its env files, `env`, default paths then `paths`; raises `Refused`),
+  `env_script_changes(stdout, *, max_bytes) -> list[(name, value or None)]`,
+  `plan(manifest, ctx, *, pinned, enforces_network=False, scripts=None) -> dict`
+  (`supported`, `setup`, `python`, `node`, `needs`, `ungranted`, `weakenings`),
+  `class Activation`, `effective(manifest, ctx, *, base_env, pinned, state=None,
+  enforces_network=False) -> Activation`, `skills_of(manifest, files)`,
+  `insecure_url(url)`.
+- Resolution: `class ResolveError(Exception)` (`chain`), `resolve(requires_of,
+  requested) -> (visiting order, missing)`, `order_key(priority, name, identity)`.
+
+## `dotagents._activate`
+
+Which installed overlays are active, and how each is applied.
+
+- `refusal(overlay) -> Optional[str]` — why a pinned overlay may not be activated:
+  a tree with no digest, a digest that is not its pin, an excluded entry (a
+  `__pycache__`, a `.pyc`) in its copy, or a store setting that is invalid.
+- `active(overlays, logger=None) -> list` — the ones not refused; each refusal
+  logged once per process. `Scope.overlays` is this over `Scope.installed_overlays`.
+- `digest_of(overlay) -> (digest, why)` — memoized per process on the install
+  record and manifest. `is_pinned(overlay) -> bool`.
+- `state_dir(overlay) -> Optional[Path]` — for an overlay declaring `setup` or
+  `env_scripts`: `<store>/overlays/.dotagents-state/<name>/<os>-<digest[:16]>/`.
+- `default_paths(overlay) -> list[dict]` — its default path additions.
+  `default_env_script(overlay) -> (script, skipped)` — its default `env.<ext>`.
+- `context(overlay, *, host_env=None) -> _aos.Context` — its root, env files read
+  from inside it, its store's grants and secrets (`env` provider: `host_env`,
+  default `os.environ`), its env-script opt-in, its default paths.
+- `describe(weakenings)`, `report(logger, weakenings)` — one warning line,
+  `overlay[id subject, ...]; ...`.
+
+## `dotagents._policy`
+
+The consumer's settings for overlays, in each store's registry document
+(`<store>/dotagents.{toml,json,yaml,yml}`, the `overlays` form only): an overlay
+uses the settings of the store it is installed in. Nothing is granted and no env
+script runs by default.
+
+```toml
+secrets_dir = "~/.agent-secrets"   # the `file` provider's directory
+env_scripts = false                # the store's default
+[overlays.docs]
+source = "<repo>@<commit>#overlays/docs"   # optional: a table without one offers nothing
+pin = "sha256:<64 hex>"
+env_scripts = true
+grants = { env = ["DOCS_TOKEN"], secret = ["signing"], file = ["docs/token"] }
+[secrets.signing]
+provider = "env"
+key = "RELEASE_SIGNING_KEY"
+```
+
+- `class PolicyError(SystemExit)`. `class StorePolicy(store)` — `pin(identity)`,
+  `env_scripts(identity)`, `grants(identity)`, `named_secret(name, host_env)`,
+  `read_secret_file(key)`, `secrets_for(identity, host_env=None) -> _aos.Secrets`,
+  `entry(identity)`. `for_store(store)`, `for_overlay(overlay)` — memoized on the
+  registry file.
+
+## `dotagents._run`
+
+How setup and env scripts run: their interpreter found on the base `PATH`
+(`python` is the scope venv's; `pwsh -NoLogo -NoProfile -NonInteractive -File` for
+`powershell`; Git's bash and sh on Windows; never a `.cmd` / `.bat`), arguments as
+a list, a timeout, and a process group (POSIX) or job object (Windows, the process
+started suspended until it is in the job) so nothing it started outlives it.
+
+- `TIMED_OUT = 124`. `class InterpreterError(Exception)`.
+  `interpreter_command(name, *, python, base_path) -> list[str]`, `can_run(name) -> bool`.
+  `version_of(name, command) -> Optional[str]` (python, node).
+  `run_step(argv, *, cwd, env, timeout, capture=False, max_output=1 MiB) ->
+  (status, stdout)`. `pycache_prefix(user_store) -> str` — where Python run for an
+  overlay keeps bytecode (`<user store>/.cache/pycache`), never inside an overlay.
 
 ## `dotagents._resources`
 
@@ -233,7 +353,8 @@ returns the exit code.
   - Attributes: `level`, `agents_root`, `user_root`, `project_root`, `system_root`.
     Properties: `global_scope` (user level), `project_store` (`None` in the user
     scope), `stores` (system, user, project — existing roles only, a directory
-    listed once), `overlays` (`Overlay.installed(*stores)`), `overlay_root`
+    listed once), `installed_overlays` (`Overlay.installed(*stores)`),
+    `overlays` (the active ones: `_activate.active(installed_overlays)`), `overlay_root`
     (`<agents_root>/overlays`), `shared_skills_dir` (`<agents_root>/skills`).
   - `store_level(store) -> str` — `"system"` / `"user"` / `"project"`; `ValueError`
     for another path.
@@ -270,25 +391,23 @@ returns the exit code.
 
 ## `dotagents._overlays`
 
-- `DEFAULT_PRIORITY = 500`. `DEFAULT_SETUP_TIMEOUT = 300` — seconds a setup script
-  may run when neither `--setup-timeout` nor the manifest's `setup_timeout` says
-  otherwise; `0` from either means no limit.
-- `parse_manifest_text(text, origin="overlay.toml") -> Optional[dict]` — the TOML
-  document via `tomllib` / `tomli`, else a built-in reader (top-level strings,
-  string arrays including multi-line strings, an integer, and the `[scripts]` table
-  of strings and booleans); `None` plus one warning when it is not valid TOML.
-- `SCRIPT_NAME_RE` — a script (launcher) name: a letter or digit, then letters,
-  digits, `.`, `_`, `-`; never ending in `.exe` nor a Windows device name.
+- `DEFAULT_PRIORITY = 500`. `DEFAULT_SETUP_TIMEOUT = 300` — seconds a setup
+  variant runs when it declares no `timeout` and `--setup-timeout` is not given;
+  `0` means no limit.
+- `load_manifest(path) -> (document, problems)` — `overlay.cfg` read
+  (`_aos.read_document`) and validated (`_aos.validate`); a refused one is `({},
+  [problem, ...])`; memoized on the file's mtime and size.
 - `class InstallResult` — what `install_to` did: `written`, `unchanged`,
-  `replaced` (edited here, replaced by the source's file), `removed` (not in the
-  source, or cleared by `prune`), `backed_up`, `lines`; property `skipped`
-  (= unchanged). Unpacks as `(written, skipped, lines)`.
+  `replaced` (edited here, replaced by the source's file), `removed`, `backed_up`,
+  `lines`; property `skipped` (= unchanged). Unpacks as `(written, skipped, lines)`.
 - `class Overlay(path, store=None)` — one overlay directory; `os.PathLike`; equal
   and hashed by `path`; nothing read at construction.
   - Class data: `NAME_RE`, `RESERVED_NAMES` (Windows device names),
-    `MANIFEST_NAME = "overlay.toml"`, `SETUP_SCRIPT_NAMES = ("setup.py",)`,
-    `SKIP_PARTS` (`.git`, `__pycache__`, tool caches, `node_modules` — never
-    installed), `INSTALL_RECORD = ".dotagents-install.json"`, `DEFAULT_PRIORITY`.
+    `MANIFEST_NAME = "overlay.cfg"`, `OLD_MANIFEST_NAME = "overlay.toml"` (never
+    read; a warning names it), `RECORDS_DIR = ".dotagents-install"`,
+    `STATE_DIR = ".dotagents-state"`, `OLD_INSTALL_RECORD =
+    ".dotagents-install.json"` (an install record inside the overlay: read when
+    none is beside it, removed by the next install), `DEFAULT_PRIORITY`.
   - `Overlay.is_valid_name(name) -> bool` — `NAME_RE` (a letter, then letters,
     digits, `_`, `.`, `-`, ending in a letter or digit), not a `LEVEL_NAMES` entry,
     not a Windows device name (with or without an extension).
@@ -297,56 +416,45 @@ returns the exit code.
   - `Overlay.root_var_for(name) -> str` — `normalize_name(name)` upper-cased, every
     non-alphanumeric → `_`, plus `_OVERLAY_ROOT`.
   - Properties: `name` (dir name), `normalized_name`, `root_var`, `is_valid`,
-    `manifest_path`, `priority` (manifest value, else `DEFAULT_PRIORITY`),
-    `sort_key` (`(priority, manifest name, dir name)`), `install_record_path`;
-    attribute `store` (the store it was discovered in, else `None`).
-  - `Overlay.discover(root, store=None) -> list[Overlay]` — valid-named dirs
-    directly under one `overlays/` root, sorted; warns when two normalize alike.
-  - `Overlay.installed(*stores) -> list[Overlay]` — `discover` over each
-    `<store>/overlays` in order (`None` skipped), each result stamped with its
-    store; an overlay whose normalized name appears in a later store is dropped
-    (the later copy shadows it).
-  - `Overlay.sort_by_priority(overlays) -> list[Overlay]` — sorted by `sort_key`.
-  - `read_manifest() -> dict` — keys `name`, `description`, `routing`, `rules`,
-    `requires` (valid names only, normalized, de-duplicated), `priority`,
-    `setup_timeout`, `scripts` (the `[scripts]` table as written: name -> path
-    relative to the overlay, `/`-separated, plain file-name characters, no `..`,
-    or `false`; any other entry is dropped with a warning); a missing or invalid
-    manifest gives empty contributions. `[mcp]` is read by
-    `_mcp_gateway_config.discover`, not here.
-  - `scripts() -> dict[str, str]` — the scripts that get a launcher
-    (`dotagents._launchers`): each top-level `bin/<name>.py` whose stem is a
-    `SCRIPT_NAME_RE` name (so not `_private.py`, not `__init__.py`), then
-    `[scripts]`, which adds or replaces a path by name, or drops a detected one
-    with `false`.
-  - `find_setup_script() -> Optional[Path]`.
-  - `setup_timeout(override=None) -> int` — `override`, else the manifest's
-    `setup_timeout` (a non-negative int; anything else is ignored with a warning),
-    else `DEFAULT_SETUP_TIMEOUT`; `0` = no limit.
-  - `run_setup(*, agents_dir, dry_run, logger, scope_root=None, scope_level=None,
-    base_env=None, timeout=None) -> Optional[int]` — runs `setup.py` under `sys.executable` with
-    cwd = the overlay dir and env `base_env` (default `os.environ`; `overlays` passes
-    the scope's assembled env) plus `AGENTS_HOME=agents_dir`, `AGENTS_SCOPE_ROOT=scope_root or
-    agents_dir`, `AGENTS_SCOPE=scope_level` (when given), `AGENTS_OVERLAY_DIR`;
-    returns its exit code, `None` when there is no script, `0` on `dry_run`, `124`
-    when it ran past `setup_timeout(timeout)` and was stopped.
-  - `files() -> list[Path]` — every file to install: not the manifest, not the
-    install record, not under `SKIP_PARTS`, not `*.pyc`.
-  - `read_install_record() -> dict` — `{"source": dict | None, "files": {rel:
-    sha256}}` of an installed copy; `{}` when absent.
+    `manifest_path`, `priority`, `sort_key` (`(priority, manifest name, dir
+    name)`), `install_record_path` (`<store>/overlays/.dotagents-install/<name>.json`);
+    attribute `store`.
+  - `Overlay.discover(root, store=None)`, `Overlay.installed(*stores)`,
+    `Overlay.sort_by_priority(overlays)` — as before: valid-named dirs under
+    `overlays/`, a later store's copy shadowing an earlier one, `sort_key` order.
+  - `document() -> dict` — the validated manifest (`{}` when absent or refused;
+    a refused one is warned about once). `manifest_problems() -> list[str]`.
+  - `read_manifest() -> dict` — `name`, `description`, `routing` (trimmed, blanks
+    dropped), `rules`, `requires` (normalized, de-duplicated), `priority`, `doc`.
+  - `skills() -> list[str]` — its `skills` list, else every `skills/<name>/` with a
+    `SKILL.md`. `context_files(harness_id=None) -> list[str]` — its `context`
+    (when absent, `CONTEXT.md` if present), then `harness.<id>.context`.
+    `harness_hints(harness_id) -> dict`. `setup_variant(os_name=None)` (the
+    declared variant for this OS, else the default `setup.<ext>`),
+    `default_setup() -> (variant, skipped)`.
+  - `declared_scripts(os_name=None) -> {name: (path, interpreter)}` (each
+    top-level `bin/<name>.py` unless `[defaults] bin = false`, then `scripts`, which
+    adds, replaces or with `false` drops one); `scripts() -> {name: path}` (the
+    python ones: they get launchers); `unsupported_scripts() ->
+    {name: interpreter}` (refused by `overlays add`).
+  - `run_setup(variant, *, env, python, base_path, dry_run, logger, timeout=None)
+    -> int` — one setup variant through `_run.run_step`: cwd the overlay root,
+    `env` as given, `TIMED_OUT` when stopped, `127` for an interpreter it cannot run.
+  - `members() -> list[str]`, `files() -> list[Path]` — every member (all regular
+    files but the excluded names; the manifest included); raise `DigestError` for
+    a link or a refused name. `tree_digest() -> str`.
+  - `state_dir(digest, os_name=None) -> Path`, `setup_marker(digest) -> Path`
+    (written once setup succeeded for that digest).
+  - `read_install_record() -> dict` — `{"source", "commit", "digest", "files":
+    {rel: sha256}, "installed"}`; `{}` when absent. `forget()` — delete the record
+    and the state directories of a removed overlay.
   - `rule_blocks(rel_paths) -> tuple[list[str], list[str]]` — `(blocks, warnings)`:
-    each file's leading `- **` bullets up to its next `## ` heading; a path outside
-    the overlay, missing or unreadable is a warning.
-  - `ignore_rules() -> IgnoreRules` — the rules of the `.gitignore` / `.ignore`
-    at the overlay's root (`dotagents._ignore`).
-  - `install_to(dest_overlay_dir, dry_run, *, prune=False, backup_root=None,
-    source=None) -> InstallResult` — make the install exactly the overlay:
-    `files()` installed or replaced, `overlay.toml` refreshed, every other file
-    removed; what `ignore_rules()` matches, the install record and `SKIP_PARTS`
-    caches are never copied, replaced or removed unless `prune` (which clears
-    them, without backup); a replaced or removed file that is not what dotagents
-    installed is copied under `backup_root` first; writes the install record
-    (`source`, or the previous one when `None`).
+    each file's leading `- **` bullets up to its next `## ` heading.
+  - `install_to(dest_overlay_dir, dry_run, *, backup_root=None, source=None,
+    commit=None) -> InstallResult` — make the install hold exactly the members:
+    each installed or replaced, everything else removed (a file dotagents did not
+    put there backed up first under `backup_root`; excluded entries not backed
+    up); writes the install record beside it.
 - `OVERLAY_ROOT_NOTE: str` — the line emitted once above overlay routing lines that
   use `$<NAME>_OVERLAY_ROOT`.
 - `recompose_overlay_block(agents_md, base_block, overlays, dry_run, logger) -> bool`
@@ -356,7 +464,7 @@ returns the exit code.
 
 ## `dotagents._launchers`
 
-Launchers for overlays' scripts (`Overlay.scripts()`), in `<venv>/overlays/` of a
+Launchers for overlays' declared python scripts (`Overlay.scripts()`), in `<venv>/overlays/` of a
 dotagents venv; `_pyvenv.sync_venvs` brings them up to date on every sync, and
 `_env.get_environment` puts that dir first on `PATH` for the venv `AGENTS_PYTHON`
 names. A launcher runs `$<NAME>_OVERLAY_ROOT/<script>` under the venv's
@@ -400,7 +508,8 @@ a directory of overlays or a registry file (default: the root); for a **source**
 - `class Spec(kind, location, ref=None, path=None)` — `kind` `"git"` / `"url"` /
   `"dir"`; `display() -> str` (credentials removed).
 - `parse_spec(text) -> Spec` — `ValueError` when empty; `SourceError` when a git
-  location or ref starts with `-`.
+  location, ref or host starts with `-`, a location holds `::`, a git URL's scheme
+  is not `https`/`http`/`ssh`/`git`/`file`, or `#path` is not a relative path.
 - `redact(text) -> str` — URL userinfo removed, query values masked.
 - `uri_path_class()` — `uripath.URIPath` (from `pathapi-uri`), or `None` without the
   `uri` extra.
@@ -413,15 +522,21 @@ a directory of overlays or a registry file (default: the root); for a **source**
   runs as `git -c http.schannelCheckRevoke=<ssl_revoke> ...` (Git for Windows'
   Schannel checks revocation; git with OpenSSL ignores it), and a failure that looks
   like a revocation check names the key. A git that rejects the value as a bad
-  boolean (older than `best-effort`) is asked again without it. `repo_dir(location, ref=None) -> Path`
+  boolean (older than `best-effort`) is asked again without it. Every call also
+  carries `-c core.autocrlf=false -c core.symlinks=false`, and each checkout's
+  `.git/info/attributes` is `* -text -filter -ident -working-tree-encoding`, so
+  its files are the blobs' bytes. `special_entries(checkout, subpath) -> list[str]`
+  (symbolic links and submodules of the commit), `commit(checkout)`. `repo_dir(location, ref=None) -> Path`
   (`<root>/<slug>-<hash>`); `checkout(spec) -> Path` (clone or fetch, once per
   process; a failed fetch of an existing checkout is a warning);
   `materialize(spec) -> Path` (a `url` spec: `file://` in place, anything else
   synced into `<root>/uri/` once per process; needs the `uri` extra). Creates a
   `.gitignore` of `*` in `root`.
 - `parse_document(text, suffix, origin) -> dict[str, str]` — a registry's
-  name → spec map (the document or its `overlays` table); TOML needs Python 3.11+ or
-  `tomli`, YAML `pyyaml`.
+  name → spec map (the document or its `overlays` table, whose entries may be
+  tables with a `source`; a table without one offers nothing); TOML needs Python
+  3.11+ or `tomli`, YAML `pyyaml`. `load_document(path) -> dict` — a local
+  registry file's whole document (`_policy` reads its settings from it).
 - `class DirRepo(root, origin=None)` — `available() -> list[str]`, `has(name) ->
   bool`, `overlay_dir(name) -> Path` (literal, normalized, or any dir whose
   normalized name matches; `OverlayNotFound` otherwise).
@@ -457,9 +572,14 @@ a directory of overlays or a registry file (default: the root); for a **source**
 
 ## `dotagents._env`
 
-Assembly order (`get_environment`): identity (`stamp_identity`), then the roots,
-then `PATH`, then `PYTHONPATH` / `AGENTS_PYTHONPATH`, then the env files, then the
-proxy model. `PATH`: every level's `bin` prepended, then, first of all, the active
+Assembly order (`get_environment`): identity (`stamp_identity`), then the roots
+and every active overlay's root and state variables, then the overlays'
+declarations in composition order (`_apply_declarations`: env files, `env`,
+default paths then `paths`, env scripts when enabled; an overlay that cannot be
+applied contributes nothing, with an error naming why; weakenings reported in
+one warning), then the stores' `bin` on `PATH`, then `PYTHONPATH` /
+`AGENTS_PYTHONPATH`, then the stores' env files, then the proxy model. `PATH`:
+every store's `bin` prepended, then, first of all, the active
 venv's launcher dir (`<venv>/overlays`, `_launchers`) when `AGENTS_PYTHON` is that
 venv's interpreter and the dir exists; every other dotagents venv's launcher dir is
 taken out. First even before the `bin` dirs: cmd.exe and PowerShell try every
@@ -472,26 +592,29 @@ taken out. First even before the `bin` dirs: cmd.exe and PowerShell try every
   the active scope venv's interpreter (`_pyvenv.active_venv`), else
   `sys.executable`; it replaces an inherited value equal to `sys.executable` or
   naming another `.pyvenv` interpreter, and any other pin holds. `AGENTS_PYVENV`:
-  that venv's dir, removed when there is none. Only when unset: one
-  `<NAME>_OVERLAY_ROOT` per
-  `scope.overlays` (a value pinned to the user store's copy is re-pointed when a
-  project copy shadows it). `AGENTS_PYLIB` (`_env.PYLIB_VAR`): the `.pyz` when
+  that venv's dir, removed when there is none. Always: one `<NAME>_OVERLAY_ROOT`
+  per `scope.overlays`, the copy in play whatever was inherited, and
+  `<NAME>_OVERLAY_STATE` for one with a state directory. Only when unset:
+  `PYTHONPYCACHEPREFIX` (`_run.pycache_prefix`). `AGENTS_PYLIB` (`_env.PYLIB_VAR`): the `.pyz` when
   dotagents runs from one (`_resources.pyz_archive()`), else not set — where its
   own libraries (duho, pathapi) import from by zipimport for an overlay
   built on them. Never added to `PYTHONPATH`: a consumer appends it to
   `sys.path` when its import fails.
-- `PATH`: every level's `bin` (contract A, not project-root, missing dirs included)
-  at the front in that order, whatever the caller's `PATH` held; empty and
-  cwd-relative inherited entries are dropped.
-- `PYTHONPATH`: every existing level's `lib` the active venv's `.pth` does not
-  already layer, at the front, highest precedence first (with a venv synced for the
-  scope, none); the entries an inherited `AGENTS_PYTHONPATH` named (another scope's
-  libs) are removed first. `AGENTS_PYTHONPATH`: every existing `lib`,
-  `os.pathsep`-joined, layered or not; removed when there are none.
-- Env files: all `pre.env.py` / `pre.env` (+ the project store's `pre.local.env`),
-  then all `env.py` / `env` (+ `local.env`), contract-A order, regular files only,
-  each evaluated against everything before it. The project root contributes none.
-  A layer that raises is skipped with a warning.
+- `PATH`: an overlay's additions as AOS defines them (its prepends first, empty
+  components dropped, an entry listed twice once); then every store's `bin`
+  (not project-root, missing dirs included) at the front, whatever the caller's
+  `PATH` held; empty and cwd-relative inherited entries are dropped.
+- `PYTHONPATH`: an overlay's additions as declared (its `lib` appended by
+  default); every existing store `lib` the active venv's `.pth` does not already
+  layer, at the front, highest precedence first; the entries an inherited
+  `AGENTS_PYTHONPATH` named (another scope's libs) are removed first.
+  `AGENTS_PYTHONPATH`: every agent library dir (`get_lib_paths`),
+  `os.pathsep`-joined; removed when there are none.
+- Env files: the stores' only -- all `pre.env.py` / `pre.env` (+ the project
+  store's `pre.local.env`), then all `env.py` / `env` (+ `local.env`), store order,
+  regular files only, each evaluated against everything before it. An overlay's
+  files with these names mean nothing. The project root contributes none. A layer
+  that raises is skipped with a warning.
 - Proxy: `AGENTS_PROXY` seeded when unset from `AGENTS_WEBFETCH_PROXY_URL`, then
   `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` (either case); each set proxy variable
   mirrored into its other case.
@@ -525,16 +648,26 @@ API:
   MSYS2 / Cygwin (never the WSL launcher). Warns once when there is none.
 - `interpreter(osenv) -> str` — `osenv["AGENTS_PYTHON"]` when it names a file, else
   `sys.executable`.
-- `get_bin_paths(scope) -> list[Path]`, `get_lib_paths(scope) -> list[Path]`
-  (existing dirs only), `get_overlay_roots(scope) -> list[Path]` (the dirs of
-  `scope.overlays`), `resolve_env_files(scope) -> list[tuple[str, Path,
-  Optional[Path]]]` (pre tier then main tier, as `Scope.paths` tuples).
+- `get_bin_paths(scope)` (each store's `bin`), `get_path_dirs(scope)` (stores'
+  `bin` and overlays' `PATH` additions, contract-A order), `get_store_lib_paths(scope)`,
+  `get_lib_paths(scope)` (stores' `lib` and overlays' `PYTHONPATH` additions,
+  existing dirs only), `declared_paths(overlay, variable) -> list[Path]` (default
+  then declared), `get_overlay_roots(scope)` (the dirs of `scope.overlays`),
+  `resolve_env_files(scope) -> list[tuple[str, Path, Optional[Path]]]` (pre tier
+  then main tier, stores only, as `Scope.paths` tuples).
+- `overlay_process_env(scope, overlay, *, base_env=None, logger=None) ->
+  Optional[dict]` — the environment of a process one overlay runs (its setup): the
+  base, `AGENTS_HOME` / `AGENTS_PYTHON` / `PYTHONPYCACHEPREFIX`, every active
+  overlay's root and state variable, the path additions of the overlays it
+  requires, its own declarations, `AOS_OVERLAY_ROOT` / `_NAME` / `_STATE`; None
+  when its declarations cannot be applied.
 - `apply_proxy_model(osenv) -> dict[str, str]` — the proxy changes described above.
 - `ENV_CACHE_TTL = 300.0` (seconds). `env_cache_key(scope, base_env, *parts) -> str`
   — a digest of what an assembly reads without running it: roots, cwd, interpreter,
   package version, installed overlays, each env-file candidate's
   existence/mtime/size, every file under an existing `lib`, each store's venv state
-  file, the whole `base_env`,
+  file, the stores' registry files, each overlay's manifest, install record,
+  `bin` / `lib` and the env files it names, the whole `base_env`,
   and `parts` (format, mode). `read_env_cache(scope, key, *, now=None) ->
   Optional[str]` (None when absent or older than the TTL); `write_env_cache(scope,
   key, text) -> None` (owner-only, under `<user store>/.cache/env/`; never raises).
@@ -547,9 +680,10 @@ API:
 
 - `assemble_context(agent, scope, *, inline=False, expand_vars=True) -> str` — the
   context markdown, or `""` when nothing is left after subtracting
-  `agent.loaded_paths(project_root)`. Sources in order: overlay `CONTEXT.md`s by
-  `Overlay.sort_key`, then contract-A `AGENTS.md` (every store and the project root)
-  and `AGENTS.local.md` (project store and project root), each prefixed
+  `agent.loaded_paths(project_root)`. Sources in order: contract-A `AGENTS.md`
+  (every store and the project root) and `AGENTS.local.md` (project store and
+  project root), then each active overlay's `context_files(agent.harness_id)` by
+  `Overlay.sort_key` (front matter dropped), each prefixed
   `<!-- Source: <path> -->`. Then a skills listing (`- **name** (`<SKILL.md>`):
   description`, from each skill's leading frontmatter; a project skill wins), then
   a "Local additions to overlay files" section when `local_additions` finds any,
@@ -732,8 +866,11 @@ objects `{"matcher"?: str, "hooks": [{"type": "command", "command": str, ...}]}`
   overwrite=False) -> SyncResult` — refresh a copy only when it still matches
   `published_digest`, or with `overwrite`.
 - `publish_overlay_skills(overlay_dir, shared_skills, *, copy=False, logger=None) ->
-  int` — each `<overlay_dir>/skills/<name>` into `shared_skills`; an occupied target
-  is kept with a warning. Returns the count published.
+  int` — each of the overlay's skills (`Overlay.skills()`) into `shared_skills`; an
+  occupied target is kept with a warning. Returns the count published.
+- `harness_excluded(store, harness_id) -> set[str]` — the skills of `store`'s
+  overlays whose `harness.<harness_id>.skills = false`: not linked into that
+  harness's own skills dir (the context's listing names them).
 - `resync_overlay_skills(overlay_dir, shared_skills, *, copy=False, overwrite=False,
   logger=None) -> int` — publish new skills, refresh unedited copies.
 - `owned_overlay_skills(overlay_dir, shared_skills, *, logger=None) -> list[str]` —
@@ -748,8 +885,9 @@ objects `{"matcher"?: str, "hooks": [{"type": "command", "command": str, ...}]}`
   copy's digest.
 - `class LinkResult` — `linked`, `copied`, `removed`, `kept` (lists of names) and
   `owned` (every name dotagents holds in the target afterwards).
-- `link_skills_into(shared_skills, target_dir, *, dry_run=False, logger=None) ->
-  LinkResult` — per skill: a symlink, else (Windows) a junction, else a copy; an
+- `link_skills_into(shared_skills, target_dir, *, dry_run=False, logger=None,
+  exclude=()) -> LinkResult` — per skill (a name in `exclude` treated as one the
+  store does not have): a symlink, else (Windows) a junction, else a copy; an
   unedited copy is refreshed, a skill the store dropped is removed (a dangling link
   too); someone else's entry, or a copy edited since, is kept with a warning.
   Junctions are treated as links throughout and removed without touching their
@@ -780,15 +918,16 @@ agents' venvs only (skills, overlay helpers, setup scripts), never a project's o
 code. `AGENTS_NO_PYVENV=1` (or `true`/`yes`/`on`) turns it all off.
 
 - `BASE_REQUIREMENTS = ("duho>=0.7.9,<0.8",)` — always in the user venv; dotagents'
-  own duho range. `REQUIREMENTS_FILE = "requirements.txt"` (at an overlay's root),
-  `PYVENV_DIR = ".pyvenv"`, `STATE_FILE = ".dotagents-venv.json"` (in the venv:
+  own duho range. `PYVENV_DIR = ".pyvenv"`, `STATE_FILE = ".dotagents-venv.json"` (in the venv:
   `{"digest", "requirements", "pth"}`), `PTH_FILE = "dotagents-layers.pth"` (in its
   site-packages), `DISABLE_ENV = "AGENTS_NO_PYVENV"`.
 - `sync_venvs(scope, *, dry_run=False, logger=None) -> list[Path]` — the user venv
-  (base requirements + the user store's overlays' `requirements.txt`), then the
-  project's when `wants_venv` (its own overlays' requirements only). pip runs only
-  when the requirements' digest changed, in one `pip install -r ... -r ...` per
-  venv, with `--find-links` from `AGENTS_PIP_SOURCE`. The `.pth` is rewritten when
+  (base requirements + the dependencies the user store's overlays declare), then
+  the project's when `wants_venv` (its own overlays' only). pip runs only when the
+  digest changed: one `pip install` of the base and every `requirements` file, and
+  one per `lock` with `--require-hashes --no-deps --only-binary=:all:`, each with
+  `--find-links` from `AGENTS_PIP_SOURCE`; a file with anything but requirement
+  lines, or a lock that is not its `lock_digest`, is refused first. The `.pth` is rewritten when
   it differs: the store's own libs, then each lower store's venv site-packages and
   libs, then `runtime_entry()`. Each venv's launchers (`_launchers.sync`) serve its
   store's overlays and every lower store's; a project venv a sync made that is no
@@ -809,7 +948,10 @@ code. `AGENTS_NO_PYVENV=1` (or `true`/`yes`/`on`) turns it all off.
   for the running interpreter that a sync completed (its `STATE_FILE` exists); a
   venv made there any other way is never an agents venv.
 - `layers(scope) -> list[tuple[str, Path, list[Path]]]` — `(level, store, libs)`,
-  highest first. `requirement_files(scope, store) -> list[Path]`.
+  highest first (an overlay's libs: its `PYTHONPATH` additions).
+  `python_dependencies(overlay) -> Optional[(file, locked, lock_digest)]` (its
+  `runtime.python` variant on this OS), `requirement_files(scope, store) -> list`
+  of those, `check_dependencies(path, locked, lock_digest) -> list[str]`.
   `runtime_entry() -> str` (the `.pyz`, else the dir holding `dotagents`).
   `venv_dir(store)`, `venv_python(venv)`, `site_packages(venv)`, `triplet()`,
   `os_bucket()`, `read_state(venv)`, `disabled(environ=None)`,
@@ -864,8 +1006,8 @@ Read:
 - `AGENTS_OVERLAYS_REPO`, `AGENTS_OVERLAYS_REPO_<KEY>` — overlay repos (after
   `--repo`). `AGENTS_CMDS_PATH` — extra command dirs.
 - `AGENTS_HARNESS` — the running harness (registry name or harness id), for
-  identity. `AGENTS_PYTHON` — the interpreter for `env.py` and `setup.py`.
-  `AGENTS_PYTHONPATH` — the overlay/store `lib` dirs, highest precedence first.
+  identity. `AGENTS_PYTHON` — the interpreter for `env.py` and a `python` setup.
+  `AGENTS_PYTHONPATH` — the agent library dirs, highest precedence first.
   `AGENTS_NO_PYVENV` — turns the scope venvs off. `AGENTS_PIP_SOURCE` — a directory
   of wheels (or a URI to one) for pip, before the index. `PIP_INDEX_URL`,
   `PIP_CONFIG_FILE`, `PIP_FIND_LINKS`, `PIP_CERT`, `PIP_TRUSTED_HOST`, `PIP_PROXY` and
@@ -885,12 +1027,15 @@ Read:
 
 Emitted by `env` (and applied by `launch`): `AGENTS_HARNESS`, `AGENTS_VENDOR`,
 `AGENT`, `AGENTS_MODEL`, `AGENTS_HOME`, `AGENTS_PROJECT_ROOT`, `AGENTS_PYTHON`,
-`AGENTS_PYVENV` (with a scope venv), `AGENTS_PYLIB` (from a `.pyz` only), `<NAME>_OVERLAY_ROOT`, `PATH`, `AGENTS_PYTHONPATH`, `AGENTS_PROXY` and the mirrored
-proxy vars, plus whatever the env files set. `AGENTS_AGENT` is never emitted.
+`AGENTS_PYVENV` (with a scope venv), `AGENTS_PYLIB` (from a `.pyz` only), `<NAME>_OVERLAY_ROOT`, `<NAME>_OVERLAY_STATE`, `PYTHONPYCACHEPREFIX`, `PATH`, `PYTHONPATH`, `AGENTS_PYTHONPATH`, `AGENTS_PROXY` and the mirrored
+proxy vars, plus what overlays declare and the stores' env files set. `AGENTS_AGENT` is never emitted.
 `launch` also exports `AGENTS_CONTEXT_FILE`.
 
-Set for an overlay's `setup.py`: `AGENTS_HOME` (user store), `AGENTS_SCOPE_ROOT`,
-`AGENTS_SCOPE`, `AGENTS_OVERLAY_DIR`.
+Set for an overlay's setup and env scripts: `AOS_OVERLAY_ROOT`,
+`AOS_OVERLAY_NAME`, `AOS_OVERLAY_STATE` (its state directory, where it writes),
+`<NAME>_OVERLAY_STATE`; setup also gets `AGENTS_HOME` (user store),
+`AGENTS_SCOPE_ROOT`, `AGENTS_SCOPE`. `AOS_*`, `*_OVERLAY_ROOT` and
+`*_OVERLAY_STATE` are dotagents': no overlay can set one.
 
 Read by a script launcher (`_launchers`): its overlay's `<NAME>_OVERLAY_ROOT`.
 
@@ -907,8 +1052,12 @@ Read by a script launcher (`_launchers`): its overlay's `<NAME>_OVERLAY_ROOT`.
 - **Skills run under `AGENTS_PYTHON`**, the scope venv: duho, every overlay's
   requirements and libs, and dotagents import there. Its site-packages is never put
   on `PYTHONPATH`, which every other Python in the session would read first.
-- **`env` output is sensitive**: it prints resolved values. Nothing in the package
-  logs a value, only names.
+- **`env` output is sensitive**: it prints resolved values, granted secrets
+  included. Nothing in the package logs a value, only names.
+- **`overlay.toml` is not read.** An overlay's manifest is `overlay.cfg`; a
+  manifest that does not validate is ignored whole, with a warning.
+- **A refused manifest or a refused overlay contributes nothing**: no
+  environment, context, skills, commands' libs, launchers or MCP servers.
 - **Credentials in a repo URL** are removed from every log line, cache dir name and
   install record; an overlay installed from such a URL syncs only while that repo is
   configured again (or given as `--repo`).

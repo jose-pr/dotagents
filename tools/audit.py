@@ -18,8 +18,8 @@ Usage (what CI runs):
   python tools/audit.py --root . [--overlays DIR]
       the required files exist; every file of the base overlay
       (src/dotagents/_overlay/) is free of the forbidden patterns; size budget
-      (warning only); and, when an overlays dir is found, every `rules` path an
-      overlay.toml declares resolves to a rules file.
+      (warning only); and, when an overlays dir is found, every overlay.cfg
+      validates as AOS and every `rules` path it declares resolves to a rules file.
   python tools/audit.py --check-templates --root . [--overlays DIR]
       instantiate + parse-check the overlays' reference templates (3.11+).
       Without an overlays dir it fails with NOT CHECKED.
@@ -28,10 +28,10 @@ Usage (what CI runs):
 
 The overlays dir is --overlays DIR, else the first of <root>/overlays,
 <root>/repo and <root>/overlays-src that holds overlays, either directly
-(<dir>/<name>/overlay.toml) or as a `repo` branch checkout
-(<dir>/overlays/<name>/overlay.toml).
+(<dir>/<name>/overlay.cfg) or as a `repo` branch checkout
+(<dir>/overlays/<name>/overlay.cfg).
 
-Exit 1 on missing required files, forbidden patterns, unresolved rules paths, or
+Exit 1 on missing required files, forbidden patterns, invalid manifests, unresolved rules paths, or
 failed (or unrunnable) template checks.
 """
 import sys
@@ -42,7 +42,7 @@ from typing import List, Optional
 # so parents[1] is the checkout root) -- not `~/.agents`, which has no `src/` tree.
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 
-# The overlay manifest check reads overlay.toml with the CLI's own reader, so it
+# The overlay manifest check reads overlay.cfg with the CLI's own reader, so it
 # can never disagree with what `overlays add` does. Prefer this checkout's copy
 # of the package over any installed one.
 sys.path.insert(0, str(DEFAULT_ROOT / "src"))
@@ -80,11 +80,11 @@ SUBST = {"<project_name>": "demopkg", "<gh_org>": "demoorg",
 
 
 def _holds_overlays(path: Path) -> bool:
-    return any(path.glob("*/overlay.toml"))
+    return any(path.glob("*/overlay.cfg"))
 
 
 def find_overlays(root: Path, overlays: Optional[Path] = None) -> Optional[Path]:
-    """The directory holding `<name>/overlay.toml` entries, or None.
+    """The directory holding `<name>/overlay.cfg` entries, or None.
 
     `overlays` (the --overlays flag) is the only candidate when given; a
     `repo` branch checkout is accepted in place of its `overlays/` subdir."""
@@ -142,16 +142,22 @@ def audit(root: Path, probe: Optional[Path] = None,
 
 
 def check_overlay_manifests(overlays_dir: Path) -> List[str]:
-    """Every `rules` path in an overlay.toml must resolve to a rules file.
+    """Every overlay.cfg must validate as AOS (every file it names present),
+    and every `rules` path in it must resolve to a rules file.
 
-    A typo there silently drops an always-on rule from every install. Read with
-    the CLI's own manifest reader and rules extractor, so this check sees exactly
-    what `overlays add` would merge."""
+    A refused manifest contributes nothing, and a typo in `rules` silently drops
+    an always-on rule from every install. Read with the CLI's own manifest
+    reader, validator and rules extractor, so this check sees exactly what
+    `overlays add` would merge."""
+    from dotagents import _aos
     from dotagents._overlays import Overlay
 
     failures: List[str] = []
     found = Overlay.discover(overlays_dir)
     for overlay in found:
+        problems = overlay.manifest_problems() or [
+            "%s at %s" % issue for issue in _aos.validate(overlay.document(), overlay.members())]
+        failures += ["overlays/%s: overlay.cfg: %s" % (overlay.name, p) for p in problems]
         rules = overlay.read_manifest()["rules"]
         _blocks, warnings = overlay.rule_blocks(rules)
         failures += ["overlays/%s: %s" % (overlay.name, w) for w in warnings]
@@ -230,7 +236,7 @@ def check_templates(root: Path, overlays: Optional[Path] = None) -> List[str]:
 # package -- `tests/test_audit_leak.py` pins that). It is run directly
 # (`python tools/audit.py --root .`); `__main__` dispatches through duho for
 # the argument definition and help text, and the manifest check reads
-# overlay.toml with dotagents' own reader, so the CI job that runs it installs
+# overlay.cfg with dotagents' own reader, so the CI job that runs it installs
 # the package (`pip install -e .`) first.
 # --------------------------------------------------------------------------- #
 

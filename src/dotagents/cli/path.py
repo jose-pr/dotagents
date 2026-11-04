@@ -17,7 +17,8 @@ class PathCmd(DotAgentsArgs):
 
     Highest precedence first, the order ``dotagents env`` puts them at the
     front of ``PATH`` / ``PYTHONPATH``: the project's ``.agents`` first, and
-    each store's own dir before its overlays'. The bin list includes dirs
+    each store's own dir before the dirs its overlays declare (``paths``
+    in ``overlay.cfg``). The bin list includes dirs
     that do not exist yet (as ``env`` does, so one created later is found);
     the lib list only existing ones. Nothing is run -- no env file, no ``env.py`` -- so it is a
     cheap way to put the bins on a shell's ``PATH``::
@@ -62,7 +63,7 @@ class PathCmd(DotAgentsArgs):
             project_root=_scope.project_root_default(),
             global_scope=self.global_scope,
         )
-        found = _env.get_lib_paths(scope) if self.lib else _env.get_bin_paths(scope)
+        found = _env.get_lib_paths(scope) if self.lib else _env.get_path_dirs(scope)
         dirs: "list[str]" = []
         for p in reversed(found):  # contract A lists lowest precedence first
             if str(p) not in dirs:

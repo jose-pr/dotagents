@@ -28,6 +28,7 @@ import os
 import shutil
 import stat
 from pathlib import Path
+from typing import Iterable
 
 #: Beside the published skills: the tree digest of each COPY at the moment it
 #: was published, so a later sync can tell "unchanged since we copied it"
@@ -290,10 +291,26 @@ def clean_broken_syncs(shared_skills: Path, logger=None) -> None:
 
 
 def _overlay_skill_dirs(overlay_dir: Path) -> "list[Path]":
-    skills_dir = overlay_dir / "skills"
-    if not skills_dir.is_dir():
-        return []
-    return sorted(d for d in skills_dir.iterdir() if d.is_dir())
+    """The overlay's skills (:meth:`Overlay.skills`: its ``skills`` list,
+    else every ``skills/<name>/`` holding a ``SKILL.md``)."""
+    from dotagents._overlays import Overlay
+
+    return [overlay_dir / "skills" / name for name in Overlay(overlay_dir).skills()]
+
+
+def harness_excluded(store: Path, harness_id: str) -> "set[str]":
+    """The skills of ``store``'s overlays that are not delivered natively to
+    ``harness_id`` (``harness.<id>.skills = false``): the context's skills
+    listing names their ``SKILL.md`` instead."""
+    from dotagents._overlays import Overlay
+
+    out: "set[str]" = set()
+    if not harness_id:
+        return out
+    for overlay in Overlay.discover(Path(store) / "overlays", store):
+        if overlay.harness_hints(harness_id).get("skills") is False:
+            out.update(overlay.skills())
+    return out
 
 
 def publish_overlay_skills(
@@ -526,7 +543,8 @@ def _points_into(link: Path, directory: Path) -> bool:
 
 
 def link_skills_into(
-    shared_skills: Path, target_dir: Path, *, dry_run: bool = False, logger=None
+    shared_skills: Path, target_dir: Path, *, dry_run: bool = False, logger=None,
+    exclude: "Iterable[str]" = (),
 ) -> LinkResult:
     """Link each ``shared_skills/<name>/`` into ``target_dir/<name>`` (an
     agent's own skills dir), per skill, and drop the entries a skill the
@@ -540,11 +558,13 @@ def link_skills_into(
     (re-linked when links work now); an owned entry whose skill is gone is
     removed. Anything else of the same name -- a skill the user placed, or a
     copy edited in place -- is kept and reported in ``kept``, never replaced.
+    A name in ``exclude`` is treated as one the store does not have.
     """
     result = LinkResult()
+    excluded = set(exclude)
     store = (
         {d.name: d for d in sorted(shared_skills.iterdir())
-         if d.is_dir() and not d.name.startswith(".")}
+         if d.is_dir() and not d.name.startswith(".") and d.name not in excluded}
         if shared_skills.is_dir() else {}
     )
     data = _load_linked(target_dir)

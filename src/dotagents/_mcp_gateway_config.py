@@ -1,13 +1,20 @@
-"""Read MCP server and skill declarations from overlay manifests."""
+"""Read MCP server and skill declarations from overlay manifests (``overlay.cfg``).
+
+A stdio server starts in its overlay's root. Its ``env`` values are AOS env
+values: a literal, a path under the root, or a secret reference resolved
+through the overlay's grants. ``env_passthrough`` and ``headers_env`` read
+the gateway's own environment only for the variables the overlay's store
+grants it (``grants.env``); the others are not passed."""
 
 from __future__ import annotations
 
 import math
+import os
 import re
 import urllib.parse
 from pathlib import Path
 
-from dotagents._overlays import _toml_module
+from dotagents import _aos
 
 _MAX_LINE = 16 * 1024 * 1024
 _PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
@@ -24,7 +31,7 @@ class GatewayConfigError(ValueError):
 class _ServerSpec:
     __slots__ = (
         "overlay", "name", "transport", "command", "args", "url", "env",
-        "env_passthrough", "headers_env", "timeout", "skills",
+        "env_passthrough", "headers_env", "timeout", "skills", "root", "secrets", "resolved",
     )
 
     def __init__(self, overlay, data):
@@ -39,6 +46,39 @@ class _ServerSpec:
         self.headers_env = data.get("headers_env", {})
         self.timeout = float(data.get("timeout", 60))
         self.skills = []
+        #: The overlay's root (the working directory) and its secrets.
+        self.root = None
+        self.secrets = _aos.Secrets()
+        #: Values resolved from the gateway's environment or a secret, kept
+        #: only to remove them from error messages.
+        self.resolved = []
+
+    def granted(self, variable):
+        """Whether the overlay may read ``variable`` from the gateway's environment."""
+        return variable in self.secrets.grants.get("env", ())
+
+    def server_env(self):
+        """The ``env`` values: literals, paths under the root, and secret
+        references (raises RuntimeError naming the variable when one cannot
+        be resolved and is not optional)."""
+        out = {}
+        for var, value in self.env.items():
+            if isinstance(value, str):
+                out[var] = value
+            elif "value" in value:
+                out[var] = value["value"]
+            elif "path" in value:
+                out[var] = _aos.resolve_path(str(self.root), value["path"], os.name == "nt")
+            else:
+                resolved = self.secrets.resolve(value)
+                if resolved is None:
+                    if value.get("optional"):
+                        continue
+                    raise RuntimeError("MCP server %s: %s cannot be resolved (%s %s)" % (
+                        self.name, var, value.get("provider", "secret"), value.get("key", value.get("secret"))))
+                self.resolved.append(resolved)
+                out[var] = resolved
+        return out
 
     def prefix(self, name=None, template=None):
         namespace = name or self.name
@@ -82,9 +122,9 @@ def _read_specs(overlay_name, raw, origin):
                 raise GatewayConfigError("stdio MCP server %s args must be strings" % name)
             if not isinstance(env, dict) or any(
                 not isinstance(var, str) or not _ENV_NAME.fullmatch(var)
-                or not isinstance(value, str) for var, value in env.items()
+                or not isinstance(value, (str, dict)) for var, value in env.items()
             ):
-                raise GatewayConfigError("stdio MCP server %s env must map names to string values" % name)
+                raise GatewayConfigError("stdio MCP server %s env must map names to env values" % name)
             if not isinstance(env_passthrough, list) or any(
                 not isinstance(var, str) or not _ENV_NAME.fullmatch(var) for var in env_passthrough
             ) or len(set(env_passthrough)) != len(env_passthrough):
@@ -139,30 +179,25 @@ def _read_specs(overlay_name, raw, origin):
 
 
 def discover(scope):
-    """Resolve MCP servers and skill links for the active overlays."""
+    """Resolve MCP servers and skill links for the active overlays, in
+    composition order. An overlay whose manifest was refused declares
+    nothing."""
+    from dotagents import _activate
+
     specs = []
-    for overlay_name, path, root in scope.paths({"overlay": "overlay.toml"}):
-        if root is None or not path.is_file():
+    for overlay in sorted(scope.overlays, key=lambda o: o.sort_key):
+        raw = overlay.document().get("mcp")
+        if raw is None:
             continue
-        toml = _toml_module()
-        if toml is None:
-            raise GatewayConfigError("MCP declarations require tomli below Python 3.11")
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            raise GatewayConfigError(
-                "cannot read MCP declaration %s (%s)" % (path, type(exc).__name__)
-            ) from None
-        try:
-            manifest = toml.loads(text)
-        except ValueError:
-            raise GatewayConfigError("invalid TOML in MCP declaration %s" % path) from None
-        raw = manifest.get("mcp", {})
-        for spec in _read_specs(overlay_name, raw, path):
+        root = overlay.path
+        secrets = _activate.context(overlay).secrets
+        for spec in _read_specs(overlay.name, raw, overlay.manifest_path):
             for skill in spec.skills:
                 if not (root / "skills" / skill / "SKILL.md").is_file():
                     raise GatewayConfigError(
-                        "MCP skill %s has no SKILL.md in overlay %s" % (skill, overlay_name)
+                        "MCP skill %s has no SKILL.md in overlay %s" % (skill, overlay.name)
                     )
+            spec.root = root
+            spec.secrets = secrets
             specs.append(spec)
     return specs

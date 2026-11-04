@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from dotagents import _overlays, _scope, _skills
+from dotagents import _aos, _overlays, _scope, _skills
 
 
 # --------------------------------------------------------------------------- #
@@ -92,13 +92,13 @@ def test_overlay_instance_surface(tmp_path):
     assert ov.normalized_name == "my-ov-v2"
     assert ov.root_var == "MY_OV_V2_OVERLAY_ROOT"
     assert ov.is_valid
-    assert ov.manifest_path == d / "overlay.toml"
+    assert ov.manifest_path == d / "overlay.cfg"
     assert ov.read_manifest()["priority"] == _overlays.DEFAULT_PRIORITY
     assert ov.priority == _overlays.DEFAULT_PRIORITY
-    assert ov.find_setup_script() is None
+    assert ov.setup_variant() is None
     # Files written after construction are seen (no caching).
     d.mkdir()
-    (d / "overlay.toml").write_text('name = "ov"\npriority = 7\n', encoding="utf-8")
+    (d / "overlay.cfg").write_text('name = "ov"\npriority = 7\n', encoding="utf-8")
     assert ov.priority == 7
     assert ov.sort_key == (7, "ov", "My_Ov.v2")  # priority, manifest name, dir name
     # os.PathLike: usable wherever a path is, and Overlay(Overlay) is identity.
@@ -126,7 +126,7 @@ def make_source(root: Path):
     py = src / "py-demo"
     (py / "kb").mkdir(parents=True)
     (py / "kb" / "PY.md").write_text("py kb\n", encoding="utf-8")
-    (py / "overlay.toml").write_text(
+    (py / "overlay.cfg").write_text(
         'name = "py-demo"\nrouting = [\n  """- Py work -> ~/.agents/kb/PY.md""",\n]\n',
         encoding="utf-8",
     )
@@ -174,7 +174,7 @@ def test_source_resolution_keyed_env_repo_beats_the_default(tmp_path, monkeypatc
     src = make_source(tmp_path)
     other = tmp_path / "other"
     (other / "py-demo").mkdir(parents=True)
-    (other / "py-demo" / "overlay.toml").write_text('name = "py-demo"\n', encoding="utf-8")
+    (other / "py-demo" / "overlay.cfg").write_text('name = "py-demo"\n', encoding="utf-8")
     monkeypatch.setenv("AGENTS_OVERLAYS_REPO", str(src))
     monkeypatch.setenv("AGENTS_OVERLAYS_REPO_A", str(other))
     assert _scope.resolve_source(None).overlay_dir("py-demo") == other / "py-demo"
@@ -263,7 +263,7 @@ def test_install_overlay_dir_copies_files_and_manifest(tmp_path):
     dest = tmp_path / "dest" / "py-demo"
     copied, skipped, _lines = Overlay(src / "py-demo").install_to(dest, False)
     assert (dest / "kb" / "PY.md").is_file()
-    assert (dest / "overlay.toml").is_file()
+    assert (dest / "overlay.cfg").is_file()
     assert copied >= 2 and skipped == 0
 
 
@@ -280,14 +280,15 @@ def test_reinstall_makes_the_install_match_the_source(tmp_path):
     assert result.written == 1
 
 
-def test_overlay_files_excludes_manifest_and_caches(tmp_path):
+def test_overlay_files_are_its_members_manifest_included(tmp_path):
+    """AOS: the manifest is a member like any other file; caches are not."""
     src = make_source(tmp_path)
     ov = Overlay(src / "py-demo")
     (ov.path / "__pycache__").mkdir()
     (ov.path / "__pycache__" / "x.pyc").write_bytes(b"")
     names = {p.relative_to(ov.path).as_posix() for p in ov.files()}
     assert "kb/PY.md" in names
-    assert "overlay.toml" not in names
+    assert "overlay.cfg" in names
     assert not any("__pycache__" in n for n in names)
 
 
@@ -448,14 +449,14 @@ def test_overlay_files_skip_vcs_metadata_and_caches(tmp_path):
     """A whole-repository overlay (a git spec with no #path) copied its clone's
     .git into the store."""
     ov = tmp_path / "whole"
-    for rel in ("overlay.toml", "kb/X.md", "references/.gitignore", ".git/HEAD",
+    for rel in ("overlay.cfg", "kb/X.md", "references/.gitignore", ".git/HEAD",
                 ".git/objects/ab/cdef", "sub/.git", "__pycache__/m.cpython-314.pyc",
                 "lib/m.pyc", ".mypy_cache/x.json", "node_modules/p/index.js"):
         p = ov / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("x\n", encoding="utf-8")
     got = [p.relative_to(ov).as_posix() for p in Overlay(ov).files()]
-    assert got == ["kb/X.md", "references/.gitignore"]
+    assert got == ["kb/X.md", "overlay.cfg", "references/.gitignore"]
 
 
 def test_remove_deletes_read_only_files(tmp_path):
@@ -561,19 +562,46 @@ def test_cmd_sync_glob_filter(tmp_path):
 def _add_setup_overlay(src: Path, name: str, body: str):
     """Add an overlay `name` under source `src` shipping a `setup.py` with `body`.
 
-    A `setup.py` runs under the current interpreter cross-platform (no `sh`
-    needed), so these tests are Windows-safe. `body` is Python appended after a
-    small preamble exposing the marker path helpers."""
+    The manifest declares it (`[[setup]]`, interpreter `python`): a file named
+    setup.py means nothing by its name. It runs under the current interpreter
+    cross-platform (no `sh` needed), so these tests are Windows-safe. `body`
+    is Python appended after a small preamble exposing the marker path helpers."""
     o = src / name
     o.mkdir(parents=True)
     (o / "file.md").write_text("f\n", encoding="utf-8")
+    (o / "overlay.cfg").write_text('[[setup]]\ninterpreter = "python"\npath = "setup.py"\n', encoding="utf-8")
     preamble = (
         "import os, sys\n"
         "agents = os.environ['AGENTS_HOME']\n"
-        "overlay = os.environ.get('AGENTS_OVERLAY_DIR', os.getcwd())\n"
+        "overlay = os.environ['AOS_OVERLAY_ROOT']\n"
+        "state = os.environ['AOS_OVERLAY_STATE']\n"
     )
     (o / "setup.py").write_text(preamble + body, encoding="utf-8")
     return o
+
+
+def test_the_default_setup_is_the_first_runnable_setup_script(tmp_path):
+    """No `setup` declared: the root's first `setup.<ext>` this OS can run
+    (.py before .ps1, .bash, .sh, .js) runs, once per digest;
+    `[defaults] setup = false` turns it off."""
+    from dotagents.cli import OverlayAdd
+
+    src = tmp_path / "src_overlays"
+    o = src / "plain"
+    o.mkdir(parents=True)
+    (o / "setup.py").write_text("open(%r, 'a').write('py')\n" % str(tmp_path / "RAN"), encoding="utf-8")
+    (o / "setup.sh").write_text("echo sh >> %s\n" % (tmp_path / "RAN").as_posix(), encoding="utf-8")
+    scope = make_scope(tmp_path)
+
+    def add():
+        return _run(OverlayAdd, name=["plain"], repo=[str(src)], global_scope=True,
+                    agents_dir=scope.agents_root, copy=True, dry_run=False)
+
+    assert add() == 0 and add() == 0
+    assert (tmp_path / "RAN").read_text(encoding="utf-8") == "py"
+    (o / "overlay.cfg").write_text("[defaults]\nsetup = false\n", encoding="utf-8")
+    assert add() == 0
+    assert (tmp_path / "RAN").read_text(encoding="utf-8") == "py", "turned off"
 
 
 def test_setup_runs_on_add(tmp_path):
@@ -593,8 +621,8 @@ def test_setup_runs_on_add(tmp_path):
 
 
 def test_setup_env_carries_only_the_agents_names(tmp_path):
-    # The runner emits AGENTS_HOME / AGENTS_OVERLAY_DIR and nothing under the
-    # retired DOTAGENTS_* prefix.
+    # The runner emits AGENTS_HOME and the AOS_OVERLAY_* names, and nothing
+    # under the retired DOTAGENTS_* prefix.
     from dotagents.cli import OverlayAdd
 
     src = tmp_path / "src_overlays"
@@ -615,18 +643,21 @@ def test_setup_cwd_is_installed_overlay_dir(tmp_path):
     from dotagents.cli import OverlayAdd
 
     src = tmp_path / "src_overlays"
-    # The marker lands via a *relative* path -> proves cwd is the installed dir,
-    # and its content is AGENTS_OVERLAY_DIR -> proves that env var is set.
+    # The cwd is the installed root (AOS_OVERLAY_ROOT); what setup produces
+    # goes into AOS_OVERLAY_STATE, outside the root, which keeps its digest.
     _add_setup_overlay(
         src, "cwd-demo",
-        "open('MARKER', 'w').write(overlay)\n",
+        "open(os.path.join(state, 'MARKER'), 'w').write(os.getcwd() + '|' + overlay)\n",
     )
     scope = make_scope(tmp_path)
     _run(OverlayAdd, name=["cwd-demo"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
-    marker = scope.overlay_root / "cwd-demo" / "MARKER"
+    installed = Overlay(scope.overlay_root / "cwd-demo")
+    marker = installed.state_dir(installed.tree_digest()) / "MARKER"
     assert marker.is_file()
-    assert marker.read_text(encoding="utf-8") == str(scope.overlay_root / "cwd-demo")
+    cwd, root = marker.read_text(encoding="utf-8").split("|")
+    assert Path(cwd) == Path(root) == scope.overlay_root / "cwd-demo"
+    assert installed.tree_digest() == Overlay(src / "cwd-demo").tree_digest()
 
 
 def test_add_without_setup_is_fine(tmp_path):
@@ -682,22 +713,31 @@ def test_setup_dry_run_does_not_run(tmp_path):
     assert not (scope.agents_root / "SETUP_RAN").exists()
 
 
-def test_setup_runs_on_sync(tmp_path):
+def test_setup_runs_once_per_digest(tmp_path):
     from dotagents.cli import OverlayAdd, OverlaySync
 
     src = tmp_path / "src_overlays"
-    # Idempotent-style setup: append a line each run so we can count invocations.
+    # Append a line each run so we can count invocations.
     _add_setup_overlay(
         src, "with-setup",
         "open(os.path.join(agents, 'RUNS'), 'a').write('x')\n",
     )
     scope = make_scope(tmp_path)
+    runs = scope.agents_root / "RUNS"
+
+    def sync(**kw):
+        _run(OverlaySync, pattern="with-setup", repo=[str(src)], global_scope=True,
+             agents_dir=scope.agents_root, copy=True, dry_run=False, **kw)
+
     _run(OverlayAdd, name=["with-setup"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
-    _run(OverlaySync, pattern="with-setup", repo=[str(src)], global_scope=True,
-         agents_dir=scope.agents_root, copy=True, dry_run=False)
-    # Ran once on add + once on sync.
-    assert (scope.agents_root / "RUNS").read_text(encoding="utf-8") == "xx"
+    sync()
+    assert runs.read_text(encoding="utf-8") == "x", "same digest: not run again"
+    (src / "with-setup" / "file.md").write_text("changed\n", encoding="utf-8")
+    sync()
+    assert runs.read_text(encoding="utf-8") == "xx", "a new digest runs it"
+    sync(rerun_setup=True)
+    assert runs.read_text(encoding="utf-8") == "xxx", "--rerun-setup runs it"
 
 
 # --------------------------------------------------------------------------- #
@@ -718,7 +758,7 @@ def _make_rules_overlay(src_root: Path, name: str, marker: str, priority=None):
         toml += "priority = %d\n" % priority
     toml += 'rules = ["rules.md"]\n'
     toml += 'routing = ["""- %s route -> ~/.agents/kb/%s.md"""]\n' % (marker, marker)
-    (ov / "overlay.toml").write_text(toml, encoding="utf-8")
+    (ov / "overlay.cfg").write_text(toml, encoding="utf-8")
     return ov
 
 
@@ -806,8 +846,8 @@ def test_recompose_block_high_priority_added_first_still_sorts_last(tmp_path):
 
 
 def test_existing_bundled_overlay_manifests_still_parse(tmp_path):
-    """Every shipped overlay.toml parses unchanged and reports default priority
-    (none declares `priority` today) -- the field is optional and backward-compatible.
+    """Every shipped overlay.cfg is a valid AOS manifest (the files it names
+    present) and reports default priority (none declares `priority` today).
 
     The example overlays live on the `repo` branch (D77), under
     `overlays/<name>/`. CI checks that branch out at `overlays-src/`, a dev box
@@ -816,13 +856,16 @@ def test_existing_bundled_overlay_manifests_still_parse(tmp_path):
     and the tmp-fixture tests above cover read_manifest's parsing there."""
     checkout = Path(__file__).resolve().parents[1]
     candidates = [checkout / d for d in ("overlays-src/overlays", "repo/overlays", "overlays/overlays", "overlays")]
-    repo_overlays = next((d for d in candidates if list(d.glob("*/overlay.toml"))), None)
+    repo_overlays = next((d for d in candidates if list(d.glob("*/overlay.cfg"))), None)
     if repo_overlays is None:
         pytest.skip("no checkout of the example overlays (overlays-src/, repo/ or overlays/)")
-    manifests = sorted(repo_overlays.glob("*/overlay.toml"))
+    manifests = sorted(repo_overlays.glob("*/overlay.cfg"))
     assert manifests, "expected bundled overlays to exist"
     for manifest in manifests:
-        parsed = Overlay(manifest.parent).read_manifest()
+        overlay = Overlay(manifest.parent)
+        assert overlay.manifest_problems() == [], manifest
+        assert _aos.validate(overlay.document(), overlay.members()) == [], manifest
+        parsed = overlay.read_manifest()
         assert isinstance(parsed["priority"], int)
         # None of the shipped overlays sets priority yet -> all default.
         assert parsed["priority"] == _overlays.DEFAULT_PRIORITY

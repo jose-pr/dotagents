@@ -294,16 +294,22 @@ def _discovery_scope(argv=None):
 
 
 def _add_overlay_libs(argv=None) -> "list[str]":
-    """Put every existing overlay/store ``lib`` dir on ``sys.path`` before the
-    command modules import, so a command can import any overlay's library even
-    when ``dotagents`` runs from a plain shell (a session already has them on
+    """Put every agent library dir (each store's ``lib``, each active overlay's
+    declared ``PYTHONPATH`` directories) on ``sys.path`` before the command
+    modules import, so a command can import any overlay's library even when
+    ``dotagents`` runs from a plain shell (a session already has them on
     ``PYTHONPATH``). APPENDED, in contract-A precedence: in this process a lib
     never shadows an installed package, dotagents' own dependencies included.
+    Bytecode of what imports from an overlay goes outside it
+    (``sys.pycache_prefix``), so an installed copy keeps its tree digest.
     Returns the dirs added."""
-    from dotagents import _env
+    from dotagents import _env, _run
 
+    scope = _discovery_scope(argv)
+    if sys.pycache_prefix is None:
+        sys.pycache_prefix = _run.pycache_prefix(scope.user_root)
     added = []
-    for lib in reversed(_env.get_lib_paths(_discovery_scope(argv))):
+    for lib in reversed(_env.get_lib_paths(scope)):
         entry = str(lib)
         if entry not in sys.path:
             sys.path.append(entry)

@@ -19,7 +19,7 @@ def _world(tmp_path):
     user = tmp_path / "user"
     project = tmp_path / "proj"
     rust = user / "overlays" / "rust"
-    _write(rust / "overlay.toml", 'name = "rust"\n')
+    _write(rust / "overlay.cfg", 'name = "rust"\n')
     _write(rust / "CONTEXT.md", "RUST-CONTEXT\n")
     _write(rust / "kb" / "RUST.md", "upstream rust\n")
     _write(rust / "kb" / "NOTES.md", "no addition for this one\n")
@@ -70,7 +70,7 @@ def test_context_lists_them_and_json_carries_them(tmp_path):
 
 def test_no_section_without_additions(tmp_path):
     user = tmp_path / "user"
-    _write(user / "overlays" / "rust" / "overlay.toml", 'name = "rust"\n')
+    _write(user / "overlays" / "rust" / "overlay.cfg", 'name = "rust"\ncontext = ["CONTEXT.md"]\n')
     _write(user / "overlays" / "rust" / "CONTEXT.md", "RUST-CONTEXT\n")
     _write(user / "overlays" / "rust" / "kb" / "RUST.md", "upstream\n")
     _write(user / "AGENTS.md", "# user\n")
