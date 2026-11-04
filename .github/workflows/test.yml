@@ -100,7 +100,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install the package
-        # audit.py's command surface is a duho Cmd, and it reads overlay.toml
+        # audit.py's command surface is a duho Cmd, and it reads overlay.cfg
         # with dotagents' own manifest reader.
         run: python -m pip install -e .
       - name: Audit repo structure and overlay manifests
@@ -129,13 +129,13 @@ jobs:
           python-version: "3.14"
       - name: Install the package with the dev extra
         run: python -m pip install -e ".[dev]"
-      - name: Install every overlay's requirements.txt
+      - name: Install every overlay's lib/python/requirements.txt
         # What dotagents installs into the agents' venv for them; their tests
         # import it (the net overlay's curl launcher runs curlike).
         shell: bash
         run: |
-          for req in overlays-src/overlays/*/requirements.txt; do
-            [ -f "$req" ] && python -m pip install -r "$req"
+          for req in overlays-src/overlays/*/lib/python/requirements.txt; do
+            if [ -f "$req" ]; then python -m pip install -r "$req"; fi
           done
       - name: Run the overlays' test suites
         # An empty config file keeps main's own pytest settings out of the
@@ -215,7 +215,7 @@ jobs:
           # add by name from the bundled source, into the user scope.
           python -m dotagents overlays add python --repo overlays-src/overlays -g
           test -f "$HOME/.agents/overlays/python/kb/PYTHON.md"     # installed as a dir
-          test -f "$HOME/.agents/overlays/python/overlay.toml"     # self-describing
+          test -f "$HOME/.agents/overlays/python/overlay.cfg"     # self-describing
           grep -qF "kb/PYTHON.md" "$HOME/.agents/AGENTS.md"        # routing merged
           # list discovers it by presence (no registry file).
           out=$(python -m dotagents overlays list --repo overlays-src/overlays -g)
