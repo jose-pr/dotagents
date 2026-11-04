@@ -16,9 +16,10 @@ class PathCmd(DotAgentsArgs):
     """Print the bin dirs dotagents puts on PATH (--lib: the lib dirs).
 
     Highest precedence first, the order ``dotagents env`` puts them at the
-    front of ``PATH`` / ``PYTHONPATH``: the project's ``.agents`` first, and
-    each store's own dir before the dirs its overlays declare (``paths``
-    in ``overlay.cfg``). The bin list includes dirs
+    front of ``PATH`` / ``PYTHONPATH``: the stores' own dirs first, the
+    project's ``.agents`` before the user store's, then the dirs the overlays
+    declare (``paths`` in ``overlay.cfg``), the last in composition order
+    first. The bin list includes dirs
     that do not exist yet (as ``env`` does, so one created later is found);
     the lib list only existing ones. Nothing is run -- no env file, no ``env.py`` -- so it is a
     cheap way to put the bins on a shell's ``PATH``::

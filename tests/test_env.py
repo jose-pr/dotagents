@@ -256,6 +256,27 @@ def test_a_stores_pre_files_see_the_stores_bins_and_libs(tree):
             < parts.index(str(agents_dir / "overlays" / "aa" / "bin")) < parts.index("/usr/bin"))
 
 
+def test_path_and_lib_lists_are_in_the_order_env_applies(tree):
+    """`dotagents path` (get_path_dirs / get_lib_paths, lowest precedence
+    first) lists the dirs in the order `env` puts them at the front of PATH and
+    PYTHONPATH, also when a project overlay sorts before a user overlay."""
+    agents_dir, project_root = tree
+    for root in (project_root / ".agents" / "overlays" / "a-proj", agents_dir / "overlays" / "zz"):
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "tool").write_text("", encoding="utf-8")
+        (root / "lib" / "python").mkdir(parents=True)
+        (root / "lib" / "python" / "m.py").write_text("", encoding="utf-8")
+    (agents_dir / "lib").mkdir()
+    (project_root / ".agents" / "lib").mkdir()
+    scope = Scope.of(agents_dir=agents_dir, project_root=project_root, global_scope=False)
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin", "PYTHONPATH": "/site"})
+    path = env["PATH"].split(os.pathsep)
+    assert path[:path.index("/usr/bin")] == [str(p) for p in reversed(_env.get_path_dirs(scope))]
+    libs = [str(p) for p in reversed(_env.get_lib_paths(scope))]
+    assert env["PYTHONPATH"].split(os.pathsep) == libs + ["/site"]
+    assert env["AGENTS_PYTHONPATH"].split(os.pathsep) == libs
+
+
 def test_bin_paths_excludes_project_root(tree):
     agents_dir, project_root = tree
     (project_root / "bin").mkdir()  # a project-ROOT bin must NOT be picked up

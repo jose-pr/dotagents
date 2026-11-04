@@ -831,19 +831,15 @@ def get_overlay_roots(scope: Scope) -> "list[Path]":
 
 
 def get_path_dirs(scope: Scope) -> "list[Path]":
-    """Every dir a session's ``PATH`` gains, contract-A precedence order: for
-    each store, the directories its active overlays declare on ``PATH`` (on
-    this OS), then the store's own ``bin``; absent ones included."""
-    overlays = scope.overlays
+    """Every dir a session's ``PATH`` gains, lowest precedence first, in the
+    order :func:`get_environment` applies them: the directories the active
+    overlays declare on ``PATH`` (on this OS), overlay by overlay in
+    composition order, then each store's own ``bin`` (absent ones included),
+    which lead every overlay's."""
     out: "list[Path]" = []
-    stores = {str(Path(p).parent): p for p in get_bin_paths(scope)}
-    for store in scope.stores:
-        for overlay in overlays:
-            if overlay.store == store:
-                out += declared_paths(overlay, "PATH")
-        if str(store) in stores:
-            out.append(stores[str(store)])
-    return out
+    for overlay in _ordered(scope.overlays):
+        out += declared_paths(overlay, "PATH")
+    return out + get_bin_paths(scope)
 
 
 def get_store_lib_paths(scope: Scope) -> "list[Path]":
@@ -853,26 +849,24 @@ def get_store_lib_paths(scope: Scope) -> "list[Path]":
 
 
 def get_lib_paths(scope: Scope) -> "list[Path]":
-    """Every agent library dir in contract-A precedence order: for each store,
-    the existing directories its active overlays declare on ``PYTHONPATH``
-    (``paths``), then the store's own ``lib``; project-root's ``lib`` is not
-    an agent library. What :func:`get_environment` publishes as
-    ``AGENTS_PYTHONPATH`` (in reverse, highest precedence first), what the
-    scope venvs layer and what command discovery appends to ``sys.path``.
+    """Every agent library dir, lowest precedence first, in the order
+    :func:`get_environment` puts them on ``PYTHONPATH``: the existing
+    directories the active overlays declare on ``PYTHONPATH`` (``paths``),
+    overlay by overlay in composition order, then each store's own ``lib``
+    (:func:`get_store_lib_paths`); project-root's ``lib`` is not an agent
+    library. What :func:`get_environment` publishes as ``AGENTS_PYTHONPATH``
+    (in reverse, highest precedence first) and what command discovery appends
+    to ``sys.path``.
 
     Only dirs that EXIST are returned: a dozen absent entries on a search path
     are noise a reader has to rule out.
     """
-    overlays = scope.overlays
     out: "list[Path]" = []
-    for store in scope.stores:
-        for overlay in overlays:
-            if overlay.store == store:
-                out += [p for p in declared_paths(overlay, "PYTHONPATH") if p.is_dir()]
-        lib = Path(store) / "lib"
-        if lib.is_dir():
-            out.append(lib)
-    return out
+    for overlay in _ordered(scope.overlays):
+        out += [p for p in declared_paths(overlay, "PYTHONPATH") if p.is_dir()]
+    return out + get_store_lib_paths(scope)
+
+
 def _prepend_missing(path_entries: "list[str]", new_entries: "list[str]") -> "list[str]":
     """Prepend each new entry not already present.
 

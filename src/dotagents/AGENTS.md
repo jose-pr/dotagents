@@ -730,10 +730,11 @@ API:
   MSYS2 / Cygwin (never the WSL launcher). Warns once when there is none.
 - `interpreter(osenv) -> str` — `osenv["AGENTS_PYTHON"]` when it names a file, else
   `sys.executable`.
-- `get_bin_paths(scope)` (each store's `bin`), `get_path_dirs(scope)` (stores'
-  `bin` and overlays' `PATH` additions, contract-A order), `get_store_lib_paths(scope)`,
-  `get_lib_paths(scope)` (stores' `lib` and overlays' `PYTHONPATH` additions,
-  existing dirs only), `declared_paths(overlay, variable) -> list[Path]` (default
+- `get_bin_paths(scope)` (each store's `bin`), `get_path_dirs(scope)` (overlays'
+  `PATH` additions in composition order, then the stores' `bin`: lowest precedence
+  first, the order `get_environment` applies them), `get_store_lib_paths(scope)`,
+  `get_lib_paths(scope)` (overlays' `PYTHONPATH` additions, then the stores' `lib`,
+  same order, existing dirs only), `declared_paths(overlay, variable) -> list[Path]` (default
   then declared), `get_overlay_roots(scope)` (the dirs of `scope.overlays`),
   `resolve_env_files(scope) -> list[tuple[str, Path, Optional[Path]]]` (pre tier
   then main tier, stores only, as `Scope.paths` tuples).
