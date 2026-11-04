@@ -1380,6 +1380,50 @@ def get_environment(
                 continue
             _apply(changes)
 
+    # --- Contract B step 1: the stores' bins onto PATH, their libs onto
+    # PYTHONPATH and every lib into AGENTS_PYTHONPATH. Applied before the
+    # stores' pre.* files, which may run a store's tool or import its lib as
+    # its main files can, and again after the overlays, so the stores' dirs
+    # lead every overlay's.
+    def _store_paths() -> None:
+        bin_paths = [str(p) for p in get_bin_paths(scope)]
+        updated = _prepended_path_var(osenv, "PATH", bin_paths)
+        if updated is not None:
+            _apply({"PATH": updated})
+        updated = _launcher_path(osenv.get("PATH", ""), venv if venv is not None
+                                 and osenv.get("AGENTS_PYTHON") == str(_pyvenv.venv_python(venv)) else None)
+        if updated is not None:
+            _apply({"PATH": updated})
+        # Every lib -- the stores' and the overlays' declared PYTHONPATH
+        # directories -- listed in AGENTS_PYTHONPATH, highest precedence first,
+        # for a process that builds its own path (an env.py, a launcher,
+        # command discovery).
+        lib_paths: "list[str]" = []
+        for p in reversed(get_lib_paths(scope)):
+            if str(p) not in lib_paths:
+                lib_paths.append(str(p))
+        if lib_paths:
+            if osenv.get("AGENTS_PYTHONPATH") != os.pathsep.join(lib_paths):
+                _apply({"AGENTS_PYTHONPATH": os.pathsep.join(lib_paths)})
+        elif "AGENTS_PYTHONPATH" in osenv:
+            _apply(EnvChanges(removed=["AGENTS_PYTHONPATH"]))
+        # A store's own lib on PYTHONPATH, unless the scope venv's .pth already
+        # layers it: the venv's interpreter (AGENTS_PYTHON) imports it anyway,
+        # and no other Python in the session should.
+        layered = {
+            os.path.normcase(e) for e in (_pyvenv.read_state(venv).get("pth") or [] if venv else [])
+        }
+        store_libs = [str(p) for p in reversed(get_store_lib_paths(scope))]
+        on_path = [p for p in store_libs if os.path.normcase(p) not in layered]
+        current = osenv.get("PYTHONPATH") or ""
+        pythonpath = _prepended_path_var({"PYTHONPATH": current}, "PYTHONPATH", list(reversed(on_path)))
+        if pythonpath is not None and pythonpath != current:
+            if pythonpath:
+                _apply({"PYTHONPATH": pythonpath})
+            elif "PYTHONPATH" in osenv:
+                _apply(EnvChanges(removed=["PYTHONPATH"]))
+
+    _store_paths()
     env_files = resolve_env_files(scope)
     main_tier = [item for item in env_files if not item[1].name.startswith("pre.")]
     _run_tier([item for item in env_files if item[1].name.startswith("pre.")])
@@ -1406,44 +1450,7 @@ def get_environment(
         weakenings += [(overlay.name, ident, subject) for ident, subject in overlay_weakenings]
     _activate.report(logger, weakenings)
 
-    # --- Contract B step 1: store bins onto PATH. ---
-    bin_paths = [str(p) for p in get_bin_paths(scope)]
-    updated = _prepended_path_var(osenv, "PATH", bin_paths)
-    if updated is not None:
-        _apply({"PATH": updated})
-    updated = _launcher_path(osenv.get("PATH", ""), venv if venv is not None
-                             and osenv.get("AGENTS_PYTHON") == str(_pyvenv.venv_python(venv)) else None)
-    if updated is not None:
-        _apply({"PATH": updated})
-
-    # --- Libs: a store's own `lib` on PYTHONPATH; every lib -- those and
-    # the overlays' declared PYTHONPATH directories -- listed in
-    # AGENTS_PYTHONPATH, highest precedence first, for a process that builds
-    # its own path (an env.py, a launcher, command discovery).
-    lib_paths: "list[str]" = []
-    for p in reversed(get_lib_paths(scope)):
-        if str(p) not in lib_paths:
-            lib_paths.append(str(p))
-    if lib_paths:
-        if osenv.get("AGENTS_PYTHONPATH") != os.pathsep.join(lib_paths):
-            _apply({"AGENTS_PYTHONPATH": os.pathsep.join(lib_paths)})
-    elif "AGENTS_PYTHONPATH" in osenv:
-        _apply(EnvChanges(removed=["AGENTS_PYTHONPATH"]))
-    # A lib the scope venv's .pth already layers stays off PYTHONPATH: the
-    # venv's interpreter (AGENTS_PYTHON) imports it anyway, and no other
-    # Python in the session should.
-    layered = {
-        os.path.normcase(e) for e in (_pyvenv.read_state(venv).get("pth") or [] if venv else [])
-    }
-    store_libs = [str(p) for p in reversed(get_store_lib_paths(scope))]
-    on_path = [p for p in store_libs if os.path.normcase(p) not in layered]
-    current = osenv.get("PYTHONPATH") or ""
-    pythonpath = _prepended_path_var({"PYTHONPATH": current}, "PYTHONPATH", list(reversed(on_path)))
-    if pythonpath is not None and pythonpath != current:
-        if pythonpath:
-            _apply({"PYTHONPATH": pythonpath})
-        elif "PYTHONPATH" in osenv:
-            _apply(EnvChanges(removed=["PYTHONPATH"]))
+    _store_paths()
 
     # --- Contract B steps 2-5: the stores' main tier, after the overlays, so a
     # store's env files read and override what an overlay set. ---

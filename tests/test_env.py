@@ -234,6 +234,28 @@ def test_env_py_sees_prepended_path(tree):
     assert str(agents_dir / "bin") in env["SEEN_PATH"]
 
 
+def test_a_stores_pre_files_see_the_stores_bins_and_libs(tree):
+    """A store's pre.* files run with every store's bin on PATH and lib on
+    PYTHONPATH, as its main files do; the stores' dirs still lead the
+    overlays' in the result."""
+    agents_dir, project_root = tree
+    (agents_dir / "lib").mkdir()
+    (agents_dir / "lib" / "store_helper.py").write_text("VALUE = 'from-store-lib'\n", encoding="utf-8")
+    (agents_dir / "overlays" / "aa" / "bin" / "tool").write_text("", encoding="utf-8")
+    (agents_dir / "pre.env.py").write_text(
+        "import json, os, store_helper\n"
+        "print(json.dumps({'PRE_SEEN_LIB': store_helper.VALUE, 'PRE_SEEN_PATH': os.environ['PATH']}))\n",
+        encoding="utf-8",
+    )
+    env = _run(agents_dir, project_root, {"PATH": "/usr/bin"})
+    assert env["PRE_SEEN_LIB"] == "from-store-lib"
+    seen = env["PRE_SEEN_PATH"].split(os.pathsep)
+    assert str(agents_dir / "bin") in seen and str(project_root / ".agents" / "bin") in seen
+    parts = env["PATH"].split(os.pathsep)
+    assert (parts.index(str(project_root / ".agents" / "bin")) < parts.index(str(agents_dir / "bin"))
+            < parts.index(str(agents_dir / "overlays" / "aa" / "bin")) < parts.index("/usr/bin"))
+
+
 def test_bin_paths_excludes_project_root(tree):
     agents_dir, project_root = tree
     (project_root / "bin").mkdir()  # a project-ROOT bin must NOT be picked up

@@ -390,7 +390,9 @@ form and drop names that are not shell identifiers.
    since those libraries are already in `AGENTS_PYTHON`'s site-packages. It is
    never put on `PYTHONPATH`, where it would shadow a project's own copy.
 3. **The stores' `pre.*` files** — every store's `pre.env.py` / `pre.env` (and the
-   project's `pre.local.env`), each evaluated against everything before it.
+   project's `pre.local.env`), each evaluated against everything before it, with
+   the stores' `bin/` already on `PATH` and their `lib/` on `PYTHONPATH` (step 5,
+   applied here too), so a pre file can run a store's tool or import its module.
 4. **The overlays**, in priority order (AOS's order of application): each overlay's
    root `env` file (dotenv: `NAME=value` lines) and declared env files, its
    `env` values, each text value substituted (`${NAME}`) as it is set, its path additions -- by default `bin/` prepended to `PATH` and

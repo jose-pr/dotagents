@@ -693,7 +693,8 @@ taken out. First even before the `bin` dirs: cmd.exe and PowerShell try every
   `os.pathsep`-joined; removed when there are none.
 - Env files: the stores' only -- all `pre.env.py` / `pre.env` (+ the project
   store's `pre.local.env`), then all `env.py` / `env` (+ `local.env`), store order,
-  regular files only, each evaluated against everything before it. An overlay's
+  regular files only, each evaluated against everything before it; the stores'
+  `bin` / `lib` are on `PATH` / `PYTHONPATH` for both tiers. An overlay's
   files with these names mean nothing. The project root contributes none. A layer
   that raises is skipped with a warning.
 - Proxy: `AGENTS_PROXY` seeded when unset from `AGENTS_WEBFETCH_PROXY_URL`, then
