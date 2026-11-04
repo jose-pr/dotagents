@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Optional
 
+from dotagents import _activate
 from dotagents import _agents
 from dotagents import _env
 from dotagents import _overlays
@@ -322,12 +323,14 @@ def local_additions(scope: _scope.Scope) -> "list[tuple[Path, list[Path]]]":
     an overlay's ``kb/RUST.md``), in store order. An overlay file is upstream's
     copy, replaced by ``overlays sync``; the addition is where the user's own
     text lives. A store's root files (``AGENTS.md``, ``env.py``) never match:
-    only a file in a subdirectory counts."""
+    only a file in a subdirectory counts. The overlay's members are listed,
+    never read, so a file this user cannot read does not stop ``context``."""
     stores = list(scope.stores)
     out: "list[tuple[Path, list[Path]]]" = []
     for overlay in scope.overlays:
-        for path in overlay.files():
-            rel = path.relative_to(overlay.path)
+        for member in _activate.files(overlay):
+            rel = Path(*member.split("/"))
+            path = overlay.path / rel
             if path.suffix.lower() != ".md" or len(rel.parts) < 2 or rel.parts[0] == "skills":
                 continue
             found = [store / rel for store in stores if (store / rel).is_file()]

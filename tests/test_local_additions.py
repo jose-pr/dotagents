@@ -52,6 +52,22 @@ def test_additions_are_matched_by_relative_path_in_every_store(tmp_path):
     assert user_only == {"RUST.md", "STEP.md"}
 
 
+def test_an_unreadable_overlay_file_does_not_stop_context(tmp_path, monkeypatch):
+    """Listing the additions reads no overlay file: one this user cannot read
+    (a system store's, say) leaves `context` working and the listing whole."""
+    from dotagents import _aos
+
+    user, project = _world(tmp_path)
+
+    def unreadable(path):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(_aos, "file_digest", unreadable)
+    text = _context.assemble_context(_agents.CodexAgent(), _scope(user, project))
+    assert "## Local additions to overlay files" in text
+    assert str(user / "kb" / "RUST.md") in text
+
+
 def test_context_lists_them_and_json_carries_them(tmp_path):
     user, project = _world(tmp_path)
     codex = _agents.CodexAgent()
