@@ -188,8 +188,8 @@ For every active overlay `dotagents env` exports **`$<NAME>_OVERLAY_ROOT`** -- t
 overlay's installed directory (`NAME` is the overlay's name upper-cased, `-` → `_`:
 `private-sync` → `PRIVATE_SYNC_OVERLAY_ROOT`). Then, overlay by overlay in priority
 order, it applies the overlay's environment, each field's defaults first: its root
-`env` file (dotenv: literal `NAME=value` lines, no expansion) and the env files it
-declares, its `env` values, its path additions -- by default `bin/` prepended to
+`env` file (dotenv: `NAME=value` lines) and the env files it declares, its `env`
+values, its path additions -- by default `bin/` prepended to
 `PATH` and `lib/python/` prepended to `PYTHONPATH` when they hold a file (listed in
 `AGENTS_PYTHONPATH` too) -- and last its env scripts: one `env.<ext>`, the first in
 the order `.py`, `.js`, `.mjs`, `.cjs`, then `.ps1` on Windows, then `.bash`, `.sh`
@@ -197,7 +197,31 @@ elsewhere, that this machine can run, then those it declares. A bare `lib/` mean
 nothing: Python modules go in `lib/python/`. An entry naming a default's file or
 directory (a `paths` entry with `path = "bin"`, an env script `env.py`) replaces
 that default with its own settings, in the default's place; `[defaults]` turns one
-off. The launchers of its
+off.
+
+**Substitution.** A text value -- in `env`, an `aos` or `dotenv` env file, or an MCP
+server's `env` -- can use other variables: `CACHE = "${TOOL_HOME}/cache"`. Each value is
+substituted once, when it is set, against the environment as it stands: every earlier
+overlay's values, every overlay's root and state variables, this overlay's earlier env
+files and the earlier lines of the same `dotenv` file, and its own `AOS_OVERLAY_ROOT`,
+`AOS_OVERLAY_NAME` and `AOS_OVERLAY_STATE`. The entries of one mapping (`env`, one
+`aos` file) do not see each other. Only the braced form is read: `${NAME}`,
+`${NAME:-default}`, `${NAME-default}`, `${NAME:+alt}`, `${#NAME}`, `${NAME:1:3}`,
+`${NAME/pattern/text}`, `${NAME#prefix}`, `${NAME%suffix}`, `${NAME^^}`, `${NAME,,}`;
+`$$` writes a `$`, and `$NAME`, `$(...)` and backticks are characters. A name that is
+not set is an error unless the value gives a default, and a placeholder never reads a
+variable that holds a secret: either refuses the overlay's environment, and the report
+names the variable and the placeholder, never a value. A single-quoted `dotenv` value is
+kept as written:
+
+```text
+TOOL_HOME=${AOS_OVERLAY_ROOT}/tool
+TOOL_CACHE=${TOOL_CACHE_DIR:-${TOOL_HOME}/cache}
+TOOL_PROMPT='${USER}$ '
+```
+
+An overlay's own processes (its env scripts, setup, MCP servers) get its values as they
+were substituted for the session. The launchers of its
 declared python `scripts` (in `<venv>/overlays/` of the agents' venv) go first on
 `PATH`. An overlay with a state directory also gets `$<NAME>_OVERLAY_STATE`.
 
@@ -241,10 +265,10 @@ Keys dotagents applies:
 | `context` | Files added to the agent's context, after the default `CONTEXT.md`. |
 | `skills` | Skills added to the default ones (every `skills/<name>/SKILL.md`). |
 | `[defaults]` | `bin`, `lib`, `env`, `env_scripts`, `setup`, `context`, `skills`, `rules = false` each turn one default off; any other key is refused. |
-| `env`, `env_files`, `paths` | Environment values (a literal, a path in the overlay, a secret reference), env files (`aos` or `dotenv`), and further path additions (`prepend` / `append`, per OS). |
+| `env`, `env_files`, `paths` | Environment values (text with `${NAME}` placeholders, a path in the overlay, a secret reference), env files (`aos` or `dotenv`), and further path additions (`prepend` / `append`, per OS). |
 | `env_scripts` | Programs that compute variables (`interpreter`, `path`, `timeout`), after the default `env.<ext>`; one naming a root `env.<ext>` configures it; the store can turn them off. |
 | `runtime` | `os`, `commands`, `python` (version, `requirements` or `lock` + `lock_digest`), `node`: probed before an install. |
-| `setup` | Variants per OS (`interpreter`, `path`, `args`, `timeout`, `network`), tried before the default `setup.<ext>`; one naming a root `setup.<ext>` configures it. Run once per tree digest. |
+| `setup` | Variants per OS (`interpreter`, `path`, `args`, `timeout`, `network`), tried before the default `setup.<ext>`; one naming a root `setup.<ext>` configures it. Told its phase: `install`, `sync`, `remove`. |
 | `[scripts]` | Commands: `name = "path.py"` or `{ path, interpreter, os }`; dotagents launches python scripts. No file is a command by its name. |
 | `[harness.<id>]` | `context` and `skills = false` for one harness (`claude-code`, `codex`, `gemini-cli`, ...); `model` / `effort` are shown, not applied. |
 | `[mcp]` | MCP servers and the skills that expose them. See [MCP servers](#mcp-servers). |
@@ -417,19 +441,33 @@ args = ["--quiet"]
 network = true                 # reported as the weakening setup-network
 ```
 
-- It runs **once per tree digest and OS**: after `add`, and on `sync` only when the
-  overlay's files changed (`--rerun-setup` runs it again; `--no-setup` skips it).
-- It must be **idempotent** -- running it twice leaves what running it once did.
+- It is told its **phase**, as its first argument (before `args`) and as
+  `AOS_SETUP_PHASE`: `install` the first time it runs here, `sync` on every `add` or
+  `sync` after an install succeeded (whether or not the files changed), and `remove`
+  when `overlays remove` deletes the overlay, before its copy and state go. The record
+  of which setup succeeded is kept per overlay and OS. `--no-setup` skips it.
+- It must be **idempotent** -- running it twice leaves what running it once did -- and
+  treat a phase it does not know as success with nothing to do (exit 0):
+
+  ```sh
+  case "${1:-}" in
+    install|sync) ... ;;
+    remove) ;;    # nothing outside the state directory to undo
+    *) ;;         # a phase this script does not know
+  esac
+  ```
 - **Interpreter**: `python` is the scope venv's (`AGENTS_PYTHON`); the others are
   found on your `PATH` (never an overlay's), PowerShell as `pwsh -NoLogo -NoProfile
   -NonInteractive -File`, Git's bash and sh on Windows, never a `.cmd` or `.bat`.
   Arguments are passed as a list, never through a shell.
 - **cwd** is the installed overlay root. **Write only into `AOS_OVERLAY_STATE`**, a
-  directory outside the root that belongs to this overlay, digest and OS; the root
-  keeps its tree digest, and sessions find the state as `$<NAME>_OVERLAY_STATE`.
+  directory outside the root that belongs to this overlay on this OS, kept across
+  syncs (so `sync` updates in place; `install` starts it empty) and deleted on
+  removal; the root keeps its tree digest, and sessions find the state as
+  `$<NAME>_OVERLAY_STATE`.
 - **Environment**: your environment, every overlay's root variable, the path
   additions of the overlays it requires, its own declarations, `AOS_OVERLAY_ROOT`,
-  `AOS_OVERLAY_NAME`, `AOS_OVERLAY_STATE`, and `AGENTS_HOME` (the user store),
+  `AOS_OVERLAY_NAME`, `AOS_OVERLAY_STATE`, `AOS_SETUP_PHASE`, and `AGENTS_HOME` (the user store),
   `AGENTS_SCOPE_ROOT` (the store it is installed into), `AGENTS_SCOPE`. No other
   overlay's values or secrets.
 - **Time limit**: the variant's `timeout`, or `--setup-timeout`; a step still running
@@ -437,6 +475,8 @@ network = true                 # reported as the weakening setup-network
 - **Network**: dotagents cannot deny a process the network, so a variant that does not
   declare it is reported `network-not-enforced`.
 - A **non-zero exit fails the install** with a clear error, and a fresh `add` is
-  rolled back.
+  rolled back. An `install` or `sync` that fails on an overlay already installed
+  leaves it refused (not activated) until a setup of it succeeds; the previous copy is
+  not kept. A failed `remove` is reported and the overlay is removed anyway.
 
 See [Authoring an overlay](authoring.md) to build your own.

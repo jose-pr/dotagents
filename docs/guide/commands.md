@@ -213,7 +213,6 @@ dotagents overlays add python engineering  # install into the scope, publish ski
 dotagents overlays add '*' -g              # everything the repos offer (a store registry: all it names)
 dotagents overlays list                    # installed (discovered) + available from the repos
 dotagents overlays sync 'py*'              # refresh installed overlays matching a glob
-dotagents overlays sync --rerun-setup      # run setup again although the digest did not change
 dotagents overlays remove python           # delete the overlay dir, unpublish its skills, un-merge its rules
 dotagents overlays show python             # describe one: declarations, digest, pin, weakenings, source (--json)
 ```
@@ -392,8 +391,8 @@ form and drop names that are not shell identifiers.
 3. **The stores' `pre.*` files** — every store's `pre.env.py` / `pre.env` (and the
    project's `pre.local.env`), each evaluated against everything before it.
 4. **The overlays**, in priority order (AOS's order of application): each overlay's
-   root `env` file (dotenv: literal `NAME=value` lines) and declared env files, its
-   `env` values, its path additions -- by default `bin/` prepended to `PATH` and
+   root `env` file (dotenv: `NAME=value` lines) and declared env files, its
+   `env` values, each text value substituted (`${NAME}`) as it is set, its path additions -- by default `bin/` prepended to `PATH` and
    `lib/python/` prepended to `PYTHONPATH` -- then its env scripts: one `env.<ext>`
    it can run here (`.py`, `.js`, `.mjs`, `.cjs`, then `.ps1` on Windows, `.bash`,
    `.sh` elsewhere) and the ones it declares. An overlay's `pre.env*` and `local.env` mean nothing. An

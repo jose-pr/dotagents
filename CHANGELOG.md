@@ -24,20 +24,25 @@ dotagents implements the [Agent Overlay Specification](https://boriken-dev.githu
   they hold a file.
 - A `bin/<name>.py` no longer gets a launcher by its name: a command is a
   `[scripts]` entry (`curl = "bin/curl.py"`). `bin/` itself stays on `PATH`.
-- An overlay's `setup.py` no longer runs on every `add` and `sync`. Its setup is the
-  first `[[setup]]` variant it declares for the OS, else one `setup.<ext>` at its
-  root -- the first, in the order `.py`, `.js`, `.mjs`, `.cjs`, then `.ps1` on
-  Windows, then `.bash`, `.sh` elsewhere, that this machine can run -- taken to
-  need the network. It runs once per tree digest, in the overlay's own
+- An overlay's setup is the first `[[setup]]` variant it declares for the OS, else
+  one `setup.<ext>` at its root -- the first, in the order `.py`, `.js`, `.mjs`,
+  `.cjs`, then `.ps1` on Windows, then `.bash`, `.sh` elsewhere, that this machine
+  can run -- taken to need the network. It is told its phase as its first argument
+  and `AOS_SETUP_PHASE`: `install` on the first `add`, `sync` on every `add` or
+  `sync` after one succeeded, and `remove` when `overlays remove` deletes the
+  overlay (new: setup used to run with no argument, and never on removal). A script
+  must treat a phase it does not know as success. It runs in the overlay's own
   environment, with `AOS_OVERLAY_ROOT`, `AOS_OVERLAY_NAME` and `AOS_OVERLAY_STATE`
-  (where it writes; sessions see it as `<NAME>_OVERLAY_STATE`).
-  `AGENTS_OVERLAY_DIR` is gone (it is `AOS_OVERLAY_ROOT`). `setup_timeout` is now a
-  variant's `timeout`. `--rerun-setup` runs it again.
+  (where it writes, kept across syncs and deleted on removal; sessions see it as
+  `<NAME>_OVERLAY_STATE`). An `install` or `sync` that fails keeps the overlay
+  from being activated until a setup of it succeeds; a failed `remove` is reported
+  and the removal goes ahead. `AGENTS_OVERLAY_DIR` is gone (it is
+  `AOS_OVERLAY_ROOT`). `setup_timeout` is now a variant's `timeout`.
 - An overlay's `env.py` runs as an AOS env script: one `env.<ext>`, chosen in the
   same order, with the overlay's own environment and no arguments, a 60-second
   timeout, printing one JSON object (over one or several lines) or one object per
-  line. An overlay's root `env` file is read as a dotenv file -- literal
-  `NAME=value` lines, no shell -- not sourced by bash. An overlay's `pre.env.py`,
+  line. An overlay's root `env` file is read as a dotenv file -- `NAME=value`
+  lines with `${NAME}` substituted, no shell -- not sourced by bash. An overlay's `pre.env.py`,
   `pre.env` and `local.env` mean nothing; the stores keep all of theirs. A store's
   `pre.*` files run before every overlay, its `env.py` / `env` / `local.env` after.
 - An overlay's `rules/<name>.md` files are always-on rules files by default,
@@ -78,6 +83,15 @@ dotagents implements the [Agent Overlay Specification](https://boriken-dev.githu
   place; `[defaults]` turns one off (`bin`, `lib`, `env`, `env_scripts`, `setup`,
   `context`, `skills`, `rules = false`; any other key is refused). Env values can be
   secret references, resolved only when granted.
+- Substitution in env values: a text value in `env`, an `aos` or `dotenv` env file
+  or an MCP server's `env` reads other variables as `${NAME}` and its operators
+  (`${NAME:-default}`, `${NAME:+alt}`, `${#NAME}`, slices, replacements, trims,
+  case), `$$` for a `$`. Each value is substituted once, when it is set, in the order
+  of application: a `dotenv` file line by line, one mapping's entries against the
+  environment from before it, with the overlay's own `AOS_OVERLAY_ROOT`,
+  `AOS_OVERLAY_NAME` and `AOS_OVERLAY_STATE` readable. An undefined name without a
+  default, or a placeholder reading a variable that holds a secret, refuses the
+  overlay's environment; a single-quoted `dotenv` value is kept as written.
 - Pins, grants and settings in a store's registry document (`dotagents.toml`,
   `overlays` form): `[overlays.<name>] pin = "sha256:..."` refuses any other tree
   digest, at install and at every activation; `grants` lets an overlay read a host
@@ -106,10 +120,13 @@ dotagents implements the [Agent Overlay Specification](https://boriken-dev.githu
    `[[runtime.python]] requirements = "requirements.txt"`, a `bin/<name>.py` command
    as `[scripts] <name> = "bin/<name>.py"`, `setup_timeout` as a `[[setup]]`
    entry's `timeout`. Make a root `env` file plain `NAME=value` lines (or an
-   `env.py`), and have setup write only into `$AOS_OVERLAY_STATE`.
+   `env.py`); write a literal `${` in one as `$${`, or single-quote the value. Have
+   setup write only into `$AOS_OVERLAY_STATE`, and accept its phase (`install`,
+   `sync`, `remove`) as its first argument, exiting 0 for one it does not know.
 2. Install the new dotagents, then `dotagents overlays sync -g` (and in each project
    with overlays, `dotagents overlays sync`): it installs the `overlay.cfg` overlays,
-   moves the install records beside them, and runs each setup once.
+   moves the install records beside them, and runs each setup in its `install`
+   phase (no setup has a record yet).
 3. Optionally pin what you trust: `dotagents overlays show <name>` prints its digest;
    put it in the store's `dotagents.toml` as `[overlays.<name>] pin = "..."`.
 

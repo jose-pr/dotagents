@@ -182,12 +182,17 @@ store's shared `skills/` so every agent sees the same skills.
 declares for this OS (interpreter, args, timeout, network), else one `setup.<ext>` at its
 root, the first this machine can run (`.py`, `.js`, `.mjs`, `.cjs`, then `.ps1` on
 Windows, `.bash`, `.sh` elsewhere), taken to need the network. dotagents runs it
-after `add`/`sync` copies the overlay in, **once per tree digest**; `--rerun-setup` runs it
-again, `--no-setup` skips it. The contract for authors:
+after `add`/`sync` copies the overlay in and before `remove` deletes it, telling it the
+**phase** as its first argument and `$AOS_SETUP_PHASE`: `install` the first time, `sync`
+on every add or sync after that, `remove` on removal. `--no-setup` skips it. The
+contract for authors:
 
-- **Idempotent** — running it twice leaves what running it once did.
+- **Idempotent**, and a phase it does not know is success with nothing to do (exit 0).
+- An `install` or `sync` that fails keeps the overlay from being activated until a
+  setup succeeds; a `remove` that fails is reported and the removal goes ahead.
 - **cwd** is the installed overlay root; **write only into `$AOS_OVERLAY_STATE`**, a
-  directory outside the root that sessions see as `$<NAME>_OVERLAY_STATE`.
+  directory outside the root, kept across syncs and deleted on removal, that sessions
+  see as `$<NAME>_OVERLAY_STATE`.
 - **Env** is your environment, every overlay's root variable, the overlay's own
   declarations, `AOS_OVERLAY_ROOT` / `AOS_OVERLAY_NAME` / `AOS_OVERLAY_STATE`, and
   `AGENTS_HOME` (the user store — never hardcode `~/.agents`), `AGENTS_SCOPE_ROOT`,

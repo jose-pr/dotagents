@@ -139,7 +139,9 @@ means the current directory). The net overlay's `bin/curl.py` does this.
 
 ## Environment
 
-An `env` file at the root (`NAME=value` lines, optionally `export `, literal values)
+An `env` file at the root (`NAME=value` lines, optionally `export `; `${NAME}` is
+substituted from the lines above and the environment, a single-quoted value is kept as
+written)
 and an `env.py` (or `.js`, `.mjs`, `.cjs`, `.ps1` on Windows, `.bash`, `.sh` elsewhere: the first this machine can run) set your
 overlay's variables by default; `[defaults] env = false` turns off the `env` file
 and `env_scripts = false` the script. The script prints one JSON object (across
@@ -165,8 +167,11 @@ A `setup.py` (or `.js`, `.mjs`, `.cjs`, `.ps1` on Windows, `.bash`, `.sh` elsewh
 variants per OS with `[[setup]]`. See the contract in
 [Overlays → Setup](overlays.md#setup). The essentials:
 
-- idempotent; it runs once per tree digest of your overlay;
-- cwd is your installed overlay root; write only into `$AOS_OVERLAY_STATE`;
+- idempotent; it gets the phase as its first argument and `$AOS_SETUP_PHASE`:
+  `install` the first time, `sync` on every add or sync after that, `remove` before
+  the overlay is deleted; a phase it does not know is success (exit 0);
+- cwd is your installed overlay root; write only into `$AOS_OVERLAY_STATE`, kept
+  across syncs;
 - the environment is the user's, the overlays' root variables, your own declarations,
   `AOS_OVERLAY_ROOT` / `_NAME` / `_STATE`, the user store (`AGENTS_HOME`) and the
   store you are installed into (`AGENTS_SCOPE_ROOT`, `AGENTS_SCOPE`);
