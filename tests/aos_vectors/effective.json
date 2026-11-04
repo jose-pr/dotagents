@@ -1,5 +1,5 @@
 {
-  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (env file contents), providers, env_scripts_enabled, enforces_network. 'expect' gives the resulting environment, the selected setup and runtime variants, what a probe needs, and the weakenings as [id, subject]; or the refusal.",
+  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (the overlay's files by relative path, with the text of those read as env files; the fields a manifest does not write take their defaults from them), providers, interpreters (the interpreters the consumer can run here; absent, python, node, powershell, bash and sh), env_scripts_enabled (the consumer's policy; absent, true), enforces_network. 'expect' gives the resulting environment, the selected setup and runtime variants, what a probe needs, and the weakenings as [id, subject]; or the refusal.",
   "spec": "spec/v0/environment.md#order-of-application",
   "cases": [
     {
@@ -1178,7 +1178,7 @@
     },
     {
       "id": "env-scripts-disabled",
-      "description": "Env scripts run only when enabled; disabled, nothing is reported or needed.",
+      "description": "A consumer whose own policy turns env scripts off runs none; nothing is reported or needed.",
       "manifest": {
         "env_scripts": [
           {
@@ -1191,7 +1191,8 @@
         "os": "linux",
         "root": "/srv/ov/docs-tools",
         "identity": "docs-tools",
-        "pinned": true
+        "pinned": true,
+        "env_scripts_enabled": false
       },
       "expect": {
         "ungranted": [],
@@ -1477,6 +1478,1524 @@
           "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
           "A": "x",
           "B": "/srv/ov/docs-tools/p"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-bin-only",
+      "description": "No manifest and a bin/: bin/ goes first on PATH, and nothing else happens.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "bin/todo-scan": "",
+          "README.md": ""
+        },
+        "base_env": {
+          "PATH": "/usr/bin:/bin"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/srv/ov/docs-tools/bin:/usr/bin:/bin",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-paths",
+      "description": "bin/ prepended to PATH, then lib/python/ prepended to PYTHONPATH.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "bin/tool": "",
+          "lib/python/pkg/__init__.py": ""
+        },
+        "base_env": {
+          "PATH": "/usr/bin",
+          "PYTHONPATH": "/home/u/src"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/srv/ov/docs-tools/bin:/usr/bin",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python:/home/u/src",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-paths-windows",
+      "description": "The same on Windows: the existing Path keeps its name.",
+      "manifest": {},
+      "facts": {
+        "os": "windows",
+        "root": "C:\\ov\\docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "bin/tool.ps1": "",
+          "lib/python/m.py": ""
+        },
+        "base_env": {
+          "Path": "C:\\Windows"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "Path": "C:\\ov\\docs-tools\\bin;C:\\Windows",
+          "DOCS_TOOLS_OVERLAY_ROOT": "C:\\ov\\docs-tools",
+          "PYTHONPATH": "C:\\ov\\docs-tools\\lib\\python"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-paths-absent",
+      "description": "Not present: no file under bin/ or lib/python/ (a file named bin.txt, an excluded name, Bin/ in another case, a bare lib/).",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "bin.txt": "",
+          "lib/python/__pycache__/m.cpython-312.pyc": "",
+          "Bin/tool": "",
+          "lib/m.py": ""
+        },
+        "base_env": {
+          "PATH": "/usr/bin"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/usr/bin",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-paths-off",
+      "description": "[defaults] bin = false and lib = false turn both off.",
+      "manifest": {
+        "defaults": {
+          "bin": false,
+          "lib": false
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "bin/tool": "",
+          "lib/python/m.py": ""
+        },
+        "base_env": {
+          "PATH": "/usr/bin"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/usr/bin",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-paths-bin-off",
+      "description": "Only bin off: lib/python/ still goes on PYTHONPATH.",
+      "manifest": {
+        "defaults": {
+          "bin": false
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "bin/tool": "",
+          "lib/python/m.py": ""
+        },
+        "base_env": {
+          "PATH": "/usr/bin"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/usr/bin",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-paths-declared",
+      "description": "Declared entries add to the defaults: bin/ stays first on PATH; the entry naming lib/python replaces that default and appends it, once; MANPATH is added.",
+      "manifest": {
+        "paths": [
+          {
+            "variable": "PYTHONPATH",
+            "path": "lib/python",
+            "position": "append"
+          },
+          {
+            "variable": "MANPATH",
+            "path": "man",
+            "position": "append"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "bin/tool": "",
+          "lib/python/m.py": "",
+          "man/tool.1": ""
+        },
+        "base_env": {
+          "PATH": "/usr/bin",
+          "PYTHONPATH": "/home/u/src"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/srv/ov/docs-tools/bin:/usr/bin",
+          "PYTHONPATH": "/home/u/src:/srv/ov/docs-tools/lib/python",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "MANPATH": "/srv/ov/docs-tools/man"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-paths-declared-os",
+      "description": "A declared entry naming bin replaces the default even where its os does not apply.",
+      "manifest": {
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "bin",
+            "os": [
+              "windows"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "bin/tool": ""
+        },
+        "base_env": {
+          "PATH": "/usr/bin"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/usr/bin",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-paths-env-conflict",
+      "description": "A bin/ under the default: env cannot also set PATH.",
+      "manifest": {
+        "env": {
+          "PATH": "/opt/bin"
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "bin/tool": ""
+        }
+      },
+      "expect": {
+        "error": "env-path-conflict",
+        "subject": "PATH"
+      }
+    },
+    {
+      "id": "default-paths-env-bin-off",
+      "description": "With bin off, env may set PATH (a sensitive variable, reported).",
+      "manifest": {
+        "env": {
+          "PATH": "/opt/bin"
+        },
+        "defaults": {
+          "bin": false
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "bin/tool": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PATH": "/opt/bin"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-sensitive",
+            "PATH"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-file",
+      "description": "A root file named env is read as dotenv: literal values, nothing expanded or run.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env": "# defaults\nexport MODE=read-only\nBANNER=\"Docs: read only\"\nWHO=$(id -u)\nHOME_COPY=${HOME}\n"
+        },
+        "base_env": {
+          "HOME": "/home/u"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "HOME": "/home/u",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "MODE": "read-only",
+          "BANNER": "Docs: read only",
+          "WHO": "$(id -u)",
+          "HOME_COPY": "${HOME}"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-env-file-invalid",
+      "description": "The default env file must read as dotenv.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env": "MODE=read-only\nnot a line\n"
+        }
+      },
+      "expect": {
+        "error": "invalid-env-file",
+        "subject": "env"
+      }
+    },
+    {
+      "id": "default-env-file-conflict",
+      "description": "The default env file cannot set a variable a default path addition names.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env": "PATH=/tmp\n",
+          "bin/tool": ""
+        }
+      },
+      "expect": {
+        "error": "env-path-conflict",
+        "subject": "PATH"
+      }
+    },
+    {
+      "id": "default-env-file-off",
+      "description": "[defaults] env = false turns it off.",
+      "manifest": {
+        "defaults": {
+          "env": false
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env": "MODE=x\n"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-env-file-declared",
+      "description": "A declared env file is read after the default one.",
+      "manifest": {
+        "env_files": [
+          "conf/env.cfg"
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env": "A=from-env\nB=from-env\n",
+          "conf/env.cfg": "B = \"from-cfg\"\n"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "A": "from-env",
+          "B": "from-cfg"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-env-file-replaced",
+      "description": "A declared entry naming env replaces the default entry: here it applies on Windows only.",
+      "manifest": {
+        "env_files": [
+          {
+            "path": "env",
+            "format": "dotenv",
+            "os": [
+              "windows"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env": "A=x\n"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-env-script-first",
+      "description": "Several env.<ext>: the first in the order that can run, here env.py; one runs, reported.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": "",
+          "env.sh": "",
+          "env.ps1": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env.py",
+            "args": [],
+            "timeout": 60
+          }
+        ],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-script",
+            "env.py"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-script-by-runtime",
+      "description": "No Python: the next that applies on Linux and has its interpreter, env.sh (env.ps1 applies on Windows only).",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": "",
+          "env.ps1": "",
+          "env.sh": ""
+        },
+        "interpreters": [
+          "sh",
+          "bash",
+          "powershell"
+        ]
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "sh",
+            "path": "env.sh",
+            "args": [],
+            "timeout": 60
+          }
+        ],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-script",
+            "env.sh"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-script-windows",
+      "description": "On Windows a shell script does not apply: env.ps1.",
+      "manifest": {},
+      "facts": {
+        "os": "windows",
+        "root": "C:\\ov\\docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.sh": "",
+          "env.ps1": "",
+          "env.bash": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "C:\\ov\\docs-tools"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "powershell",
+            "path": "env.ps1",
+            "args": [],
+            "timeout": 60
+          }
+        ],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "powershell"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-script",
+            "env.ps1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-script-node",
+      "description": "Node.js before the shells; .js before .mjs.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.mjs": "",
+          "env.js": "",
+          "env.sh": ""
+        },
+        "interpreters": [
+          "node",
+          "sh"
+        ]
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "node",
+            "path": "env.js",
+            "args": [],
+            "timeout": 60
+          }
+        ],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "node"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-script",
+            "env.js"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-script-none-runnable",
+      "description": "Present but none can run here: nothing runs, each file is reported, and the environment is still built.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.ps1": "",
+          "env.bash": "",
+          "bin/tool": ""
+        },
+        "interpreters": [
+          "python",
+          "sh"
+        ],
+        "base_env": {
+          "PATH": "/usr/bin"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/srv/ov/docs-tools/bin:/usr/bin",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "script-not-run",
+            "env.bash"
+          ],
+          [
+            "script-not-run",
+            "env.ps1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-script-off",
+      "description": "[defaults] env_scripts = false turns it off.",
+      "manifest": {
+        "defaults": {
+          "env_scripts": false
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-env-script-declared",
+      "description": "A declared env script runs after the default one.",
+      "manifest": {
+        "env_scripts": [
+          {
+            "interpreter": "sh",
+            "path": "env/compute.sh"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": "",
+          "env/compute.sh": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env.py",
+            "args": [],
+            "timeout": 60
+          },
+          {
+            "interpreter": "sh",
+            "path": "env/compute.sh",
+            "args": [],
+            "timeout": 60
+          }
+        ],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "python",
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-script",
+            "env.py"
+          ],
+          [
+            "env-script",
+            "env/compute.sh"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-script-configured",
+      "description": "A declared entry naming env.py replaces the default entry with its own arguments and timeout; it runs once.",
+      "manifest": {
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env.py",
+            "args": [
+              "--quiet"
+            ],
+            "timeout": 5
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": "",
+          "env.sh": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env.py",
+            "args": [
+              "--quiet"
+            ],
+            "timeout": 5
+          }
+        ],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-script",
+            "env.py"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-script-configured-fallback",
+      "description": "The configured env.py keeps its place in the order: without Python, env.sh is chosen and the configured entry does not run.",
+      "manifest": {
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env.py",
+            "timeout": 5
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": "",
+          "env.sh": ""
+        },
+        "interpreters": [
+          "sh"
+        ]
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "sh",
+            "path": "env.sh",
+            "args": [],
+            "timeout": 60
+          }
+        ],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-script",
+            "env.sh"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-script-declared-off",
+      "description": "With the default off, a declared env.sh is an ordinary declared script.",
+      "manifest": {
+        "defaults": {
+          "env_scripts": false
+        },
+        "env_scripts": [
+          {
+            "interpreter": "sh",
+            "path": "env.sh"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": "",
+          "env.sh": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "sh",
+            "path": "env.sh",
+            "args": [],
+            "timeout": 60
+          }
+        ],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-script",
+            "env.sh"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-script-consumer-off",
+      "description": "A consumer whose policy turns env scripts off runs no default one either.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": ""
+        },
+        "env_scripts_enabled": false
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-setup",
+      "description": "setup.<ext> chosen like an env script; a default setup needs the network (reported) and has the 300-second timeout.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.ps1": "",
+          "setup.sh": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-setup-windows",
+      "description": "On Windows, setup.ps1.",
+      "manifest": {},
+      "facts": {
+        "os": "windows",
+        "root": "C:\\ov\\docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.ps1": "",
+          "setup.sh": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "C:\\ov\\docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "powershell",
+          "path": "setup.ps1",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "powershell"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.ps1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-setup-none-runnable",
+      "description": "Present but none can run here: no setup, each file reported.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.ps1": "",
+          "setup.py": ""
+        },
+        "interpreters": [
+          "sh"
+        ]
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "script-not-run",
+            "setup.ps1"
+          ],
+          [
+            "script-not-run",
+            "setup.py"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-setup-off",
+      "description": "[defaults] setup = false turns it off.",
+      "manifest": {
+        "defaults": {
+          "setup": false
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.py": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-setup-configured",
+      "description": "To deny the default setup the network, declare an entry naming it: network then defaults to false.",
+      "manifest": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "setup.sh"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": false
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-setup-configured-order",
+      "description": "Configuring setup.sh does not move it up the order: setup.py, still a default, is chosen and needs the network.",
+      "manifest": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "setup.sh"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": "",
+          "setup.py": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "python",
+          "path": "setup.py",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.py"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-setup-declared-first",
+      "description": "A declared variant that applies comes before the default setup.",
+      "manifest": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "tools/prepare.sh",
+            "os": [
+              "unix"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.py": "",
+          "tools/prepare.sh": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "tools/prepare.sh",
+          "args": [],
+          "timeout": 300,
+          "network": false
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "default-setup-declared-fallback",
+      "description": "No declared variant applies on Windows: the default setup is the last variant.",
+      "manifest": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "tools/prepare.sh",
+            "os": [
+              "unix"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "os": "windows",
+        "root": "C:\\ov\\docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.py": "",
+          "tools/prepare.sh": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "C:\\ov\\docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "python",
+          "path": "setup.py",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.py"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-other-names",
+      "description": "No other name has a default: requirements.txt, pre.env, pre.env.py, local.env, cmds/, an env/ directory, setup/setup.sh, env.cfg, a bare lib/; bin/tool.py is a program on PATH, not a command.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "requirements.txt": "",
+          "pre.env": "",
+          "pre.env.py": "",
+          "local.env": "A=1\n",
+          "cmds/x.py": "",
+          "env/a.env": "A=1\n",
+          "setup/setup.sh": "",
+          "env.cfg": "A = 'x'\n",
+          "lib/m.py": "",
+          "bin/tool.py": ""
+        },
+        "base_env": {
+          "PATH": "/usr/bin"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/srv/ov/docs-tools/bin:/usr/bin",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
         },
         "env_scripts": [],
         "setup": null,

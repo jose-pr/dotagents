@@ -1,5 +1,5 @@
 {
-  "description": "Resolution and composition. 'overlays' maps identity to manifest; 'files' lists an overlay's files where skills are discovered. 'expect' gives the visiting order, the composition order and what the active overlays contribute, or the cycle; with 'facts', the environment they build together.",
+  "description": "Resolution and composition. 'overlays' maps identity to manifest; 'files' lists an overlay's files, from which the fields a manifest does not write take their defaults (skills, rules, context, paths). 'expect' gives the visiting order, the composition order and what the active overlays contribute, or the cycle; with 'facts', the environment they build together.",
   "spec": "spec/v0/composition.md",
   "cases": [
     {
@@ -305,7 +305,7 @@
     },
     {
       "id": "skills",
-      "description": "Declared skills, discovered skills, and collisions (names compare without ASCII case) won by the overlay later in order.",
+      "description": "Declared and discovered skills together (an empty list adds nothing), and collisions (names compare without ASCII case) won by the overlay later in order.",
       "overlays": {
         "base": {
           "priority": 100
@@ -362,12 +362,272 @@
         "context": [],
         "skills": {
           "Lint": "docs",
-          "search": "docs"
+          "search": "docs",
+          "hidden": "extra"
         },
         "skill_collisions": [
           "lint",
           "search"
         ]
+      }
+    },
+    {
+      "id": "defaults-contributions",
+      "description": "Fields not written take their defaults from the files: rules/<name>.md directly in rules/ by path bytes, the root CONTEXT.md, skills/<name>/SKILL.md with a skill name; other names, other cases and excluded files are not conventions.",
+      "overlays": {
+        "base": {
+          "priority": 100
+        },
+        "team": {
+          "priority": 600
+        }
+      },
+      "requested": [
+        "team",
+        "base"
+      ],
+      "files": {
+        "base": [
+          "rules/b.md",
+          "rules/a.md",
+          "rules/README.txt",
+          "rules/notes/x.md",
+          "rules/C.MD",
+          "CONTEXT.md",
+          "kb/CONTEXT.md",
+          "skills/lint/SKILL.md",
+          "skills/.hidden/SKILL.md",
+          "skills/README.md",
+          "skills/fmt/skill.md",
+          "skills/__pycache__/SKILL.md"
+        ],
+        "team": [
+          "context.md",
+          "rules/team.md",
+          "skills/review/SKILL.md",
+          "skills/review/scripts/run.py"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "team",
+          "base"
+        ],
+        "active": [
+          "base",
+          "team"
+        ],
+        "missing": [],
+        "root_variables": {
+          "base": "BASE_OVERLAY_ROOT",
+          "team": "TEAM_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [
+          [
+            "base",
+            "rules/a.md"
+          ],
+          [
+            "base",
+            "rules/b.md"
+          ],
+          [
+            "team",
+            "rules/team.md"
+          ]
+        ],
+        "context": [
+          [
+            "base",
+            "CONTEXT.md"
+          ]
+        ],
+        "skills": {
+          "lint": "base",
+          "review": "team"
+        },
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "defaults-declared",
+      "description": "Declared entries add to the defaults, after them; one naming the same file as a default entry replaces it, at its declared place, so nothing repeats.",
+      "overlays": {
+        "base": {
+          "rules": [
+            "kb/always.md",
+            "rules/a.md"
+          ],
+          "context": [
+            "kb/glossary.md",
+            "CONTEXT.md"
+          ],
+          "skills": [
+            "lint"
+          ]
+        }
+      },
+      "requested": [
+        "base"
+      ],
+      "files": {
+        "base": [
+          "rules/a.md",
+          "rules/b.md",
+          "kb/always.md",
+          "CONTEXT.md",
+          "kb/glossary.md",
+          "skills/lint/SKILL.md",
+          "skills/fmt/SKILL.md"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "base"
+        ],
+        "active": [
+          "base"
+        ],
+        "missing": [],
+        "root_variables": {
+          "base": "BASE_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [
+          [
+            "base",
+            "rules/b.md"
+          ],
+          [
+            "base",
+            "kb/always.md"
+          ],
+          [
+            "base",
+            "rules/a.md"
+          ]
+        ],
+        "context": [
+          [
+            "base",
+            "kb/glossary.md"
+          ],
+          [
+            "base",
+            "CONTEXT.md"
+          ]
+        ],
+        "skills": {
+          "fmt": "base",
+          "lint": "base"
+        },
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "defaults-off",
+      "description": "[defaults] turns a default off; what is declared still applies, so skills = false with a list offers exactly the list.",
+      "overlays": {
+        "base": {
+          "defaults": {
+            "rules": false,
+            "context": false,
+            "skills": false
+          },
+          "skills": [
+            "lint"
+          ],
+          "context": [
+            "kb/glossary.md"
+          ]
+        }
+      },
+      "requested": [
+        "base"
+      ],
+      "files": {
+        "base": [
+          "rules/a.md",
+          "CONTEXT.md",
+          "kb/glossary.md",
+          "skills/lint/SKILL.md",
+          "skills/fmt/SKILL.md"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "base"
+        ],
+        "active": [
+          "base"
+        ],
+        "missing": [],
+        "root_variables": {
+          "base": "BASE_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [
+          [
+            "base",
+            "kb/glossary.md"
+          ]
+        ],
+        "skills": {
+          "lint": "base"
+        },
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "defaults-empty-lists",
+      "description": "An empty list declares nothing: it turns no default off.",
+      "overlays": {
+        "base": {
+          "rules": [],
+          "context": [],
+          "skills": []
+        }
+      },
+      "requested": [
+        "base"
+      ],
+      "files": {
+        "base": [
+          "rules/a.md",
+          "CONTEXT.md",
+          "skills/lint/SKILL.md"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "base"
+        ],
+        "active": [
+          "base"
+        ],
+        "missing": [],
+        "root_variables": {
+          "base": "BASE_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [
+          [
+            "base",
+            "rules/a.md"
+          ]
+        ],
+        "context": [
+          [
+            "base",
+            "CONTEXT.md"
+          ]
+        ],
+        "skills": {
+          "lint": "base"
+        },
+        "skill_collisions": []
       }
     },
     {
@@ -491,6 +751,88 @@
           "LOW_OVERLAY_ROOT": "C:\\ov\\low",
           "HIGH_OVERLAY_ROOT": "C:\\ov\\high",
           "MODE": "high"
+        }
+      }
+    },
+    {
+      "id": "default-paths-across-overlays",
+      "description": "Each overlay's bin/ and lib/python/ are prepended in composition order, so the higher priority is found first; declaring another directory keeps them; [defaults] turns them off.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        },
+        "high": {
+          "priority": 900
+        },
+        "manpages": {
+          "priority": 500,
+          "paths": [
+            {
+              "variable": "MANPATH",
+              "path": "man"
+            }
+          ]
+        },
+        "quiet": {
+          "priority": 600,
+          "defaults": {
+            "bin": false,
+            "lib": false
+          }
+        }
+      },
+      "requested": [
+        "high",
+        "low",
+        "manpages",
+        "quiet"
+      ],
+      "files": {
+        "low": [
+          "bin/a",
+          "lib/python/low.py"
+        ],
+        "high": [
+          "bin/b",
+          "lib/python/pkg/__init__.py"
+        ],
+        "manpages": [
+          "bin/c",
+          "lib/plain.py",
+          "man/c.1"
+        ],
+        "quiet": [
+          "bin/d",
+          "lib/python/q.py"
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "base_env": {
+          "PATH": "/usr/bin:/bin"
+        },
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high",
+          "manpages": "/ov/manpages",
+          "quiet": "/ov/quiet"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "manpages",
+          "quiet",
+          "high"
+        ],
+        "env": {
+          "PATH": "/ov/high/bin:/ov/manpages/bin:/ov/low/bin:/usr/bin:/bin",
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "MANPAGES_OVERLAY_ROOT": "/ov/manpages",
+          "QUIET_OVERLAY_ROOT": "/ov/quiet",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "PYTHONPATH": "/ov/high/lib/python:/ov/low/lib/python",
+          "MANPATH": "/ov/manpages/man"
         }
       }
     }

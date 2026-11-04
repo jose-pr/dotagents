@@ -83,20 +83,36 @@ def test_bin_and_lib_are_path_additions_by_default(store):
     """No manifest needed for the basics: an existing bin/ is prepended to
     PATH, an existing lib/ appended to PYTHONPATH; `[defaults]` turns either off."""
     plain = store / "overlays" / "plain"
-    for rel in ("bin", "lib"):
-        (plain / rel).mkdir(parents=True)
+    _write(plain / "bin" / "tool", "#!/bin/sh\n")
+    _write(plain / "lib" / "python" / "plain_mod.py", "")
     quiet = store / "overlays" / "quiet"
-    for rel in ("bin", "lib"):
-        (quiet / rel).mkdir(parents=True)
+    _write(quiet / "bin" / "tool", "#!/bin/sh\n")
+    _write(quiet / "lib" / "python" / "quiet_mod.py", "")
     _write(quiet / "overlay.cfg", "[defaults]\nbin = false\nlib = false\n")
-    _write(store / "overlays" / "nolib" / "overlay.cfg", "name = \"nolib\"\n")  # no dirs: nothing added
+    bare = store / "overlays" / "bare"
+    (bare / "bin").mkdir(parents=True)  # empty: not present
+    _write(bare / "lib" / "bare_mod.py", "")  # a bare lib/ means nothing
     env = _env_of(store, {"PATH": "/usr/bin", "PYTHONPATH": "/site"})
     path, pythonpath = env["PATH"].split(os.pathsep), env["PYTHONPATH"].split(os.pathsep)
     assert path.index(str(plain / "bin")) < path.index("/usr/bin")
-    assert pythonpath == ["/site", str(plain / "lib")]
-    assert str(quiet / "bin") not in path and str(quiet / "lib") not in pythonpath
-    assert not any("nolib" in entry for entry in path + pythonpath)
+    assert pythonpath == [str(plain / "lib" / "python"), "/site"]
+    assert str(quiet / "bin") not in path and str(quiet / "lib" / "python") not in pythonpath
+    assert not any("bare" in entry for entry in path + pythonpath)
     assert _aos.validate({"defaults": {"bin": "no"}}) == [("type", "/defaults/bin")]
+    assert _aos.validate({"defaults": {"libs": False}}) == [("unknown-key", "/defaults/libs")]
+
+
+def test_a_declared_entry_naming_a_default_replaces_it(store):
+    ov = store / "overlays" / "decl"
+    _write(ov / "bin" / "tool", "#!/bin/sh\n")
+    _write(ov / "lib" / "python" / "decl_mod.py", "")
+    _write(ov / "man" / "tool.1", "")
+    _write(ov / "overlay.cfg", '[[paths]]\nvariable = "PYTHONPATH"\npath = "lib/python"\nposition = "append"\n'
+                               '[[paths]]\nvariable = "MANPATH"\npath = "man"\n')
+    env = _env_of(store, {"PATH": "/usr/bin", "PYTHONPATH": "/site"})
+    assert str(ov / "bin") in env["PATH"].split(os.pathsep), "declaring another directory keeps bin/"
+    assert env["PYTHONPATH"].split(os.pathsep) == ["/site", str(ov / "lib" / "python")]
+    assert env["MANPATH"] == str(ov / "man")
 
 
 def test_a_reference_needs_a_grant_and_is_reported(store, caplog):
@@ -179,7 +195,32 @@ def test_the_default_env_file_and_env_script(store, caplog):
     assert "plain[unpinned, env-script env.py]" in caplog.text
     _write(ov / "overlay.cfg", "[defaults]\nenv = false\n")
     env = _env_of(store)
-    assert "FROM_DOTENV" not in env and "FROM_SCRIPT" not in env
+    assert "FROM_DOTENV" not in env and env["FROM_SCRIPT"] == "1", "env turns off only the dotenv file"
+    _write(ov / "overlay.cfg", "[defaults]\nenv_scripts = false\n")
+    env = _env_of(store)
+    assert env["FROM_DOTENV"] == "literal $HOME" and "FROM_SCRIPT" not in env
+
+
+def test_the_default_script_order_and_a_configured_one(store, caplog):
+    """`.py`, `.js`, `.mjs`, `.cjs` on every OS, `.ps1` on Windows only, then
+    `.bash`, `.sh` elsewhere; a declared entry naming one keeps its place
+    with its own settings, and a pretty-printed object is accepted."""
+    ov = store / "overlays" / "order"
+    shell = "env.ps1" if os.name == "nt" else "env.sh"
+    _write(ov / shell, "unused\n")
+    _write(ov / "env.py", "import json\nprint(json.dumps({'WHICH': 'py', 'ARGS': ','.join(__import__('sys').argv[1:])}, indent=2))\n")
+    env = _env_of(store)
+    assert env["WHICH"] == "py" and env["ARGS"] == ""
+    _write(ov / "overlay.cfg", '[[env_scripts]]\ninterpreter = "python"\npath = "env.py"\nargs = ["a", "b"]\n')
+    env = _env_of(store)
+    assert env["WHICH"] == "py" and env["ARGS"] == "a,b"
+    (ov / "env.py").unlink()
+    _write(ov / "overlay.cfg", "")
+    with caplog.at_level(logging.WARNING):
+        env = _env_of(store)
+    assert "WHICH" not in env
+    if os.name == "nt" and shutil.which("pwsh") is None:
+        assert "script-not-run env.ps1" in caplog.text
 
 
 def test_a_store_pre_file_runs_before_the_overlays_and_its_env_after(store):
@@ -308,7 +349,7 @@ def test_a_setup_variant_for_another_os_does_not_run(tmp_path, store):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("manifest, why", [
-    ('[runtime]\nos = ["plan9"]\n', "does not support"),
+    ('[runtime]\nos = ["haiku"]\n', "does not support"),
     ('[runtime]\ncommands = ["no-such-command-aos"]\n', "no-such-command-aos is not on PATH"),
     ('[[runtime.python]]\nversion = "99"\n', "python 99 or later"),
     ('[[setup]]\ninterpreter = "cobol"\npath = "s.cob"\n', "interpreter 'cobol' is not supported"),

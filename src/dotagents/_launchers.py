@@ -1,9 +1,9 @@
-"""Launchers for overlays' python scripts (``Overlay.scripts``): each top-level
-``bin/<name>.py``, and what ``overlay.cfg`` declares under ``scripts``::
+"""Launchers for overlays' python scripts (``Overlay.scripts``): what
+``overlay.cfg`` declares under ``scripts`` -- no file is a command by its name::
 
     [scripts]
-    tool = "lib/tool/main.py"   # another path, or another name
-    helper = false              # no launcher for bin/helper.py
+    curl = "bin/curl.py"
+    tool = "lib/tool/main.py"
     check = { path = "tools/check.py", interpreter = "python", os = ["unix"] }
 
 Each becomes an executable named after the key in ``<venv>/overlays/`` of a

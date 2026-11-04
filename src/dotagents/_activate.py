@@ -104,39 +104,40 @@ def is_pinned(overlay: Any) -> bool:
         return False
 
 
+def files(overlay: Any) -> "list[str]":
+    """The overlay's member files, which decide its defaults."""
+    return _aos.member_paths(overlay.path)
+
+
+_INTERPRETERS: "list[set[str]]" = []
+
+
+def interpreters() -> "set[str]":
+    """The AOS interpreters this machine can run, found once per process."""
+    if not _INTERPRETERS:
+        from dotagents._run import can_run
+
+        _INTERPRETERS.append({name for name in _aos.INTERPRETERS if can_run(name)})
+    return set(_INTERPRETERS[0])
+
+
 def state_dir(overlay: Any) -> "Optional[Path]":
     """The state directory of an overlay with a setup or an env script,
     declared or default (they are what writes state), or None."""
     doc = overlay.document()
-    if not (doc.get("setup") or doc.get("env_scripts") or overlay.setup_variant()
-            or default_env_script(overlay)[0]):
+    members = files(overlay)
+    has_script = doc.get("env_scripts") or _aos.default_script(
+        doc, "env_scripts", "env", members, _aos.current_os(), interpreters())[0]
+    if not (has_script or overlay.setup_variant()):
         return None
     digest, _why = digest_of(overlay)
     return overlay.state_dir(digest) if digest else None
 
 
-def default_paths(overlay: Any) -> "list[dict[str, Any]]":
-    """The path additions ``overlay`` makes without declaring them: its
-    existing ``bin`` on ``PATH`` and ``lib`` on ``PYTHONPATH``, unless its
-    ``[defaults]`` turns one off (:func:`dotagents._aos.default_paths`)."""
-    root = overlay.path
-    return _aos.default_paths(overlay.document(), lambda rel: (root / rel).is_dir())
-
-
-def default_env_script(overlay: Any) -> "tuple[Optional[dict[str, Any]], list[str]]":
-    """``(script, skipped)``: the overlay's default ``env.<ext>``, the first
-    this OS can run (:func:`dotagents._aos.default_script`), and those present
-    that cannot."""
-    from dotagents._run import can_run
-
-    root = overlay.path
-    return _aos.default_script(overlay.document(), "env", lambda rel: (root / rel).is_file(), can_run)
-
-
 def context(overlay: Any, *, host_env: "Optional[dict[str, str]]" = None) -> _aos.Context:
     """How ``overlay`` is applied on this OS: its root, its env files read
-    from it, its store's grants and secrets, its env-script opt-in, its
-    default path additions."""
+    from it, its store's grants and secrets, whether its store lets its env
+    scripts run, its member files (its defaults) and the interpreters here."""
     policy = _policy.for_overlay(overlay)
     root = os.path.abspath(str(overlay.path))
 
@@ -156,9 +157,7 @@ def context(overlay: Any, *, host_env: "Optional[dict[str, str]]" = None) -> _ao
     return _aos.Context(
         os_name=_aos.current_os(), root=root, identity=overlay.name, read=read,
         secrets=policy.secrets_for(overlay.name, host_env), env_scripts_enabled=policy.env_scripts(overlay.name),
-        default_paths=default_paths(overlay),
-        default_env_files=_aos.default_env_file(overlay.document(), lambda rel: (overlay.path / rel).is_file()),
-        default_env_scripts=[s for s in [default_env_script(overlay)[0]] if s],
+        files=files(overlay), interpreters=interpreters(),
     )
 
 

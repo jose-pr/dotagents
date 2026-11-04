@@ -224,10 +224,10 @@ def _run_setup(scope, dest_dir: Path, name: str, *, no_setup, dry_run, logger, s
         overlay = Overlay(source_dir)
     variant = overlay.setup_variant()
     if variant is None:
-        _default, skipped = overlay.default_setup()
-        if skipped and "setup" not in overlay.document():
-            logger.warning("overlay %s: %s cannot run here (no interpreter for it); setup skipped",
-                           name, ", ".join(skipped))
+        # A default setup.<ext> present that this machine cannot run.
+        plan = _aos.plan(overlay.document(), _activate.context(overlay), pinned=True)
+        not_run = [(name, ident, subject) for ident, subject in plan["weakenings"] if ident == "script-not-run"]
+        _activate.report(logger, not_run)
         return 0
     if no_setup:
         logger.info("skipping setup for %s (--no-setup)", name)
@@ -1056,7 +1056,7 @@ class OverlayShow(_RepoArgs):
             "digest_problem": digest_problem,
             "pin": pin,
             "routing": manifest["routing"],
-            "rules": manifest["rules"],
+            "rules": overlay.rules(),
             "context": overlay.context_files(),
             "env": sorted(doc.get("env", {})),
             "env_files": [e if isinstance(e, str) else e["path"] for e in doc.get("env_files", [])],

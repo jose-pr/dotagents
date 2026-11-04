@@ -58,11 +58,8 @@ def test_reading(case):
     data = base64.b64decode(case["base64"]) if "base64" in case else case["text"].encode("utf-8")
     limits = {"max_" + key[4:]: value for key, value in case.get("limits", {}).items()}
     expect = case["expect"]
-    if case["format"] == "dotenv":
-        read = _aos.read_dotenv
-    else:
-        def read(data, **kw):
-            return _aos.read_document(data, **kw)
+    read = {"aos": _aos.read_document, "dotenv": _aos.read_dotenv,
+            "env-script": _aos.read_env_script_output}[case["format"]]
     if "error" in expect and "data" in expect:
         try:
             got = read(data, **limits)
@@ -206,7 +203,7 @@ def test_digests_compare_without_case():
         _aos.same_digest(digest, "sha1:" + "0" * 40)
 
 
-def _context(manifest: dict, facts: dict, identity: str, root: str) -> _aos.Context:
+def _context(manifest: dict, facts: dict, identity: str, root: str, tree=None) -> _aos.Context:
     windows = facts["os"] == "windows"
     files = facts.get("files", {})
     secret_files = facts.get("secret_files")
@@ -222,7 +219,9 @@ def _context(manifest: dict, facts: dict, identity: str, root: str) -> _aos.Cont
     return _aos.Context(
         os_name=facts["os"], root=root, identity=identity,
         read=lambda rel: files[rel].encode("utf-8") if rel in files else None,
-        secrets=secrets, env_scripts_enabled=facts.get("env_scripts_enabled", False),
+        secrets=secrets, env_scripts_enabled=facts.get("env_scripts_enabled", True),
+        files=list(files) if tree is None else tree,
+        interpreters=facts.get("interpreters", _aos.INTERPRETERS),
     )
 
 
@@ -248,8 +247,8 @@ def test_compose(case):
         "missing": missing,
         "root_variables": {i: Overlay.root_var_for(i) for i in active},
         "routing": [line for i in active for line in overlays[i].get("routing", [])],
-        "rules": [[i, path] for i in active for path in overlays[i].get("rules", [])],
-        "context": [[i, path] for i in active for path in overlays[i].get("context", [])],
+        "rules": [[i, path] for i in active for path in _aos.rules_of(overlays[i], files.get(i, []))],
+        "context": [[i, path] for i in active for path in _aos.context_of(overlays[i], files.get(i, []))],
     }
     winners: "dict[str, tuple[str, str]]" = {}
     collisions: "set[str]" = set()
@@ -267,7 +266,8 @@ def test_compose(case):
             env.set(Overlay.root_var_for(identity), facts["roots"][identity])
         try:
             for identity in active:
-                ctx = _context(overlays[identity], facts, identity, facts["roots"][identity])
+                ctx = _context(overlays[identity], facts, identity, facts["roots"][identity],
+                               tree=files.get(identity, []))
                 _aos.apply_overlay(env, overlays[identity], ctx, [])
         except _aos.Refused as refused:
             result = {"active": active, "env": {"error": refused.code, "subject": refused.subject}}

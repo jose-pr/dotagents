@@ -158,7 +158,7 @@ def check_overlay_manifests(overlays_dir: Path) -> List[str]:
         problems = overlay.manifest_problems() or [
             "%s at %s" % issue for issue in _aos.validate(overlay.document(), overlay.members())]
         failures += ["overlays/%s: overlay.cfg: %s" % (overlay.name, p) for p in problems]
-        rules = overlay.read_manifest()["rules"]
+        rules = overlay.rules()
         _blocks, warnings = overlay.rule_blocks(rules)
         failures += ["overlays/%s: %s" % (overlay.name, w) for w in warnings]
     print("checked the manifests of %d overlays in %s" % (len(found), overlays_dir))

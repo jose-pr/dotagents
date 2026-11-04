@@ -102,6 +102,11 @@ _ALLOWLIST = [
         "variable (an agent-identity feature), not a reference to a human "
         "reviewer or this repo's review process",
     ),
+    (
+        "tests/aos_vectors/digest.json",
+        '"base64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj',
+        "a copy of the AOS conformance vectors (bytes 0-255 in base64), kept byte for byte",
+    ),
 ]
 
 # Decision ids are cited by convention everywhere EXCEPT the changelog (a

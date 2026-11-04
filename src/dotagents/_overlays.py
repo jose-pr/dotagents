@@ -412,26 +412,27 @@ class Overlay:
             "doc": doc,
         }
 
+    def member_paths(self) -> "list[str]":
+        """The member files, without hashing: what decides the defaults."""
+        return _aos.member_paths(self.path)
+
     def skills(self) -> "list[str]":
-        """The overlay's skills: its ``skills`` list, else every
-        ``skills/<name>/`` holding a ``SKILL.md``."""
-        doc = self.document()
-        if "skills" in doc:
-            return list(doc["skills"])
-        skills_dir = self.path / "skills"
-        if not skills_dir.is_dir():
-            return []
-        return sorted(d.name for d in skills_dir.iterdir() if (d / "SKILL.md").is_file())
+        """The overlay's skills: every ``skills/<name>/SKILL.md`` (unless
+        ``[defaults] skills = false``) and those ``skills`` lists."""
+        return _aos.skills_of(self.document(), self.member_paths())
+
+    def rules(self) -> "list[str]":
+        """Its rules files: every ``rules/<name>.md`` (unless ``[defaults]
+        rules = false``), then ``rules``; an entry naming a default file
+        replaces it."""
+        return _aos.rules_of(self.document(), self.member_paths())
 
     def context_files(self, harness_id: "Optional[str]" = None) -> "list[str]":
-        """The files the overlay adds to an agent's initial context: its
-        ``context`` (when absent, ``CONTEXT.md`` if the root has one), then
-        ``harness.<harness_id>.context``."""
+        """The files the overlay adds to an agent's initial context: the root
+        ``CONTEXT.md`` (unless ``[defaults] context = false``), then
+        ``context``, then ``harness.<harness_id>.context``."""
         doc = self.document()
-        if "context" in doc:
-            out = list(doc["context"])
-        else:
-            out = ["CONTEXT.md"] if (self.path / "CONTEXT.md").is_file() else []
+        out = _aos.context_of(doc, self.member_paths())
         if harness_id:
             out += list(doc.get("harness", {}).get(harness_id, {}).get("context", []))
         return out
@@ -442,39 +443,23 @@ class Overlay:
         return dict(self.document().get("harness", {}).get(harness_id, {}))
 
     def setup_variant(self, os_name: "Optional[str]" = None) -> "Optional[dict[str, Any]]":
-        """The ``setup`` variant that applies on ``os_name`` (this OS); with no
-        ``setup`` declared, the default ``setup.<ext>`` at the root, the first
-        this OS can run (:func:`dotagents._aos.default_script`); else None."""
-        doc = self.document()
-        if "setup" in doc:
-            return _aos.first_variant(doc["setup"], os_name or _aos.current_os())
-        return self.default_setup()[0]
+        """The setup that runs on ``os_name`` (this OS), normalized with its
+        ``args``, ``timeout`` and ``network``: the first declared variant that
+        applies, else the default ``setup.<ext>`` this machine can run
+        (:func:`dotagents._aos.setup_of`); None when there is none."""
+        from dotagents._activate import interpreters
 
-    def default_setup(self) -> "tuple[Optional[dict[str, Any]], list[str]]":
-        """``(variant, skipped)``: the default ``setup.<ext>`` that runs here, and
-        those present that cannot (``[defaults] setup = false``: none)."""
-        from dotagents._run import can_run
-
-        return _aos.default_script(self.document(), "setup", lambda rel: (self.path / rel).is_file(), can_run)
+        return _aos.setup_of(self.document(), self.member_paths(), os_name or _aos.current_os(),
+                             interpreters())[0]
 
     def declared_scripts(self, os_name: "Optional[str]" = None) -> "dict[str, tuple[str, str]]":
         """The overlay's commands on ``os_name`` (this OS), as ``{name: (path,
-        interpreter)}``: by default each top-level ``bin/<name>.py`` (unless
-        ``[defaults] bin = false``), then its ``scripts``, which add, replace
-        or, with ``false``, drop one by name."""
+        interpreter)}``: its ``scripts`` entries that apply there. No file is a
+        command by its name; ``false`` entries are left out."""
         os_name = os_name or _aos.current_os()
-        doc = self.document()
         out: "dict[str, tuple[str, str]]" = {}
-        bin_dir = self.path / "bin"
-        if doc.get("defaults", {}).get("bin", True) and bin_dir.is_dir():
-            for entry in sorted(bin_dir.iterdir()):
-                stem = entry.name[:-3]
-                if entry.name.endswith(".py") and entry.is_file() and _aos._SCRIPT_NAME.match(stem) \
-                        and stem.split(".")[0].lower() not in self.RESERVED_NAMES:
-                    out[stem] = ("bin/" + entry.name, "python")
-        for name, target in doc.get("scripts", {}).items():
+        for name, target in self.document().get("scripts", {}).items():
             if target is False:
-                out.pop(name, None)
                 continue
             if isinstance(target, dict):
                 if _aos.os_matches(target, os_name):
@@ -881,7 +866,7 @@ def _compose_block(base_text: str, overlays, logger) -> str:
     routing: "list[str]" = []
     for overlay in Overlay.sort_by_priority(overlays):
         manifest = overlay.read_manifest()
-        blocks, warnings = overlay.rule_blocks(manifest["rules"])  # type: ignore[arg-type]
+        blocks, warnings = overlay.rule_blocks(overlay.rules())
         for warning in warnings:
             logger.warning("overlay %s: %s", manifest["name"], warning)
         rules.extend(blocks)

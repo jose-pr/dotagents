@@ -927,10 +927,10 @@ def validate(doc: Any, files: "Optional[Iterable[str]]" = None) -> "list[tuple[s
         _check_harness(c, doc["harness"], "/harness")
     if "defaults" in doc and c.type(doc["defaults"], "object", "/defaults"):
         for key, value in doc["defaults"].items():
-            if key in ("bin", "lib", "env", "setup"):
+            if key in DEFAULT_KEYS:
                 c.type(value, "boolean", "/defaults/" + key)
             else:
-                c.any_value(value, "/defaults/" + key)
+                c.add("unknown-key", "/defaults/" + key)
     known = {"name", "description", "requires", "routing", "rules", "priority", "context", "skills", "env",
              "env_files", "paths", "env_scripts", "runtime", "setup", "scripts", "mcp", "harness", "defaults"}
     for key, value in doc.items():
@@ -938,6 +938,12 @@ def validate(doc: Any, files: "Optional[Iterable[str]]" = None) -> "list[tuple[s
             c.any_value(value, "/" + key)
     if files is not None:
         have = set(files)
+        env = doc.get("env")
+        if isinstance(env, dict) and isinstance(doc.get("paths", []), list):
+            added = {entry["variable"].upper() for entry in default_paths(doc, have)}
+            for name in env:
+                if name.upper() in added:
+                    c.add("env-path-conflict", "/env/%s" % name)
         for at, path in named_files(doc):
             if path not in have:
                 c.add("missing-file", at)
@@ -1069,6 +1075,38 @@ def members(root: "str | os.PathLike[str]") -> "list[str]":
     counts), sorted. Raises :class:`DigestError` as the digest would."""
     _digest, lines = digest_entries(tree_entries(root))
     return [line.split(b"\0", 1)[0].decode("utf-8") for line in lines]
+
+
+def member_paths(root: "str | os.PathLike[str]") -> "list[str]":
+    """The overlay's member files as relative paths, read without hashing
+    and without following a link: what decides which defaults are present.
+    Unlike :func:`members` it raises nothing; a link, a special file or a
+    name AOS refuses is simply not a member."""
+    out: "list[str]" = []
+
+    def walk(directory: str, prefix: str) -> None:
+        try:
+            with os.scandir(directory) as it:
+                found = sorted(it, key=lambda e: e.name)
+        except OSError:
+            return
+        for entry in found:
+            if entry.name in EXCLUDED_COMPONENTS:
+                continue
+            rel = prefix + entry.name
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISLNK(info.st_mode) or _is_reparse(info):
+                continue
+            if stat.S_ISDIR(info.st_mode):
+                walk(entry.path, rel + "/")
+            elif stat.S_ISREG(info.st_mode) and valid_relpath(rel):
+                out.append(rel)
+
+    walk(str(root), "")
+    return out
 
 
 def foreign_entries(root: "str | os.PathLike[str]") -> "list[str]":
@@ -1322,8 +1360,9 @@ class Secrets(object):
 class Context(object):
     """What applying one overlay needs from its consumer: the OS, the
     overlay's root and identity, its env files' bytes (``read(relpath)``,
-    ``None`` when absent), the :class:`Secrets`, and whether env scripts are
-    enabled."""
+    ``None`` when absent), the :class:`Secrets`, whether its env scripts may
+    run (the consumer's policy), the overlay's member files (``files``, from
+    which the defaults follow) and the interpreters the consumer can run."""
 
     def __init__(
         self,
@@ -1333,10 +1372,9 @@ class Context(object):
         identity: str,
         read: "Callable[[str], Optional[bytes]]",
         secrets: "Optional[Secrets]" = None,
-        env_scripts_enabled: bool = False,
-        default_paths: "Iterable[dict[str, Any]]" = (),
-        default_env_files: "Iterable[dict[str, Any]]" = (),
-        default_env_scripts: "Iterable[dict[str, Any]]" = (),
+        env_scripts_enabled: bool = True,
+        files: "Iterable[str]" = (),
+        interpreters: "Iterable[str]" = (),
     ):
         self.os = os_name
         self.windows = os_name == "windows"
@@ -1345,14 +1383,8 @@ class Context(object):
         self.read = read
         self.secrets = secrets or Secrets(windows=self.windows)
         self.env_scripts_enabled = env_scripts_enabled
-        #: Path additions the overlay makes without declaring them
-        #: (:func:`default_paths`), applied before its ``paths``.
-        self.default_paths = list(default_paths)
-        #: The env file and env script the overlay has without declaring
-        #: them (:func:`default_env_file`, :func:`default_script`), applied
-        #: before its declared ones.
-        self.default_env_files = list(default_env_files)
-        self.default_env_scripts = list(default_env_scripts)
+        self.files = list(files)
+        self.interpreters = set(interpreters)
 
 
 def _apply_mapping(env: Environment, mapping: "dict[str, Any]", ctx: Context,
@@ -1437,23 +1469,177 @@ def read_env_file(item: "dict[str, Any]", ctx: Context, listed: "set[str]") -> "
     return mapping
 
 
+# --------------------------------------------------------------------------- #
+# Defaults: what conventional files contribute unless ``defaults`` turns them off.
+# --------------------------------------------------------------------------- #
+
+#: The keys of ``defaults``; each is true unless the manifest writes it false.
+DEFAULT_KEYS = ("bin", "lib", "env", "env_scripts", "setup", "context", "skills", "rules")
+#: Default path additions as ``(key, variable, directory)``, in the order they apply.
+DEFAULT_PATHS = (("bin", "PATH", "bin"), ("lib", "PYTHONPATH", "lib/python"))
+#: Default script extensions in the order a consumer tries them, with the OSes
+#: each applies on (``None``: every OS).
+DEFAULT_SCRIPTS = (
+    (".py", "python", None),
+    (".js", "node", None),
+    (".mjs", "node", None),
+    (".cjs", "node", None),
+    (".ps1", "powershell", ["windows"]),
+    (".bash", "bash", ["unix"]),
+    (".sh", "sh", ["unix"]),
+)
+_SKILL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_RULES_FILE = re.compile(r"^rules/[^/]+\.md$")
+
+
+def default_on(manifest: "dict[str, Any]", key: str) -> bool:
+    """Whether the default ``key`` is on: true unless ``[defaults]`` says false."""
+    defaults = manifest.get("defaults")
+    return not (isinstance(defaults, dict) and defaults.get(key) is False)
+
+
+def _members(files: "Iterable[str]") -> "list[str]":
+    """The files that make a path present: digest members only."""
+    return [path for path in files if valid_relpath(path)]
+
+
+def _by_bytes(paths: "Iterable[str]") -> "list[str]":
+    return sorted(paths, key=lambda path: path.encode("utf-8"))
+
+
+def _named(entry: Any) -> Any:
+    """The file or directory an entry names: a string, or a mapping's ``path``."""
+    return entry.get("path") if isinstance(entry, dict) else entry
+
+
+def _declared(manifest: "dict[str, Any]", field: str) -> "list[Any]":
+    value = manifest.get(field)
+    return list(value) if isinstance(value, list) else []
+
+
+def _merge(defaults: "list[Any]", declared: "list[Any]") -> "list[Any]":
+    """Default entries first, then declared ones; a declared entry naming the
+    same file or directory as a default entry replaces it."""
+    named = {_named(entry) for entry in declared}
+    return [entry for entry in defaults if _named(entry) not in named] + declared
+
+
+def default_paths(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[dict[str, Any]]":
+    """The default path additions that are on, present (a member file under
+    the directory) and not replaced by a declared entry with that ``path``."""
+    members = _members(files)
+    found = [
+        {"variable": variable, "path": directory}
+        for key, variable, directory in DEFAULT_PATHS
+        if default_on(manifest, key) and any(p.startswith(directory + "/") for p in members)
+    ]
+    named = {_named(entry) for entry in _declared(manifest, "paths")}
+    return [entry for entry in found if entry["path"] not in named]
+
+
+def paths_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[dict[str, Any]]":
+    """The ``bin`` and ``lib`` defaults, then ``paths``."""
+    return default_paths(manifest, files) + _declared(manifest, "paths")
+
+
+def rules_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[str]":
+    """Every ``rules/<name>.md`` by path bytes, then ``rules``."""
+    found: "list[str]" = []
+    if default_on(manifest, "rules"):
+        found = [path for path in _by_bytes(_members(files)) if _RULES_FILE.match(path)]
+    return _merge(found, _declared(manifest, "rules"))
+
+
+def context_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[str]":
+    """The root ``CONTEXT.md``, then ``context``."""
+    found: "list[str]" = []
+    if default_on(manifest, "context") and "CONTEXT.md" in _members(files):
+        found = ["CONTEXT.md"]
+    return _merge(found, _declared(manifest, "context"))
+
+
+def skills_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[str]":
+    """Every ``skills/<name>/SKILL.md`` with a skill name, and the skills
+    ``skills`` lists, by name bytes."""
+    found = set(_declared(manifest, "skills"))
+    if default_on(manifest, "skills"):
+        for path in _members(files):
+            parts = path.split("/")
+            if len(parts) == 3 and parts[0] == "skills" and parts[2] == "SKILL.md" and _SKILL_DIR.match(parts[1]):
+                found.add(parts[1])
+    return _by_bytes(found)
+
+
+def env_files_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[Any]":
+    """The root file ``env`` read as dotenv, then ``env_files``."""
+    found: "list[Any]" = []
+    if default_on(manifest, "env") and "env" in _members(files):
+        found = [{"path": "env", "format": "dotenv"}]
+    return _merge(found, _declared(manifest, "env_files"))
+
+
+def default_script(
+    manifest: "dict[str, Any]", field: str, stem: str, files: "Iterable[str]", os_name: str,
+    interpreters: "Iterable[str]",
+) -> "tuple[Optional[dict[str, Any]], bool, list[str], list[Any]]":
+    """The default ``<stem>.<ext>`` a consumer runs for ``field``
+    (``env_scripts`` / ``env``, ``setup`` / ``setup``): ``(entry, configured,
+    present, others)`` -- the chosen entry, whether a declared entry
+    configured it, the candidate files present (reported when none is
+    chosen), and the declared entries that name no candidate. A declared
+    entry naming a candidate keeps its place in :data:`DEFAULT_SCRIPTS`, with
+    its own settings."""
+    declared = _declared(manifest, field)
+    if not default_on(manifest, field):
+        return None, False, [], declared
+    members = set(_members(files))
+    present = [stem + ext for ext, _interpreter, _os in DEFAULT_SCRIPTS if stem + ext in members]
+    configured = {entry["path"]: entry for entry in declared
+                  if isinstance(entry, dict) and entry.get("path") in present}
+    others = [entry for entry in declared if _named(entry) not in configured]
+    can = set(interpreters)
+    for ext, interpreter, names in DEFAULT_SCRIPTS:
+        path = stem + ext
+        if path not in present:
+            continue
+        entry = configured.get(path, {"interpreter": interpreter, "path": path, "os": names})
+        if os_matches(entry, os_name) and entry["interpreter"] in can:
+            return entry, path in configured, present, others
+    return None, False, present, others
+
+
+# --------------------------------------------------------------------------- #
+# Applying one overlay.
+# --------------------------------------------------------------------------- #
+
+
 def apply_overlay(env: Environment, manifest: "dict[str, Any]", ctx: Context,
                   weakenings: "list[tuple[str, str]]") -> "list[dict[str, Any]]":
     """Steps 2.1 to 2.3 of the order of application -- the overlay's env
-    files for this OS, its ``env``, its ``paths`` -- applied to ``env``.
-    Returns the env scripts that run next (none unless enabled), each
-    reported. Raises :class:`Refused`; ``env`` may then hold part of the
-    overlay's changes, so a caller applies to a copy."""
-    listed = {entry["variable"].upper() for entry in manifest.get("paths", [])}
-    for item in ctx.default_env_files + list(manifest.get("env_files", [])):
+    files for this OS, its ``env``, its ``paths``, each after its defaults --
+    applied to ``env``. Returns the env scripts that run next (the default
+    one, then the declared ones; none when the consumer turned them off),
+    each reported, and reports ``script-not-run`` for a default script
+    present that cannot run. Raises :class:`Refused`; ``env`` may then hold
+    part of the overlay's changes, so a caller applies to a copy."""
+    paths = paths_of(manifest, ctx.files)
+    listed = {entry["variable"].upper() for entry in paths}
+    for name in manifest.get("env", {}):
+        if name.upper() in listed:
+            raise Refused("env-path-conflict", name)
+    for item in env_files_of(manifest, ctx.files):
         item = {"path": item} if isinstance(item, str) else item
         if os_matches(item, ctx.os):
             _apply_mapping(env, read_env_file(item, ctx, listed), ctx, weakenings)
     _apply_mapping(env, manifest.get("env", {}), ctx, weakenings)
-    apply_paths(env, ctx.default_paths + list(manifest.get("paths", [])), ctx, weakenings)
+    apply_paths(env, paths, ctx, weakenings)
     scripts: "list[dict[str, Any]]" = []
     if ctx.env_scripts_enabled:
-        for script in ctx.default_env_scripts + list(manifest.get("env_scripts", [])):
+        chosen, _configured, present, others = default_script(
+            manifest, "env_scripts", "env", ctx.files, ctx.os, ctx.interpreters)
+        if chosen is None:
+            weakenings.extend(("script-not-run", path) for path in present)
+        for script in ([chosen] if chosen else []) + others:
             if os_matches(script, ctx.os):
                 selected = {"interpreter": script["interpreter"], "path": script["path"],
                             "args": list(script.get("args", [])), "timeout": script.get("timeout", 60)}
@@ -1464,100 +1650,82 @@ def apply_overlay(env: Environment, manifest: "dict[str, Any]", ctx: Context,
     return scripts
 
 
-#: The path additions an overlay makes by default: ``bin`` prepended to
-#: ``PATH`` and ``lib`` appended to ``PYTHONPATH``, each when that directory
-#: exists, unless ``[defaults]`` turns it off (``bin = false``, ``lib = false``).
-DEFAULT_PATHS = (
-    ("bin", {"variable": "PATH", "path": "bin"}),
-    ("lib", {"variable": "PYTHONPATH", "path": "lib", "position": "append"}),
-)
-
-
-def default_paths(manifest: "dict[str, Any]", is_dir: "Callable[[str], bool]") -> "list[dict[str, Any]]":
-    """The default path additions of an overlay (:data:`DEFAULT_PATHS`):
-    ``is_dir(relpath)`` says whether that directory exists under the root."""
-    defaults = manifest.get("defaults", {})
-    return [dict(entry) for key, entry in DEFAULT_PATHS if defaults.get(key, True) and is_dir(entry["path"])]
-
-
-#: The order a default script (``env.<ext>``, ``setup.<ext>``) is chosen in:
-#: the first that exists and that this OS can run.
-DEFAULT_SCRIPT_ORDER = ((".py", "python"), (".ps1", "powershell"), (".bash", "bash"), (".sh", "sh"),
-                        (".js", "node"), (".mjs", "node"))
-
-
-def default_env_file(manifest: "dict[str, Any]", is_file: "Callable[[str], bool]") -> "list[dict[str, Any]]":
-    """An overlay's root ``env`` file, read as ``dotenv``, unless
-    ``[defaults] env = false``."""
-    if manifest.get("defaults", {}).get("env", True) and is_file("env"):
-        return [{"path": "env", "format": "dotenv"}]
-    return []
-
-
-def default_script(manifest: "dict[str, Any]", stem: str, is_file: "Callable[[str], bool]",
-                   can_run: "Callable[[str], bool]") -> "tuple[Optional[dict[str, Any]], list[str]]":
-    """``(script, skipped)``: the first ``<stem>.<ext>`` at the root (in
-    :data:`DEFAULT_SCRIPT_ORDER`) whose interpreter ``can_run``, as
-    ``{interpreter, path}``, and the ones present that cannot run here.
-    ``stem`` is ``env`` or ``setup``; ``[defaults] <stem> = false`` turns it off."""
-    if not manifest.get("defaults", {}).get(stem, True):
-        return None, []
-    skipped = []
-    for ext, interpreter in DEFAULT_SCRIPT_ORDER:
-        path = stem + ext
-        if is_file(path):
-            if can_run(interpreter):
-                return {"interpreter": interpreter, "path": path}, skipped
-            skipped.append(path)
-    return None, skipped
-
-
-def env_script_changes(stdout: bytes, *, max_bytes: int = DEFAULT_MAX_BYTES) -> "list[tuple[str, Optional[str]]]":
-    """An env script's output as ``(name, value or None to unset)`` in order.
-    Raises :class:`Refused` (``env-script-output``) on anything else."""
-    if len(stdout) > max_bytes:
-        raise Refused("env-script-output", "too large")
+def read_env_script_output(data: bytes, *, max_bytes: int = DEFAULT_MAX_BYTES) -> "dict[str, Optional[str]]":
+    """An env script's standard output: the variables it sets (a string) or
+    unsets (None), in order. The whole output is one JSON object, possibly
+    over several lines; or else every line that is not blank is one. Raises
+    :class:`ReadError` (``env-script-output`` for a name or value it may not
+    set)."""
+    if len(data) > max_bytes:
+        raise ReadError("too-large")
     try:
-        text = stdout.decode("utf-8")
+        text = data.decode("utf-8")
     except UnicodeDecodeError:
-        raise Refused("env-script-output", "not UTF-8")
-    out: "list[tuple[str, Optional[str]]]" = []
-    for line in text.split("\n"):
-        if line.endswith("\r"):
-            line = line[:-1]
-        if not line.strip(" \t"):
-            continue
-        try:
-            obj = _read_json(line)
-        except ReadError:
-            raise Refused("env-script-output", "a line that is not a JSON object")
-        if not isinstance(obj, dict):
-            raise Refused("env-script-output", "a line that is not a JSON object")
-        for name, value in obj.items():
+        raise ReadError("invalid-utf8")
+    whole = text.strip(" \t\r\n")
+    if not whole:
+        return {}
+    try:
+        objects = [_read_json(whole)]
+    except ReadError as error:
+        if error.code != "parse-error":
+            raise
+        objects = []
+        for line in text.split("\n"):
+            line = line[:-1] if line.endswith("\r") else line
+            if line.strip(" \t"):
+                objects.append(_read_json(line))
+    out: "dict[str, Optional[str]]" = {}
+    for value in objects:
+        if not isinstance(value, dict):
+            raise ReadError("env-script-output", "not an object")
+        for name, item in value.items():
             if not valid_variable_name(name) or is_reserved_variable(name):
-                raise Refused("env-script-output", name)
-            if value is not None and not (isinstance(value, str) and "\0" not in value):
-                raise Refused("env-script-output", name)
-            out.append((name, value))
+                raise ReadError("env-script-output", "variable name")
+            if item is not None and not (isinstance(item, str) and "\0" not in item):
+                raise ReadError("env-script-output", "value")
+            out[name] = item
     return out
+
+
+def setup_of(manifest: "dict[str, Any]", files: "Iterable[str]", os_name: str,
+             interpreters: "Iterable[str]") -> "tuple[Optional[dict[str, Any]], list[str]]":
+    """``(variant, not_run)``: the setup that runs on ``os_name`` -- the first
+    declared variant that applies, else the default ``setup.<ext>`` (taken to
+    need the network unless a declared entry configured it) -- normalized with
+    its ``args``, ``timeout`` and ``network``; and the default scripts present
+    that cannot run, when none was chosen."""
+    chosen, configured, present, others = default_script(manifest, "setup", "setup", files, os_name, interpreters)
+    setup = first_variant(others, os_name)
+    network = False
+    not_run: "list[str]" = []
+    if setup is None:
+        setup = chosen
+        network = not configured
+        if setup is None:
+            not_run = present
+    if setup is None:
+        return None, not_run
+    return {"interpreter": setup["interpreter"], "path": setup["path"], "args": list(setup.get("args", [])),
+            "timeout": setup.get("timeout", 300), "network": setup.get("network", network)}, not_run
 
 
 def plan(manifest: "dict[str, Any]", ctx: Context, *, pinned: bool, enforces_network: bool = False,
          scripts: "Optional[list[dict[str, Any]]]" = None) -> "dict[str, Any]":
     """What one overlay needs and declares on ``ctx.os``, beyond its
-    environment: whether the OS is supported, the selected setup, Python and
-    Node variants, the interpreters and commands a probe looks for, the
-    references not granted, and the weakenings (not counting the
-    environment's own). ``scripts`` are the env scripts that will run."""
+    environment: whether the OS is supported, the selected setup (with its
+    defaults), Python and Node variants, the interpreters and commands a
+    probe looks for, the references not granted, and the weakenings (not
+    counting the environment's own). ``scripts`` are the env scripts that
+    will run."""
     os_name = ctx.os
     weakenings: "list[tuple[str, str]]" = []
     if not pinned:
         weakenings.append(("unpinned", ""))
     runtime = manifest.get("runtime", {})
-    setup = first_variant(manifest.get("setup", []), os_name)
+    setup, not_run = setup_of(manifest, ctx.files, os_name, ctx.interpreters)
+    weakenings.extend(("script-not-run", path) for path in not_run)
     if setup is not None:
-        setup = {"interpreter": setup["interpreter"], "path": setup["path"], "args": list(setup.get("args", [])),
-                 "timeout": setup.get("timeout", 300), "network": setup.get("network", False)}
         if setup["network"]:
             weakenings.append(("setup-network", setup["path"]))
         elif not enforces_network:
@@ -1640,7 +1808,7 @@ class Activation(object):
 def effective(manifest: "dict[str, Any]", ctx: Context, *, base_env: "dict[str, str]", pinned: bool,
               state: "Optional[str]" = None, enforces_network: bool = False) -> Activation:
     """One overlay applied alone over ``base_env``: its root (and state)
-    variable, then its declarations, then :func:`plan`."""
+    variable, then its declarations with their defaults, then :func:`plan`."""
     env = Environment(base_env, ctx.windows)
     env.set(root_variable(ctx.identity), ctx.root)
     if state is not None:
@@ -1653,19 +1821,6 @@ def effective(manifest: "dict[str, Any]", ctx: Context, *, base_env: "dict[str, 
     found = plan(manifest, ctx, pinned=pinned, enforces_network=enforces_network, scripts=scripts)
     weakenings = found.pop("weakenings") + weakenings
     return Activation(env=env, scripts=scripts, plan=found, weakenings=weakenings)
-
-
-def skills_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[str]":
-    """An overlay's skills: its ``skills`` list, else every
-    ``skills/<name>/SKILL.md`` among its ``files``."""
-    if "skills" in manifest:
-        return list(manifest["skills"])
-    found = []
-    for path in files:
-        parts = path.split("/")
-        if len(parts) == 3 and parts[0] == "skills" and parts[2] == "SKILL.md":
-            found.append(parts[1])
-    return sorted(found)
 
 
 def insecure_url(url: str) -> bool:

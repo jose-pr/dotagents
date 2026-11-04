@@ -90,22 +90,17 @@ def test_one_invalid_script_entry_refuses_the_whole_manifest(tmp_path, monkeypat
     assert any("/scripts/up" in problem for problem in Overlay(path).manifest_problems())
 
 
-def test_bin_scripts_are_commands_by_default_and_scripts_adds_replaces_or_drops(tmp_path):
+def test_a_bin_script_is_a_command_only_when_scripts_names_it(tmp_path):
+    """AOS: bin/ goes on PATH by default, but a consumer exposes a command
+    only for a `scripts` entry."""
     path = tmp_path / "demo"
-    (path / "bin" / "sub").mkdir(parents=True)
-    for name in ("tool.py", "helper.py", "replaced.py", "_private.py", "__init__.py", "con.py", "shell", "x.txt"):
+    (path / "bin").mkdir(parents=True)
+    for name in ("tool.py", "helper.py"):
         (path / "bin" / name).write_text("", encoding="utf-8")
-    (path / "bin" / "sub" / "deep.py").write_text("", encoding="utf-8")
     overlay = Overlay(path)
-    assert overlay.scripts() == {"tool": "bin/tool.py", "helper": "bin/helper.py", "replaced": "bin/replaced.py"}
-    (path / "overlay.cfg").write_text(
-        '[scripts]\nhelper = false\nreplaced = "lib/main.py"\nextra = "lib/extra.py"\nmissing = false\n',
-        encoding="utf-8",
-    )
-    assert overlay.scripts() == {"tool": "bin/tool.py", "replaced": "lib/main.py", "extra": "lib/extra.py"}
-    (path / "overlay.cfg").write_text('[defaults]\nbin = false\n[scripts]\nextra = "lib/extra.py"\n',
-                                      encoding="utf-8")
-    assert overlay.scripts() == {"extra": "lib/extra.py"}
+    assert overlay.scripts() == {}
+    (path / "overlay.cfg").write_text('[scripts]\ntool = "bin/tool.py"\nhelper = false\n', encoding="utf-8")
+    assert overlay.scripts() == {"tool": "bin/tool.py"}
 
 
 def test_a_manifest_without_scripts_declares_none(tmp_path):

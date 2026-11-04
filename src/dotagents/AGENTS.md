@@ -18,13 +18,19 @@ Terms used throughout:
 - **overlay** — an AOS overlay (the Agent Overlay Specification, edition
   `0.1.0-draft`, https://boriken-dev.github.io/agent-overlay-spec/): a directory,
   optionally with an `overlay.cfg` manifest, installed as `<store>/overlays/<name>/`;
-  its root is exported as `$<NAME>_OVERLAY_ROOT`. What it declares is applied,
-  and by default: its existing `bin/` prepended to `PATH`, `lib/` appended to
-  `PYTHONPATH`, its root `env` read as a dotenv env file, the first `env.<ext>`
-  and `setup.<ext>` this OS can run (`.py`, `.ps1`, `.bash`, `.sh`, `.js`, `.mjs`)
-  as its env script and setup, its `skills/<name>/SKILL.md` as its skills and its
-  `CONTEXT.md` as its context. `[defaults] bin` / `lib` / `env` / `setup = false`
-  turns one off; its `pre.env*` and `local.env` mean nothing.
+  its root is exported as `$<NAME>_OVERLAY_ROOT`. Its conventional files take
+  effect by default, when present (a member file there): `bin/` prepended to
+  `PATH`, `lib/python/` prepended to `PYTHONPATH`, the root `env` read as a dotenv
+  env file, one `env.<ext>` as its first env script and one `setup.<ext>` as its
+  last setup variant (the first that applies and can run, in the order `.py`,
+  `.js`, `.mjs`, `.cjs`, then `.ps1` on Windows, then `.bash`, `.sh` elsewhere),
+  `CONTEXT.md` as context, `skills/<name>/SKILL.md` as skills and
+  `rules/<name>.md` as rules files. `[defaults]` turns one off (`bin`, `lib`,
+  `env`, `env_scripts`, `setup`, `context`, `skills`, `rules = false`; any other
+  key is refused). What the manifest declares adds to the defaults, and an entry
+  naming a default's file or directory replaces that default entry. A bare
+  `lib/`, `pre.env*`, `local.env`, `requirements.txt` and `bin/<name>.py` as a
+  command mean nothing.
 - **active overlay** — an installed overlay that is not refused: one whose store
   pins it (`_policy`) is active only while its tree digest is the pin.
 
@@ -175,7 +181,8 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
   `file_digest(path)`, `same_digest(a, b)` (hex without regard to case; `ValueError`
   for another form), `DIGEST_FORM`, `EMPTY_DIGEST`, `digest_entries(entries) ->
   (digest, lines)`, `tree_entries(root)`, `tree_digest(root) -> str`,
-  `members(root) -> list[str]`, `foreign_entries(root) -> list[str]` (excluded
+  `members(root) -> list[str]`, `member_paths(root) -> list[str]` (the same paths
+  without hashing or raising: what decides the defaults), `foreign_entries(root) -> list[str]` (excluded
   names present: a mismatch in a verified copy).
 - OS and variants: `UNIX_NAMES`, `INTERPRETERS`, `current_os()`, `os_matches(entry,
   os)`, `first_variant(variants, os)`, `version_tuple(text)`.
@@ -188,22 +195,31 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
   `reference_name(entry)`, `is_reference(entry)`, `class Secrets(*, grants,
   host_env, named, read_file, providers, provider_values, windows)` (`granted`,
   `resolve`: a reference resolves only when granted), `class Context(*, os_name,
-  root, identity, read, secrets=None, env_scripts_enabled=False, default_paths=())`,
-  `DEFAULT_PATHS`, `default_paths(manifest, is_dir) -> list[dict]` (an existing
-  `bin` prepended to `PATH`, `lib` appended to `PYTHONPATH`, unless `[defaults]`
-  turns one off), `default_env_file(manifest, is_file)` (the root `env`, as
-  `dotenv`), `DEFAULT_SCRIPT_ORDER` (`.py`, `.ps1`, `.bash`, `.sh`, `.js`, `.mjs`),
-  `default_script(manifest, stem, is_file, can_run) -> (script, skipped)` (the
-  first runnable `env.<ext>` / `setup.<ext>`; `[defaults] env` / `setup = false`
-  turns it off), `apply_paths(env, paths, ctx, weakenings)`, `read_env_file(item,
-  ctx, listed)`, `apply_overlay(env, manifest, ctx, weakenings) -> list[env script]`
-  (its env files, `env`, default paths then `paths`; raises `Refused`),
-  `env_script_changes(stdout, *, max_bytes) -> list[(name, value or None)]`,
-  `plan(manifest, ctx, *, pinned, enforces_network=False, scripts=None) -> dict`
-  (`supported`, `setup`, `python`, `node`, `needs`, `ungranted`, `weakenings`),
-  `class Activation`, `effective(manifest, ctx, *, base_env, pinned, state=None,
-  enforces_network=False) -> Activation`, `skills_of(manifest, files)`,
-  `insecure_url(url)`.
+  root, identity, read, secrets=None, env_scripts_enabled=True, files=(),
+  interpreters=())` (`files`: the overlay's member paths, which decide its
+  defaults; `interpreters`: those the consumer can run).
+- Defaults: `DEFAULT_KEYS`, `DEFAULT_PATHS` (`bin` → `PATH`, `lib/python` →
+  `PYTHONPATH`, both prepended), `DEFAULT_SCRIPTS` (the extension order with the
+  OSes each applies on), `default_on(manifest, key)`, `default_paths(manifest,
+  files)`, `paths_of`, `rules_of`, `context_of`, `skills_of`, `env_files_of`
+  (each `(manifest, files)`: the field's defaults that are on and present, then
+  its declared entries; a declared entry naming a default's file or directory
+  replaces it; `skills` adds), `default_script(manifest, field, stem, files,
+  os_name, interpreters) -> (entry, configured, present, others)` (the default
+  `env.<ext>` / `setup.<ext>`; a declared entry naming one configures it in
+  place), `setup_of(manifest, files, os_name, interpreters) -> (variant,
+  not_run)` (declared variants first, the default last, a default setup taken to
+  need the network unless configured).
+- Applying: `apply_paths(env, paths, ctx, weakenings)`, `read_env_file(item, ctx,
+  listed)`, `apply_overlay(env, manifest, ctx, weakenings) -> list[env script]`
+  (env files, `env`, paths, each after its defaults; the default env script then
+  the declared ones, `script-not-run` for a default present that cannot run;
+  raises `Refused`), `read_env_script_output(data, *, max_bytes) -> dict` (one
+  JSON object, even over several lines, else one per non-blank line), `plan(manifest,
+  ctx, *, pinned, enforces_network=False, scripts=None) -> dict` (`supported`,
+  `setup`, `python`, `node`, `needs`, `ungranted`, `weakenings`), `class
+  Activation`, `effective(manifest, ctx, *, base_env, pinned, state=None,
+  enforces_network=False) -> Activation`, `insecure_url(url)`.
 - Resolution: `class ResolveError(Exception)` (`chain`), `resolve(requires_of,
   requested) -> (visiting order, missing)`, `order_key(priority, name, identity)`.
 
@@ -218,10 +234,12 @@ Which installed overlays are active, and how each is applied.
   logged once per process. `Scope.overlays` is this over `Scope.installed_overlays`.
 - `digest_of(overlay) -> (digest, why)` — memoized per process on the install
   record and manifest. `is_pinned(overlay) -> bool`.
-- `state_dir(overlay) -> Optional[Path]` — for an overlay declaring `setup` or
-  `env_scripts`: `<store>/overlays/.dotagents-state/<name>/<os>-<digest[:16]>/`.
-- `default_paths(overlay) -> list[dict]` — its default path additions.
-  `default_env_script(overlay) -> (script, skipped)` — its default `env.<ext>`.
+- `state_dir(overlay) -> Optional[Path]` — for an overlay with a setup or an env
+  script, declared or default:
+  `<store>/overlays/.dotagents-state/<name>/<os>-<digest[:16]>/`.
+- `files(overlay) -> list[str]` — its member paths (`_aos.member_paths`).
+  `interpreters() -> set[str]` — the AOS interpreters this machine can run, once
+  per process.
 - `context(overlay, *, host_env=None) -> _aos.Context` — its root, env files read
   from inside it, its store's grants and secrets (`env` provider: `host_env`,
   default `os.environ`), its env-script opt-in, its default paths.
@@ -426,16 +444,14 @@ returns the exit code.
     a refused one is warned about once). `manifest_problems() -> list[str]`.
   - `read_manifest() -> dict` — `name`, `description`, `routing` (trimmed, blanks
     dropped), `rules`, `requires` (normalized, de-duplicated), `priority`, `doc`.
-  - `skills() -> list[str]` — its `skills` list, else every `skills/<name>/` with a
-    `SKILL.md`. `context_files(harness_id=None) -> list[str]` — its `context`
-    (when absent, `CONTEXT.md` if present), then `harness.<id>.context`.
-    `harness_hints(harness_id) -> dict`. `setup_variant(os_name=None)` (the
-    declared variant for this OS, else the default `setup.<ext>`),
-    `default_setup() -> (variant, skipped)`.
-  - `declared_scripts(os_name=None) -> {name: (path, interpreter)}` (each
-    top-level `bin/<name>.py` unless `[defaults] bin = false`, then `scripts`, which
-    adds, replaces or with `false` drops one); `scripts() -> {name: path}` (the
-    python ones: they get launchers); `unsupported_scripts() ->
+  - `member_paths() -> list[str]` (no hashing). `skills()`, `rules()`,
+    `context_files(harness_id=None)` — the field with its defaults
+    (`_aos.skills_of`, `rules_of`, `context_of`), then `harness.<id>.context`.
+    `harness_hints(harness_id) -> dict`. `setup_variant(os_name=None)` —
+    `_aos.setup_of` here: a declared variant, else the default `setup.<ext>`.
+  - `declared_scripts(os_name=None) -> {name: (path, interpreter)}` (its `scripts`
+    entries for this OS; no file is a command by its name); `scripts() -> {name:
+    path}` (the python ones: they get launchers); `unsupported_scripts() ->
     {name: interpreter}` (refused by `overlays add`).
   - `run_setup(variant, *, env, python, base_path, dry_run, logger, timeout=None)
     -> int` — one setup variant through `_run.run_step`: cwd the overlay root,
@@ -604,7 +620,7 @@ taken out. First even before the `bin` dirs: cmd.exe and PowerShell try every
   components dropped, an entry listed twice once); then every store's `bin`
   (not project-root, missing dirs included) at the front, whatever the caller's
   `PATH` held; empty and cwd-relative inherited entries are dropped.
-- `PYTHONPATH`: an overlay's additions as declared (its `lib` appended by
+- `PYTHONPATH`: an overlay's additions (its `lib/python/` prepended by
   default); every existing store `lib` the active venv's `.pth` does not already
   layer, at the front, highest precedence first; the entries an inherited
   `AGENTS_PYTHONPATH` named (another scope's libs) are removed first.

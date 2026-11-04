@@ -208,6 +208,8 @@ def test_no_overlays_dir_emits_no_overlay_root_vars(tmp_path):
 
 def test_bins_prepended_to_path_first(tree):
     agents_dir, project_root = tree
+    for ov in ("aa", "bb"):
+        (agents_dir / "overlays" / ov / "bin" / "tool").write_text("", encoding="utf-8")
     _manifest(agents_dir / "overlays" / "bb", '[defaults]\nbin = false\n')
     base = {"PATH": os.pathsep.join(["/usr/bin", "/bin"])}
     env = _run(agents_dir, project_root, base)
@@ -247,9 +249,10 @@ def test_bin_paths_excludes_project_root(tree):
 
 def test_lib_dirs_lead_pythonpath_and_are_published_in_agents_pythonpath(tree):
     agents_dir, project_root = tree
-    (agents_dir / "overlays" / "aa" / "lib").mkdir()
-    (agents_dir / "overlays" / "bb" / "lib").mkdir()  # turned off: not a lib
-    _manifest(agents_dir / "overlays" / "bb", '[defaults]\nlib = false\n')
+    for ov in ("aa", "bb"):
+        (agents_dir / "overlays" / ov / "lib" / "python").mkdir(parents=True)
+        (agents_dir / "overlays" / ov / "lib" / "python" / ("%s_mod.py" % ov)).write_text("", encoding="utf-8")
+    _manifest(agents_dir / "overlays" / "bb", '[defaults]\nlib = false\n')  # turned off: not a lib
     (agents_dir / "lib").mkdir()
     (project_root / ".agents" / "lib").mkdir()
     base = {"PATH": "/usr/bin", "PYTHONPATH": "/site/extra"}
@@ -259,12 +262,11 @@ def test_lib_dirs_lead_pythonpath_and_are_published_in_agents_pythonpath(tree):
     assert parts == [
         str(project_root / ".agents" / "lib"),
         str(agents_dir / "lib"),
-        str(agents_dir / "overlays" / "aa" / "lib"),
+        str(agents_dir / "overlays" / "aa" / "lib" / "python"),
     ]
-    # The session's PYTHONPATH: the stores' libs first, the inherited entries,
-    # then an overlay's lib, appended by default -- a skill script or launcher
-    # an overlay starts imports any overlay's lib, and none shadows the others.
-    assert env["PYTHONPATH"].split(os.pathsep) == parts[:2] + ["/site/extra", parts[2]]
+    # The session's PYTHONPATH carries them first, the inherited entries after:
+    # a skill script or launcher an overlay starts imports any overlay's lib.
+    assert env["PYTHONPATH"].split(os.pathsep) == parts + ["/site/extra"]
 
 
 def test_no_lib_dirs_leaves_pythonpath_alone(tree):

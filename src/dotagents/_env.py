@@ -1025,14 +1025,14 @@ def _ordered(overlays: "list") -> "list":
 
 def declared_paths(overlay, variable: str) -> "list[Path]":
     """The directories ``overlay`` adds to ``variable`` on this OS, absolute:
-    its default ones (an existing ``bin`` on ``PATH``, ``lib`` on
-    ``PYTHONPATH``, unless ``[defaults]`` turns one off), then its ``paths``
-    in declaration order."""
+    its defaults (``bin/`` on ``PATH``, ``lib/python/`` on ``PYTHONPATH``,
+    when present and not turned off or replaced), then its ``paths`` in
+    declaration order."""
     windows = os.name == "nt"
     want = variable.upper() if windows else variable
     out: "list[Path]" = []
     root = os.path.abspath(str(overlay.path))
-    for entry in _activate.default_paths(overlay) + list(overlay.document().get("paths", [])):
+    for entry in _aos.paths_of(overlay.document(), _activate.files(overlay)):
         name = entry["variable"].upper() if windows else entry["variable"]
         if name == want and _aos.os_matches(entry, _aos.current_os()):
             found = Path(_aos.resolve_path(root, entry["path"], windows))
@@ -1063,8 +1063,8 @@ def _run_env_script(overlay, script: "dict", own: "_aos.Environment", ctx: "_aos
         )
         if status != 0:
             raise _aos.Refused("env-script-failed", script["path"], "exit %d" % status)
-        return _aos.env_script_changes(out)
-    except (_aos.Refused, _run.InterpreterError, OSError) as exc:
+        return list(_aos.read_env_script_output(out).items())
+    except (_aos.Refused, _aos.ReadError, _run.InterpreterError, OSError) as exc:
         if logger:
             logger.error("overlay %s: env script %s failed, nothing of it applies (%s)",
                          overlay.name, script["path"], getattr(exc, "detail", "") or exc)
@@ -1083,11 +1083,6 @@ def _apply_declarations(overlay, osenv: "dict[str, str]", own_base: "dict[str, s
     provider reads (default ``os.environ``)."""
     ctx = _activate.context(overlay, host_env=host_env)
     doc = overlay.document()
-    if logger and not ctx.default_env_scripts:
-        _script, skipped = _activate.default_env_script(overlay)
-        if skipped:
-            logger.warning("overlay %s: %s cannot run here (no interpreter for it); skipped",
-                           overlay.name, ", ".join(skipped))
     windows = os.name == "nt"
     session = _aos.Environment(osenv, windows)
     weakenings: "list[tuple[str, str]]" = []
@@ -1163,7 +1158,7 @@ def overlay_process_env(scope: Scope, overlay, *, base_env: "Optional[dict[str, 
     for other in _ordered(required):
         built = _aos.Environment(env, windows)
         ctx = _activate.context(other)
-        _aos.apply_paths(built, ctx.default_paths + list(other.document().get("paths", [])), ctx, [])
+        _aos.apply_paths(built, _aos.paths_of(other.document(), ctx.files), ctx, [])
         env = built.values
     found = _apply_declarations(overlay, env, env, python=interpreter(env), logger=logger,
                                 host_env=dict(os.environ if base_env is None else base_env))

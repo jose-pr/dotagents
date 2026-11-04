@@ -41,8 +41,8 @@ def test_context_md_frontmatter_is_not_context(tmp_path):
 
 
 def test_context_md_is_context_by_default_and_context_lists_the_files(tmp_path):
-    """The root's CONTEXT.md is an overlay's context unless `context` lists
-    the files (an empty list: none)."""
+    """The root's CONTEXT.md is an overlay's context; an empty `context`
+    turns nothing off, `[defaults] context = false` does."""
     store = tmp_path / "store"
     ov = store / "overlays" / "plain"
     ov.mkdir(parents=True)
@@ -51,6 +51,8 @@ def test_context_md_is_context_by_default_and_context_lists_the_files(tmp_path):
     scope = Scope.of(agents_dir=store, project_root=tmp_path / "proj", global_scope=True)
     assert "DEFAULT-CONTEXT" in _context.assemble_context(_agents.CodexAgent(), scope)
     (ov / "overlay.cfg").write_text("context = []\n", encoding="utf-8")
+    assert "DEFAULT-CONTEXT" in _context.assemble_context(_agents.CodexAgent(), scope)
+    (ov / "overlay.cfg").write_text("[defaults]\ncontext = false\n", encoding="utf-8")
     assert "DEFAULT-CONTEXT" not in _context.assemble_context(_agents.CodexAgent(), scope)
 
 
@@ -71,14 +73,14 @@ def _store(tmp_path, monkeypatch):
     store = tmp_path / "store"
     for name in ("aa", "bb"):
         ov = store / "overlays" / name
-        (ov / "lib").mkdir(parents=True)
+        (ov / "lib" / "python").mkdir(parents=True)
+        (ov / "lib" / "python" / "m.py").write_text("", encoding="utf-8")
+        (ov / "bin").mkdir()
+        (ov / "bin" / "tool").write_text("", encoding="utf-8")
         (ov / "overlay.cfg").write_text('name = "%s"\n' % name, encoding="utf-8")
-    # `aa` keeps the defaults (its bin/ and lib/ when they exist); `bb` turns
-    # both off.
-    (store / "overlays" / "aa" / "bin").mkdir()
+    # `aa` keeps the defaults (its bin/ and lib/python/); `bb` turns both off.
     with open(str(store / "overlays" / "bb" / "overlay.cfg"), "a", encoding="utf-8") as fh:
         fh.write('[defaults]\nbin = false\nlib = false\n')
-    (store / "overlays" / "bb" / "bin").mkdir()
     (store / "lib").mkdir()
     monkeypatch.setenv("AGENTS_HOME", str(store))
     monkeypatch.delenv("AGENTS_PROJECT_ROOT", raising=False)
@@ -96,7 +98,7 @@ def test_path_lib_lists_only_existing_lib_dirs(tmp_path, monkeypatch, capsys):
     store = _store(tmp_path, monkeypatch)
     assert _run(PathCmd, global_scope=True, lib=True, format="native") == 0
     out = capsys.readouterr().out.strip().split(os.pathsep)
-    assert out == [str(store / "lib"), str(store / "overlays" / "aa" / "lib")]
+    assert out == [str(store / "lib"), str(store / "overlays" / "aa" / "lib" / "python")]
 
 
 def test_path_posix_is_colon_joined_msys_form_on_windows(tmp_path, monkeypatch, capsys):
