@@ -55,6 +55,15 @@ dotagents implements the [Agent Overlay Specification](https://boriken-dev.githu
   before the ones `rules` lists.
 - `<NAME>_OVERLAY_ROOT` always names the overlay copy in play; an inherited value
   used to hold.
+- The overlays of every store are applied in one composition order, `(priority,
+  name)`, as AOS orders them: a project's overlay no longer comes before a user
+  store's overlay because it is the project's (a same-named one still shadows the
+  store's copy). Every store's own `bin/` and `lib/` lead all the overlays' dirs on
+  `PATH` and `PYTHONPATH`, and `dotagents path` and `AGENTS_PYTHONPATH` list them in
+  that order.
+- An overlay's root `env` is applied before its `env.py` (which used to run first),
+  and its `lib/python/` is on the session's `PYTHONPATH` for every Python, also when
+  the store venv layers it (it used to reach only `$AGENTS_PYTHON` then).
 - An overlay's `CONTEXT.md` comes after the stores' `AGENTS.md` in `context`, as AOS
   orders the base context first.
 - Dependencies install by default from `lib/python/requirements.txt` and
