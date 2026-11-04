@@ -36,8 +36,8 @@ for what it starts, so the shim works from any shell.
 
 ## curl — `$NET_OVERLAY_ROOT/bin/curl.py`
 
-dotagents makes `curl` from `bin/curl.py`, as it does for every top-level
-`bin/*.py` of an overlay: a launcher in the agents' venv,
+dotagents makes `curl` from `bin/curl.py`, the `[scripts]` entry
+`curl = "bin/curl.py"` in this overlay's `overlay.cfg`: a launcher in the agents' venv,
 `<venv>/overlays/curl` (`curl.exe` on Windows), made whenever the venv is
 synced and put first on `PATH` by `dotagents env`, ahead of the system's
 curl. On Windows it is a native program, never a `.cmd`: cmd.exe parses a
@@ -109,7 +109,7 @@ bundle FILE from the OS trust store —
 4. nothing: `None`, and a one-time note on stderr naming the variables to set (a bare
    container with no trust store).
 
-With `$NET_OVERLAY_ROOT/lib` on `PYTHONPATH` ahead of any real `certifi` (every
+With `$NET_OVERLAY_ROOT/lib/python` on `PYTHONPATH` ahead of any real `certifi` (every
 session has it), any library that `import certifi` verifies TLS through the OS trust
 store with no shipped certs.
 
@@ -165,5 +165,5 @@ AGENTS_SYSHTTP_HOOKS_INTERNAL_CURL="$MYTOOLS_OVERLAY_ROOT/bin/curl-signed.py"
 
 ## Referencing the lib from a skill
 
-Use `$NET_OVERLAY_ROOT/lib` for the certifi shim; `syshttp` and `curlike` are
+Use `$NET_OVERLAY_ROOT/lib/python` for the certifi shim; `syshttp` and `curlike` are
 importable from `$AGENTS_PYTHON`. Never hardcode the store path.

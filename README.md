@@ -113,7 +113,8 @@ in your scope. The manifest declares only what is not a default. Minimal shape:
   CONTEXT.md       # optional; emitted by `dotagents context` (<NAME_OVERLAY_ROOT> expands)
   rules/<name>.md  # optional; always-on rules, merged into AGENTS.md
   skills/<skill>/  # optional skills, published to the shared skills dir
-  setup.py         # optional idempotent install-time script, run once per digest --
+  setup.py         # optional idempotent script, run on add, every sync and remove with
+                   #   its phase (install, sync, remove) as its first argument --
                    #   only for real install work; it writes into $AOS_OVERLAY_STATE
 ```
 
