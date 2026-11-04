@@ -3,11 +3,13 @@
 An overlay is just a directory with the files you want installed into a scope, plus an
 optional `overlay.cfg` manifest: an
 [AOS](https://boriken-dev.github.io/agent-overlay-spec/) overlay, readable by any
-consumer of the format. The basics need no manifest: an existing `bin/` goes on `PATH`,
-`lib/` on `PYTHONPATH`, `skills/<name>/SKILL.md` are skills, `CONTEXT.md` is context, an
-`env` file (dotenv) and the first runnable `env.<ext>` set variables, and the first
-runnable `setup.<ext>` is the setup. Declare only what is not a default, and turn a
-default off with `[defaults] bin` / `lib` / `env` / `setup = false`. Anyone can write one; name its parent directory (a
+consumer of the format. The basics need no manifest: `bin/` goes on `PATH`,
+`lib/python/` on `PYTHONPATH`, `skills/<name>/SKILL.md` are skills, `CONTEXT.md` is
+context, `rules/<name>.md` are always-on rules, an `env` file (dotenv) and one
+`env.<ext>` set variables, and one `setup.<ext>` is the setup. Declare only what is
+not a default -- a declaration adds to the defaults, and one naming a default's file
+replaces that default -- and turn a default off in `[defaults]` (`bin`, `lib`, `env`,
+`env_scripts`, `setup`, `context`, `skills`, `rules = false`). Anyone can write one; name its parent directory (a
 directory of overlays), a registry, or a git repo with `--repo` — see the
 [overlays guide](overlays.md). Keep the source outside `<store>/overlays/`:
 `overlays remove` deletes the installed directory outright.
@@ -70,8 +72,8 @@ yours needs it.
 
 ## Libraries and launchers
 
-Put importable Python in `lib/`. Every Python a session starts sees it on
-`PYTHONPATH` (appended, after what the session already had, and listed in
+Put importable Python in `lib/python/` (a bare `lib/` means nothing). Every Python a
+session starts sees it on `PYTHONPATH` (prepended, and listed in
 `$AGENTS_PYTHONPATH`), so a skill script or another overlay can `import` your module.
 So can your command modules, which dotagents starts with the libs in place whatever
 shell it runs from, and the setup of an overlay that `requires` yours. Another
@@ -81,7 +83,7 @@ directory goes there with a path addition:
 [[paths]]
 variable = "PYTHONPATH"
 path = "src"
-position = "prepend"     # or "append" (the default for lib/ is append)
+position = "append"      # or "prepend", the default
 os = ["linux", "macos"]  # optional
 ```
 
@@ -96,27 +98,26 @@ requirements = "requirements.txt"   # or lock = "locks/all.txt" + lock_digest = 
 dotagents installs them into the scope venv; a lock installs with
 `--require-hashes --no-deps --only-binary=:all:`.
 
-## Commands on PATH: `bin/*.py` and `[scripts]`
+## Commands on PATH: `[scripts]`
 
-A Python command needs no launcher of your own. Every top-level `bin/<name>.py`
-(unless `[defaults] bin = false`) gets one named `<name>`: `<name>.exe` on Windows (distlib's `ScriptMaker`, the
+A Python command needs no launcher of your own. Name it under `[scripts]` and it
+gets one named after the key; `bin/` itself is only on `PATH`, and no file there is a
+command by its name. Each launcher is `<name>.exe` on Windows (distlib's `ScriptMaker`, the
 launcher pip gives console scripts) and a `/bin/sh` script elsewhere, made in the
 agents' venv, in `<venv>/overlays/`, whenever `overlays add` / `sync` / `remove` or
 `init` brings the venv up to date. `dotagents env` puts that directory first on
-`PATH` for the venv `$AGENTS_PYTHON` names, so `bin/curl.py` answers to `curl`
-ahead of the system's, and drops any other venv's.
+`PATH` for the venv `$AGENTS_PYTHON` names, so with `curl = "bin/curl.py"` the
+overlay's `curl` answers ahead of the system's, and drops any other venv's.
 
-The launcher runs your script under the venv's interpreter, as `python
-bin/<name>.py` would, found when it runs through `$<NAME>_OVERLAY_ROOT`: editing
-the script or moving the store needs nothing regenerated, only a new interpreter
-does. Unset, or with the script missing, it exits 2 and says so. A file whose name
-starts with `_` is not a command. Name other scripts, rename one, or opt one out
-in `overlay.cfg`:
+The launcher runs your script under the venv's interpreter, as `python <script>`
+would, found when it runs through `$<NAME>_OVERLAY_ROOT`: editing the script or
+moving the store needs nothing regenerated, only a new interpreter does. Unset, or
+with the script missing, it exits 2 and says so.
 
 ```toml
 [scripts]
-tool = "lib/tool/main.py"   # a launcher `tool` for another path
-helper = false              # none for bin/helper.py
+curl = "bin/curl.py"
+tool = "lib/tool/main.py"
 check = { path = "tools/check.py", interpreter = "python", os = ["windows"] }
 ```
 
@@ -139,10 +140,12 @@ means the current directory). The net overlay's `bin/curl.py` does this.
 ## Environment
 
 An `env` file at the root (`NAME=value` lines, optionally `export `, literal values)
-and an `env.py` (or `.ps1`, `.bash`, `.sh`, `.js`: the first this OS can run) set your
-overlay's variables by default; `[defaults] env = false` turns both off. The script
-prints one JSON object per line (`{"NAME": "value"}`, `null` to unset) and gets no
-arguments. Static values are better declared:
+and an `env.py` (or `.js`, `.mjs`, `.cjs`, `.ps1` on Windows, `.bash`, `.sh` elsewhere: the first this machine can run) set your
+overlay's variables by default; `[defaults] env = false` turns off the `env` file
+and `env_scripts = false` the script. The script prints one JSON object (across
+several lines if it likes) or one per line (`{"NAME": "value"}`, `null` to unset),
+and gets no arguments unless an `[[env_scripts]]` entry naming it gives some.
+Static values are better declared:
 
 ```toml
 [env]
@@ -158,7 +161,7 @@ value in the overlay: reference it, and the user grants it (see
 
 ## Setup
 
-A `setup.py` (or `.ps1`, `.bash`, `.sh`, `.js`) at the root is your setup, or declare
+A `setup.py` (or `.js`, `.mjs`, `.cjs`, `.ps1` on Windows, `.bash`, `.sh` elsewhere) at the root is your setup -- taken to need the network unless a `[[setup]]` entry naming it says `network = false` -- or declare
 variants per OS with `[[setup]]`. See the contract in
 [Overlays → Setup](overlays.md#setup). The essentials:
 

@@ -187,13 +187,17 @@ dotagents overlays sync -g                                                   # r
 For every active overlay `dotagents env` exports **`$<NAME>_OVERLAY_ROOT`** -- the
 overlay's installed directory (`NAME` is the overlay's name upper-cased, `-` → `_`:
 `private-sync` → `PRIVATE_SYNC_OVERLAY_ROOT`). Then, overlay by overlay in priority
-order, it applies the overlay's environment: its root `env` file (dotenv format:
-`NAME=value` lines, literal, no expansion) and the env files it declares, its `env`
-values, its path additions -- by default an existing `bin/` prepended to `PATH` and
-`lib/` appended to `PYTHONPATH` (listed in `AGENTS_PYTHONPATH` too) -- and last its
-env scripts: the first `env.<ext>` this OS can run (`env.py`, else `env.ps1`,
-`env.bash`, `env.sh`, `env.js`), then those it declares. `[defaults] bin`, `lib` or
-`env = false` in its `overlay.cfg` turns a default off. The launchers of its
+order, it applies the overlay's environment, each field's defaults first: its root
+`env` file (dotenv: literal `NAME=value` lines, no expansion) and the env files it
+declares, its `env` values, its path additions -- by default `bin/` prepended to
+`PATH` and `lib/python/` prepended to `PYTHONPATH` when they hold a file (listed in
+`AGENTS_PYTHONPATH` too) -- and last its env scripts: one `env.<ext>`, the first in
+the order `.py`, `.js`, `.mjs`, `.cjs`, then `.ps1` on Windows, then `.bash`, `.sh`
+elsewhere, that this machine can run, then those it declares. A bare `lib/` means
+nothing: Python modules go in `lib/python/`. An entry naming a default's file or
+directory (a `paths` entry with `path = "bin"`, an env script `env.py`) replaces
+that default with its own settings, in the default's place; `[defaults]` turns one
+off. The launchers of its
 declared python `scripts` (in `<venv>/overlays/` of the agents' venv) go first on
 `PATH`. An overlay with a state directory also gets `$<NAME>_OVERLAY_STATE`.
 
@@ -205,8 +209,9 @@ routing line reads `$ENGINEERING_OVERLAY_ROOT/flows/PLAN.md`, never `~/.agents/f
 written by `context --write-agent` keeps the variable.
 
 An env script runs with the overlay's own environment and the root as its
-working directory, and prints one JSON object per line (`{"NAME": "value"}`, `null`
-to unset); it gets no command-line arguments. Its store can turn env scripts off
+working directory, and prints one JSON object -- across several lines if it likes --
+or one object per line (`{"NAME": "value"}`, `null` to unset); a default one gets no
+command-line arguments. Its store can turn env scripts off
 (below); each run is reported. An overlay's `pre.env*` and `local.env` mean nothing:
 those are the stores' own files (a store's `pre.*` files run before every overlay,
 its `env.py` / `env` / `local.env` after them, so they read and override what the
@@ -232,15 +237,15 @@ Keys dotagents applies:
 | --- | --- |
 | `name`, `description`, `priority` | Display name, summary, merge order (lower sorts earlier; default 500). |
 | `requires` | Other overlays this one depends on; `add` installs them first. |
-| `routing`, `rules` | Lines for "Load on demand"; markdown files whose rule bullets join "Always-on rules". |
-| `context` | Files added to the agent's context (default: `CONTEXT.md` when present; `[]` for none). |
-| `skills` | The overlay's skills (default: every `skills/<name>/SKILL.md`). |
-| `[defaults]` | `bin`, `lib`, `env`, `setup = false` turn off the default `PATH` / `PYTHONPATH` addition, the root `env` file and `env.<ext>` script, the `setup.<ext>`. |
+| `routing`, `rules` | Lines for "Load on demand"; markdown files whose rule bullets join "Always-on rules", after the default `rules/<name>.md`. |
+| `context` | Files added to the agent's context, after the default `CONTEXT.md`. |
+| `skills` | Skills added to the default ones (every `skills/<name>/SKILL.md`). |
+| `[defaults]` | `bin`, `lib`, `env`, `env_scripts`, `setup`, `context`, `skills`, `rules = false` each turn one default off; any other key is refused. |
 | `env`, `env_files`, `paths` | Environment values (a literal, a path in the overlay, a secret reference), env files (`aos` or `dotenv`), and further path additions (`prepend` / `append`, per OS). |
-| `env_scripts` | Programs that compute variables (`interpreter`, `path`, `timeout`), after the default `env.<ext>`; the store can turn them off. |
+| `env_scripts` | Programs that compute variables (`interpreter`, `path`, `timeout`), after the default `env.<ext>`; one naming a root `env.<ext>` configures it; the store can turn them off. |
 | `runtime` | `os`, `commands`, `python` (version, `requirements` or `lock` + `lock_digest`), `node`: probed before an install. |
-| `setup` | Variants per OS (`interpreter`, `path`, `args`, `timeout`, `network`), run once per tree digest; replaces the default `setup.<ext>`. |
-| `[scripts]` | Launchers: `name = "path.py"` or `{ path, interpreter, os }`; dotagents launches python scripts. |
+| `setup` | Variants per OS (`interpreter`, `path`, `args`, `timeout`, `network`), tried before the default `setup.<ext>`; one naming a root `setup.<ext>` configures it. Run once per tree digest. |
+| `[scripts]` | Commands: `name = "path.py"` or `{ path, interpreter, os }`; dotagents launches python scripts. No file is a command by its name. |
 | `[harness.<id>]` | `context` and `skills = false` for one harness (`claude-code`, `codex`, `gemini-cli`, ...); `model` / `effort` are shown, not applied. |
 | `[mcp]` | MCP servers and the skills that expose them. See [MCP servers](#mcp-servers). |
 
@@ -389,11 +394,14 @@ Opt out per run with `--no-venv`, or for good with `AGENTS_NO_PYVENV=1`.
 
 ## Setup
 
-An overlay's setup is, by default, the first `setup.<ext>` at its root this OS can
-run (`setup.py`, else `setup.ps1`, `setup.bash`, `setup.sh`, `setup.js`) -- one
-present that cannot run here is skipped with a warning -- and `[defaults] setup =
-false` turns that off. Declared `[[setup]]` entries replace it; each is a variant,
-the first whose `os` matches is the one that runs:
+An overlay's setup is, by default, one `setup.<ext>` at its root, chosen in the
+order `.py`, `.js`, `.mjs`, `.cjs`, then `.ps1` on Windows, then `.bash`, `.sh`
+elsewhere -- the first that this machine can run -- taken to need the network
+(reported `setup-network`). One present that cannot run is reported
+`script-not-run`; `[defaults] setup = false` turns it off. Declared `[[setup]]`
+variants are tried first, the default last; the first whose `os` matches runs. A
+variant naming a root `setup.<ext>` configures that file instead (its interpreter,
+args, timeout, os, and `network`, false unless declared):
 
 ```toml
 [[setup]]

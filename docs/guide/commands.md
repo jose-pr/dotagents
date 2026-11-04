@@ -393,10 +393,10 @@ form and drop names that are not shell identifiers.
    project's `pre.local.env`), each evaluated against everything before it.
 4. **The overlays**, in priority order (AOS's order of application): each overlay's
    root `env` file (dotenv: literal `NAME=value` lines) and declared env files, its
-   `env` values, its path additions -- by default an existing `bin/` prepended to
-   `PATH` and `lib/` appended to `PYTHONPATH` -- then its env scripts: the first
-   `env.<ext>` it can run here (`env.py`, else `.ps1`, `.bash`, `.sh`, `.js`) and
-   the ones it declares. An overlay's `pre.env*` and `local.env` mean nothing. An
+   `env` values, its path additions -- by default `bin/` prepended to `PATH` and
+   `lib/python/` prepended to `PYTHONPATH` -- then its env scripts: one `env.<ext>`
+   it can run here (`.py`, `.js`, `.mjs`, `.cjs`, then `.ps1` on Windows, `.bash`,
+   `.sh` elsewhere) and the ones it declares. An overlay's `pre.env*` and `local.env` mean nothing. An
    overlay whose environment cannot be applied contributes nothing, with an error
    naming why; the weakenings of every overlay are reported in one warning.
 5. **`PATH`** — every store's `bin/` goes to the front, including ones that do not

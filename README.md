@@ -178,9 +178,10 @@ store's shared `skills/` so every agent sees the same skills.
 - `list` and `show` flag a `requires` no installed overlay provides; `show` names the
   repo an installed overlay came from.
 
-**Overlay setup.** An overlay's setup is the first `setup.<ext>` at its root this OS
-can run (`setup.py`, else `.ps1`, `.bash`, `.sh`, `.js`), or the `[[setup]]` variants its
-`overlay.cfg` declares (interpreter, args, timeout, network, per OS). dotagents runs it
+**Overlay setup.** An overlay's setup is the `[[setup]]` variant its `overlay.cfg`
+declares for this OS (interpreter, args, timeout, network), else one `setup.<ext>` at its
+root, the first this machine can run (`.py`, `.js`, `.mjs`, `.cjs`, then `.ps1` on
+Windows, `.bash`, `.sh` elsewhere), taken to need the network. dotagents runs it
 after `add`/`sync` copies the overlay in, **once per tree digest**; `--rerun-setup` runs it
 again, `--no-setup` skips it. The contract for authors:
 
