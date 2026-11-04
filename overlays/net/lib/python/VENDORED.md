@@ -7,8 +7,8 @@ overlay's own:
   stdlib (`os` + `ssl`), ships no certificates.
 
 The HTTP code is not vendored either. `syshttp` and `curlike` are packages of
-their own, installed into the agents' venv from this overlay's
-`requirements.txt`, from PyPI. Neither needs `requests`, and the overlay does
+their own, installed into the agents' shared Python environment from this
+overlay's `lib/python/requirements.txt`, from PyPI. Neither needs `requests`, and the overlay does
 not install it.
 
 ## If a future change *does* vendor a package

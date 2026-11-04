@@ -1,8 +1,8 @@
 # NET — HTTP tooling for agents
 
 Installed by `dotagents overlays add net`. It brings two packages from PyPI
-into the agents' venv (the `requirements.txt` this overlay's `overlay.cfg` declares, which dotagents
-installs into the interpreter `$AGENTS_PYTHON` names):
+into the agents' shared Python environment (this overlay's `lib/python/requirements.txt`, which
+dotagents installs on `add` and every `sync`, and which the interpreter `$AGENTS_PYTHON` names imports):
 
 - **syshttp** — proxy resolution with credentials and prefix gateways (with
   no proxy variable set, the system's own proxy configuration, PAC and WPAD

@@ -119,12 +119,14 @@ def test_the_manifest_sets_the_agents_prefix_unless_one_is_set():
     assert _manifest()["env"]["SYSHTTP_PREFIX"] == {"value": "AGENTS_", "if_unset": True}
 
 
-def test_the_manifest_declares_the_requirements():
-    assert _manifest()["runtime"]["python"] == [{"version": "3.9", "requirements": "requirements.txt"}]
+def test_the_manifest_asks_for_python_and_names_no_requirements_file():
+    # lib/python/requirements.txt is the default file; naming another would replace it.
+    assert _manifest()["runtime"]["python"] == [{"version": "3.9"}]
 
 
 def test_requirements_take_both_packages_from_pypi_in_one_minor_series():
-    lines = [ln.strip() for ln in (BIN.parent / "requirements.txt").read_text(encoding="utf-8").splitlines()
+    path = BIN.parent / "lib" / "python" / "requirements.txt"
+    lines = [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()
              if ln.strip() and not ln.lstrip().startswith("#")]
     assert sorted(lines) == ["curlike>=0.1.0,<0.2", "syshttp>=0.1.0,<0.2"]
 

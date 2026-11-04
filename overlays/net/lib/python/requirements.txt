@@ -1,5 +1,5 @@
 # What the curl launcher and the overlay's Python users import, installed into
-# the agents' venv by dotagents from PyPI. Both are pre-1.0: a new minor may
+# the agents' shared Python environment by dotagents from PyPI. Both are pre-1.0: a new minor may
 # break the API the launcher uses, so each range stays within one minor.
 syshttp>=0.1.0,<0.2
 curlike>=0.1.0,<0.2

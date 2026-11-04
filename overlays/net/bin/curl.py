@@ -5,8 +5,9 @@ in the agents' venv, ``<venv>/overlays/curl`` (``curl.exe`` on Windows, a
 native program, so no command interpreter parses the caller's arguments),
 which ``dotagents env`` puts first on PATH.
 
-curlike and syshttp come from the agents' venv (this overlay's
-``requirements.txt``), which the launcher runs under. Settings are read under
+curlike and syshttp come from the agents' shared Python environment (this
+overlay's ``lib/python/requirements.txt``), which the venv the launcher runs
+under layers in. Settings are read under
 the prefix ``AGENTS_`` (``AGENTS_SYSHTTP_PROXY``, ``AGENTS_CURL``):
 ``SYSHTTP_PREFIX=AGENTS_`` (this overlay's ``overlay.cfg``) is set here too when
 nothing set a prefix, so the launcher means the same outside a ``dotagents
