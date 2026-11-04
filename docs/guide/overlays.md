@@ -6,8 +6,9 @@ opinionated ships as a named overlay you add explicitly.
 
 ## The overlay model
 
-An overlay is a directory (optionally carrying an `overlay.toml` manifest) that
-installs as a unit into `<store>/overlays/<name>/` — `~/.agents/overlays/<name>/` for
+An overlay is an [AOS](https://boriken-dev.github.io/agent-overlay-spec/) overlay:
+a directory, optionally carrying an `overlay.cfg` manifest, that installs as a unit
+into `<store>/overlays/<name>/` — `~/.agents/overlays/<name>/` for
 the user store, `<project>/.agents/overlays/<name>/` for a project. Its files keep
 their relative paths inside that directory, and content refers to them through the
 overlay's root variable (`$<NAME>_OVERLAY_ROOT/kb/X.md`, see
@@ -65,21 +66,24 @@ Scope is **project** by default, or **user** with `-g` / `--global` (the configu
 store). Each overlay:
 
 - installs as a directory (kept, discoverable), after what its manifest `requires`;
-- records the repo it came from and the digest of every file it installed, in
-  `<store>/overlays/<name>/.dotagents-install.json`;
+- is checked first: a manifest that does not validate, a tree with no digest (a
+  symbolic link, a name AOS refuses), a machine lacking what it needs, or a pin it
+  does not match refuses it before anything is written;
+- records the repo and commit it came from, its tree digest and the digest of every
+  file it installed, beside it in `<store>/overlays/.dotagents-install/<name>.json`;
 - has its `routing` / `rules` merged into `AGENTS.md`'s managed block, which is
   recomposed from the pristine base over every installed overlay in priority order;
 - has its skills published into the scope's shared skills dir, so every agent that
   reads that dir sees the same skills.
 
 `sync` refreshes each overlay from the repo it was installed from (`--repo` replaces
-that source for the run) and makes the install exactly the source: changed files are
-replaced and files the source does not ship are removed, anything edited there backed
-up under `<store>/install_backup/` first. What the `.gitignore` / `.ignore` at the
-overlay's root match (an ignore file in a subdirectory is just a file it ships), and
-tool caches, belong to the install (a setup script's output, local
-state) and are left alone; `--prune` clears them too. A `requires` added upstream is
-installed. An installed overlay is upstream's copy, not a place for your edits.
+that source for the run) and makes the install hold exactly the overlay's files:
+changed files are replaced and everything else is removed -- tool caches,
+`__pycache__`, anything a setup wrote there -- anything edited there backed up under
+`<store>/install_backup/` first. The installed copy then has the overlay's tree
+digest; setup writes into its own state directory instead. A `requires` added
+upstream is installed. An installed overlay is upstream's copy, not a place for your
+edits.
 
 ### Your additions to an overlay's files
 
@@ -180,49 +184,110 @@ dotagents overlays sync -g                                                   # r
 
 ## What `dotagents env` wires for every overlay
 
-Nothing in an overlay has to set up its own paths. For every installed overlay,
-`dotagents env` prepends `bin/` to `PATH` and an existing `lib/` to `PYTHONPATH`
-(listing the libs in `AGENTS_PYTHONPATH` too), puts the launchers of its scripts
-(`bin/*.py` and `[scripts]`, in `<venv>/overlays/` of the agents' venv) first on
-`PATH`, and exports **`$<NAME>_OVERLAY_ROOT`** — the overlay's
-installed directory (`NAME` is the overlay's name upper-cased, `-` → `_`:
-`private-sync` → `PRIVATE_SYNC_OVERLAY_ROOT`).
-That variable is how overlay content refers to itself and to other overlays: a
+For every active overlay `dotagents env` exports **`$<NAME>_OVERLAY_ROOT`** -- the
+overlay's installed directory (`NAME` is the overlay's name upper-cased, `-` → `_`:
+`private-sync` → `PRIVATE_SYNC_OVERLAY_ROOT`). Then, overlay by overlay in priority
+order, it applies the overlay's environment: its root `env` file (dotenv format:
+`NAME=value` lines, literal, no expansion) and the env files it declares, its `env`
+values, its path additions -- by default an existing `bin/` prepended to `PATH` and
+`lib/` appended to `PYTHONPATH` (listed in `AGENTS_PYTHONPATH` too) -- and last its
+env scripts: the first `env.<ext>` this OS can run (`env.py`, else `env.ps1`,
+`env.bash`, `env.sh`, `env.js`), then those it declares. `[defaults] bin`, `lib` or
+`env = false` in its `overlay.cfg` turns a default off. The launchers of its
+declared python `scripts` (in `<venv>/overlays/` of the agents' venv) go first on
+`PATH`. An overlay with a state directory also gets `$<NAME>_OVERLAY_STATE`.
+
+The root variable is how overlay content refers to itself and to other overlays: a
 routing line reads `$ENGINEERING_OVERLAY_ROOT/flows/PLAN.md`, never `~/.agents/flows/PLAN.md`
-— overlays install under `overlays/<name>/`, and the store itself can live anywhere
+-- overlays install under `overlays/<name>/`, and the store itself can live anywhere
 (`$AGENTS_HOME`). `dotagents context` expands both forms, `$ENGINEERING_OVERLAY_ROOT` and
 `<ENGINEERING_OVERLAY_ROOT>`, at assembly time for its stdout and JSON output; a file
 written by `context --write-agent` keeps the variable.
 
-An overlay that needs to export something of its own ships an `env.py` (or a plain
-`env` file) at its root. `dotagents env` runs it as `env.py --level <overlay name>`
-(plus `--global` when the project tiers are skipped) with the environment assembled
-so far, and reads its changes from stdout as JSON — one object, or one object per line,
-merged in order. Values must be strings, and `null` unsets a variable. The full
-contract is under [Commands → env](commands.md#env).
+An env script runs with the overlay's own environment and the root as its
+working directory, and prints one JSON object per line (`{"NAME": "value"}`, `null`
+to unset); it gets no command-line arguments. Its store can turn env scripts off
+(below); each run is reported. An overlay's `pre.env*` and `local.env` mean nothing:
+those are the stores' own files (a store's `pre.*` files run before every overlay,
+its `env.py` / `env` / `local.env` after them, so they read and override what the
+overlays set). An overlay whose environment cannot be applied (a secret not
+granted, a missing env file) contributes nothing, and `env` says which variable and
+why. Every activation reports the overlay's **weakenings** in one
+warning line -- `unpinned` for an overlay with no pin, `env-sensitive`,
+`env-passthrough`, `secret-read`, `env-script`, ... -- naming variables and paths,
+never values.
 
-## `overlay.toml`
+## `overlay.cfg`
 
-The manifest is read by the `overlays` command and the context assembler, with
-`tomllib` (Python 3.11+) or `tomli` when either is installed, and otherwise with a
-small built-in reader that covers these keys (all but `[mcp]`, which needs one of
-the two). Keys:
+The manifest is AOS's `overlay.cfg`: TOML by default, JSON with a first line `#!json`,
+YAML with `#!yaml` (needs PyYAML, the `yaml` extra). It is static data, read without
+running anything; one that does not validate is ignored whole, with a warning saying
+where it is wrong, and `overlays add` refuses it. `overlay.toml` is not read any more
+(a warning names it): rename it, and move what was inferred into declarations (see
+the [changelog](../changelog.md)). The full grammar is the
+[specification's](https://boriken-dev.github.io/agent-overlay-spec/spec/v0/manifest/).
+Keys dotagents applies:
 
 | Key | Meaning |
 | --- | --- |
-| `name` | The overlay's canonical name. |
-| `description` | One-line summary shown by `overlays list`. |
+| `name`, `description`, `priority` | Display name, summary, merge order (lower sorts earlier; default 500). |
 | `requires` | Other overlays this one depends on; `add` installs them first. |
-| `routing` | Lines appended to the core's "Load on demand" routing table. |
-| `rules` | Overlay-relative markdown paths whose rule bullets append to "Always-on rules". |
-| `priority` | Merge order (lower sorts earlier; unprioritized default is 500). |
-| `setup_timeout` | Seconds the setup script may run before it is stopped (default 300; `0` = no limit). |
-| `[scripts]` | Launchers on `PATH`: `name = "path/in/overlay.py"` adds or replaces one, `name = false` drops the one for a `bin/<name>.py`. See [Authoring → Commands on PATH](authoring.md#commands-on-path-binpy-and-scripts). |
-| `[mcp]` | `[[mcp.servers]]` and `[[mcp.skills]]` declare MCP endpoints and skills that expose them. See [MCP servers](#mcp-servers). |
+| `routing`, `rules` | Lines for "Load on demand"; markdown files whose rule bullets join "Always-on rules". |
+| `context` | Files added to the agent's context (default: `CONTEXT.md` when present; `[]` for none). |
+| `skills` | The overlay's skills (default: every `skills/<name>/SKILL.md`). |
+| `[defaults]` | `bin`, `lib`, `env`, `setup = false` turn off the default `PATH` / `PYTHONPATH` addition, the root `env` file and `env.<ext>` script, the `setup.<ext>`. |
+| `env`, `env_files`, `paths` | Environment values (a literal, a path in the overlay, a secret reference), env files (`aos` or `dotenv`), and further path additions (`prepend` / `append`, per OS). |
+| `env_scripts` | Programs that compute variables (`interpreter`, `path`, `timeout`), after the default `env.<ext>`; the store can turn them off. |
+| `runtime` | `os`, `commands`, `python` (version, `requirements` or `lock` + `lock_digest`), `node`: probed before an install. |
+| `setup` | Variants per OS (`interpreter`, `path`, `args`, `timeout`, `network`), run once per tree digest; replaces the default `setup.<ext>`. |
+| `[scripts]` | Launchers: `name = "path.py"` or `{ path, interpreter, os }`; dotagents launches python scripts. |
+| `[harness.<id>]` | `context` and `skills = false` for one harness (`claude-code`, `codex`, `gemini-cli`, ...); `model` / `effort` are shown, not applied. |
+| `[mcp]` | MCP servers and the skills that expose them. See [MCP servers](#mcp-servers). |
 
-`overlay.toml` is the only manifest. A leading `---` frontmatter block in a
-`CONTEXT.md` (the `priority:` / `scope:` / `dependencies:` an older overlay format
-kept there) is not read, and `context` leaves it out of what it assembles.
+```toml
+# engineering/overlay.cfg: what is not a default
+name = "engineering"
+requires = []
+rules = ["rules/ENGINEERING.md"]
+routing = ["- Write or revise a plan → $ENGINEERING_OVERLAY_ROOT/flows/PLAN.md"]
+
+[runtime]
+commands = ["git"]
+```
+
+## Pins, grants and env scripts: the store's own settings
+
+What an overlay may do is the store's decision, never the overlay's. It lives in the
+store's registry document, `<store>/dotagents.toml` (or `.json`, `.yaml`), in its
+`overlays` form; an overlay uses the settings of the store it is installed in:
+
+```toml
+secrets_dir = "~/.agent-secrets"      # where `file` secret references read
+env_scripts = false                   # this store's overlays run no env script (default true)
+
+[overlays.docs-tools]
+source = "https://example.org/agents.git@<commit>#overlays/docs-tools"
+pin = "sha256:<64 hex digits>"        # its tree digest (`overlays show` prints it)
+env_scripts = true
+grants = { env = ["DOCS_TOKEN"], secret = ["release-signing"], file = ["docs/token"] }
+
+[secrets.release-signing]
+provider = "env"
+key = "RELEASE_SIGNING_KEY"
+```
+
+- **A pin** refuses any other bytes: `add` and `sync` check the source before writing
+  it, and every session start (`env`, `context`, command discovery) checks the
+  installed copy; a mismatch, or a cache such as `__pycache__` inside the copy, makes
+  the overlay contribute nothing, with a warning. Change the pin to accept new bytes.
+  An overlay with no pin is reported `unpinned` each time it is activated.
+- **A grant** lets the overlay read one secret: a host variable (`env`), a named
+  secret (`secret`), or a file under `secrets_dir` (`file`). Nothing is granted by
+  default, and an ungranted reference leaves the overlay's environment unapplied
+  (unless it is `optional`). MCP `env_passthrough` and `headers_env` need an `env`
+  grant too.
+- **`env_scripts = false`** stops the overlay's env scripts (its `env.<ext>` and
+  the ones it declares) from running; they run by default, each run reported.
 
 ## MCP servers
 
@@ -232,8 +297,8 @@ seconds (default 60):
 
 | `transport` | Keys |
 | --- | --- |
-| `stdio` | `command`, `args`; `env` sets values (not secrets: they sit in the manifest); `env_passthrough` names variables passed on from the environment. |
-| `streamable-http` | `url` (no credentials, no fragment); `headers_env` maps a header name to the variable holding its value. Needs `dotagents-cli[mcp-http]`. |
+| `stdio` | `command` (a name on `PATH`, or a path in the overlay), `args`; `env` sets values (a literal, a path in the overlay, or a granted secret reference); `env_passthrough` names variables passed on from the environment, when granted. |
+| `streamable-http` | `url` (no credentials, no fragment); `headers_env` maps a header name to the granted variable holding its value. Needs `dotagents-cli[mcp-http]`. |
 
 ```toml
 [mcp]
@@ -265,17 +330,21 @@ must exist) and the server behind it; that server's tools are then listed as
 several. `dotagents mcp --prefix 'dotagents.{name}'` puts every forwarded name under
 `dotagents.`.
 
-A stdio server gets `PATH`, `HOME`, `USERPROFILE`, `SYSTEMROOT`, `TEMP` and `TMP`,
-the variables in `env_passthrough`, and `env`; nothing else of the environment. An
-invalid `[mcp]` table in any active overlay stops `dotagents mcp` from starting; a
-server that fails to start is left out with a warning. Only tools are forwarded.
+A stdio server starts in its overlay's root and gets `PATH`, `HOME`, `USERPROFILE`,
+`SYSTEMROOT`, `TEMP` and `TMP`, the granted variables in `env_passthrough`, its `env`
+and its overlay's root variable; nothing else of the environment. A manifest that
+does not validate declares no server; a server that fails to start is left out with a
+warning. Only tools are forwarded.
 
 ## Skills
 
-An overlay may ship `skills/<skill-name>/` directories. Publishing symlinks each (or
-copies, where symlinks are unavailable) into the scope's shared skills dir, so every
-agent that reads that dir picks up the same skills. Removing the overlay unpublishes
-only the skills it published, then sweeps any now-broken symlinks.
+An overlay's skills are its `skills` list when it has one, else every
+`skills/<skill-name>/` holding a `SKILL.md`. Publishing symlinks each (or copies,
+where symlinks are unavailable) into the scope's shared skills dir, so every agent
+that reads that dir picks up the same skills; `[harness.<id>] skills = false` keeps
+them out of that harness's own skills dir (the context's skills listing still names
+them). Removing the overlay unpublishes only the skills it published, then sweeps any
+now-broken symlinks.
 
 ## Python dependencies and the scope venv
 
@@ -289,20 +358,24 @@ ever used as an agents' venv. `init` and every
 `overlays add` / `sync` / `remove` keep it current:
 
 - The user store's venv always has **duho**, so any skill can build a command line
-  on it, plus the packages each overlay installed there lists in a
-  **`requirements.txt`** at its root (pip's format). They are installed in one pip
-  run, so pip sees every constraint at once, and only when a file changed.
-- A project gets its own venv only when one of its overlays ships a
-  `requirements.txt` or a `lib/`; otherwise a project session uses the user venv.
+  on it, plus the dependencies each overlay installed there declares under
+  `[[runtime.python]]`: a `requirements` file (reported `unlocked-dependencies`),
+  installed in one pip run with the others so pip sees every constraint at once, or a
+  `lock` (every line pinned with `==` and hashed; its `lock_digest` checked first),
+  installed in its own run with `--require-hashes --no-deps --only-binary=:all:`.
+  Either file holds requirement lines only: no `-r`, index option, URL or path.
+  pip runs only when a file changed. The venv is the store's, not one per overlay.
+- A project gets its own venv only when one of its overlays declares dependencies,
+  has a library dir or a script; otherwise a project session uses the user venv.
 - The venvs **layer like everything else**. A `.pth` file in each venv lists, highest
   precedence first: the store's own overlay libs, then the user venv's packages and
   libs, then the system store's. dotagents itself comes last. So in a project venv,
   the project's packages and libs win, then the user's, then the system's.
 - `dotagents env` points **`AGENTS_PYTHON`** at the active venv (and names it in
-  `AGENTS_PYVENV`). Overlay `setup.py` and `env.py` run under it, and the managed
-  block tells agents to run skill scripts with it. Libs the venv layers stay off
-  `PYTHONPATH`, so no other Python in the session, such as a project's own venv,
-  imports them by accident.
+  `AGENTS_PYVENV`). A `python` setup or env script and the stores' `env.py` run under
+  it, and the managed block tells agents to run skill scripts with it. A store's own
+  `lib` the venv layers stays off `PYTHONPATH`; an overlay's library dir is a path
+  addition, on `PYTHONPATH` for every process of the session.
 
 **No ensurepip, no network?** pip runs from its wheel, pinned by version (25.3, the
 last for Python 3.9) and hash, found in this order: the store's cache, a copy
@@ -314,30 +387,48 @@ requirements themselves.
 
 Opt out per run with `--no-venv`, or for good with `AGENTS_NO_PYVENV=1`.
 
-## Setup scripts
+## Setup
 
-An overlay may ship an **idempotent** `setup.py` at its root — the recommended,
-OS-agnostic form: it runs under `AGENTS_PYTHON` (the scope venv above, with the
-overlay's requirements installed first), so it works on every platform. After
-`add` / `sync` copies the overlay in, dotagents runs the script automatically. Reserve it for real install-time work:
-`PATH`, `PYTHONPATH` and `$<NAME>_OVERLAY_ROOT` are `dotagents env`'s job
-(above), and an overlay's own env vars belong in its `env.py`, not in a script that
-writes one into the store — none of the example overlays ship a setup script any more.
-Presence of a script is the opt-in; skip it with `--no-setup`. The author contract:
+An overlay's setup is, by default, the first `setup.<ext>` at its root this OS can
+run (`setup.py`, else `setup.ps1`, `setup.bash`, `setup.sh`, `setup.js`) -- one
+present that cannot run here is skipped with a warning -- and `[defaults] setup =
+false` turns that off. Declared `[[setup]]` entries replace it; each is a variant,
+the first whose `os` matches is the one that runs:
 
-- **Idempotent** — safe on every `add` / `sync`; check-then-act, never blindly append.
-- **cwd** is the installed overlay dir, so reference your own files by relative path.
-- **Environment** carries `AGENTS_HOME` (the user store), `AGENTS_SCOPE_ROOT` (the
-  store the overlay is installed into), `AGENTS_SCOPE` (`user` or `project`) and
-  `AGENTS_OVERLAY_DIR` (the overlay's own installed dir) — never hardcode a home path.
-- **Environment** is also the scope's assembled `dotagents env`: every overlay's `bin/`
-  on `PATH`, and every overlay's `lib/` importable (through the venv's layering, or
-  `PYTHONPATH` without a venv).
-- **Time limit**: 300 seconds, or the manifest's `setup_timeout`, or the command's
-  `--setup-timeout` (which wins); `0` means no limit. A script still running then is
-  stopped, and that counts as a failure (exit 124).
-- A **non-zero exit fails the install** with a clear error, not a silent skip, and a
-  fresh `add` is rolled back. Any outward or irreversible action must be confirmed by
-  the *script* itself.
+```toml
+[[setup]]
+os = ["windows"]
+interpreter = "powershell"     # python, bash, sh, powershell, node
+path = "setup/setup.ps1"
+timeout = 120                  # seconds; default 300, 0 for no limit
+
+[[setup]]
+interpreter = "python"
+path = "setup/setup.py"
+args = ["--quiet"]
+network = true                 # reported as the weakening setup-network
+```
+
+- It runs **once per tree digest and OS**: after `add`, and on `sync` only when the
+  overlay's files changed (`--rerun-setup` runs it again; `--no-setup` skips it).
+- It must be **idempotent** -- running it twice leaves what running it once did.
+- **Interpreter**: `python` is the scope venv's (`AGENTS_PYTHON`); the others are
+  found on your `PATH` (never an overlay's), PowerShell as `pwsh -NoLogo -NoProfile
+  -NonInteractive -File`, Git's bash and sh on Windows, never a `.cmd` or `.bat`.
+  Arguments are passed as a list, never through a shell.
+- **cwd** is the installed overlay root. **Write only into `AOS_OVERLAY_STATE`**, a
+  directory outside the root that belongs to this overlay, digest and OS; the root
+  keeps its tree digest, and sessions find the state as `$<NAME>_OVERLAY_STATE`.
+- **Environment**: your environment, every overlay's root variable, the path
+  additions of the overlays it requires, its own declarations, `AOS_OVERLAY_ROOT`,
+  `AOS_OVERLAY_NAME`, `AOS_OVERLAY_STATE`, and `AGENTS_HOME` (the user store),
+  `AGENTS_SCOPE_ROOT` (the store it is installed into), `AGENTS_SCOPE`. No other
+  overlay's values or secrets.
+- **Time limit**: the variant's `timeout`, or `--setup-timeout`; a step still running
+  then is stopped with everything it started, and that is a failure (exit 124).
+- **Network**: dotagents cannot deny a process the network, so a variant that does not
+  declare it is reported `network-not-enforced`.
+- A **non-zero exit fails the install** with a clear error, and a fresh `add` is
+  rolled back.
 
 See [Authoring an overlay](authoring.md) to build your own.

@@ -88,9 +88,10 @@ python -m dotagents build-pyz --out dist/dotagents.pyz   # or build it (needs a 
 - `bin/` — put on `PATH` by `dotagents env`. `init` writes the `dotagents` wrappers
   into it: at the `.pyz` it runs from, or running `"<python>" -m dotagents` for a plain
   install.
-- `lib/` — Python modules: `dotagents env` puts every level's `lib/` on the
-  session's `PYTHONPATH` (and lists them in `AGENTS_PYTHONPATH`), so skill scripts,
-  overlay launchers and `env.py` all import them (see
+- `lib/` — Python modules: `dotagents env` puts the store's `lib/` on the
+  session's `PYTHONPATH` (and lists it, with the overlays' library dirs, in
+  `AGENTS_PYTHONPATH`), so skill scripts, overlay launchers and `env.py` all import
+  them (see
   [Commands → env](commands.md#env)).
 - `env.py`, `env`, `pre.env.py`, `pre.env` — the store's env layers; a project store
   also reads `local.env` / `pre.local.env` (see [Commands → env](commands.md#env)).
@@ -119,9 +120,13 @@ python -m dotagents build-pyz --out dist/dotagents.pyz   # or build it (needs a 
 ## What runs, and from where
 
 `dotagents env` and the command discovery run code from every store the session
-walks: each store's `env.py` and env files, its `dotagents/cmds/*.py`, and the same
-from its installed overlays; `env` also puts each store's and overlay's `bin/` on
-`PATH`. The hooks `init` wires run them at session start.
+walks: each store's `env.py` and env files and its `dotagents/cmds/*.py`, and from
+its installed overlays their env scripts (an `env.<ext>`, or declared; a store turns
+them off with `env_scripts = false` in its `dotagents.toml`) and `cmds/*.py`; `env`
+also puts each store's and overlay's `bin/` on `PATH`. The hooks `init` wires run
+them at session start. An overlay's setup runs at `overlays add` / `sync`, once per
+digest. A store can pin an overlay to its tree digest, refusing any other bytes (see
+[Overlays](overlays.md#pins-grants-and-env-scripts-the-stores-own-settings)).
 
 - **The user store** is yours.
 - **A project's `.agents/`** is trusted the way a harness trusts a repo's own

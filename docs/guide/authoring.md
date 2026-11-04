@@ -1,7 +1,13 @@
 # Authoring an overlay
 
 An overlay is just a directory with the files you want installed into a scope, plus an
-optional `overlay.toml` manifest. Anyone can write one; name its parent directory (a
+optional `overlay.cfg` manifest: an
+[AOS](https://boriken-dev.github.io/agent-overlay-spec/) overlay, readable by any
+consumer of the format. The basics need no manifest: an existing `bin/` goes on `PATH`,
+`lib/` on `PYTHONPATH`, `skills/<name>/SKILL.md` are skills, `CONTEXT.md` is context, an
+`env` file (dotenv) and the first runnable `env.<ext>` set variables, and the first
+runnable `setup.<ext>` is the setup. Declare only what is not a default, and turn a
+default off with `[defaults] bin` / `lib` / `env` / `setup = false`. Anyone can write one; name its parent directory (a
 directory of overlays), a registry, or a git repo with `--repo` — see the
 [overlays guide](overlays.md). Keep the source outside `<store>/overlays/`:
 `overlays remove` deletes the installed directory outright.
@@ -10,12 +16,12 @@ directory of overlays), a registry, or a git repo with `--repo` — see the
 
 ```
 my-overlay/
-  overlay.toml
+  overlay.cfg
   kb/MY_TOPIC.md
 ```
 
 ```toml
-# my-overlay/overlay.toml
+# my-overlay/overlay.cfg (TOML; `#!json` or `#!yaml` on the first line for those)
 name = "my-overlay"
 description = "My team's conventions for topic X."
 routing = [
@@ -64,18 +70,36 @@ yours needs it.
 
 ## Libraries and launchers
 
-Put importable Python in `lib/`. Every Python a session starts sees every overlay's
-`lib/` on `PYTHONPATH` (`dotagents env` puts them there, highest precedence first,
-and lists them in `$AGENTS_PYTHONPATH`), so a skill script or another overlay can
-`import` your module. So can your setup script and your command modules, which
-dotagents starts with the libs in place whatever shell it runs from. A `lib/` module
-comes before site-packages and the standard library: do not reuse a package name you
-do not mean to replace.
+Put importable Python in `lib/`. Every Python a session starts sees it on
+`PYTHONPATH` (appended, after what the session already had, and listed in
+`$AGENTS_PYTHONPATH`), so a skill script or another overlay can `import` your module.
+So can your command modules, which dotagents starts with the libs in place whatever
+shell it runs from, and the setup of an overlay that `requires` yours. Another
+directory goes there with a path addition:
+
+```toml
+[[paths]]
+variable = "PYTHONPATH"
+path = "src"
+position = "prepend"     # or "append" (the default for lib/ is append)
+os = ["linux", "macos"]  # optional
+```
+
+An overlay's Python dependencies are declared, never found by a file name:
+
+```toml
+[[runtime.python]]
+version = "3.9"
+requirements = "requirements.txt"   # or lock = "locks/all.txt" + lock_digest = "sha256:..."
+```
+
+dotagents installs them into the scope venv; a lock installs with
+`--require-hashes --no-deps --only-binary=:all:`.
 
 ## Commands on PATH: `bin/*.py` and `[scripts]`
 
 A Python command needs no launcher of your own. Every top-level `bin/<name>.py`
-gets one named `<name>`: `<name>.exe` on Windows (distlib's `ScriptMaker`, the
+(unless `[defaults] bin = false`) gets one named `<name>`: `<name>.exe` on Windows (distlib's `ScriptMaker`, the
 launcher pip gives console scripts) and a `/bin/sh` script elsewhere, made in the
 agents' venv, in `<venv>/overlays/`, whenever `overlays add` / `sync` / `remove` or
 `init` brings the venv up to date. `dotagents env` puts that directory first on
@@ -87,13 +111,17 @@ bin/<name>.py` would, found when it runs through `$<NAME>_OVERLAY_ROOT`: editing
 the script or moving the store needs nothing regenerated, only a new interpreter
 does. Unset, or with the script missing, it exits 2 and says so. A file whose name
 starts with `_` is not a command. Name other scripts, rename one, or opt one out
-in `overlay.toml`:
+in `overlay.cfg`:
 
 ```toml
 [scripts]
 tool = "lib/tool/main.py"   # a launcher `tool` for another path
 helper = false              # none for bin/helper.py
+check = { path = "tools/check.py", interpreter = "python", os = ["windows"] }
 ```
+
+dotagents launches python scripts; an overlay naming another interpreter for a
+script is refused by `overlays add`.
 
 Two overlays with one script name is an error naming both. A launcher no overlay
 has any more is deleted at the next sync.
@@ -108,22 +136,52 @@ for what it starts, if anything needs the libs: its own `lib/`, then
 `$AGENTS_PYTHONPATH`, then the caller's, leaving empty parts out (an empty entry
 means the current directory). The net overlay's `bin/curl.py` does this.
 
-## Setup scripts
+## Environment
 
-Ship an idempotent `setup.py` at the overlay root to run install-time wiring
-automatically — the recommended, OS-agnostic form (it runs under the same Python as
-dotagents, so it works on every platform). See the contract in
-[Overlays → Setup scripts](overlays.md#setup-scripts). The essentials:
+An `env` file at the root (`NAME=value` lines, optionally `export `, literal values)
+and an `env.py` (or `.ps1`, `.bash`, `.sh`, `.js`: the first this OS can run) set your
+overlay's variables by default; `[defaults] env = false` turns both off. The script
+prints one JSON object per line (`{"NAME": "value"}`, `null` to unset) and gets no
+arguments. Static values are better declared:
 
-- idempotent, check-then-act;
-- cwd is your installed overlay dir;
-- the environment is the scope's assembled `dotagents env` (every overlay's `lib/` on
-  `PYTHONPATH`, `bin/` on `PATH`), plus the user store (`AGENTS_HOME`), the store you are installed
-  into (`AGENTS_SCOPE_ROOT`, with `AGENTS_SCOPE` = `user` / `project`) and your own
-  installed dir (`AGENTS_OVERLAY_DIR`) — never hardcode a home path;
-- it has 300 seconds unless `setup_timeout` in `overlay.toml` (or the user's
-  `--setup-timeout`) says otherwise; `0` means no limit;
+```toml
+[env]
+TOOL_MODE = "read-only"
+TOOL_CONFIG = { path = "conf/tool.toml" }            # an absolute path in the overlay
+SYSHTTP_PREFIX = { value = "AGENTS_", if_unset = true }
+DOCS_TOKEN = { provider = "env", key = "DOCS_TOKEN" } # needs the store's grant
+```
+
+No overlay sets `AOS_*`, `*_OVERLAY_ROOT` or `*_OVERLAY_STATE`. A secret is never a
+value in the overlay: reference it, and the user grants it (see
+[Overlays → Pins, grants and env scripts](overlays.md#pins-grants-and-env-scripts-the-stores-own-settings)).
+
+## Setup
+
+A `setup.py` (or `.ps1`, `.bash`, `.sh`, `.js`) at the root is your setup, or declare
+variants per OS with `[[setup]]`. See the contract in
+[Overlays → Setup](overlays.md#setup). The essentials:
+
+- idempotent; it runs once per tree digest of your overlay;
+- cwd is your installed overlay root; write only into `$AOS_OVERLAY_STATE`;
+- the environment is the user's, the overlays' root variables, your own declarations,
+  `AOS_OVERLAY_ROOT` / `_NAME` / `_STATE`, the user store (`AGENTS_HOME`) and the
+  store you are installed into (`AGENTS_SCOPE_ROOT`, `AGENTS_SCOPE`);
+- 300 seconds unless the variant's `timeout` (or the user's `--setup-timeout`) says
+  otherwise; `0` means no limit;
+- declare `network = true` when it needs the network: it is reported;
 - a non-zero exit fails the install loudly; confirm any irreversible action yourself.
+
+## Needs
+
+Say what must exist where your overlay goes; `overlays add` refuses a machine that
+lacks it, naming what is missing:
+
+```toml
+[runtime]
+os = ["linux", "macos", "windows"]
+commands = ["git", { name = "gh", os = ["linux", "macos"] }]
+```
 
 ## Custom commands
 
@@ -195,7 +253,8 @@ a good tool:
 ## Skills
 
 Put `skills/<skill-name>/` directories in your overlay to publish shared skills into
-the scope on install. See [Overlays → Skills](overlays.md#skills).
+the scope on install (`skills = [...]` lists them when not all are). See
+[Overlays → Skills](overlays.md#skills).
 
 A skill that relies on commands says so, in its own text: which `dotagents` commands
 it uses, that they are available as MCP tools (`dotagents.<command>`) when the

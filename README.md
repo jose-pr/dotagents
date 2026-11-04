@@ -55,8 +55,10 @@ tree: they are swappable payloads, not part of the tool. Name that branch as a r
 This repo's own working material (decisions, findings, plans) lives **privately** in
 its untracked `.agents/` — like every project, `.agents/` is never tracked or pushed.
 
-Each overlay's `<name>/overlay.toml` carries a `name`/`description`/`requires`/`routing`
-manifest read by the `dotagents overlays` subcommand, which manages overlays by name
+Overlays follow the [Agent Overlay Specification](https://boriken-dev.github.io/agent-overlay-spec/)
+(AOS): each may carry an `overlay.cfg` manifest (`name`/`description`/`requires`/`routing`,
+and what it needs that is not a default: environment, path additions, setup,
+runtime), read by the `dotagents overlays` subcommand, which manages overlays by name
 (`add`/`remove`/`list`/`sync`/`show`) — see [Managing overlays](#managing-overlays) below.
 
 ## Install
@@ -155,13 +157,15 @@ installed first, its `routing`/`rules` merge into `AGENTS.md`'s managed block, a
 store's shared `skills/` so every agent sees the same skills.
 
 - `add` and `sync` keep an installed overlay exactly as its source ships it: changed
-  files are replaced and files the source does not ship are removed, anything edited
-  there backed up under `<store>/install_backup/` first. What the `.gitignore` /
-  `.ignore` at the overlay's root match (setup output, local state) and tool caches are left
-  alone; `--prune` clears them too. A fresh `add` whose setup script fails is rolled
-  back.
+  files are replaced and everything else is removed (tool caches and setup output
+  included), anything edited there backed up under `<store>/install_backup/` first,
+  so the copy keeps the overlay's AOS tree digest. A source is refused before
+  anything is written when its manifest does not validate, this machine lacks what
+  its `runtime` needs, or the store pins it to another digest. A fresh `add` whose
+  setup fails is rolled back.
 - Each store has a Python venv, `<store>/.pyvenv/<version>-<os>-<arch>/`, where skills
-  run (`$AGENTS_PYTHON`): duho, every overlay's `requirements.txt` and every overlay
+  run (`$AGENTS_PYTHON`): duho, the dependencies each overlay declares
+  (`[[runtime.python]]`, a requirements or a hash-checked lock file) and every agent
   `lib/` import there, layered project > user > system. pip comes from the
   interpreter, else its pinned wheel (cache, `AGENTS_PIP_SOURCE`, your index mirror,
   or a `.pyz` built `--with-pip`).
@@ -174,24 +178,21 @@ store's shared `skills/` so every agent sees the same skills.
 - `list` and `show` flag a `requires` no installed overlay provides; `show` names the
   repo an installed overlay came from.
 
-**Overlay setup scripts.** An overlay may ship an **idempotent** `setup.py` at its root
-(the recommended form: it runs under the same Python that runs dotagents, so it works on
-every OS). After `add`/`sync` copies the overlay
-in, dotagents runs the script automatically — so anything a human would otherwise
-hand-follow (PATH/lib wiring, self-registration) is one script the tool runs, not a doc.
-Presence of the script is the opt-in; skip it with `--no-setup`. The contract for
-authors:
+**Overlay setup.** An overlay's setup is the first `setup.<ext>` at its root this OS
+can run (`setup.py`, else `.ps1`, `.bash`, `.sh`, `.js`), or the `[[setup]]` variants its
+`overlay.cfg` declares (interpreter, args, timeout, network, per OS). dotagents runs it
+after `add`/`sync` copies the overlay in, **once per tree digest**; `--rerun-setup` runs it
+again, `--no-setup` skips it. The contract for authors:
 
-- **Idempotent** — safe to run on every `add`/`sync`; check-then-act, never blindly append.
-- **cwd** is the installed overlay dir (`<store>/overlays/<name>/`), so reference
-  your own files by relative path.
-- **Env** carries `AGENTS_HOME` (the user store — never hardcode `~/.agents`),
-  `AGENTS_SCOPE_ROOT` (the store the overlay is installed into: the user store with
-  `-g`, the project's `.agents` otherwise), `AGENTS_SCOPE` (`user` or `project`) and
-  `AGENTS_OVERLAY_DIR` (your own installed dir).
-- A **non-zero exit fails the install** with a clear error (not a silent skip). For any
-  outward or irreversible action the *script* must confirm first — the runner invokes a
-  script you chose to install; it does not second-guess it.
+- **Idempotent** — running it twice leaves what running it once did.
+- **cwd** is the installed overlay root; **write only into `$AOS_OVERLAY_STATE`**, a
+  directory outside the root that sessions see as `$<NAME>_OVERLAY_STATE`.
+- **Env** is your environment, every overlay's root variable, the overlay's own
+  declarations, `AOS_OVERLAY_ROOT` / `AOS_OVERLAY_NAME` / `AOS_OVERLAY_STATE`, and
+  `AGENTS_HOME` (the user store — never hardcode `~/.agents`), `AGENTS_SCOPE_ROOT`,
+  `AGENTS_SCOPE`.
+- A **non-zero exit or the timeout fails the install** with a clear error, and
+  everything the step started is stopped with it.
 
 ### Downloadable `dotagents.pyz`
 

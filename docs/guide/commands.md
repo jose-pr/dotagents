@@ -213,9 +213,9 @@ dotagents overlays add python engineering  # install into the scope, publish ski
 dotagents overlays add '*' -g              # everything the repos offer (a store registry: all it names)
 dotagents overlays list                    # installed (discovered) + available from the repos
 dotagents overlays sync 'py*'              # refresh installed overlays matching a glob
-dotagents overlays sync --prune            # also clear what .gitignore/.ignore protect: exactly upstream
+dotagents overlays sync --rerun-setup      # run setup again although the digest did not change
 dotagents overlays remove python           # delete the overlay dir, unpublish its skills, un-merge its rules
-dotagents overlays show python             # describe one: manifest, requires, setup, skills, source (--json)
+dotagents overlays show python             # describe one: declarations, digest, pin, weakenings, source (--json)
 ```
 
 - **`add`** takes names or globs: `'*'` is every overlay the repos offer, so with
@@ -233,26 +233,27 @@ dotagents overlays show python             # describe one: manifest, requires, s
   before touching anything — the first repo that offers a name wins — records where
   each overlay came from, and publishes skills from the installed copy, never
   replacing a skill already in the shared `skills/` dir (and links them into
-  Claude's skills dir when `init` wired Claude for the store). Each overlay's
-  `requirements.txt` is installed into the scope venv before its setup script runs
-  (`--no-venv` skips it; see
-  [the scope venv](overlays.md#python-dependencies-and-the-scope-venv)). A fresh install
-  whose requirements or setup script fail is rolled back. A source inside the store's own `overlays/` directory
+  Claude's skills dir when `init` wired Claude for the store). Each overlay is
+  checked first -- a manifest that does not validate, a tree with no digest, a
+  machine lacking what its `runtime` needs, a pin it does not match refuse it before
+  anything is written. Its declared Python dependencies are installed into the scope
+  venv before its setup runs (`--no-venv` skips them; see
+  [the scope venv](overlays.md#python-dependencies-and-the-scope-venv)); setup runs once
+  per tree digest. A fresh install whose dependencies or setup fail is rolled back. A source inside the store's own `overlays/` directory
   is refused (by `sync` too): `remove` would delete the only copy.
 - `add`, `remove` and `show` without an overlay name are usage errors (exit 2), and
   a `--dry-run` says what it would write (`would recompose ...`) instead of reporting
   it as done.
 - **`sync`** refreshes each installed overlay from the repo it was installed from
-  (recorded in `<overlay>/.dotagents-install.json`); `--repo` replaces that recorded
-  source for the run. The install is made to match the source exactly: new and changed
-  files land, `overlay.toml` is refreshed, and files the source does not ship are
-  removed. A file you edited (or added) there is copied to
+  (recorded beside it in `<store>/overlays/.dotagents-install/<name>.json`, with the
+  commit and tree digest); `--repo` replaces that recorded source for the run. The
+  install is made to hold exactly the overlay's files: new and changed files land and
+  everything else goes -- caches (`__pycache__`, `.venv`, ...) and anything a setup
+  wrote there included. A file you edited (or added) there is copied to
   `<store>/install_backup/<timestamp>/overlays/<name>/` before it is replaced or
-  removed. What the `.gitignore` / `.ignore` at the overlay's root match — setup
-  output, local state — and tool caches (`__pycache__`, `.venv`, …) are the install's own and
-  left alone; `--prune` clears them too, leaving exactly the upstream files. A
-  `requires` added upstream is installed, and published skill copies are refreshed.
-  `add` of an overlay already installed does the same (with `--prune` too). Keep your
+  removed. Setup runs again only when the digest changed. A `requires` added upstream
+  is installed, and published skill copies are refreshed. `add` of an overlay already
+  installed does the same. Keep your
   own additions outside `<store>/overlays/` — a `kb/` file of your own, an
   `AGENTS.local.md` — where a sync never touches them.
 - **`remove`** deletes the overlay's directory, unpublishes the skills it published
@@ -261,14 +262,16 @@ dotagents overlays show python             # describe one: manifest, requires, s
   requires (and no other store provides) unless `--force`.
 - **`list`** shows the installed overlays per store (in a project, the user store's
   too; a same-named project overlay shadows the store's copy), flags a `requires` no
-  installed overlay provides, and lists what the repos offer (`*` = installed).
-  **`show`** also names the repo an installed overlay came from.
+  installed overlay provides or a pin refuses, and lists what the repos offer (`*` =
+  installed). **`show`** also names the repo and commit an installed overlay came
+  from, its tree digest and pin, what this machine lacks for it and its weakenings.
 
 ## context
 
-Assembles the effective context an agent should load — the overlay `CONTEXT.md`s
-(by priority), then each store's `AGENTS.md`, the project store's `AGENTS.local.md`,
-and the project root's own `AGENTS.md` / `AGENTS.local.md` — minus whatever the harness already loads by itself (for Claude Code, whatever its
+Assembles the effective context an agent should load — each store's `AGENTS.md`, the
+project store's `AGENTS.local.md`, and the project root's own `AGENTS.md` /
+`AGENTS.local.md`, then each overlay's context (its `context` files, by default its
+`CONTEXT.md`, plus `[harness.<id>] context` for the agent; by priority) — minus whatever the harness already loads by itself (for Claude Code, whatever its
 `CLAUDE.md` files really `@`-include) — and prints it to **stdout** by default
 (POSIX convention); pass a path to write a file, or `--write-agent` to merge it into
 each agent's own instruction file. It ends with the skills on offer and, when there are
@@ -386,30 +389,36 @@ form and drop names that are not shell identifiers.
    `sys.path` when its own import fails. An installed `dotagents` sets nothing,
    since those libraries are already in `AGENTS_PYTHON`'s site-packages. It is
    never put on `PYTHONPATH`, where it would shadow a project's own copy.
-3. **`PATH`** — every level's `bin/` (each store's overlays, then the store) goes
-   to the front in that order, including ones that do not exist yet, so an `env.py`
-   and every subprocess can call an overlay's helpers by name. The order holds even
-   when the calling shell already had some of them, and empty or relative inherited
-   entries are dropped.
-4. **`PYTHONPATH`** — every level's `lib/` that exists goes to the front, highest
-   precedence first, so every Python the session starts — a skill script, an
-   overlay's `bin/` launcher, an `env.py` — can `import` any overlay's `lib/`
-   module, including another overlay's. The same list is published as
+3. **The stores' `pre.*` files** — every store's `pre.env.py` / `pre.env` (and the
+   project's `pre.local.env`), each evaluated against everything before it.
+4. **The overlays**, in priority order (AOS's order of application): each overlay's
+   root `env` file (dotenv: literal `NAME=value` lines) and declared env files, its
+   `env` values, its path additions -- by default an existing `bin/` prepended to
+   `PATH` and `lib/` appended to `PYTHONPATH` -- then its env scripts: the first
+   `env.<ext>` it can run here (`env.py`, else `.ps1`, `.bash`, `.sh`, `.js`) and
+   the ones it declares. An overlay's `pre.env*` and `local.env` mean nothing. An
+   overlay whose environment cannot be applied contributes nothing, with an error
+   naming why; the weakenings of every overlay are reported in one warning.
+5. **`PATH`** — every store's `bin/` goes to the front, including ones that do not
+   exist yet. The order holds even when the calling shell already had some of them,
+   and empty or relative inherited entries are dropped. **`PYTHONPATH`** — every
+   store's `lib/` that exists goes to the front, highest precedence first. Every
+   agent library dir -- the stores' and the overlays' -- is published as
    `AGENTS_PYTHONPATH` (`os.pathsep`-joined), which is how `env` knows which
    `PYTHONPATH` entries are its own: after a `cd` into another project, the first
-   project's libs leave. A `lib/` module comes before site-packages and the
+   project's libs leave. A store `lib/` module comes before site-packages and the
    standard library, so it must not reuse a name it does not mean to replace.
-5. **The env files** — first every level's `pre.env.py` / `pre.env` (and the project's
-   `pre.local.env`), then every level's `env.py` / `env` (and the project's
-   `local.env`), each evaluated against everything before it. A project root's own
-   top-level files outside `.agents/` never run.
-6. **Proxy** — `AGENTS_PROXY` is set from `AGENTS_WEBFETCH_PROXY_URL` or the global
+6. **The stores' env files** — every store's `env.py` / `env` (and the project's
+   `local.env`), each evaluated against everything before it, so they read and
+   override what the overlays set. A project root's own top-level files outside
+   `.agents/` never run.
+7. **Proxy** — `AGENTS_PROXY` is set from `AGENTS_WEBFETCH_PROXY_URL` or the global
    `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` when unset, and each proxy variable that
    is set in one case is mirrored into the other.
 
-**`env.py`** is executed with the Python in `AGENTS_PYTHON` (else `dotagents`' own),
-as `env.py --level <level> [--global]`, where `<level>` is `system`, `user`,
-`project` or the overlay's name and `--global` says the project tiers are skipped
+**A store's `env.py`** is executed with the Python in `AGENTS_PYTHON` (else `dotagents`' own),
+as `env.py --level <level> [--global]`, where `<level>` is `system`, `user` or
+`project` and `--global` says the project tiers are skipped
 (`--agent <level>` is passed too, for older scripts). It inherits everything
 assembled so far and prints its changes to stdout as JSON: one object, or one object
 per line, merged in order. Each value must be a string; `null` unsets the variable;
@@ -418,7 +427,7 @@ and a value holding NUL or bytes that are not UTF-8 are skipped with a warning n
 the key. A script that exits non-zero or prints something else contributes nothing,
 with a warning; values are never logged.
 
-**A plain env file** (`env`, `pre.env`, `local.env`, `pre.local.env`) is sourced by
+**A store's plain env file** (`env`, `pre.env`, `local.env`, `pre.local.env`) is sourced by
 bash with `set -a`, and whatever it changed, including `unset`, is taken; both
 snapshots come from the same bash process. On Windows that is Git for Windows' bash
 (not the WSL launcher); with no usable bash, plain env files are skipped with a
@@ -433,8 +442,9 @@ warning. A file whose `source` fails, or that calls `exit`, contributes nothing.
 ## path
 
 The dirs `env` puts at the front of `PATH` — or with `--lib`, of `PYTHONPATH` —
-highest precedence first. Nothing is run (no env file, no `env.py`), so it is a
-cheap way to put the overlay bins on a shell's `PATH`:
+highest precedence first: each store's `bin` and each overlay's `PATH` additions.
+Nothing is run (no env file, no `env.py`), so it is a cheap way to put the overlay
+bins on a shell's `PATH`:
 
 ```bash
 export PATH="$(dotagents path --format posix):$PATH"   # bash / Git Bash

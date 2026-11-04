@@ -7,6 +7,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+dotagents implements the [Agent Overlay Specification](https://boriken-dev.github.io/agent-overlay-spec/)
+(AOS, edition `0.1.0-draft`) and passes its conformance vectors.
+
+### Changed (breaking)
+
+- An overlay's manifest is `overlay.cfg` (TOML by default; `#!json` or `#!yaml` on
+  its first line for JSON or YAML, the latter with the `yaml` extra). `overlay.toml`
+  is not read any more; an overlay that still has one gets a warning naming it.
+- A manifest that does not validate against AOS is ignored whole, with a warning
+  naming where it is wrong, and `overlays add` / `sync` refuse it. It used to keep
+  its valid fields and drop the others. The small built-in TOML reader is gone: below
+  Python 3.11 manifests need `tomli` (a declared dependency, vendored in the `.pyz`).
+- An overlay's `setup.py` no longer runs on every `add` and `sync`: an overlay's
+  setup -- the first `setup.<ext>` at its root this OS can run (`.py`, `.ps1`,
+  `.bash`, `.sh`, `.js`), or the `[[setup]]` variants it declares -- runs once per
+  tree digest, in the overlay's own environment, with `AOS_OVERLAY_ROOT`,
+  `AOS_OVERLAY_NAME` and `AOS_OVERLAY_STATE` (where it writes; sessions see it as
+  `<NAME>_OVERLAY_STATE`). `AGENTS_OVERLAY_DIR` is gone (it is `AOS_OVERLAY_ROOT`).
+  `setup_timeout` is now each variant's `timeout`. `--rerun-setup` runs it again.
+- An overlay's `env.py` runs as an AOS env script: the first `env.<ext>` its root
+  has that this OS can run, with the overlay's own environment, no arguments, a
+  60-second timeout, printing one JSON object per line (a pretty-printed object is
+  refused). An overlay's root `env` file is read as a dotenv file -- literal
+  `NAME=value` lines, no shell -- not sourced by bash. An overlay's `pre.env.py`,
+  `pre.env` and `local.env` mean nothing; the stores keep all of theirs. A store's
+  `pre.*` files run before every overlay, its `env.py` / `env` / `local.env` after.
+- An overlay's `lib/` is appended to `PYTHONPATH`, after the session's own entries;
+  it used to be prepended. Its `bin/` is prepended to `PATH` only when it exists.
+- `<NAME>_OVERLAY_ROOT` always names the overlay copy in play; an inherited value
+  used to hold.
+- An overlay's `CONTEXT.md` comes after the stores' `AGENTS.md` in `context`, as AOS
+  orders the base context first.
+- Python dependencies are declared (`[[runtime.python]]` with `requirements`, or a
+  `lock` and its `lock_digest`, installed with `--require-hashes --no-deps
+  --only-binary=:all:`); a root `requirements.txt` means nothing by its name. A
+  requirements or lock file with anything but requirement lines is refused.
+- The installed copy holds exactly the overlay's files, so it keeps the overlay's tree
+  digest: the install record moved beside it, to
+  `<store>/overlays/.dotagents-install/<name>.json` (with the commit and the tree
+  digest), and caches and setup output inside an installed overlay are removed by
+  `add` / `sync`. `--prune` is gone, and so are the `.gitignore` / `.ignore` rules
+  that protected files inside an install (`dotagents._ignore`).
+- `overlays add` / `sync` refuse an overlay before writing anything when its tree has
+  a symbolic link or a name AOS refuses, its git commit holds a link or a submodule,
+  or this machine lacks what its `runtime`, setup or scripts need (an OS, a command,
+  an interpreter, a Python or Node version). A launcher is made only for python
+  scripts; an overlay declaring a script for another interpreter is refused.
+- MCP: a stdio server starts in its overlay's root; `env_passthrough` and
+  `headers_env` pass a variable only when the store grants it; a `command` with a
+  separator is a path inside the overlay. An overlay with an invalid `[mcp]` table
+  declares nothing, instead of stopping `dotagents mcp` from starting.
+- An overlay source refuses `::` in a git location, a host starting with `-`, a git
+  URL scheme other than https, http, ssh, git or file, and a `#path` that is not a
+  relative path.
+
+### Added
+
+- `env`, `env_files` (AOS or dotenv files), `paths` (prepend or append, per OS),
+  `env_scripts`, `context`, `skills`, `runtime`, `setup`, `harness` and `defaults` in
+  `overlay.cfg`; `[defaults] bin` / `lib` / `env` / `setup = false` turns a default
+  off. Env values can be secret references, resolved only when granted.
+- Pins, grants and settings in a store's registry document (`dotagents.toml`,
+  `overlays` form): `[overlays.<name>] pin = "sha256:..."` refuses any other tree
+  digest, at install and at every activation; `grants` lets an overlay read a host
+  variable, a named secret (`[secrets.<name>]`) or a file under `secrets_dir`;
+  `env_scripts = false` stops an overlay's env scripts. A registry entry may be a
+  table with a `source`.
+- Weakenings (`unpinned`, `env-sensitive`, `env-passthrough`, `secret-read`,
+  `env-script`, `setup-network`, `network-not-enforced`, `no-timeout`,
+  `unlocked-dependencies`, `insecure-transport`) are reported each time an overlay is
+  activated, and by `overlays show`, which also prints the tree digest, the pin, what
+  this machine lacks and the declarations.
+- Setup and env scripts run with their interpreter found on `PATH` (never a `.cmd` or
+  `.bat`), arguments as a list, and in a process group or job object, so nothing they
+  start outlives them. Python run for an overlay keeps its bytecode under
+  `<user store>/.cache/pycache` (`PYTHONPYCACHEPREFIX`).
+- `[harness.<id>]`: `context` for that harness, and `skills = false` to keep the
+  overlay's skills out of that harness's own skills dir.
+- Git checkouts hold the blobs' bytes (no line-ending or filter conversion), so a
+  digest computed here agrees with any other AOS implementation.
+
+### Upgrading an existing store
+
+1. In each overlay you author, rename `overlay.toml` to `overlay.cfg`. Declare what is
+   not a default: a `requirements.txt` as `[[runtime.python]] requirements =
+   "requirements.txt"`, `setup_timeout` as the setup's `timeout` (with a
+   `[[setup]]` entry), a plain `env` file that runs shell code as an env script.
+   Move anything setup wrote inside the overlay to `$AOS_OVERLAY_STATE`.
+2. Install the new dotagents, then `dotagents overlays sync -g` (and in each project
+   with overlays, `dotagents overlays sync`): it installs the `overlay.cfg` overlays,
+   moves the install records beside them, and runs each setup once.
+3. Optionally pin what you trust: `dotagents overlays show <name>` prints its digest;
+   put it in the store's `dotagents.toml` as `[overlays.<name>] pin = "..."`.
+
 ## [0.8.3] - 2026-10-30
 
 ### Added
