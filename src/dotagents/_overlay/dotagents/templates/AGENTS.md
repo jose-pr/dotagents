@@ -31,9 +31,9 @@ Startup: annotate that you read `{{AGENTS_MD}}`.
   closes it with `dotagents findings done -g <name> -r "<resolution>"` (moved,
   never deleted; the resolution is the record).
 - **Python for skills**: run every skill script, overlay `bin/` helper and anything
-  importing an overlay's `lib/` with `$AGENTS_PYTHON` (PowerShell
+  importing an overlay's `lib/python/` with `$AGENTS_PYTHON` (PowerShell
   `& $env:AGENTS_PYTHON`), never a bare `python`, `python3` or `py`. It is the scope's
-  venv: duho, every overlay's requirements and every overlay `lib/` (project, then
+  venv: duho, every overlay's requirements and every overlay `lib/python/` (project, then
   user, then system) import there and nowhere else. When the variable is unset, use
   the interpreter `dotagents context` prints. `.agents/.pyvenv/` holds only these
   agents' venvs: never create, install into or test a project in one.
