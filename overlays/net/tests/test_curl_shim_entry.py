@@ -107,17 +107,20 @@ def test_without_curlike_the_current_directory_is_never_searched(tmp_path, monke
     assert calls == [] and "no curl on PATH" in capsys.readouterr().err
 
 
-def test_env_py_sets_the_agents_prefix_unless_one_is_set():
-    import json
-    import subprocess
+def _manifest():
+    try:
+        import tomllib
+    except ImportError:  # Python < 3.11
+        import tomli as tomllib
+    return tomllib.loads((BIN.parent / "overlay.cfg").read_text(encoding="utf-8"))
 
-    env_py = str(BIN.parent / "env.py")
-    base = {k: v for k, v in os.environ.items() if k.upper() != "SYSHTTP_PREFIX"}
-    out = subprocess.run([sys.executable, env_py], capture_output=True, text=True, env=base, check=True)
-    assert json.loads(out.stdout) == {"SYSHTTP_PREFIX": "AGENTS_"}
-    out = subprocess.run([sys.executable, env_py], capture_output=True, text=True,
-                         env=dict(base, SYSHTTP_PREFIX="MINE"), check=True)
-    assert out.stdout.strip() == ""
+
+def test_the_manifest_sets_the_agents_prefix_unless_one_is_set():
+    assert _manifest()["env"]["SYSHTTP_PREFIX"] == {"value": "AGENTS_", "if_unset": True}
+
+
+def test_the_manifest_declares_the_requirements():
+    assert _manifest()["runtime"]["python"] == [{"version": "3.9", "requirements": "requirements.txt"}]
 
 
 def test_requirements_take_both_packages_from_pypi_in_one_minor_series():

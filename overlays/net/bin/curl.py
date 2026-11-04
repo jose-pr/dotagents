@@ -8,7 +8,7 @@ which ``dotagents env`` puts first on PATH.
 curlike and syshttp come from the agents' venv (this overlay's
 ``requirements.txt``), which the launcher runs under. Settings are read under
 the prefix ``AGENTS_`` (``AGENTS_SYSHTTP_PROXY``, ``AGENTS_CURL``):
-``SYSHTTP_PREFIX=AGENTS_`` (this overlay's ``env.py``) is set here too when
+``SYSHTTP_PREFIX=AGENTS_`` (this overlay's ``overlay.cfg``) is set here too when
 nothing set a prefix, so the launcher means the same outside a ``dotagents
 env`` session. Without curlike the real curl still runs, as typed.
 """

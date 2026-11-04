@@ -21,11 +21,15 @@ export AGENTS_OVERLAYS_REPO=/path/to/overlays
 dotagents overlays add engineering
 ```
 
-Each overlay installs into your scope's `overlays/<name>/` (what its manifest
-`requires` first), merges its always-on rules/routing into `AGENTS.md`, publishes any
-skills to the shared skills dir, and runs its `setup.py` if it ships one (none of
-these do). `dotagents env` then puts every installed overlay's `bin/` on `PATH`, its
-`lib/` on `PYTHONPATH`, and exports one `$<NAME>_OVERLAY_ROOT` per overlay -- the
+Each overlay is an [AOS](https://boriken-dev.github.io/agent-overlay-spec/) overlay:
+its `overlay.cfg` declares only what is not a default (`requires`, routing, rules, and
+what it needs: `net`'s environment and Python dependencies, the `git` that
+`engineering`, `private-sync` and `release` run). It installs into your scope's
+`overlays/<name>/` (what its manifest `requires` first), merges its always-on
+rules/routing into `AGENTS.md`, publishes any skills to the shared skills dir, and
+runs its setup if it has one (none of these do). `dotagents env` then puts every
+installed overlay's existing `bin/` on `PATH`, its `lib/` on `PYTHONPATH`, applies
+what it declares, and exports one `$<NAME>_OVERLAY_ROOT` per overlay -- the
 variable every routing line and cross-reference here uses instead of a hard path, so
 the store can live anywhere (`$AGENTS_HOME`) and nothing breaks when it moves. See the dotagents docs for the full overlay model:
 <https://jose-pr.github.io/dotagents/guide/overlays/>.
@@ -38,7 +42,7 @@ the store can live anywhere (`$AGENTS_HOME`) and nothing breaks when it moves. S
 | `python`, `node`, `rust` | Per-language `kb/` conventions + manifest templates + CI workflow templates (test / release / docs). `python` and `rust` also carry `standards/`: a base standard every library or crate follows (public API, README and `AGENTS.md` format, preferred libraries) and specialized ones for kinds of project — protocol libraries and command lines in both, a C ABI and plugins in Rust. |
 | `release` | A host-agnostic release helper: an agent-driven commit-plan loop plus tag/CI monitoring across GitHub (`gh`) and GitLab. |
 | `private-sync` | The one-private-repo, per-project `.agents` model (`kb/PRIVATE_SYNC.md` + cloud hooks). |
-| `net` | HTTP tooling: a drop-in `curl` launcher over [curlike](https://github.com/jose-pr/curlike), an OS-trust-store `certifi` shim, and [syshttp](https://github.com/jose-pr/syshttp) (the system proxy and the OS verifier by default), both installed from PyPI by the overlay's `requirements.txt`. Settings are read as `AGENTS_<NAME>` (`SYSHTTP_PREFIX=AGENTS_`), nothing unprefixed: the agent proxy `AGENTS_SYSHTTP_PROXY` with its credential (`AGENTS_SYSHTTP_PROXY_AUTH`) and kind (`AGENTS_SYSHTTP_PROXY_TYPE=connect` or a `prefix[:/endpoint]` gateway), `AGENTS_HTTPS_PROXY`, `AGENTS_NO_PROXY`; the curl launcher hands the same to real curl. |
+| `net` | HTTP tooling: a drop-in `curl` launcher over [curlike](https://github.com/jose-pr/curlike), an OS-trust-store `certifi` shim, and [syshttp](https://github.com/jose-pr/syshttp) (the system proxy and the OS verifier by default), both installed from PyPI by the `requirements.txt` its `overlay.cfg` declares. Settings are read as `AGENTS_<NAME>` (`SYSHTTP_PREFIX=AGENTS_`), nothing unprefixed: the agent proxy `AGENTS_SYSHTTP_PROXY` with its credential (`AGENTS_SYSHTTP_PROXY_AUTH`) and kind (`AGENTS_SYSHTTP_PROXY_TYPE=connect` or a `prefix[:/endpoint]` gateway), `AGENTS_HTTPS_PROXY`, `AGENTS_NO_PROXY`; the curl launcher hands the same to real curl. |
 | `recovery` | A config-recovery playbook for reconstructing a lost `~/.agents`. |
 
 ## Private sync (per-user + per-project, one private repo)
@@ -91,22 +95,25 @@ walkthrough: `$PRIVATE_SYNC_OVERLAY_ROOT/kb/PRIVATE_SYNC.md`.
 
 ## Overlay layout
 
-An overlay is a directory with an `overlay.toml` manifest and files that install to the
-same relative path in your scope. Minimal shape:
+An overlay is an [AOS](https://boriken-dev.github.io/agent-overlay-spec/) directory,
+with an optional `overlay.cfg` manifest, whose files install to the same relative path
+in your scope. The manifest declares only what is not a default. Minimal shape:
 
 ```
 <name>/
-  overlay.toml     # name, description, requires, routing lines, optional priority
+  overlay.cfg      # name, description, requires, routing lines, optional priority, needs
   kb/…             # knowledge-base files the routing points at ($<NAME>_OVERLAY_ROOT/kb/…)
   rules/, flows/, references/, tools/   # other content, one category dir per kind -- never <name>/<name>/
-  bin/, lib/       # optional; put on PATH / PYTHONPATH by `dotagents env`;
+  bin/, lib/       # optional; on PATH / PYTHONPATH by default ([defaults] bin/lib = false);
                    #   each bin/<name>.py also gets a `<name>` launcher on PATH
   cmds/            # optional duho command modules, discovered as `dotagents <name>`
                    #   and served as MCP tools by `DOTAGENTS_MCP=stdio dotagents`
-  env.py           # optional; run by `dotagents env`, prints a JSON object of env changes
+  env, env.py      # optional; a dotenv file, and a script printing one JSON object per
+                   #   line -- prefer static `[env]` values in overlay.cfg
   CONTEXT.md       # optional; emitted by `dotagents context` (<NAME_OVERLAY_ROOT> expands)
   skills/<skill>/  # optional skills, published to the shared skills dir
-  setup.py         # optional idempotent install-time script -- only for real install work
+  setup.py         # optional idempotent install-time script, run once per digest --
+                   #   only for real install work; it writes into $AOS_OVERLAY_STATE
 ```
 
 **Ship a command module, not a loose script**, when an overlay has something to run:

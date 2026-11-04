@@ -1,7 +1,7 @@
 # NET — HTTP tooling for agents
 
 Installed by `dotagents overlays add net`. It brings two packages from PyPI
-into the agents' venv (this overlay's `requirements.txt`, which dotagents
+into the agents' venv (the `requirements.txt` this overlay's `overlay.cfg` declares, which dotagents
 installs into the interpreter `$AGENTS_PYTHON` names):
 
 - **syshttp** — proxy resolution with credentials and prefix gateways (with
@@ -22,7 +22,7 @@ real curl with the agent proxy added, else curlike.
 
 Every setting has a full name (`SYSHTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`,
 `CA_BUNDLE`, the launcher's `CURL`) and is read as `<PREFIX><NAME>` for each
-prefix of `SYSHTTP_PREFIX`. This overlay's `env.py` sets
+prefix of `SYSHTTP_PREFIX`. This overlay's `overlay.cfg` sets
 `SYSHTTP_PREFIX=AGENTS_` (unless a prefix is already set), and the launcher
 does the same when nothing set one, so agents read `AGENTS_SYSHTTP_PROXY`,
 `AGENTS_HTTPS_PROXY`, `AGENTS_NO_PROXY`, `AGENTS_CA_BUNDLE`, ... and **nothing
