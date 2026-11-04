@@ -66,11 +66,21 @@ def digest_of(overlay: Any) -> "tuple[Optional[str], Optional[str]]":
 
 
 def refusal(overlay: Any) -> "Optional[str]":
-    """Why ``overlay`` may not be activated, or None."""
+    """Why ``overlay`` may not be activated, or None: its pin does not
+    verify, or its setup (``install`` or ``sync``) failed for this digest
+    and has not succeeded since."""
     try:
         pin = _policy.for_overlay(overlay).pin(overlay.name)
     except _policy.PolicyError as exc:
         return str(exc.code)
+    failed = overlay.read_setup_record()["failed"]
+    if failed is not None:
+        digest, _why = digest_of(overlay)
+        try:
+            if digest is not None and _aos.same_digest(digest, failed):
+                return "its setup failed for this digest %s" % digest
+        except ValueError:
+            pass
     if pin is None:
         return None
     digest, why = digest_of(overlay)
@@ -130,16 +140,17 @@ def state_dir(overlay: Any) -> "Optional[Path]":
         doc, "env_scripts", "env", members, _aos.current_os(), interpreters())[0]
     if not (has_script or overlay.setup_variant()):
         return None
-    digest, _why = digest_of(overlay)
-    return overlay.state_dir(digest) if digest else None
+    return overlay.state_dir()
 
 
 def context(overlay: Any, *, host_env: "Optional[dict[str, str]]" = None) -> _aos.Context:
     """How ``overlay`` is applied on this OS: its root, its env files read
     from it, its store's grants and secrets, whether its store lets its env
-    scripts run, its member files (its defaults) and the interpreters here."""
+    scripts run, its member files (its defaults), the interpreters here and
+    its state directory."""
     policy = _policy.for_overlay(overlay)
     root = os.path.abspath(str(overlay.path))
+    state = state_dir(overlay)
 
     def read(rel: str) -> "Optional[bytes]":
         if not _aos.valid_relpath(rel):
@@ -157,7 +168,7 @@ def context(overlay: Any, *, host_env: "Optional[dict[str, str]]" = None) -> _ao
     return _aos.Context(
         os_name=_aos.current_os(), root=root, identity=overlay.name, read=read,
         secrets=policy.secrets_for(overlay.name, host_env), env_scripts_enabled=policy.env_scripts(overlay.name),
-        files=files(overlay), interpreters=interpreters(),
+        files=files(overlay), interpreters=interpreters(), state=None if state is None else str(state),
     )
 
 

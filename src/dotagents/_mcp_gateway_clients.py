@@ -37,14 +37,16 @@ class _StdioClient:
 
     def start(self):
         env = {key: os.environ[key] for key in _BASE_ENV if key in os.environ}
+        passed = []
         for key in self.spec.env_passthrough:
             if key in os.environ and self.spec.granted(key):
                 env[key] = os.environ[key]
+                passed.append(key)
                 self.spec.resolved.append(os.environ[key])
-        env.update(self.spec.server_env())
         root = str(self.spec.root) if self.spec.root is not None else None
         if root is not None:
             env[_aos.root_variable(self.spec.overlay)] = root
+        env.update(self.spec.server_env(env, passed))
         if ("/" in self.spec.command or "\\" in self.spec.command) and root is not None:
             # A relative path under the overlay root, never one outside it.
             command = _aos.resolve_path(root, self.spec.command, os.name == "nt")

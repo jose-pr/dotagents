@@ -47,9 +47,9 @@ and an error saying a command is required, and exits 2.
 | Command | Contract |
 | --- | --- |
 | `init [-g] [--dest D] [--from SRC] [--bin-dir D] [--agents a,b] [--no-hooks] [--powershell-env-hook] [--no-venv] [--force] [--dry-run]` | Merge the base block into `<store>/AGENTS.md`, write `<store>/bin/dotagents[.cmd]`, and per active agent (`--agents`, else detected + `claude`) write its include and hooks. Then bring the scope's Python venvs up to date (`_pyvenv.sync_venvs`; a failure is a warning; not with `--dest` or `--no-venv`). `--force` replaces `AGENTS.md`'s content, backed up under `<store>/install_backup/<timestamp>/`. `--from` records its base in `<store>/dotagents/config.toml`. |
-| `overlays add NAME\|GLOB... [-g] [--repo SPEC]... [--copy] [--no-setup] [--rerun-setup] [--setup-timeout S] [--no-requires] [--no-venv] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does), publish its skills, install the Python dependencies its `runtime.python` declares into the scope venv (`_pyvenv`; not with `--no-venv`), run its declared `setup` once per tree digest (`--rerun-setup`: again), recompose the managed block. Before anything of an overlay is written it is refused when its `overlay.cfg` does not validate (named files included), its tree has no digest (a link, a refused name), its git commit holds a link or submodule, this machine lacks what its `runtime`, setup or scripts need, or its store pins another digest. A glob (`'*'`, `'py*'`) stands for every name the repos offer that matches it; one matching nothing is an error. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused. An overlay whose copy, requirements or setup fail is logged and skipped, along with what requires it; the others still install, and the command exits 1 naming each failure. One this run was installing for the first time is removed again; one already installed stays. No name: exit 2. |
-| `overlays remove NAME... [-g] [--force] [--no-venv] [--dry-run]` | Delete the overlay dirs, unpublish the skills they published, recompose the block, rewrite the venv layering (installed requirements stay). Refuses an overlay another installed overlay requires unless `--force`. No name: exit 2. |
-| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--no-setup] [--rerun-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it), checked as `add` checks a source: the install is made to hold exactly the overlay's members (new and changed files land, everything else goes, caches and setup output left inside it included); a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`, then the venv dependencies (when they changed), then setup when the digest changed. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/` or is refused, or its dependencies or setup fail. |
+| `overlays add NAME\|GLOB... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--no-venv] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does), publish its skills, install the Python dependencies its `runtime.python` declares into the scope venv (`_pyvenv`; not with `--no-venv`), run its `setup` (phase `install` the first time it succeeds here, `sync` after that), recompose the managed block. Before anything of an overlay is written it is refused when its `overlay.cfg` does not validate (named files included), its tree has no digest (a link, a refused name), its git commit holds a link or submodule, this machine lacks what its `runtime`, setup or scripts need, or its store pins another digest. A glob (`'*'`, `'py*'`) stands for every name the repos offer that matches it; one matching nothing is an error. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused. An overlay whose copy, requirements or setup fail is logged and skipped, along with what requires it; the others still install, and the command exits 1 naming each failure. One this run was installing for the first time is removed again; one already installed stays, refused until a setup of it succeeds. No name: exit 2. |
+| `overlays remove NAME... [-g] [--force] [--no-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Run each overlay's setup in its `remove` phase when one succeeded here (a failure is reported and the removal goes ahead), delete the overlay dirs, their state and setup records, unpublish the skills they published, recompose the block, rewrite the venv layering (installed requirements stay). Refuses an overlay another installed overlay requires unless `--force`. No name: exit 2. |
+| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it), checked as `add` checks a source: the install is made to hold exactly the overlay's members (new and changed files land, everything else goes, caches and setup output left inside it included); a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`, then the venv dependencies (when they changed), then setup in its `sync` phase (`install` when none succeeded here yet), on every sync. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/` or is refused, or its dependencies or setup fail. |
 | `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` and refused overlays flagged) and what the repos offer. |
 | `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; its declarations, a refused manifest's problems, tree digest, pin, what this machine lacks for it, its weakenings, skills, member count, recorded source and commit. No name: exit 2. |
 | `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
@@ -163,8 +163,18 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
   `select_format(data) -> (name, payload)`; `read_document(data, *, max_bytes,
   max_depth) -> dict` — the format line (`#!json`, `#!yaml`; TOML by default),
   static reading, the data model (no null, date, non-finite float, integer outside
-  64 bits; YAML without tags, anchors, merge keys, directives). `read_dotenv(data)
-  -> dict[str, str]` — the `dotenv` env-file grammar.
+  64 bits; YAML without tags, anchors, merge keys, directives).
+  `parse_dotenv(data) -> list[(name, text, literal)]` — the `dotenv` env-file
+  grammar, `literal` for a single-quoted value; `read_dotenv(data, env=None, *,
+  windows=False, secret_variables=()) -> dict[str, str]` — the file applied over
+  `env`, each line substituted against what the earlier lines left.
+- Substitution: `substitute(text, lookup) -> str` — `${NAME}` and its operators
+  (defaults and alternates, `${#NAME}`, slices in code points, replacements, trims,
+  case), `$$` for `$`; `$NAME`, `$(...)` and backticks are characters; nothing runs
+  and an inserted value is never read again. `lookup(name)` gives a value or None
+  and raises for a secret. `class SubstitutionError(ReadError)` (`code`:
+  `undefined-variable`, `secret-placeholder`, `invalid-pattern`; `name`: the
+  placeholder's variable or the pattern).
 - Names: `valid_overlay_name`, `normalize_name`, `root_variable(identity)`,
   `state_variable(identity)` (`<NAME>_OVERLAY_ROOT` / `_STATE`),
   `RESERVED_OVERLAY_NAMES`, `DEVICE_NAMES`, `OVERLAY_NAME`, `valid_relpath(path)`
@@ -190,14 +200,19 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
   file: requirement lines only (no option, URL or path), a lock pinned with `==`
   and `--hash=sha256:`.
 - Applying: `class Refused(Exception)` (`code`, `subject`, `detail`; never a
-  value), `class Environment(values, windows)` (names case-blind on Windows:
-  `key`, `get`, `set`, `unset`, `copy`), `resolve_path(root, rel, windows)`,
+  value), `class Environment(values, windows, *, secret=(), extra=None)` (names
+  case-blind on Windows: `key`, `get`, `set(name, value, *, secret=False)`,
+  `unset`, `copy`, `lookup(name)` — what a placeholder reads: `extra` first,
+  raising `SubstitutionError` for a variable in `secret`; `assigned`: the
+  variables set, in order), `resolve_path(root, rel, windows)`,
   `reference_name(entry)`, `is_reference(entry)`, `class Secrets(*, grants,
   host_env, named, read_file, providers, provider_values, windows)` (`granted`,
   `resolve`: a reference resolves only when granted), `class Context(*, os_name,
   root, identity, read, secrets=None, env_scripts_enabled=True, files=(),
-  interpreters=())` (`files`: the overlay's member paths, which decide its
-  defaults; `interpreters`: those the consumer can run).
+  interpreters=(), state=None)` (`files`: the overlay's member paths, which decide
+  its defaults; `interpreters`: those the consumer can run; `state`: its state
+  directory; `placeholders()` — the `AOS_OVERLAY_ROOT`, `AOS_OVERLAY_NAME` and
+  `AOS_OVERLAY_STATE` its placeholders see).
 - Defaults: `DEFAULT_KEYS`, `DEFAULT_PATHS` (`bin` → `PATH`, `lib/python` →
   `PYTHONPATH`, both prepended), `DEFAULT_SCRIPTS` (the extension order with the
   OSes each applies on), `default_on(manifest, key)`, `default_paths(manifest,
@@ -211,15 +226,24 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
   not_run)` (declared variants first, the default last, a default setup taken to
   need the network unless configured).
 - Applying: `apply_paths(env, paths, ctx, weakenings)`, `read_env_file(item, ctx,
-  listed)`, `apply_overlay(env, manifest, ctx, weakenings) -> list[env script]`
-  (env files, `env`, paths, each after its defaults; the default env script then
+  listed)` (an `aos` file's mapping, or a `dotenv` file's `parse_dotenv` lines),
+  `apply_overlay(env, manifest, ctx, weakenings) -> list[env script]`
+  (env files, `env`, paths, each after its defaults, text values substituted as
+  they are set: a `dotenv` file line by line, one mapping's entries against the
+  environment from before it, a secret-sourced variable never read and marked in
+  `env.secret`; the default env script then
   the declared ones, `script-not-run` for a default present that cannot run;
   raises `Refused`), `read_env_script_output(data, *, max_bytes) -> dict` (one
   JSON object, even over several lines, else one per non-blank line), `plan(manifest,
   ctx, *, pinned, enforces_network=False, scripts=None) -> dict` (`supported`,
   `setup`, `python`, `node`, `needs`, `ungranted`, `weakenings`), `class
-  Activation`, `effective(manifest, ctx, *, base_env, pinned, state=None,
-  enforces_network=False) -> Activation`, `insecure_url(url)`.
+  Activation`, `effective(manifest, ctx, *, base_env, pinned,
+  enforces_network=False) -> Activation` (the state variable from `ctx.state`),
+  `insecure_url(url)`.
+- Setup phases: `SETUP_CHANGES = ("add", "sync", "remove")`, `SETUP_PHASES =
+  ("install", "sync", "remove")`, `setup_phase(change, recorded) -> Optional[str]`
+  — `install` when no setup succeeded (`recorded` is None), `sync` on every add or
+  sync after one, `remove` on removal after one, else None.
 - Resolution: `class ResolveError(Exception)` (`chain`), `resolve(requires_of,
   requested) -> (visiting order, missing)`, `order_key(priority, name, identity)`.
 
@@ -227,22 +251,24 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
 
 Which installed overlays are active, and how each is applied.
 
-- `refusal(overlay) -> Optional[str]` — why a pinned overlay may not be activated:
-  a tree with no digest, a digest that is not its pin, an excluded entry (a
-  `__pycache__`, a `.pyc`) in its copy, or a store setting that is invalid.
+- `refusal(overlay) -> Optional[str]` — why an overlay may not be activated: its
+  setup (`install` or `sync`) failed for this digest and none succeeded since; or,
+  pinned, a tree with no digest, a digest that is not its pin, an excluded entry
+  (a `__pycache__`, a `.pyc`) in its copy; or a store setting that is invalid.
 - `active(overlays, logger=None) -> list` — the ones not refused; each refusal
   logged once per process. `Scope.overlays` is this over `Scope.installed_overlays`.
 - `digest_of(overlay) -> (digest, why)` — memoized per process on the install
   record and manifest. `is_pinned(overlay) -> bool`.
 - `state_dir(overlay) -> Optional[Path]` — for an overlay with a setup or an env
-  script, declared or default:
-  `<store>/overlays/.dotagents-state/<name>/<os>-<digest[:16]>/`.
+  script, declared or default: `<store>/overlays/.dotagents-state/<name>/<os>/`,
+  kept across syncs until the overlay is removed.
 - `files(overlay) -> list[str]` — its member paths (`_aos.member_paths`).
   `interpreters() -> set[str]` — the AOS interpreters this machine can run, once
   per process.
 - `context(overlay, *, host_env=None) -> _aos.Context` — its root, env files read
   from inside it, its store's grants and secrets (`env` provider: `host_env`,
-  default `os.environ`), its env-script opt-in, its default paths.
+  default `os.environ`), its env-script opt-in, its default paths, its state
+  directory.
 - `describe(weakenings)`, `report(logger, weakenings)` — one warning line,
   `overlay[id subject, ...]; ...`.
 
@@ -353,7 +379,11 @@ returns the exit code.
   of the scope's active overlays; raises `GatewayConfigError` (a `ValueError`) on
   the first invalid one, or on a `[[mcp.skills]]` entry without
   `skills/<name>/SKILL.md`.
-- `_mcp_gateway_clients` — the stdio and Streamable HTTP clients; private.
+- `_mcp_gateway_clients` — the stdio and Streamable HTTP clients; private. A
+  stdio server's text `env` values are substituted against what it receives (the
+  gateway's base variables, its granted `env_passthrough`, which no placeholder
+  reads, its root variable, `AOS_OVERLAY_ROOT` and `AOS_OVERLAY_NAME`), the
+  entries not seeing each other.
 
 ## `dotagents._scope`
 
@@ -453,17 +483,22 @@ returns the exit code.
     entries for this OS; no file is a command by its name); `scripts() -> {name:
     path}` (the python ones: they get launchers); `unsupported_scripts() ->
     {name: interpreter}` (refused by `overlays add`).
-  - `run_setup(variant, *, env, python, base_path, dry_run, logger, timeout=None)
-    -> int` — one setup variant through `_run.run_step`: cwd the overlay root,
-    `env` as given, `TIMED_OUT` when stopped, `127` for an interpreter it cannot run.
+  - `run_setup(variant, *, phase, env, python, base_path, dry_run, logger,
+    timeout=None) -> int` — one setup variant through `_run.run_step`: the phase
+    as the first argument before the variant's `args` and as `AOS_SETUP_PHASE`,
+    cwd the overlay root, `env` as given, `TIMED_OUT` when stopped, `127` for an
+    interpreter it cannot run.
   - `members() -> list[str]`, `files() -> list[Path]` — every member (all regular
     files but the excluded names; the manifest included); raise `DigestError` for
     a link or a refused name. `tree_digest() -> str`.
-  - `state_dir(digest, os_name=None) -> Path`, `setup_marker(digest) -> Path`
-    (written once setup succeeded for that digest).
+  - `state_dir(os_name=None) -> Path` — the overlay's own, per OS, kept across
+    syncs. `setup_record_path(os_name=None) -> Path`, `read_setup_record() ->
+    {"digest", "failed"}` (the last setup that succeeded on this OS, and the
+    digest whose setup failed since; each None when there is none),
+    `write_setup_record(digest, failed=None)`.
   - `read_install_record() -> dict` — `{"source", "commit", "digest", "files":
     {rel: sha256}, "installed"}`; `{}` when absent. `forget()` — delete the record
-    and the state directories of a removed overlay.
+    and the state directories and setup records of a removed overlay.
   - `rule_blocks(rel_paths) -> tuple[list[str], list[str]]` — `(blocks, warnings)`:
     each file's leading `- **` bullets up to its next `## ` heading.
   - `install_to(dest_overlay_dir, dry_run, *, backup_root=None, source=None,
@@ -1049,7 +1084,8 @@ proxy vars, plus what overlays declare and the stores' env files set. `AGENTS_AG
 
 Set for an overlay's setup and env scripts: `AOS_OVERLAY_ROOT`,
 `AOS_OVERLAY_NAME`, `AOS_OVERLAY_STATE` (its state directory, where it writes),
-`<NAME>_OVERLAY_STATE`; setup also gets `AGENTS_HOME` (user store),
+`<NAME>_OVERLAY_STATE`; setup also gets `AOS_SETUP_PHASE` (`install`, `sync`
+or `remove`, also its first argument), `AGENTS_HOME` (user store),
 `AGENTS_SCOPE_ROOT`, `AGENTS_SCOPE`. `AOS_*`, `*_OVERLAY_ROOT` and
 `*_OVERLAY_STATE` are dotagents': no overlay can set one.
 

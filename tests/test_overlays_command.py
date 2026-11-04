@@ -582,7 +582,7 @@ def _add_setup_overlay(src: Path, name: str, body: str):
 
 def test_the_default_setup_is_the_first_runnable_setup_script(tmp_path):
     """No `setup` declared: the root's first `setup.<ext>` this OS can run
-    (.py before .ps1, .bash, .sh, .js) runs, once per digest;
+    (.py before .ps1, .bash, .sh, .js) runs, on every add;
     `[defaults] setup = false` turns it off."""
     from dotagents.cli import OverlayAdd
 
@@ -598,10 +598,10 @@ def test_the_default_setup_is_the_first_runnable_setup_script(tmp_path):
                     agents_dir=scope.agents_root, copy=True, dry_run=False)
 
     assert add() == 0 and add() == 0
-    assert (tmp_path / "RAN").read_text(encoding="utf-8") == "py"
+    assert (tmp_path / "RAN").read_text(encoding="utf-8") == "pypy", "install, then sync"
     (o / "overlay.cfg").write_text("[defaults]\nsetup = false\n", encoding="utf-8")
     assert add() == 0
-    assert (tmp_path / "RAN").read_text(encoding="utf-8") == "py", "turned off"
+    assert (tmp_path / "RAN").read_text(encoding="utf-8") == "pypy", "turned off"
 
 
 def test_setup_runs_on_add(tmp_path):
@@ -653,7 +653,7 @@ def test_setup_cwd_is_installed_overlay_dir(tmp_path):
     _run(OverlayAdd, name=["cwd-demo"], repo=[str(src)], global_scope=True,
          agents_dir=scope.agents_root, copy=True, dry_run=False)
     installed = Overlay(scope.overlay_root / "cwd-demo")
-    marker = installed.state_dir(installed.tree_digest()) / "MARKER"
+    marker = installed.state_dir() / "MARKER"
     assert marker.is_file()
     cwd, root = marker.read_text(encoding="utf-8").split("|")
     assert Path(cwd) == Path(root) == scope.overlay_root / "cwd-demo"
@@ -713,31 +713,127 @@ def test_setup_dry_run_does_not_run(tmp_path):
     assert not (scope.agents_root / "SETUP_RAN").exists()
 
 
-def test_setup_runs_once_per_digest(tmp_path):
-    from dotagents.cli import OverlayAdd, OverlaySync
+def test_setup_is_told_install_then_sync_on_every_sync_then_remove(tmp_path):
+    """The phase is the first argument and AOS_SETUP_PHASE: install on the
+    first add, sync on every sync (a new digest or not), remove before the
+    copy and its state are deleted. The state directory is kept across syncs."""
+    from dotagents.cli import OverlayAdd, OverlayRemove, OverlaySync
 
     src = tmp_path / "src_overlays"
-    # Append a line each run so we can count invocations.
     _add_setup_overlay(
         src, "with-setup",
-        "open(os.path.join(agents, 'RUNS'), 'a').write('x')\n",
+        "assert sys.argv[1] == os.environ['AOS_SETUP_PHASE']\n"
+        "kept = os.path.join(state, 'kept')\n"
+        "with open(os.path.join(agents, 'RUNS'), 'a') as fh:\n"
+        "    fh.write('%s:%s:%s,' % (sys.argv[1], os.path.isfile(kept), os.path.isfile('file.md')))\n"
+        "open(kept, 'w').write('x')\n",
     )
     scope = make_scope(tmp_path)
     runs = scope.agents_root / "RUNS"
+    installed = Overlay(scope.overlay_root / "with-setup")
 
-    def sync(**kw):
-        _run(OverlaySync, pattern="with-setup", repo=[str(src)], global_scope=True,
-             agents_dir=scope.agents_root, copy=True, dry_run=False, **kw)
+    def sync():
+        assert _run(OverlaySync, pattern="with-setup", repo=[str(src)], global_scope=True,
+                    agents_dir=scope.agents_root, copy=True, dry_run=False) == 0
 
-    _run(OverlayAdd, name=["with-setup"], repo=[str(src)], global_scope=True,
-         agents_dir=scope.agents_root, copy=True, dry_run=False)
+    assert _run(OverlayAdd, name=["with-setup"], repo=[str(src)], global_scope=True,
+                agents_dir=scope.agents_root, copy=True, dry_run=False) == 0
     sync()
-    assert runs.read_text(encoding="utf-8") == "x", "same digest: not run again"
     (src / "with-setup" / "file.md").write_text("changed\n", encoding="utf-8")
     sync()
-    assert runs.read_text(encoding="utf-8") == "xx", "a new digest runs it"
-    sync(rerun_setup=True)
-    assert runs.read_text(encoding="utf-8") == "xxx", "--rerun-setup runs it"
+    assert runs.read_text(encoding="utf-8") == "install:False:True,sync:True:True,sync:True:True,"
+    assert installed.read_setup_record() == {"digest": installed.tree_digest(), "failed": None}
+    state = installed.state_dir()
+    assert _run(OverlayRemove, name=["with-setup"], global_scope=True, agents_dir=scope.agents_root,
+                dry_run=False) == 0
+    assert runs.read_text(encoding="utf-8").endswith(",remove:True:True,")
+    assert not state.exists() and not installed.setup_record_path().exists()
+
+
+def test_a_failed_sync_refuses_the_copy_until_setup_succeeds(tmp_path, caplog):
+    from dotagents import _env
+    from dotagents.cli import OverlayAdd, OverlaySync
+
+    src = tmp_path / "src_overlays"
+    _add_setup_overlay(
+        src, "flaky",
+        "if os.path.isfile(os.path.join(overlay, 'fail.md')):\n    sys.exit(4)\n",
+    )
+    (src / "flaky" / "overlay.cfg").write_text(
+        '[[setup]]\ninterpreter = "python"\npath = "setup.py"\n[env]\nFLAKY = "on"\n', encoding="utf-8")
+    scope = make_scope(tmp_path)
+    installed = Overlay(scope.overlay_root / "flaky")
+
+    def sync():
+        return _run(OverlaySync, pattern="flaky", repo=[str(src)], global_scope=True,
+                    agents_dir=scope.agents_root, copy=True, dry_run=False)
+
+    def env():
+        return _env.get_environment(scope, base_env={"PATH": ""}, logger=logging.getLogger("t"))
+
+    assert _run(OverlayAdd, name=["flaky"], repo=[str(src)], global_scope=True,
+                agents_dir=scope.agents_root, copy=True, dry_run=False) == 0
+    first = installed.tree_digest()
+    assert env()["FLAKY"] == "on"
+    (src / "flaky" / "fail.md").write_text("x\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(SystemExit):
+            sync()
+        assert "FLAKY" not in env(), "the digest whose sync failed is not activated"
+    assert "its setup failed for this digest" in caplog.text
+    assert installed.read_setup_record() == {"digest": first, "failed": installed.tree_digest()}
+    (src / "flaky" / "fail.md").unlink()
+    assert sync() == 0
+    assert env()["FLAKY"] == "on"
+    assert installed.read_setup_record()["failed"] is None
+
+
+def test_a_failed_remove_phase_is_reported_and_the_removal_goes_ahead(tmp_path, caplog):
+    from dotagents.cli import OverlayAdd, OverlayRemove
+
+    src = tmp_path / "src_overlays"
+    _add_setup_overlay(src, "stuck", "sys.exit(5 if sys.argv[1] == 'remove' else 0)\n")
+    scope = make_scope(tmp_path)
+    assert _run(OverlayAdd, name=["stuck"], repo=[str(src)], global_scope=True,
+                agents_dir=scope.agents_root, copy=True, dry_run=False) == 0
+    state = Overlay(scope.overlay_root / "stuck").state_dir()
+    with caplog.at_level(logging.ERROR):
+        assert _run(OverlayRemove, name=["stuck"], global_scope=True, agents_dir=scope.agents_root,
+                    dry_run=False) == 0
+    assert "failed in its remove phase (exit 5)" in caplog.text
+    assert not (scope.overlay_root / "stuck").exists() and not state.exists()
+
+
+def test_install_starts_from_an_empty_state_directory(tmp_path):
+    """Installed with --no-setup, an overlay's state may hold what something
+    else left there; its first setup is `install`, into an empty directory."""
+    from dotagents.cli import OverlayAdd, OverlaySync
+
+    src = tmp_path / "src_overlays"
+    _add_setup_overlay(src, "late", "open(os.path.join(agents, 'SEEN'), 'w').write("
+                                    "sys.argv[1] + ':' + ','.join(os.listdir(state)))\n")
+    scope = make_scope(tmp_path)
+    assert _run(OverlayAdd, name=["late"], repo=[str(src)], global_scope=True,
+                agents_dir=scope.agents_root, copy=True, dry_run=False, no_setup=True) == 0
+    state = Overlay(scope.overlay_root / "late").state_dir()
+    state.mkdir(parents=True)
+    (state / "stale").write_text("x", encoding="utf-8")
+    assert _run(OverlaySync, pattern="late", repo=[str(src)], global_scope=True,
+                agents_dir=scope.agents_root, copy=True, dry_run=False) == 0
+    assert (scope.agents_root / "SEEN").read_text(encoding="utf-8") == "install:"
+
+
+def test_remove_runs_no_setup_when_none_succeeded(tmp_path):
+    from dotagents.cli import OverlayAdd, OverlayRemove
+
+    src = tmp_path / "src_overlays"
+    _add_setup_overlay(src, "never", "open(os.path.join(agents, 'RAN'), 'a').write(sys.argv[1])\n")
+    scope = make_scope(tmp_path)
+    assert _run(OverlayAdd, name=["never"], repo=[str(src)], global_scope=True,
+                agents_dir=scope.agents_root, copy=True, dry_run=False, no_setup=True) == 0
+    assert _run(OverlayRemove, name=["never"], global_scope=True, agents_dir=scope.agents_root,
+                dry_run=False) == 0
+    assert not (scope.agents_root / "RAN").exists()
 
 
 # --------------------------------------------------------------------------- #

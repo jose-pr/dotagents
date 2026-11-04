@@ -1073,29 +1073,41 @@ def _run_env_script(overlay, script: "dict", own: "_aos.Environment", ctx: "_aos
 
 def _apply_declarations(overlay, osenv: "dict[str, str]", own_base: "dict[str, str]", *, python: str,
                         logger, host_env: "Optional[dict[str, str]]" = None,
+                        secret: "Optional[set[str]]" = None,
                         ) -> "Optional[tuple[EnvChanges, list[tuple[str, str]]]]":
     """``overlay``'s declarations applied over ``osenv``: the change set and
     the weakenings, or None (reported) when they cannot be applied, in which
     case nothing of the overlay applies. Its env scripts run in
     ``own_base`` (the base environment and the root variables) with only
-    this overlay's declarations, so another overlay's secrets never reach
-    them. ``host_env`` is dotagents' own environment, where the ``env``
-    provider reads (default ``os.environ``)."""
+    this overlay's declarations, each with the value it was substituted to
+    over ``osenv``, so another overlay's secrets never reach them.
+    ``host_env`` is dotagents' own environment, where the ``env`` provider
+    reads (default ``os.environ``). ``secret`` names the variables of
+    ``osenv`` that hold a secret, which no placeholder may read; it is
+    updated with this overlay's."""
     ctx = _activate.context(overlay, host_env=host_env)
     doc = overlay.document()
     windows = os.name == "nt"
-    session = _aos.Environment(osenv, windows)
+    session = _aos.Environment(osenv, windows, secret=secret or ())
     weakenings: "list[tuple[str, str]]" = []
     try:
         scripts = _aos.apply_overlay(session, doc, ctx, weakenings)
-        own = _aos.Environment(own_base, windows)
-        if scripts:
-            _aos.apply_overlay(own, doc, ctx, [])
     except _aos.Refused as refused:
         if logger:
             logger.error("overlay %s: its environment is not applied: %s %s%s", overlay.name, refused.code,
                          refused.subject, " (%s)" % refused.detail if refused.detail else "")
         return None
+    own = _aos.Environment(own_base, windows)
+    if scripts:
+        # The values as substituted for the session, never substituted again;
+        # the path additions onto own_base's own lists.
+        paths = _aos.paths_of(doc, ctx.files)
+        fold = str.upper if windows else str
+        listed = {fold(entry["variable"]) for entry in paths}
+        for key in session.assigned:
+            if fold(key) not in listed and key in session.values:
+                own.set(key, session.values[key])
+        _aos.apply_paths(own, paths, ctx, [])
     for script in scripts:
         changes = _run_env_script(overlay, script, own, ctx, python=python, logger=logger)
         for name, value in changes or ():
@@ -1111,6 +1123,9 @@ def _apply_declarations(overlay, osenv: "dict[str, str]", own_base: "dict[str, s
     for key, value in session.values.items():
         if osenv.get(key) != value:
             out[key] = value
+    if secret is not None:
+        secret.clear()
+        secret.update(session.secret)
     return out, weakenings
 
 
@@ -1141,7 +1156,7 @@ def overlay_process_env(scope: Scope, overlay, *, base_env: "Optional[dict[str, 
             env[_aos.state_variable(other.name)] = str(state)
     # The path additions -- directories, never values or secrets -- of the
     # overlays it requires, so an overlay built on another's library or
-    # commands finds them (D95).
+    # commands finds them.
     required: "list" = []
 
     def need(name: str) -> None:
@@ -1377,11 +1392,13 @@ def get_environment(
     python_now = osenv.get("AGENTS_PYTHON") or sys.executable
     # Before any overlay's declarations: what an overlay's own processes start from.
     own_base = dict(osenv)
+    # Variables an overlay took from a secret reference: no later placeholder reads them.
+    secret: "set[str]" = set()
     for overlay in overlays:
         if not _activate.is_pinned(overlay):
             weakenings.append((overlay.name, "unpinned", ""))
         found = _apply_declarations(overlay, osenv, own_base, python=python_now, logger=logger,
-                                    host_env=host_env)
+                                    host_env=host_env, secret=secret)
         if found is None:
             continue
         changes, overlay_weakenings = found
@@ -1549,6 +1566,8 @@ def env_cache_key(scope: Scope, base_env: "dict[str, str]", *parts: str) -> str:
         for rel in ("bin", "lib"):
             items.append("default %s %s" % (overlay.path / rel, _stat_sig(overlay.path / rel)))
         items.append("record %s %s" % (overlay.install_record_path, _stat_sig(overlay.install_record_path)))
+        # A failed setup refuses the overlay until one succeeds.
+        items.append("setup %s %s" % (overlay.setup_record_path(), _stat_sig(overlay.setup_record_path())))
         doc = overlay.document()
         for entry in doc.get("env_files", []):
             rel = entry if isinstance(entry, str) else entry["path"]

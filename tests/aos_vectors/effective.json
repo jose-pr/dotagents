@@ -1,5 +1,5 @@
 {
-  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (the overlay's files by relative path, with the text of those read as env files; the fields a manifest does not write take their defaults from them), providers, interpreters (the interpreters the consumer can run here; absent, python, node, powershell, bash and sh), env_scripts_enabled (the consumer's policy; absent, true), enforces_network. 'expect' gives the resulting environment, the selected setup and runtime variants, what a probe needs, and the weakenings as [id, subject]; or the refusal.",
+  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (the overlay's files by relative path, with the text of those read as env files; the fields a manifest does not write take their defaults from them), providers, interpreters (the interpreters the consumer can run here; absent, python, node, powershell, bash and sh), env_scripts_enabled (the consumer's policy; absent, true), enforces_network, and for setup phases change ('add', 'update', 'rerun' or 'remove'), digest (the overlay's) and recorded_digest (the digest of the last setup of this overlay that succeeded on this OS; absent, none). 'expect' gives the resulting environment, the selected setup and runtime variants, what a probe needs, and the weakenings as [id, subject], and with a change the setup_phase (null when setup does not run) and setup_arguments (the phase, then the variant's args); or the refusal.",
   "spec": "spec/v0/environment.md#order-of-application",
   "cases": [
     {
@@ -1878,7 +1878,7 @@
     },
     {
       "id": "default-env-file",
-      "description": "A root file named env is read as dotenv: literal values, nothing expanded or run.",
+      "description": "A root file named env is read as dotenv: ${NAME} placeholders are substituted, single-quoted values and $(...) are characters, nothing runs; the overlay's own AOS_OVERLAY_ROOT and AOS_OVERLAY_NAME are seen, not set.",
       "manifest": {},
       "facts": {
         "os": "linux",
@@ -1886,7 +1886,7 @@
         "identity": "docs-tools",
         "pinned": true,
         "files": {
-          "env": "# defaults\nexport MODE=read-only\nBANNER=\"Docs: read only\"\nWHO=$(id -u)\nHOME_COPY=${HOME}\n"
+          "env": "# defaults\nexport MODE=read-only\nBANNER=\"Docs: read only\"\nWHO=$(id -u)\nHOME_COPY=${HOME}\nRAW='${HOME}'\nTOOL_DIR=${DOCS_TOOLS_OVERLAY_ROOT}/tool\nSELF=${AOS_OVERLAY_ROOT}\nSELF_NAME=${AOS_OVERLAY_NAME}\n"
         },
         "base_env": {
           "HOME": "/home/u"
@@ -1901,7 +1901,285 @@
           "MODE": "read-only",
           "BANNER": "Docs: read only",
           "WHO": "$(id -u)",
-          "HOME_COPY": "${HOME}"
+          "HOME_COPY": "/home/u",
+          "RAW": "${HOME}",
+          "TOOL_DIR": "/srv/ov/docs-tools/tool",
+          "SELF": "/srv/ov/docs-tools",
+          "SELF_NAME": "docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "env-self-reference",
+      "description": "PATH=${MYTOOL_HOME}/bin:${PATH} on the line after MYTOOL_HOME: each line sees the earlier ones, and PATH its own earlier value.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env": "MYTOOL_HOME=${AOS_OVERLAY_ROOT}/mytool\nPATH=${MYTOOL_HOME}/bin:${PATH}\n"
+        },
+        "base_env": {
+          "PATH": "/usr/bin:/bin"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/srv/ov/docs-tools/mytool/bin:/usr/bin:/bin",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "MYTOOL_HOME": "/srv/ov/docs-tools/mytool"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-sensitive",
+            "PATH"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "env-mapping-sees-before",
+      "description": "Entries of one mapping see the environment before it, never each other (mapping order carries no meaning); env sees the env files.",
+      "manifest": {
+        "env_files": [
+          {
+            "path": "env/a.env",
+            "format": "dotenv"
+          }
+        ],
+        "env": {
+          "A": "mapping",
+          "B": "${A}-b",
+          "C": {
+            "value": "${A}"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/a.env": "A=file\n"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "A": "mapping",
+          "B": "file-b",
+          "C": "file"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "env-mapping-undefined",
+      "description": "A name the mapping itself sets, unset before it, is undefined: an error naming the variable being set.",
+      "manifest": {
+        "env": {
+          "A": "x",
+          "B": "${A}"
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "error": "undefined-variable",
+        "subject": "B"
+      }
+    },
+    {
+      "id": "env-aos-file-substituted",
+      "description": "Text in an aos env file is substituted, in both forms; a path is not.",
+      "manifest": {
+        "env_files": [
+          "env/a.cfg"
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/a.cfg": "A = \"${HOME}/a\"\nB = { value = \"$${HOME}\" }\nC = { path = \"x/${HOME}\" }\n"
+        },
+        "base_env": {
+          "HOME": "/home/u"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "HOME": "/home/u",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "A": "/home/u/a",
+          "B": "${HOME}",
+          "C": "/srv/ov/docs-tools/x/${HOME}"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "env-secret-placeholder",
+      "description": "A dotenv line cannot read a variable an earlier env file took from a secret reference.",
+      "manifest": {
+        "env_files": [
+          "env/s.cfg",
+          {
+            "path": "env/a.env",
+            "format": "dotenv"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/s.cfg": "TOKEN = { secret = \"deploy\" }\n",
+          "env/a.env": "AUTH=Bearer ${TOKEN}\n"
+        },
+        "grants": {
+          "secret": [
+            "deploy"
+          ]
+        },
+        "secrets": {
+          "deploy": "s3cret"
+        }
+      },
+      "expect": {
+        "error": "secret-placeholder",
+        "subject": "AUTH"
+      }
+    },
+    {
+      "id": "env-state-placeholder",
+      "description": "The state directory is seen as AOS_OVERLAY_STATE and as the overlay's own state variable.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "state": "/var/lib/consumer/state/docs-tools",
+        "files": {
+          "env": "CACHE=${AOS_OVERLAY_STATE}/cache\nSTATE=${DOCS_TOOLS_OVERLAY_STATE}\n"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "DOCS_TOOLS_OVERLAY_STATE": "/var/lib/consumer/state/docs-tools",
+          "CACHE": "/var/lib/consumer/state/docs-tools/cache",
+          "STATE": "/var/lib/consumer/state/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "env-state-absent",
+      "description": "Without a state directory AOS_OVERLAY_STATE is undefined.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env": "CACHE=${AOS_OVERLAY_STATE}/cache\n"
+        }
+      },
+      "expect": {
+        "error": "undefined-variable",
+        "subject": "CACHE"
+      }
+    },
+    {
+      "id": "env-substitution-windows",
+      "description": "On Windows a placeholder finds Path as ${PATH}.",
+      "manifest": {
+        "defaults": {
+          "bin": false
+        }
+      },
+      "facts": {
+        "os": "windows",
+        "root": "C:\\ov\\docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env": "TOOL_PATH=${PATH}\n"
+        },
+        "base_env": {
+          "Path": "C:\\Windows"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "Path": "C:\\Windows",
+          "DOCS_TOOLS_OVERLAY_ROOT": "C:\\ov\\docs-tools",
+          "TOOL_PATH": "C:\\Windows"
         },
         "env_scripts": [],
         "setup": null,
@@ -2963,6 +3241,447 @@
             "setup.py"
           ]
         ]
+      }
+    },
+    {
+      "id": "phase-add",
+      "description": "First add, nothing recorded: install.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "add",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": "install",
+        "setup_arguments": [
+          "install"
+        ]
+      }
+    },
+    {
+      "id": "phase-update",
+      "description": "A new digest after a setup that succeeded: sync, the phase before the declared arguments.",
+      "manifest": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "setup.sh",
+            "args": [
+              "--quiet"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "update",
+        "recorded_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [
+            "--quiet"
+          ],
+          "timeout": 300,
+          "network": false
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [],
+        "setup_phase": "sync",
+        "setup_arguments": [
+          "sync",
+          "--quiet"
+        ]
+      }
+    },
+    {
+      "id": "phase-update-same-digest",
+      "description": "Nothing changed: setup does not run.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "update",
+        "recorded_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": null,
+        "setup_arguments": null
+      }
+    },
+    {
+      "id": "phase-update-first-setup",
+      "description": "An update with nothing recorded (the earlier digest had no setup, or it failed): install.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "update",
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": "install",
+        "setup_arguments": [
+          "install"
+        ]
+      }
+    },
+    {
+      "id": "phase-rerun",
+      "description": "Run again on the user's request after a setup that succeeded: sync.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "rerun",
+        "recorded_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": "sync",
+        "setup_arguments": [
+          "sync"
+        ]
+      }
+    },
+    {
+      "id": "phase-rerun-never",
+      "description": "Run again with nothing recorded: install.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "rerun",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": "install",
+        "setup_arguments": [
+          "install"
+        ]
+      }
+    },
+    {
+      "id": "phase-remove",
+      "description": "Removing after a setup that succeeded: remove, with the variant's own timeout and network, reported as for any phase.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "remove",
+        "recorded_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": "remove",
+        "setup_arguments": [
+          "remove"
+        ]
+      }
+    },
+    {
+      "id": "phase-remove-never-set-up",
+      "description": "Removing with nothing recorded: setup does not run.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "remove",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": null,
+        "setup_arguments": null
+      }
+    },
+    {
+      "id": "phase-no-setup",
+      "description": "No setup selected on this OS: no phase runs.",
+      "manifest": {
+        "setup": [
+          {
+            "os": [
+              "windows"
+            ],
+            "interpreter": "powershell",
+            "path": "s/w.ps1"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "change": "add",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [],
+        "setup_phase": null,
+        "setup_arguments": null
       }
     },
     {

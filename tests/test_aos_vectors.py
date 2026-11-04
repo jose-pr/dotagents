@@ -58,6 +58,9 @@ def test_reading(case):
     data = base64.b64decode(case["base64"]) if "base64" in case else case["text"].encode("utf-8")
     limits = {"max_" + key[4:]: value for key, value in case.get("limits", {}).items()}
     expect = case["expect"]
+    if case["format"] == "dotenv":
+        limits = {"env": case.get("env", {}), "windows": case.get("os") == "windows",
+                  "secret_variables": case.get("secret_variables", ())}
     read = {"aos": _aos.read_document, "dotenv": _aos.read_dotenv,
             "env-script": _aos.read_env_script_output}[case["format"]]
     if "error" in expect and "data" in expect:
@@ -221,7 +224,7 @@ def _context(manifest: dict, facts: dict, identity: str, root: str, tree=None) -
         read=lambda rel: files[rel].encode("utf-8") if rel in files else None,
         secrets=secrets, env_scripts_enabled=facts.get("env_scripts_enabled", True),
         files=list(files) if tree is None else tree,
-        interpreters=facts.get("interpreters", _aos.INTERPRETERS),
+        interpreters=facts.get("interpreters", _aos.INTERPRETERS), state=facts.get("state"),
     )
 
 
@@ -266,8 +269,11 @@ def test_compose(case):
             env.set(Overlay.root_var_for(identity), facts["roots"][identity])
         try:
             for identity in active:
-                ctx = _context(overlays[identity], facts, identity, facts["roots"][identity],
-                               tree=files.get(identity, []))
+                tree = files.get(identity, [])
+                # A mapping of path to text also gives the files an overlay reads.
+                texts = tree if isinstance(tree, dict) else {}
+                ctx = _context(overlays[identity], dict(facts, files=texts), identity,
+                               facts["roots"][identity], tree=list(tree))
                 _aos.apply_overlay(env, overlays[identity], ctx, [])
         except _aos.Refused as refused:
             result = {"active": active, "env": {"error": refused.code, "subject": refused.subject}}
@@ -284,7 +290,7 @@ def test_effective(case):
     manifest, facts = case["manifest"], case["facts"]
     ctx = _context(manifest, facts, facts["identity"], facts["root"])
     result = _aos.effective(
-        manifest, ctx, base_env=facts.get("base_env", {}), state=facts.get("state"),
+        manifest, ctx, base_env=facts.get("base_env", {}),
         pinned=facts.get("pinned", False), enforces_network=facts.get("enforces_network", True),
     )
     if result.error is not None:
@@ -294,4 +300,9 @@ def test_effective(case):
         got["env"] = result.env.values
         got["env_scripts"] = result.scripts
         got["weakenings"] = sorted({tuple(w) for w in result.weakenings})
+        if "change" in facts:
+            setup = got["setup"]
+            phase = None if setup is None else _aos.setup_phase(facts["change"], facts.get("recorded_digest"))
+            got["setup_phase"] = phase
+            got["setup_arguments"] = None if phase is None else [phase] + setup["args"]
     assert strict(json.loads(json.dumps(got))) == strict(case["expect"])

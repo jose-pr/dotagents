@@ -291,16 +291,18 @@ def _check_model(value: Any, depth: int, max_depth: int) -> None:
 _DOTENV_LINE = re.compile(r"^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=(.*)$")
 
 
-def read_dotenv(data: bytes) -> "dict[str, str]":
-    """A ``dotenv`` env file: literal values, no references, escapes or
-    expansion. Raises :class:`ReadError`."""
+def parse_dotenv(data: bytes) -> "list[tuple[str, str, bool]]":
+    """A ``dotenv`` env file's lines as ``(name, text, literal)``, in order;
+    ``literal`` is true for a value in single quotes, which is never
+    substituted. No references, escapes or command substitution. Raises
+    :class:`ReadError`."""
     if data.startswith(b"\xef\xbb\xbf"):
         data = data[3:]
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         raise ReadError("invalid-utf8")
-    out: "dict[str, str]" = {}
+    out: "list[tuple[str, str, bool]]" = []
     folded: "set[str]" = set()
     for line in text.split("\n"):
         if line.endswith("\r"):
@@ -312,13 +314,273 @@ def read_dotenv(data: bytes) -> "dict[str, str]":
         if not match:
             raise ReadError("dotenv-syntax")
         name, value = match.group(1), match.group(2).strip(" \t")
+        literal = False
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            literal = value[0] == "'"
             value = value[1:-1]
         if name.upper() in folded:
             raise ReadError("duplicate-key", name)
         folded.add(name.upper())
+        out.append((name, value, literal))
+    return out
+
+
+def read_dotenv(data: bytes, env: "Optional[dict[str, str]]" = None, *, windows: bool = False,
+                secret_variables: "Iterable[str]" = ()) -> "dict[str, str]":
+    """A ``dotenv`` env file applied over ``env``: each line substituted
+    against the environment the earlier lines left. Returns the values the
+    file sets. ``secret_variables`` are the variables of ``env`` whose value
+    came from a secret reference. Raises :class:`ReadError` (a
+    :class:`SubstitutionError` for a placeholder)."""
+    built = Environment(env or {}, windows, secret=secret_variables)
+    out: "dict[str, str]" = {}
+    for name, text, literal in parse_dotenv(data):
+        value = text if literal else substitute(text, built.lookup)
+        built.set(name, value)
         out[name] = value
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Substitution: ``${NAME}`` and its operators in env values, applied when a
+# value is set.
+# --------------------------------------------------------------------------- #
+
+
+class SubstitutionError(ReadError):
+    """``undefined-variable``, ``secret-placeholder`` or ``invalid-pattern``;
+    ``name`` is the placeholder's variable, or the pattern."""
+
+    def __init__(self, code: str, name: str):
+        super().__init__(code, name)
+        self.name = name
+
+
+_NAME_AT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_SPACE = "[ \t\n\r\f\v]"
+# Digits and white space are ASCII only; Python's \d and \s would take others.
+_SLICE = re.compile(
+    r":{s}*(?:\({s}*(-?[0-9]+){s}*\)|([0-9]+|{s}-[0-9]+))(?::{s}*(-?[0-9]+))?{s}*".format(s=_SPACE))
+_WORD_OPERATORS = (":-", ":=", ":+", "-", "=", "+")
+
+
+def substitute(text: str, lookup: "Callable[[str], Optional[str]]") -> str:
+    """``text`` with every placeholder replaced. ``lookup(name)`` gives a
+    variable's value, None when it is unset, and raises
+    :class:`SubstitutionError` for one that holds a secret. Nothing runs and
+    nothing is read but through ``lookup``; an inserted value is never read
+    again."""
+    out: "list[str]" = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char != "$":
+            out.append(char)
+            index += 1
+            continue
+        after = text[index + 1:index + 2]
+        if after == "$":
+            out.append("$")
+            index += 2
+            continue
+        if after == "{":
+            close = _closing_brace(text, index + 2)
+            if close is not None:
+                found = _expression(text[index + 2:close], lookup)
+                if found is not None:
+                    out.append(found)
+                    index = close + 1
+                    continue
+        # No expression: the '$' is itself, and reading goes on after it.
+        out.append("$")
+        index += 1
+    return "".join(out)
+
+
+def _closing_brace(text: str, index: int) -> "Optional[int]":
+    """The '}' ending an expression that starts at ``index``: the first one
+    that does not close a '${' opened inside it."""
+    depth = 0
+    while index < len(text):
+        if text.startswith("${", index):
+            depth += 1
+            index += 2
+            continue
+        if text[index] == "}":
+            if depth == 0:
+                return index
+            depth -= 1
+        index += 1
+    return None
+
+
+def _required(name: str, lookup: "Callable[[str], Optional[str]]") -> str:
+    value = lookup(name)
+    if value is None:
+        raise SubstitutionError("undefined-variable", name)
+    return value
+
+
+def _expression(body: str, lookup: "Callable[[str], Optional[str]]") -> "Optional[str]":
+    """The text for ``${body}``, or None when it is no expression AOS defines."""
+    if body.startswith("#"):
+        name = _NAME_AT.fullmatch(body, 1)
+        if name is not None:
+            return str(len(_required(name.group(), lookup)))
+    name = _NAME_AT.match(body)
+    if name is None:
+        return None
+    key, rest = name.group(), body[name.end():]
+    if not rest:
+        return _required(key, lookup)
+    for operator in _WORD_OPERATORS:
+        if rest.startswith(operator):
+            word = rest[len(operator):]
+            value = lookup(key)
+            present = value is not None and not (operator[0] == ":" and value == "")
+            if operator.endswith("+"):
+                return substitute(word, lookup) if present else ""
+            return value if present else substitute(word, lookup)
+    if rest.startswith(":"):
+        found = _SLICE.fullmatch(rest)
+        if found is None:
+            return None
+        offset = int(found.group(1) or found.group(2))
+        length = None if found.group(3) is None else int(found.group(3))
+        return _slice(_required(key, lookup), offset, length)
+    if rest.startswith("/"):
+        spec = rest[1:]
+        kind = spec[:1] if spec[:1] in ("/", "#", "%") else ""
+        pattern, replacement = _split_pattern(spec[len(kind):])
+        return _replace(_required(key, lookup), kind, pattern, replacement)
+    if rest[:1] in ("#", "%"):
+        operator = rest[:2] if rest[:2] in ("##", "%%") else rest[:1]
+        return _trim(_required(key, lookup), operator, rest[len(operator):])
+    if rest in ("^", "^^", ",", ",,"):
+        value = _required(key, lookup)
+        if rest == "^^":
+            return value.upper()
+        if rest == ",,":
+            return value.lower()
+        return (value[:1].upper() if rest == "^" else value[:1].lower()) + value[1:]
+    return None
+
+
+def _slice(value: str, offset: int, length: "Optional[int]") -> str:
+    """Code points ``offset`` to the end, or ``length`` of them; negative
+    numbers count from the end."""
+    size = len(value)
+    if offset < 0:
+        offset += size
+        if offset < 0:
+            return ""
+    end = size if length is None else (offset + length if length >= 0 else size + length)
+    return value[offset:end] if end > offset else ""
+
+
+def _split_pattern(spec: str) -> "tuple[str, str]":
+    """A replacement's pattern and text, split at the first '/' not after a backslash."""
+    index = 0
+    while index < len(spec):
+        if spec[index] == "\\":
+            index += 2
+            continue
+        if spec[index] == "/":
+            return spec[:index], spec[index + 1:]
+        index += 1
+    return spec, ""
+
+
+def _glob(pattern: str) -> "re.Pattern[str]":
+    """A pattern as a regular expression matched whole: '*', '?', bracket
+    expressions, '\\x' for x. Raises :class:`SubstitutionError` for empty
+    brackets or a reversed range."""
+    parts: "list[str]" = []
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\" and index + 1 < len(pattern):
+            parts.append(re.escape(pattern[index + 1]))
+            index += 2
+            continue
+        close = pattern.find("]", index + 2) if char == "[" else -1
+        if char == "*":
+            parts.append(".*")
+        elif char == "?":
+            parts.append(".")
+        elif close >= 0:
+            body = pattern[index + 1:close]
+            negate = body[:1] in ("!", "^")
+            items = body[1:] if negate else body
+            if not items:
+                raise SubstitutionError("invalid-pattern", pattern)
+            members: "list[str]" = []
+            at = 0
+            while at < len(items):
+                if at + 2 < len(items) and items[at + 1] == "-":
+                    low, high = items[at], items[at + 2]
+                    if ord(high) < ord(low):
+                        raise SubstitutionError("invalid-pattern", pattern)
+                    members.append(re.escape(low) + "-" + re.escape(high))
+                    at += 3
+                else:
+                    members.append(re.escape(items[at]))
+                    at += 1
+            parts.append("[" + ("^" if negate else "") + "".join(members) + "]")
+            index = close + 1
+            continue
+        else:
+            parts.append(re.escape(char))
+        index += 1
+    return re.compile("".join(parts), re.DOTALL)
+
+
+def _ends(regex: "re.Pattern[str]", value: str, start: int) -> "list[int]":
+    """Every end at which the pattern matches the value from ``start``, shortest first."""
+    return [end for end in range(start, len(value) + 1) if regex.fullmatch(value, start, end)]
+
+
+def _replace(value: str, kind: str, pattern: str, replacement: str) -> str:
+    if not pattern:
+        return value
+    regex = _glob(pattern)
+    if kind == "#":
+        ends = _ends(regex, value, 0)
+        return replacement + value[ends[-1]:] if ends else value
+    if kind == "%":
+        for start in range(len(value) + 1):
+            if regex.fullmatch(value, start):
+                return value[:start] + replacement
+        return value
+    out: "list[str]" = []
+    position = 0
+    while True:
+        match = None
+        for start in range(position, len(value)):
+            ends = _ends(regex, value, start)
+            if ends and ends[-1] > start:
+                match = (start, ends[-1])
+                break
+        if match is None:
+            break
+        out.append(value[position:match[0]] + replacement)
+        position = match[1]
+        if kind != "/":
+            break
+    return "".join(out) + value[position:]
+
+
+def _trim(value: str, operator: str, pattern: str) -> str:
+    regex = _glob(pattern)
+    if operator in ("#", "##"):
+        ends = _ends(regex, value, 0)
+        if not ends:
+            return value
+        return value[ends[0] if operator == "#" else ends[-1]:]
+    starts = [start for start in range(len(value) + 1) if regex.fullmatch(value, start)]
+    if not starts:
+        return value
+    return value[:starts[-1] if operator == "%" else starts[0]]
 
 
 # --------------------------------------------------------------------------- #
@@ -1248,11 +1510,20 @@ class Refused(Exception):
 
 class Environment(object):
     """A variable mapping; on Windows names compare without regard to ASCII
-    case, and setting one that exists under another case keeps that name."""
+    case, and setting one that exists under another case keeps that name.
 
-    def __init__(self, values: "dict[str, str]", windows: bool):
+    ``secret`` holds the variables whose value came from a secret reference,
+    which no placeholder may read. ``extra`` holds what a placeholder sees
+    that is not set (an overlay's own ``AOS_OVERLAY_*``). ``assigned`` lists
+    the variables :meth:`set` was called for, in order."""
+
+    def __init__(self, values: "dict[str, str]", windows: bool, *, secret: "Iterable[str]" = (),
+                 extra: "Optional[dict[str, str]]" = None):
         self.windows = windows
         self.values = dict(values)
+        self.secret = {key for key in (self.key(name) for name in secret) if key is not None}
+        self.extra = dict(extra or {})
+        self.assigned: "list[str]" = []
 
     def key(self, name: str) -> "Optional[str]":
         if name in self.values:
@@ -1268,16 +1539,39 @@ class Environment(object):
         key = self.key(name)
         return None if key is None else self.values[key]
 
-    def set(self, name: str, value: str) -> None:
-        self.values[self.key(name) or name] = value
+    def lookup(self, name: str) -> "Optional[str]":
+        """What a placeholder reads: None when unset; raises
+        :class:`SubstitutionError` for a variable that holds a secret."""
+        for extra, value in self.extra.items():
+            if extra == name or (self.windows and extra.upper() == name.upper()):
+                return value
+        key = self.key(name)
+        if key is None:
+            return None
+        if key in self.secret:
+            raise SubstitutionError("secret-placeholder", name)
+        return self.values[key]
+
+    def set(self, name: str, value: str, *, secret: bool = False) -> None:
+        key = self.key(name) or name
+        self.values[key] = value
+        if secret:
+            self.secret.add(key)
+        else:
+            self.secret.discard(key)
+        if key not in self.assigned:
+            self.assigned.append(key)
 
     def unset(self, name: str) -> None:
         key = self.key(name)
         if key is not None:
             del self.values[key]
+            self.secret.discard(key)
 
     def copy(self) -> "Environment":
-        return Environment(self.values, self.windows)
+        copied = Environment(self.values, self.windows, extra=self.extra)
+        copied.secret = set(self.secret)
+        return copied
 
 
 def resolve_path(root: str, relative: str, windows: bool) -> str:
@@ -1362,7 +1656,9 @@ class Context(object):
     overlay's root and identity, its env files' bytes (``read(relpath)``,
     ``None`` when absent), the :class:`Secrets`, whether its env scripts may
     run (the consumer's policy), the overlay's member files (``files``, from
-    which the defaults follow) and the interpreters the consumer can run."""
+    which the defaults follow), the interpreters the consumer can run, and
+    its state directory (``state``, None when it has none), which its
+    placeholders see as ``AOS_OVERLAY_STATE``."""
 
     def __init__(
         self,
@@ -1375,20 +1671,32 @@ class Context(object):
         env_scripts_enabled: bool = True,
         files: "Iterable[str]" = (),
         interpreters: "Iterable[str]" = (),
+        state: "Optional[str]" = None,
     ):
         self.os = os_name
         self.windows = os_name == "windows"
         self.root = root
         self.identity = identity
+        self.state = state
         self.read = read
         self.secrets = secrets or Secrets(windows=self.windows)
         self.env_scripts_enabled = env_scripts_enabled
         self.files = list(files)
         self.interpreters = set(interpreters)
 
+    def placeholders(self) -> "dict[str, str]":
+        """What this overlay's placeholders see beyond the environment: its
+        ``AOS_OVERLAY_ROOT``, ``AOS_OVERLAY_NAME`` and ``AOS_OVERLAY_STATE``."""
+        seen = {"AOS_OVERLAY_ROOT": self.root, "AOS_OVERLAY_NAME": normalize_name(self.identity)}
+        if self.state is not None:
+            seen["AOS_OVERLAY_STATE"] = self.state
+        return seen
+
 
 def _apply_mapping(env: Environment, mapping: "dict[str, Any]", ctx: Context,
                    weakenings: "list[tuple[str, str]]") -> None:
+    # Mapping order carries no meaning: every entry, its if_unset and its
+    # placeholders see the environment as it was before the mapping.
     before = env.copy()
     for name, entry in mapping.items():
         if is_reserved_variable(name):
@@ -1397,11 +1705,16 @@ def _apply_mapping(env: Environment, mapping: "dict[str, Any]", ctx: Context,
             entry = {"value": entry}
         if entry.get("if_unset") and before.get(name) is not None:
             continue
+        secret = False
         if "value" in entry:
-            value: "Optional[str]" = entry["value"]
+            try:
+                value: "Optional[str]" = substitute(entry["value"], before.lookup)
+            except SubstitutionError as error:
+                raise Refused(error.code, name, error.name)
         elif "path" in entry:
             value = resolve_path(ctx.root, entry["path"], ctx.windows)
         else:
+            secret = True
             value = ctx.secrets.resolve(entry)
             if value is None:
                 if entry.get("optional"):
@@ -1415,7 +1728,23 @@ def _apply_mapping(env: Environment, mapping: "dict[str, Any]", ctx: Context,
                 weakenings.append(("secret-read", reference_name(entry)))
         if is_sensitive(name):
             weakenings.append(("env-sensitive", name))
-        env.set(name, value)  # type: ignore[arg-type]
+        env.set(name, value, secret=secret)  # type: ignore[arg-type]
+
+
+def _apply_dotenv(env: Environment, lines: "list[tuple[str, str, bool]]",
+                  weakenings: "list[tuple[str, str]]") -> None:
+    """A ``dotenv`` file's lines in order, each substituted against the
+    environment the earlier lines left."""
+    for name, text, literal in lines:
+        if is_reserved_variable(name):
+            raise Refused("reserved-variable", name)
+        try:
+            value = text if literal else substitute(text, env.lookup)
+        except SubstitutionError as error:
+            raise Refused(error.code, name, error.name)
+        if is_sensitive(name):
+            weakenings.append(("env-sensitive", name))
+        env.set(name, value)
 
 
 def apply_paths(env: Environment, paths: "list[dict[str, Any]]", ctx: Context,
@@ -1446,27 +1775,31 @@ def apply_paths(env: Environment, paths: "list[dict[str, Any]]", ctx: Context,
             seen.add(resolved)
             (append if entry.get("position") == "append" else prepend).append(resolved)
         kept = [c for c in (env.get(variable) or "").split(separator) if c and c not in seen]
-        env.set(variable, separator.join(prepend + kept + append))
+        env.set(variable, separator.join(prepend + kept + append), secret=env.key(variable) in env.secret)
 
 
-def read_env_file(item: "dict[str, Any]", ctx: Context, listed: "set[str]") -> "dict[str, Any]":
-    """One env file's mapping, checked. Raises :class:`Refused`."""
+def read_env_file(item: "dict[str, Any]", ctx: Context,
+                  listed: "set[str]") -> "dict[str, Any] | list[tuple[str, str, bool]]":
+    """One env file, checked: an ``aos`` file's mapping, or a ``dotenv``
+    file's lines (:func:`parse_dotenv`). Raises :class:`Refused`."""
     data = ctx.read(item["path"])
     if data is None:
         raise Refused("missing-file", item["path"])
     try:
         if item.get("format", "aos") == "dotenv":
-            mapping: "dict[str, Any]" = dict(read_dotenv(data))
+            found: "dict[str, Any] | list[tuple[str, str, bool]]" = parse_dotenv(data)
+            names = [name for name, _text, _literal in found]
         else:
-            mapping = read_document(data)
+            found = read_document(data)
+            if validate({"env": found}):
+                raise Refused("invalid-env-file", item["path"])
+            names = list(found)
     except ReadError as exc:
         raise Refused("invalid-env-file", item["path"], exc.code)
-    if validate({"env": mapping}):
-        raise Refused("invalid-env-file", item["path"])
-    for name in mapping:
+    for name in names:
         if name.upper() in listed:
             raise Refused("env-path-conflict", name)
-    return mapping
+    return found
 
 
 # --------------------------------------------------------------------------- #
@@ -1621,17 +1954,28 @@ def apply_overlay(env: Environment, manifest: "dict[str, Any]", ctx: Context,
     one, then the declared ones; none when the consumer turned them off),
     each reported, and reports ``script-not-run`` for a default script
     present that cannot run. Raises :class:`Refused`; ``env`` may then hold
-    part of the overlay's changes, so a caller applies to a copy."""
+    part of the overlay's changes, so a caller applies to a copy.
+
+    Text values are substituted as they are set, against ``env`` as it
+    stands, with ``ctx``'s :meth:`Context.placeholders` seen too."""
     paths = paths_of(manifest, ctx.files)
     listed = {entry["variable"].upper() for entry in paths}
     for name in manifest.get("env", {}):
         if name.upper() in listed:
             raise Refused("env-path-conflict", name)
-    for item in env_files_of(manifest, ctx.files):
-        item = {"path": item} if isinstance(item, str) else item
-        if os_matches(item, ctx.os):
-            _apply_mapping(env, read_env_file(item, ctx, listed), ctx, weakenings)
-    _apply_mapping(env, manifest.get("env", {}), ctx, weakenings)
+    outer, env.extra = env.extra, ctx.placeholders()
+    try:
+        for item in env_files_of(manifest, ctx.files):
+            item = {"path": item} if isinstance(item, str) else item
+            if os_matches(item, ctx.os):
+                found = read_env_file(item, ctx, listed)
+                if isinstance(found, list):
+                    _apply_dotenv(env, found, weakenings)
+                else:
+                    _apply_mapping(env, found, ctx, weakenings)
+        _apply_mapping(env, manifest.get("env", {}), ctx, weakenings)
+    finally:
+        env.extra = outer
     apply_paths(env, paths, ctx, weakenings)
     scripts: "list[dict[str, Any]]" = []
     if ctx.env_scripts_enabled:
@@ -1806,13 +2150,14 @@ class Activation(object):
 
 
 def effective(manifest: "dict[str, Any]", ctx: Context, *, base_env: "dict[str, str]", pinned: bool,
-              state: "Optional[str]" = None, enforces_network: bool = False) -> Activation:
-    """One overlay applied alone over ``base_env``: its root (and state)
-    variable, then its declarations with their defaults, then :func:`plan`."""
+              enforces_network: bool = False) -> Activation:
+    """One overlay applied alone over ``base_env``: its root (and state,
+    ``ctx.state``) variable, then its declarations with their defaults, then
+    :func:`plan`."""
     env = Environment(base_env, ctx.windows)
     env.set(root_variable(ctx.identity), ctx.root)
-    if state is not None:
-        env.set(state_variable(ctx.identity), state)
+    if ctx.state is not None:
+        env.set(state_variable(ctx.identity), ctx.state)
     weakenings: "list[tuple[str, str]]" = []
     try:
         scripts = apply_overlay(env, manifest, ctx, weakenings)
@@ -1821,6 +2166,24 @@ def effective(manifest: "dict[str, Any]", ctx: Context, *, base_env: "dict[str, 
     found = plan(manifest, ctx, pinned=pinned, enforces_network=enforces_network, scripts=scripts)
     weakenings = found.pop("weakenings") + weakenings
     return Activation(env=env, scripts=scripts, plan=found, weakenings=weakenings)
+
+
+#: What a consumer is doing to an overlay when it decides whether setup runs:
+#: adding it, syncing it (asked for, or a new digest), removing it.
+SETUP_CHANGES = ("add", "sync", "remove")
+#: The phases setup is told, first argument and ``AOS_SETUP_PHASE``.
+SETUP_PHASES = ("install", "sync", "remove")
+
+
+def setup_phase(change: str, recorded: "Optional[str]") -> "Optional[str]":
+    """The phase setup runs in for ``change`` (one of :data:`SETUP_CHANGES`),
+    or None when it does not run: ``install`` when no setup of this overlay
+    has succeeded on this OS (``recorded``, the digest of the last that did,
+    is None), ``sync`` on every add or sync after one did, and ``remove``
+    on removal after one did."""
+    if change == "remove":
+        return "remove" if recorded is not None else None
+    return "install" if recorded is None else "sync"
 
 
 def insecure_url(url: str) -> bool:

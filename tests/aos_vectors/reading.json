@@ -1,5 +1,5 @@
 {
-  "description": "Reading documents: format selection, the data model, static reading, limits, and the dotenv grammar. Input is 'text' (UTF-8) or 'base64'; 'format' is 'aos' (overlay.cfg rules), 'dotenv', or 'env-script' (an env script's output, whose data maps a variable to a string, or to null to unset it). 'expect' is the data, or an error class (a list when either class is right); with both 'data' and 'error', either outcome is right.",
+  "description": "Reading documents: format selection, the data model, static reading, limits, the dotenv grammar and substitution. Input is 'text' (UTF-8) or 'base64'; 'format' is 'aos' (overlay.cfg rules), 'dotenv', or 'env-script' (an env script's output, whose data maps a variable to a string, or to null to unset it). A dotenv case may give 'env' (the environment before the file; absent, empty), 'os' ('windows' compares names without regard to ASCII case; absent, another OS) and 'secret_variables' (the names in 'env' whose value came from a secret reference); its data is what each line sets, substituted against the environment the earlier lines left. 'expect' is the data, or an error class (a list when either class is right); with both 'data' and 'error', either outcome is right.",
   "spec": "spec/v0/manifest.md#reading-overlaycfg",
   "cases": [
     {
@@ -809,16 +809,16 @@
     },
     {
       "id": "dotenv-literal-values",
-      "description": "Nothing is substituted or expanded: '=', '#', $(...), backticks and ${...} in a value are characters; spaces and tabs around '=' and the value are removed.",
+      "description": "Nothing runs: '=', '#', $(...), backticks and a bare $NAME in a value are characters; spaces and tabs around '=' and the value are removed.",
       "format": "dotenv",
-      "text": "A = x=y\nB=a #b\nC=$(id -u)\nD=`id`\nE=${HOME}/x\nF=\t'padded'\t\nG=it's\n",
+      "text": "A = x=y\nB=a #b\nC=$(id -u)\nD=`id`\nE=$HOME/x\nF=\t'padded'\t\nG=it's\n",
       "expect": {
         "data": {
           "A": "x=y",
           "B": "a #b",
           "C": "$(id -u)",
           "D": "`id`",
-          "E": "${HOME}/x",
+          "E": "$HOME/x",
           "F": "padded",
           "G": "it's"
         }
@@ -873,6 +873,1058 @@
       "text": "A=\"one\ntwo\"\n",
       "expect": {
         "error": "dotenv-syntax"
+      }
+    },
+    {
+      "id": "subst-braced",
+      "description": "${NAME} is the variable's value, anywhere in a value.",
+      "format": "dotenv",
+      "text": "A=${NAME}\nB=x${NAME}y\nC=${NAME}${NAME}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "hello world",
+          "B": "xhello worldy",
+          "C": "hello worldhello world"
+        }
+      }
+    },
+    {
+      "id": "subst-bare-dollar",
+      "description": "Only the braced form is a placeholder: $NAME, a lone $ and $5 are characters.",
+      "format": "dotenv",
+      "text": "A=$NAME\nB=cost $5\nC=$\nD=a$\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "$NAME",
+          "B": "cost $5",
+          "C": "$",
+          "D": "a$"
+        }
+      }
+    },
+    {
+      "id": "subst-escape",
+      "description": "$$ is one $, so $${NAME} is the text ${NAME}.",
+      "format": "dotenv",
+      "text": "A=$$\nB=$${NAME}\nC=$$${NAME}\nD=$$$${NAME}\nE=$$NAME\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "$",
+          "B": "${NAME}",
+          "C": "$hello world",
+          "D": "$${NAME}",
+          "E": "$NAME"
+        }
+      }
+    },
+    {
+      "id": "subst-nothing-runs",
+      "description": "Command substitution and arithmetic are characters.",
+      "format": "dotenv",
+      "text": "A=$(id -u)\nB=`id`\nC=$((1+2))\nD=$(echo ${NAME})\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "$(id -u)",
+          "B": "`id`",
+          "C": "$((1+2))",
+          "D": "$(echo hello world)"
+        }
+      }
+    },
+    {
+      "id": "subst-unknown-expression",
+      "description": "An expression AOS does not define is text: its $ is itself and reading goes on after it.",
+      "format": "dotenv",
+      "text": "A=${NAME:?missing}\nB=${1}\nC=${NAME.x}\nD=${\nE=${NAME\nF=${#}\nG=${NAME }\nH=${#NAME:-x}\nI=${NAME~}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "${NAME:?missing}",
+          "B": "${1}",
+          "C": "${NAME.x}",
+          "D": "${",
+          "E": "${NAME",
+          "F": "${#}",
+          "G": "${NAME }",
+          "H": "${#NAME:-x}",
+          "I": "${NAME~}"
+        }
+      }
+    },
+    {
+      "id": "subst-unknown-then-placeholder",
+      "description": "Reading goes on inside an unknown expression, so a placeholder there is substituted.",
+      "format": "dotenv",
+      "text": "A=${X?${NAME}}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "${X?hello world}"
+        }
+      }
+    },
+    {
+      "id": "subst-undefined",
+      "description": "An undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${MISSING}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-length",
+      "description": "The length of an undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${#MISSING}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-slice",
+      "description": "A slice of an undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${MISSING:0:1}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-replace",
+      "description": "A replacement in an undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${MISSING/a/b}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-trim",
+      "description": "A trim of an undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${MISSING%x}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-case",
+      "description": "A case change of an undefined name is an error.",
+      "format": "dotenv",
+      "text": "A=${MISSING^^}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-undefined-explicit-empty",
+      "description": "${NAME-} and ${NAME:-} give an empty value where the name is unset: the author's way to allow it.",
+      "format": "dotenv",
+      "text": "A=${MISSING-}\nB=${MISSING:-}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "",
+          "B": ""
+        }
+      }
+    },
+    {
+      "id": "subst-defaults",
+      "description": "'-' replaces an unset name; ':-' an unset or empty one; '=' and ':=' read the same and assign nothing.",
+      "format": "dotenv",
+      "text": "A=${MISSING-dflt}\nB=${EMPTY-dflt}\nC=${MISSING:-dflt}\nD=${EMPTY:-dflt}\nE=${NAME:-dflt}\nF=${MISSING=dflt}\nG=${EMPTY:=dflt}\nH=${EMPTY=dflt}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "dflt",
+          "B": "",
+          "C": "dflt",
+          "D": "dflt",
+          "E": "hello world",
+          "F": "dflt",
+          "G": "dflt",
+          "H": ""
+        }
+      }
+    },
+    {
+      "id": "subst-assign-does-not-assign",
+      "description": "${NAME=word} sets nothing: the name is still unset on the next line.",
+      "format": "dotenv",
+      "text": "A=${MISSING=set}\nB=${MISSING-unset}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "set",
+          "B": "unset"
+        }
+      }
+    },
+    {
+      "id": "subst-alternates",
+      "description": "'+' gives the word for a set name; ':+' for a set and non-empty one; otherwise empty.",
+      "format": "dotenv",
+      "text": "A=${NAME+alt}\nB=${EMPTY+alt}\nC=${EMPTY:+alt}\nD=${MISSING+alt}\nE=${NAME:+alt}\nF=${MISSING:+alt}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "alt",
+          "B": "alt",
+          "C": "",
+          "D": "",
+          "E": "alt",
+          "F": ""
+        }
+      }
+    },
+    {
+      "id": "subst-nested",
+      "description": "A default's or alternate's word is substituted itself.",
+      "format": "dotenv",
+      "text": "A=${MISSING:-${NAME}}\nB=${MISSING:-${ALSO_MISSING:-deep}}\nC=${MISSING:-$${NAME}}\nD=${NAME:+[${NAME}]}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "hello world",
+          "B": "deep",
+          "C": "${NAME}",
+          "D": "[hello world]"
+        }
+      }
+    },
+    {
+      "id": "subst-word-only-when-used",
+      "description": "A word is substituted only when it is used, so an undefined name in an unused word is no error.",
+      "format": "dotenv",
+      "text": "A=${NAME:-${MISSING}}\nB=${MISSING+${ALSO_MISSING}}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "hello world",
+          "B": ""
+        }
+      }
+    },
+    {
+      "id": "subst-word-quotes-kept",
+      "description": "Quotes in a word are characters.",
+      "format": "dotenv",
+      "text": "A=${MISSING:-'quoted'}\nB=${MISSING:-\"q\"}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "'quoted'",
+          "B": "\"q\""
+        }
+      }
+    },
+    {
+      "id": "subst-length",
+      "description": "${#NAME} is the number of Unicode code points, in decimal.",
+      "format": "dotenv",
+      "text": "A=${#NAME}\nB=${#EMPTY}\nC=${#WIDE}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "11",
+          "B": "0",
+          "C": "3"
+        }
+      }
+    },
+    {
+      "id": "subst-slice",
+      "description": "${NAME:offset} and ${NAME:offset:length}; a negative offset needs a space or parentheses, since ':-' is a default; a negative length counts from the end.",
+      "format": "dotenv",
+      "text": "A=${NAME:6}\nB=${NAME:0:5}\nC=${NAME: -5}\nD=${NAME:(-5)}\nE=${NAME:1:-1}\nF=${NAME:20}\nG=${NAME: -20}\nH=${NAME:2:-20}\nI=${NAME:-2}\nJ=${NAME:  -5:2}\nK=${NAME:( -5 ):3}\nL=${NAME:3:0}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "world",
+          "B": "hello",
+          "C": "world",
+          "D": "world",
+          "E": "ello worl",
+          "F": "",
+          "G": "",
+          "H": "",
+          "I": "hello world",
+          "J": "wo",
+          "K": "wor",
+          "L": ""
+        }
+      }
+    },
+    {
+      "id": "subst-slice-not-a-slice",
+      "description": "Not a slice, so text: an empty length, a space inside '- 5', a non-ASCII digit.",
+      "format": "dotenv",
+      "text": "A=${NAME:1:}\nB=${NAME: - 5}\nC=${NAME: ١}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "${NAME:1:}",
+          "B": "${NAME: - 5}",
+          "C": "${NAME: ١}"
+        }
+      }
+    },
+    {
+      "id": "subst-slice-code-points",
+      "description": "Offsets count Unicode code points, not bytes or UTF-16 units.",
+      "format": "dotenv",
+      "text": "A=${WIDE:1}\nB=${WIDE:1:1}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "😀x",
+          "B": "😀"
+        }
+      }
+    },
+    {
+      "id": "subst-replace",
+      "description": "'/' replaces the first match, '//' every match, '/#' a match at the start, '/%' at the end; no text deletes; an empty pattern changes nothing.",
+      "format": "dotenv",
+      "text": "A=${NAME/o/0}\nB=${NAME//o/0}\nC=${NAME/#h/H}\nD=${NAME/%d/D}\nE=${NAME/#o/0}\nF=${NAME//o}\nG=${NAME/}\nH=${PATH//:/ }\nI=${NAME/#/x}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "hell0 world",
+          "B": "hell0 w0rld",
+          "C": "Hello world",
+          "D": "hello worlD",
+          "E": "hello world",
+          "F": "hell wrld",
+          "G": "hello world",
+          "H": "/usr/bin /bin",
+          "I": "hello world"
+        }
+      }
+    },
+    {
+      "id": "subst-replace-glob",
+      "description": "Patterns are globs, matched longest first: '*', '?', bracket expressions with ranges and '!' or '^' negation, a ']' first in the brackets, '\\' for the next character.",
+      "format": "dotenv",
+      "text": "A=${NAME/o*/X}\nB=${NAME//l?/L}\nC=${NAME/l*o/_}\nD=${NAME//[a-h]/_}\nE=${NAME//[!a-h ]/_}\nF=${NAME//[^a-h ]/_}\nG=${NAME//[]o]/_}\nH=${NAME//*/x}\nI=${STAR/\\*/x}\nJ=${NAME/\\*/x}\nK=${NAME//[a-c-e]/_}\nL=${NAME//[!-]/_}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "hellX",
+          "B": "heLo worL",
+          "C": "he_rld",
+          "D": "__llo worl_",
+          "E": "he___ ____d",
+          "F": "he___ ____d",
+          "G": "hell_ w_rld",
+          "H": "x",
+          "I": "axb",
+          "J": "hello world",
+          "K": "h_llo world",
+          "L": "___________"
+        }
+      }
+    },
+    {
+      "id": "subst-replace-text-literal",
+      "description": "A '/' in the pattern is written '\\/'; the replacement is characters, a backslash or a placeholder included.",
+      "format": "dotenv",
+      "text": "A=${PATH/\\//|}\nB=${NAME/o/\\/}\nC=${NAME/o/${MISSING}}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "|usr/bin:/bin",
+          "B": "hell\\/ world",
+          "C": "hell${MISSING} world"
+        }
+      }
+    },
+    {
+      "id": "subst-replace-empty-value",
+      "description": "On an empty value '/' and '//' replace nothing, while '/#' and '/%' replace the empty match.",
+      "format": "dotenv",
+      "text": "A=${EMPTY/*/x}\nB=${EMPTY//*/x}\nC=${EMPTY/#*/x}\nD=${EMPTY/%*/x}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "",
+          "B": "",
+          "C": "x",
+          "D": "x"
+        }
+      }
+    },
+    {
+      "id": "subst-replace-unclosed-bracket",
+      "description": "A '[' with no ']' after the character that follows it is itself.",
+      "format": "dotenv",
+      "text": "A=${BRACKET/[/_}\nB=${NAME/[/_}\nC=${BRACKET/[]/_}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "a_b",
+          "B": "hello world",
+          "C": "a[b"
+        }
+      }
+    },
+    {
+      "id": "subst-replace-bad-range",
+      "description": "A range whose end is before its start is an error.",
+      "format": "dotenv",
+      "text": "A=${NAME/[z-a]/_}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "invalid-pattern"
+      }
+    },
+    {
+      "id": "subst-replace-empty-bracket",
+      "description": "Brackets holding only the negation mark are an error.",
+      "format": "dotenv",
+      "text": "A=${NAME/[!]x]/_}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "invalid-pattern"
+      }
+    },
+    {
+      "id": "subst-replace-empty-bracket-later",
+      "description": "Also when a later bracket expression follows: '[!]' never joins it.",
+      "format": "dotenv",
+      "text": "A=${NAME/[!]x[y]/_}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "error": "invalid-pattern"
+      }
+    },
+    {
+      "id": "subst-trim",
+      "description": "'#' removes the shortest matching prefix, '##' the longest; '%' the shortest matching suffix, '%%' the longest.",
+      "format": "dotenv",
+      "text": "A=${FILE#*.}\nB=${FILE##*.}\nC=${FILE%.*}\nD=${FILE%%.*}\nE=${FILE#x}\nF=${FILE#}\nG=${FILE#*}\nH=${FILE##*}\nI=${FILE%%[.]*}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "tar.gz",
+          "B": "gz",
+          "C": "archive.tar",
+          "D": "archive",
+          "E": "archive.tar.gz",
+          "F": "archive.tar.gz",
+          "G": "archive.tar.gz",
+          "H": "",
+          "I": "archive"
+        }
+      }
+    },
+    {
+      "id": "subst-case",
+      "description": "'^' upper-cases the first character, '^^' all; ',' and ',,' lower-case; Unicode full case mapping.",
+      "format": "dotenv",
+      "text": "A=${NAME^}\nB=${NAME^^}\nC=${UPPER,}\nD=${UPPER,,}\nE=${SHARP^^}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "Hello world",
+          "B": "HELLO WORLD",
+          "C": "hELLO World",
+          "D": "hello world",
+          "E": "STRASSE"
+        }
+      }
+    },
+    {
+      "id": "subst-quotes",
+      "description": "A value in single quotes is literal; double quotes, or none, are substituted.",
+      "format": "dotenv",
+      "text": "A='${NAME}'\nB=\"${NAME}\"\nC=${NAME}'\nD='$$'\nE=\"$$\"\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b"
+      },
+      "expect": {
+        "data": {
+          "A": "${NAME}",
+          "B": "hello world",
+          "C": "hello world'",
+          "D": "$$",
+          "E": "$"
+        }
+      }
+    },
+    {
+      "id": "subst-chain-lines",
+      "description": "Each line sees the lines before it.",
+      "format": "dotenv",
+      "text": "A=one\nB=${A}-two\nC=${B}-three\n",
+      "env": {},
+      "expect": {
+        "data": {
+          "A": "one",
+          "B": "one-two",
+          "C": "one-two-three"
+        }
+      }
+    },
+    {
+      "id": "subst-self-reference",
+      "description": "A variable refers to its own earlier value.",
+      "format": "dotenv",
+      "text": "MYTOOL_HOME=/opt/mytool\nPATH=${MYTOOL_HOME}/bin:${PATH}\n",
+      "env": {
+        "PATH": "/usr/bin:/bin"
+      },
+      "expect": {
+        "data": {
+          "MYTOOL_HOME": "/opt/mytool",
+          "PATH": "/opt/mytool/bin:/usr/bin:/bin"
+        }
+      }
+    },
+    {
+      "id": "subst-forward-reference",
+      "description": "A variable set on a later line is not set yet: undefined, an error.",
+      "format": "dotenv",
+      "text": "A=${B}\nB=x\n",
+      "env": {},
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-forward-reference-earlier-value",
+      "description": "A later line has not run yet, so the name still has its earlier value.",
+      "format": "dotenv",
+      "text": "A=${B}\nB=new\nC=${B}\n",
+      "env": {
+        "B": "old"
+      },
+      "expect": {
+        "data": {
+          "A": "old",
+          "B": "new",
+          "C": "new"
+        }
+      }
+    },
+    {
+      "id": "subst-no-rescan",
+      "description": "A value is inserted as it is: placeholders in it are not substituted again, so nothing can loop.",
+      "format": "dotenv",
+      "text": "A=${V}\nB=${V:-x}\nSELF=${SELF}${SELF}\n",
+      "env": {
+        "V": "${NAME}",
+        "SELF": "$${SELF}"
+      },
+      "expect": {
+        "data": {
+          "A": "${NAME}",
+          "B": "${NAME}",
+          "SELF": "$${SELF}$${SELF}"
+        }
+      }
+    },
+    {
+      "id": "subst-case-exact",
+      "description": "Off Windows a name matches only in its own case.",
+      "format": "dotenv",
+      "text": "A=${home}\n",
+      "env": {
+        "HOME": "/home/u"
+      },
+      "expect": {
+        "error": "undefined-variable"
+      }
+    },
+    {
+      "id": "subst-case-windows",
+      "description": "On Windows a name matches without regard to ASCII case.",
+      "format": "dotenv",
+      "text": "A=${path}\nB=${PATH}\n",
+      "env": {
+        "Path": "C:\\Windows"
+      },
+      "os": "windows",
+      "expect": {
+        "data": {
+          "A": "C:\\Windows",
+          "B": "C:\\Windows"
+        }
+      }
+    },
+    {
+      "id": "subst-secret",
+      "description": "A variable whose value came from a secret reference is never read by a placeholder.",
+      "format": "dotenv",
+      "text": "A=${TOKEN}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b",
+        "TOKEN": "s3cret"
+      },
+      "secret_variables": [
+        "TOKEN"
+      ],
+      "expect": {
+        "error": "secret-placeholder"
+      }
+    },
+    {
+      "id": "subst-secret-length",
+      "description": "In any form: not its length ...",
+      "format": "dotenv",
+      "text": "A=${#TOKEN}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b",
+        "TOKEN": "s3cret"
+      },
+      "secret_variables": [
+        "TOKEN"
+      ],
+      "expect": {
+        "error": "secret-placeholder"
+      }
+    },
+    {
+      "id": "subst-secret-alternate",
+      "description": "... nor whether it is set.",
+      "format": "dotenv",
+      "text": "A=${TOKEN:+set}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b",
+        "TOKEN": "s3cret"
+      },
+      "secret_variables": [
+        "TOKEN"
+      ],
+      "expect": {
+        "error": "secret-placeholder"
+      }
+    },
+    {
+      "id": "subst-secret-unused-word",
+      "description": "A secret named in a word that is not used is not read.",
+      "format": "dotenv",
+      "text": "A=${NAME:-${TOKEN}}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b",
+        "TOKEN": "s3cret"
+      },
+      "secret_variables": [
+        "TOKEN"
+      ],
+      "expect": {
+        "data": {
+          "A": "hello world"
+        }
+      }
+    },
+    {
+      "id": "subst-secret-replaced",
+      "description": "Once a later line sets the variable, it no longer holds the secret.",
+      "format": "dotenv",
+      "text": "TOKEN=plain\nA=${TOKEN}\n",
+      "env": {
+        "NAME": "hello world",
+        "EMPTY": "",
+        "FILE": "archive.tar.gz",
+        "PATH": "/usr/bin:/bin",
+        "WIDE": "ü😀x",
+        "UPPER": "HELLO World",
+        "SHARP": "straße",
+        "STAR": "a*b",
+        "BRACKET": "a[b",
+        "TOKEN": "s3cret"
+      },
+      "secret_variables": [
+        "TOKEN"
+      ],
+      "expect": {
+        "data": {
+          "TOKEN": "plain",
+          "A": "plain"
+        }
       }
     },
     {

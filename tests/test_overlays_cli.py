@@ -209,19 +209,12 @@ def test_an_installed_requirement_is_satisfied_not_redone(world, caplog):
     assert not any("installing it too" in m for m in msgs)
     assert not any("running setup for base" in m for m in msgs)
     assert sorted(p.name for p in (scope_root / "overlays").iterdir() if not p.name.startswith(".")) == ["base", "mid"]
-    # Asked for by name, it is made to match its source; setup ran for this
-    # digest already, so it runs again only when asked to.
+    # Asked for by name, it is made to match its source, and its setup runs
+    # in the sync phase, since an install of it succeeded.
     caplog.clear()
     with caplog.at_level(logging.INFO):
         assert _add(src, scope_root, "base") == 0
-    msgs = [r.getMessage() for r in caplog.records]
-    assert any("already ran for this digest" in m for m in msgs)
-    assert not any("running setup for base" in m for m in msgs)
-    caplog.clear()
-    with caplog.at_level(logging.INFO):
-        assert _run(OverlayAdd, name=["base"], repo=[str(src)], global_scope=True, agents_dir=scope_root,
-                    copy=True, dry_run=False, rerun_setup=True) == 0
-    assert any("running setup for base" in m for m in (r.getMessage() for r in caplog.records))
+    assert any("running setup for base: sync" in m for m in (r.getMessage() for r in caplog.records))
 
 
 def test_a_requirement_in_the_user_store_satisfies_a_project_add(world, tmp_path, monkeypatch, caplog):

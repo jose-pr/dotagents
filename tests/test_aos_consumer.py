@@ -1,6 +1,7 @@
 """dotagents as an AOS consumer: what an overlay declares is applied, and only
 that; pins, grants and the env-script opt-in come from the store's own
-configuration; setup runs once per digest into a state directory; weakenings
+configuration; text values are substituted; setup is told its phase and
+writes into a state directory; weakenings
 are reported; what this machine lacks refuses an install before it starts.
 
 tmp dirs only; the conftest isolates the home and the stores.
@@ -160,6 +161,78 @@ def test_unpinned_and_sensitive_weakenings_are_reported(store, caplog):
 
 
 # --------------------------------------------------------------------------
+# Substitution: ${NAME} in text values, chained in the order of application
+# --------------------------------------------------------------------------
+
+def test_values_are_substituted_in_the_order_of_application(store):
+    """A dotenv file chains line by line and names its own root; a later
+    overlay reads what an earlier one set; one mapping's entries see the
+    environment from before it; single quotes keep a value as written."""
+    low, high = store / "overlays" / "low", store / "overlays" / "high"
+    _write(low / "overlay.cfg", "priority = 100\n")
+    _write(low / "env", "TOOL_HOME=${AOS_OVERLAY_ROOT}/tool\nTOOL_CONF=${TOOL_HOME}/conf\n"
+                        "PROMPT='${USER}$ '\nPRICE=$$5 ${MISSING-none}\n")
+    _write(high / "overlay.cfg", 'priority = 900\n[env]\nTOOL_BIN = "${TOOL_HOME}/bin"\n'
+                                 'LOW = "${LOW_OVERLAY_ROOT}"\nNAME = "${AOS_OVERLAY_NAME^^}"\n')
+    env = _env_of(store)
+    tool = str(low) + "/tool"
+    assert env["TOOL_HOME"] == tool and env["TOOL_CONF"] == tool + "/conf"
+    assert env["PROMPT"] == "${USER}$ " and env["PRICE"] == "$5 none"
+    assert env["TOOL_BIN"] == tool + "/bin" and env["LOW"] == str(low) and env["NAME"] == "HIGH"
+
+
+def test_an_undefined_name_refuses_the_overlays_environment(store, caplog):
+    ov = store / "overlays" / "docs"
+    _write(ov / "overlay.cfg", '[env]\nA = "x"\nB = "${A}/y"\nC = "kept"\n')
+    with caplog.at_level(logging.ERROR):
+        env = _env_of(store)
+    assert not {"A", "B", "C"} & set(env), "nothing of the overlay applies"
+    assert "undefined-variable B (A)" in caplog.text, "the entries of one mapping do not see each other"
+
+
+def test_no_placeholder_reads_a_secret(store, caplog):
+    _write(store / "dotagents.toml", '[overlays.low]\ngrants = { env = ["HOST_TOKEN"] }\n')
+    _write(store / "overlays" / "low" / "overlay.cfg",
+           'priority = 100\n[env]\nTOKEN = { provider = "env", key = "HOST_TOKEN" }\n')
+    _write(store / "overlays" / "high" / "overlay.cfg",
+           'priority = 900\n[env]\nAUTH = "Bearer ${TOKEN}"\nLEN = "${#TOKEN}"\n')
+    with caplog.at_level(logging.ERROR):
+        env = _env_of(store, {"PATH": "", "HOST_TOKEN": "s3cret"})
+    assert env["TOKEN"] == "s3cret" and "AUTH" not in env and "LEN" not in env
+    assert "secret-placeholder" in caplog.text and "s3cret" not in caplog.text
+
+
+def test_an_env_script_sees_the_value_as_substituted_for_the_session(store):
+    """An overlay's own processes get its values as they were substituted in
+    the order of application, never substituted again over another base."""
+    _write(store / "overlays" / "low" / "overlay.cfg", 'priority = 100\n[env]\nTOOL_HOME = "/opt/tool"\n')
+    ov = store / "overlays" / "high"
+    _write(ov / "overlay.cfg", 'priority = 900\n[env]\nTOOL_BIN = "${TOOL_HOME}/bin"\n')
+    _write(ov / "env.py", "import json, os\nprint(json.dumps({'SEEN': os.environ['TOOL_BIN'],"
+                          " 'HOME_SEEN': os.environ.get('TOOL_HOME', '')}))\n")
+    env = _env_of(store)
+    assert env["SEEN"] == "/opt/tool/bin"
+    assert env["HOME_SEEN"] == "", "another overlay's own values stay out of its processes"
+
+
+def test_an_mcp_servers_env_is_substituted_against_what_it_receives(tmp_path):
+    from dotagents._mcp_gateway_config import _ServerSpec
+
+    spec = _ServerSpec("docs", {"name": "s", "transport": "stdio", "command": "x", "env": {
+        "HOME_DIR": "${AOS_OVERLAY_ROOT}/home", "NAME": "${AOS_OVERLAY_NAME}",
+        "A": "a", "B": {"value": "${A:-unset}"}}})
+    spec.root = tmp_path
+    assert spec.server_env({"PATH": "/bin"}) == {
+        "HOME_DIR": str(tmp_path) + "/home", "NAME": "docs", "A": "a", "B": "unset"}
+    with pytest.raises(RuntimeError, match="undefined-variable"):
+        _ServerSpec("docs", {"name": "s", "transport": "stdio", "command": "x",
+                             "env": {"X": "${NOPE}"}}).server_env({})
+    with pytest.raises(RuntimeError, match="secret-placeholder"):
+        _ServerSpec("docs", {"name": "s", "transport": "stdio", "command": "x",
+                             "env": {"X": "${PASSED}"}}).server_env({"PASSED": "v"}, ["PASSED"])
+
+
+# --------------------------------------------------------------------------
 # Env scripts: declared or the default env.<ext>; the store can turn them off
 # --------------------------------------------------------------------------
 
@@ -183,14 +256,14 @@ def test_the_default_env_file_and_env_script(store, caplog):
     `env.<ext>` an env script, without a manifest; `[defaults] env = false`
     turns both off. `pre.env*` and `local.env` in an overlay mean nothing."""
     ov = store / "overlays" / "plain"
-    _write(ov / "env", "FROM_DOTENV=literal $HOME\n")
+    _write(ov / "env", "FROM_DOTENV='literal $HOME ${HOME}'\n")
     _write(ov / "env.py", "import json\nprint(json.dumps({'FROM_SCRIPT': '1'}))\n")
     _write(ov / "env.sh", "echo never\n")
     _write(ov / "pre.env.py", "import json\nprint(json.dumps({'FROM_PRE': '1'}))\n")
     _write(ov / "local.env", "FROM_LOCAL=1\n")
     with caplog.at_level(logging.WARNING):
         env = _env_of(store)
-    assert env["FROM_DOTENV"] == "literal $HOME" and env["FROM_SCRIPT"] == "1"
+    assert env["FROM_DOTENV"] == "literal $HOME ${HOME}" and env["FROM_SCRIPT"] == "1"
     assert "FROM_PRE" not in env and "FROM_LOCAL" not in env
     assert "plain[unpinned, env-script env.py]" in caplog.text
     _write(ov / "overlay.cfg", "[defaults]\nenv = false\n")
@@ -198,7 +271,7 @@ def test_the_default_env_file_and_env_script(store, caplog):
     assert "FROM_DOTENV" not in env and env["FROM_SCRIPT"] == "1", "env turns off only the dotenv file"
     _write(ov / "overlay.cfg", "[defaults]\nenv_scripts = false\n")
     env = _env_of(store)
-    assert env["FROM_DOTENV"] == "literal $HOME" and "FROM_SCRIPT" not in env
+    assert env["FROM_DOTENV"] == "literal $HOME ${HOME}" and "FROM_SCRIPT" not in env
 
 
 def test_the_default_script_order_and_a_configured_one(store, caplog):
@@ -302,7 +375,7 @@ def test_show_reports_digest_pin_and_weakenings(tmp_path, store, capsys):
 
 
 # --------------------------------------------------------------------------
-# Setup once per digest, state outside the root
+# Setup in phases, state outside the root
 # --------------------------------------------------------------------------
 
 def test_setup_writes_state_and_the_session_names_it(tmp_path, store):
@@ -317,9 +390,9 @@ def test_setup_writes_state_and_the_session_names_it(tmp_path, store):
            " 'name': os.environ['AOS_OVERLAY_NAME'], 'var': os.environ['TOOL_OVERLAY_STATE']}))\n")
     assert _add(src, store, "tool") == 0
     installed = Overlay(store / "overlays" / "tool")
-    state = installed.state_dir(installed.tree_digest())
+    state = installed.state_dir()
     built = json.loads((state / "built.json").read_text(encoding="utf-8"))
-    assert built == {"args": ["a b", "$HOME"], "root": str(installed.path), "name": "tool", "var": str(state)}
+    assert built == {"args": ["install", "a b", "$HOME"], "root": str(installed.path), "name": "tool", "var": str(state)}
     assert installed.path not in state.parents, "the state directory is outside the root"
     assert installed.tree_digest() == _aos.tree_digest(src / "tool"), "setup never wrote into the root"
     assert _env_of(store)["TOOL_OVERLAY_STATE"] == str(state)

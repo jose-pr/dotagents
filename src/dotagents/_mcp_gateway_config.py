@@ -57,16 +57,28 @@ class _ServerSpec:
         """Whether the overlay may read ``variable`` from the gateway's environment."""
         return variable in self.secrets.grants.get("env", ())
 
-    def server_env(self):
-        """The ``env`` values: literals, paths under the root, and secret
-        references (raises RuntimeError naming the variable when one cannot
-        be resolved and is not optional)."""
+    def server_env(self, base=None, passed=()):
+        """The ``env`` values: text substituted against ``base`` (what the
+        server receives before them; ``passed`` names its variables taken
+        from the gateway's environment, which no placeholder reads) and the
+        overlay's ``AOS_OVERLAY_ROOT`` and ``AOS_OVERLAY_NAME``, the entries
+        not seeing each other; paths under the root; and secret references.
+        Raises RuntimeError naming the variable when a value cannot be
+        substituted, or a reference resolved and it is not optional."""
+        windows = os.name == "nt"
+        seen = {"AOS_OVERLAY_NAME": _aos.normalize_name(self.overlay)}
+        if self.root is not None:
+            seen["AOS_OVERLAY_ROOT"] = str(self.root)
+        before = _aos.Environment(base or {}, windows, secret=passed, extra=seen)
         out = {}
         for var, value in self.env.items():
-            if isinstance(value, str):
-                out[var] = value
-            elif "value" in value:
-                out[var] = value["value"]
+            if isinstance(value, str) or "value" in value:
+                text = value if isinstance(value, str) else value["value"]
+                try:
+                    out[var] = _aos.substitute(text, before.lookup)
+                except _aos.SubstitutionError as error:
+                    raise RuntimeError("MCP server %s: %s cannot be substituted (%s %s)" % (
+                        self.name, var, error.code, error.name))
             elif "path" in value:
                 out[var] = _aos.resolve_path(str(self.root), value["path"], os.name == "nt")
             else:

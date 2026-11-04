@@ -200,22 +200,32 @@ def _remove_tree(path: Path) -> None:
         shutil.rmtree(str(path), onerror=_retry)
 
 
-def _run_setup(scope, dest_dir: Path, name: str, *, no_setup, dry_run, logger, source_dir=None,
-               timeout: "Optional[int]" = None, rerun: bool = False) -> int:
-    """Run an installed overlay's selected ``setup`` variant, once per tree
-    digest and OS, honoring `--no-setup` and `--rerun-setup`.
+def _run_setup(scope, dest_dir: Path, name: str, *, change: str, no_setup=False, dry_run, logger,
+               source_dir=None, timeout: "Optional[int]" = None) -> int:
+    """Run an installed overlay's selected ``setup`` variant in the phase
+    ``change`` (``add``, ``sync`` or ``remove``) calls for
+    (:func:`dotagents._aos.setup_phase`), honoring `--no-setup`.
+
+    The phase comes from the overlay's setup record on this OS (the digest
+    of the last setup that succeeded): ``install`` with none, ``sync`` on
+    every add or sync after one, ``remove`` before the overlay is deleted
+    after one. An ``install`` or ``sync`` that succeeds records its digest;
+    one that fails records this digest as failed, which
+    :func:`dotagents._activate.refusal` refuses until a setup succeeds. The
+    state directory is the overlay's own, kept across syncs; ``install``
+    starts it empty.
 
     It runs outside any agent session, in the overlay's own process
     environment (:func:`dotagents._env.overlay_process_env`: the base
     environment, every overlay's root variable and this overlay's
     declarations) plus ``AOS_OVERLAY_ROOT`` / ``AOS_OVERLAY_NAME`` /
-    ``AOS_OVERLAY_STATE`` (its state directory, where it writes), and
-    ``AGENTS_HOME`` / ``AGENTS_SCOPE_ROOT`` / ``AGENTS_SCOPE``. Its weakenings
-    (``setup-network``, ``network-not-enforced``: dotagents cannot deny a
-    process the network, ``no-timeout``) are reported first. On a
-    `--dry-run` the installed dir may not exist yet, so the SOURCE overlay
-    (`source_dir`) is inspected. Returns the exit status, 0 when skipped or
-    absent."""
+    ``AOS_OVERLAY_STATE`` (its state directory, where it writes),
+    ``AOS_SETUP_PHASE``, and ``AGENTS_HOME`` / ``AGENTS_SCOPE_ROOT`` /
+    ``AGENTS_SCOPE``. Its weakenings (``setup-network``,
+    ``network-not-enforced``: dotagents cannot deny a process the network,
+    ``no-timeout``) are reported first. On a `--dry-run` the installed dir
+    may not exist yet, so the SOURCE overlay (`source_dir`) is inspected.
+    Returns the exit status, 0 when skipped or absent."""
     from dotagents import _activate, _aos, _env
     from dotagents._overlays import Overlay
 
@@ -224,47 +234,50 @@ def _run_setup(scope, dest_dir: Path, name: str, *, no_setup, dry_run, logger, s
         overlay = Overlay(source_dir)
     variant = overlay.setup_variant()
     if variant is None:
-        # A default setup.<ext> present that this machine cannot run.
-        plan = _aos.plan(overlay.document(), _activate.context(overlay), pinned=True)
-        not_run = [(name, ident, subject) for ident, subject in plan["weakenings"] if ident == "script-not-run"]
-        _activate.report(logger, not_run)
+        if change != "remove":
+            # A default setup.<ext> present that this machine cannot run.
+            plan = _aos.plan(overlay.document(), _activate.context(overlay), pinned=True)
+            _activate.report(logger, [(name, ident, subject) for ident, subject in plan["weakenings"]
+                                      if ident == "script-not-run"])
         return 0
     if no_setup:
         logger.info("skipping setup for %s (--no-setup)", name)
         return 0
+    record = overlay.read_setup_record()
+    phase = _aos.setup_phase(change, record["digest"])
+    if phase is None:
+        return 0
     try:
-        digest = overlay.tree_digest()
+        # `remove` keeps the record as it is.
+        digest = record["digest"] if phase == "remove" else overlay.tree_digest()
     except _aos.DigestError as exc:
         logger.error("setup for %s: the overlay has no tree digest (%s)", name, exc)
         return 1
-    marker = overlay.setup_marker(digest)
-    if marker.is_file() and not rerun:
-        logger.info("setup for %s already ran for this digest (--rerun-setup runs it again)", name)
-        return 0
     plan = _aos.plan(overlay.document(), _activate.context(overlay), pinned=True)
     _activate.report(logger, [(name, ident, subject) for ident, subject in plan["weakenings"]])
     if dry_run:
-        return overlay.run_setup(variant, env={}, python=sys.executable, base_path=os.environ.get("PATH"),
-                                 dry_run=True, logger=logger, timeout=timeout)
+        return overlay.run_setup(variant, phase=phase, env={}, python=sys.executable,
+                                 base_path=os.environ.get("PATH"), dry_run=True, logger=logger, timeout=timeout)
     env = _env.overlay_process_env(scope, overlay, base_env=dict(os.environ), logger=logger)
     if env is None:
+        if phase != "remove":
+            overlay.write_setup_record(record["digest"], failed=digest)
         return 1
-    state = overlay.state_dir(digest)
+    state = overlay.state_dir()
+    if phase == "install" and state.is_dir():
+        # Whatever an earlier attempt left: install starts from an empty directory.
+        _remove_tree(state)
     state.mkdir(parents=True, exist_ok=True)
     env["AOS_OVERLAY_STATE"] = env[_aos.state_variable(overlay.name)] = str(state)
     env["AGENTS_SCOPE_ROOT"] = str(scope.agents_root)
     env["AGENTS_SCOPE"] = scope.level
-    rc = overlay.run_setup(variant, env=env, python=_env.interpreter(env), base_path=os.environ.get("PATH"),
-                           dry_run=False, logger=logger, timeout=timeout)
-    if rc == 0:
-        marker.write_text(digest + "\n", encoding="utf-8")
-        # State of another digest belongs to bytes this overlay does not have.
-        for other in state.parent.iterdir():
-            if other.name not in (state.name, marker.name):
-                if other.is_dir():
-                    _remove_tree(other)
-                else:
-                    other.unlink()
+    rc = overlay.run_setup(variant, phase=phase, env=env, python=_env.interpreter(env),
+                           base_path=os.environ.get("PATH"), dry_run=False, logger=logger, timeout=timeout)
+    if phase != "remove":
+        if rc:
+            overlay.write_setup_record(record["digest"], failed=digest)
+        else:
+            overlay.write_setup_record(digest)
     return rc
 
 
@@ -469,10 +482,10 @@ def _log_install(logger, verb: str, name: str, result, dry_run: bool) -> None:
 
 def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: bool,
                  dry_run: bool, logger, setup_timeout: "Optional[int]" = None,
-                 no_venv: bool = False, cache=None, rerun_setup: bool = False) -> "list[str]":
+                 no_venv: bool = False, cache=None) -> "list[str]":
     """Install (or re-install) overlay ``name`` from ``src`` into the scope,
     publish its skills, install its Python dependencies into the scope's venv
-    and run its setup once for its digest. Nothing is written for a source
+    and run its setup (``install`` the first time, then ``sync``). Nothing is written for a source
     :func:`_check_source` refuses (an invalid manifest, a tree with no
     digest, a machine lacking what it needs, a pin it does not match). A
     FRESH install is copied into a staging dir that discovery ignores and
@@ -537,8 +550,8 @@ def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: b
     rc = 0 if _sync_venvs(scope, no_venv=no_venv, dry_run=dry_run, logger=logger) else 1
     if not rc:
         what = "setup"
-        rc = _run_setup(scope, dest, name, no_setup=no_setup, dry_run=dry_run,
-                        logger=logger, source_dir=src, timeout=setup_timeout, rerun=rerun_setup)
+        rc = _run_setup(scope, dest, name, change="add", no_setup=no_setup,
+                        dry_run=dry_run, logger=logger, source_dir=src, timeout=setup_timeout)
     if rc:
         if fresh and not dry_run:
             owned = _skills.owned_overlay_skills(dest, scope.shared_skills_dir)
@@ -548,8 +561,8 @@ def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: b
             logger.error("%s for overlay %s failed; the install was rolled back", what, name)
         else:
             logger.error(
-                "%s for overlay %s failed; it stays installed but is not set up "
-                "(fix it and run `overlays sync %s`)", what, name, name,
+                "%s for overlay %s failed; it stays installed and is not activated until its setup "
+                "succeeds (fix it and run `overlays sync %s`)", what, name, name,
             )
         raise SystemExit("error: %s for overlay %r failed (exit %d)" % (what, name, rc))
     return skills
@@ -630,11 +643,11 @@ class OverlayAdd(_RepoArgs):
     rules, in (priority, name) order. An overlay whose manifest does not
     validate, whose tree has no digest, that its store pins to another
     digest, or whose ``runtime`` this machine lacks is refused before
-    anything of it is written. Its declared ``setup`` runs once per tree
-    digest. When an overlay's dependencies or setup
+    anything of it is written. Its ``setup`` runs in the ``install`` phase
+    the first time, ``sync`` after that. When an overlay's dependencies or setup
     fail, only that overlay is affected: one this command was installing for
-    the first time is removed again, one that was already installed stays (not
-    set up). Every other overlay is still installed, except those that require
+    the first time is removed again, one that was already installed stays,
+    not activated until its setup succeeds. Every other overlay is still installed, except those that require
     the failed one (directly or not), and the command exits 1 naming every
     overlay that did not install. The block is recomposed over
     whatever is installed either way. Adding an overlay already installed
@@ -653,10 +666,6 @@ class OverlayAdd(_RepoArgs):
     no_setup: bool = False
     "Skip running an overlay's declared `setup` after install."
     ("--no-setup",)
-
-    rerun_setup: bool = False
-    "Run an overlay's setup even though it already ran for this digest."
-    ("--rerun-setup",)
 
     setup_timeout: Optional[int] = None
     "Seconds setup may run (default: the setup variant's timeout, else 300; 0 = no limit)."
@@ -726,7 +735,7 @@ class OverlayAdd(_RepoArgs):
                         scope, name, src, origin, copy=self.copy, no_setup=self.no_setup,
                         dry_run=self.dry_run, logger=self._logger_,
                         setup_timeout=self.setup_timeout, no_venv=self.no_venv,
-                        cache=source.cache, rerun_setup=self.rerun_setup,
+                        cache=source.cache,
                     )
                 except (SystemExit, OSError) as exc:
                     why = str(exc.code if isinstance(exc, SystemExit) else exc)
@@ -765,7 +774,11 @@ class OverlayRemove(DotAgentsArgs):
     content) -- and only once the delete succeeded. Refuses an overlay another
     installed overlay ``requires`` (and no other store provides) unless
     ``--force``. The block is recomposed over the overlays still installed,
-    even when a removal fails part-way."""
+    even when a removal fails part-way.
+
+    Before an overlay is deleted, its setup runs in the ``remove`` phase when
+    a setup of it succeeded on this OS; a failure is reported and the
+    removal goes ahead, deleting its state and setup record."""
 
     _parsername_ = "remove"
 
@@ -776,6 +789,14 @@ class OverlayRemove(DotAgentsArgs):
     force: bool = False
     "Remove even when another installed overlay requires it."
     ("--force",)
+
+    no_setup: bool = False
+    "Do not run an overlay's setup in its `remove` phase."
+    ("--no-setup",)
+
+    setup_timeout: Optional[int] = None
+    "Seconds setup may run (default: the setup variant's timeout, else 300; 0 = no limit)."
+    ("--setup-timeout",)
 
     no_venv: bool = False
     "Do not create or update the scope's Python venv (overlay requirements, duho, the .pth layering)."
@@ -830,6 +851,8 @@ class OverlayRemove(DotAgentsArgs):
         try:
             for name, overlay_dir in targets:
                 if self.dry_run:
+                    _run_setup(scope, overlay_dir, name, change="remove", no_setup=self.no_setup, dry_run=True,
+                               logger=self._logger_, timeout=self.setup_timeout)
                     removed_names.add(name)
                     self._logger_.info("removed overlay %s (%s) [dry-run]", name, overlay_dir)
                     continue
@@ -839,6 +862,13 @@ class OverlayRemove(DotAgentsArgs):
                 owned = _skills.owned_overlay_skills(
                     overlay_dir, scope.shared_skills_dir, logger=self._logger_
                 )
+                # Setup's `remove` phase, while its copy and state still exist;
+                # a failure is reported and the removal goes ahead.
+                rc = _run_setup(scope, overlay_dir, name, change="remove", no_setup=self.no_setup,
+                                dry_run=False, logger=self._logger_, timeout=self.setup_timeout)
+                if rc:
+                    self._logger_.error("setup for overlay %s failed in its remove phase (exit %d); "
+                                        "removing it anyway", name, rc)
                 _remove_tree(overlay_dir)
                 _overlays.Overlay(overlay_dir).forget()
                 removed_names.add(name)
@@ -1134,7 +1164,7 @@ class OverlaySync(_RepoArgs):
     -- a file edited here is backed up first (``<store>/install_backup/``);
     tool caches and setup output inside it go (setup writes
     into its state directory). The source is checked as ``add`` checks it,
-    and setup runs again only when the digest changed. A ``requires``
+    and setup runs in its ``sync`` phase (``install`` when none succeeded yet). A ``requires``
     added upstream is installed. The managed
     block is recomposed over every installed overlay. An optional ``<glob>``
     filters which installed overlays to sync (``sync 'py*'``). A repo that
@@ -1154,10 +1184,6 @@ class OverlaySync(_RepoArgs):
     no_setup: bool = False
     "Skip running each overlay's declared `setup` after sync."
     ("--no-setup",)
-
-    rerun_setup: bool = False
-    "Run setup even for an overlay whose digest it already ran for."
-    ("--rerun-setup",)
 
     no_venv: bool = False
     "Do not create or update the scope's Python venv (overlay requirements, duho, the .pth layering)."
@@ -1279,11 +1305,12 @@ class OverlaySync(_RepoArgs):
                                    logger=self._logger_):
                     failures.append(name)
                     continue
-                rc = _run_setup(scope, dest_dir, name, no_setup=self.no_setup,
+                rc = _run_setup(scope, dest_dir, name, change="sync",
                                 dry_run=self.dry_run, logger=self._logger_,
-                                source_dir=overlay_src, timeout=self.setup_timeout, rerun=self.rerun_setup)
+                                no_setup=self.no_setup, source_dir=overlay_src, timeout=self.setup_timeout)
                 if rc:
-                    self._logger_.error("setup for overlay %s failed (exit %d)", name, rc)
+                    self._logger_.error("setup for overlay %s failed (exit %d); this copy is not activated "
+                                        "until its setup succeeds, and the previous one is not kept", name, rc)
                     failures.append(name)
 
             # A `requires` added upstream: install what no store provides yet.
@@ -1309,7 +1336,7 @@ class OverlaySync(_RepoArgs):
                     skills += _install_one(
                         scope, dep, src, origin, copy=self.copy, no_setup=self.no_setup,
                         dry_run=self.dry_run, logger=self._logger_, setup_timeout=self.setup_timeout,
-                        no_venv=self.no_venv, cache=chain.cache, rerun_setup=self.rerun_setup,
+                        no_venv=self.no_venv, cache=chain.cache,
                     )
         finally:
             # Recompose over ALL installed overlays in (priority, name) order

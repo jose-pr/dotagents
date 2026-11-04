@@ -514,18 +514,19 @@ class Overlay:
     # -- setup ---------------------------------------------------------------
 
     def run_setup(
-        self, variant: "dict[str, Any]", *, env: "dict[str, str]", python: str,
+        self, variant: "dict[str, Any]", *, phase: str, env: "dict[str, str]", python: str,
         base_path: "Optional[str]", dry_run: bool, logger, timeout: "Optional[int]" = None,
     ) -> int:
-        """Run one ``setup`` variant (:meth:`setup_variant`) and return its exit
-        status, ``0`` on success.
+        """Run one ``setup`` variant (:meth:`setup_variant`) in ``phase``
+        (``install``, ``sync`` or ``remove``) and return its exit status,
+        ``0`` on success.
 
         It runs as AOS says a step does: its interpreter (``python`` is the
         scope venv's, the others are found on ``base_path``, the base
-        environment's ``PATH``) with the script's absolute path and its
-        ``args`` as a list; the working directory the overlay root; ``env``
+        environment's ``PATH``) with the script's absolute path, the phase and
+        its ``args`` as a list; the working directory the overlay root; ``env``
         (the caller builds it: the overlay's own environment and the
-        ``AOS_OVERLAY_*`` variables); stopped after ``timeout`` (the
+        ``AOS_OVERLAY_*`` variables) with ``AOS_SETUP_PHASE``; stopped after ``timeout`` (the
         command's override), else the variant's, else
         :data:`DEFAULT_SETUP_TIMEOUT` seconds (``0``: no limit), a stop being
         a failure, :data:`dotagents._run.TIMED_OUT`; and everything it
@@ -534,34 +535,35 @@ class Overlay:
         from dotagents import _run
 
         limit = variant.get("timeout", DEFAULT_SETUP_TIMEOUT) if timeout is None else max(0, timeout)
-        logger.info("running setup for %s (%s %s)", self.name, variant["interpreter"], variant["path"])
+        logger.info("running setup for %s: %s (%s %s)", self.name, phase, variant["interpreter"], variant["path"])
         try:
             argv = _run.interpreter_command(variant["interpreter"], python=python, base_path=base_path)
         except _run.InterpreterError as exc:
             logger.error("setup for %s: %s", self.name, exc)
             return 127
         if dry_run:
-            logger.info("[dry-run] would run %s in %s", variant["path"], self.path)
+            logger.info("[dry-run] would run %s %s in %s", variant["path"], phase, self.path)
             return 0
         script = _aos.resolve_path(str(self.path), variant["path"], os.name == "nt")
         try:
-            status, _out = _run.run_step(argv + [script] + list(variant.get("args", [])),
-                                         cwd=str(self.path), env=env, timeout=limit)
+            status, _out = _run.run_step(argv + [script, phase] + list(variant.get("args", [])),
+                                         cwd=str(self.path), env=dict(env, AOS_SETUP_PHASE=phase), timeout=limit)
         except OSError as exc:
             logger.error("setup for %s failed to start: %s", self.name, exc)
             return 1
         if status == _run.TIMED_OUT:
-            logger.error("setup for %s did not finish in %ds and was stopped (raise its timeout in "
-                         "overlay.cfg or with --setup-timeout; 0 = no limit)", self.name, limit)
+            logger.error("setup for %s (%s) did not finish in %ds and was stopped (raise its timeout in "
+                         "overlay.cfg or with --setup-timeout; 0 = no limit)", self.name, phase, limit)
         elif status != 0:
-            logger.error("setup for %s exited %d", self.name, status)
+            logger.error("setup for %s (%s) exited %d", self.name, phase, status)
         return status
 
     # -- members, digest, state -----------------------------------------------
 
     #: Beside the store's overlays: one install record per overlay.
     RECORDS_DIR = ".dotagents-install"
-    #: Beside the store's overlays: ``<name>/<os>-<digest>/`` state directories.
+    #: Beside the store's overlays: ``<name>/<os>/`` state directories and
+    #: ``<name>/<os>.setup.json`` setup records.
     STATE_DIR = ".dotagents-state"
     #: An install record kept inside the overlay: read when the record beside
     #: it is absent, and removed by the next install.
@@ -582,16 +584,40 @@ class Overlay:
         :class:`dotagents._aos.DigestError`."""
         return _aos.tree_digest(self.path)
 
-    def state_dir(self, digest: str, os_name: "Optional[str]" = None) -> Path:
-        """The state directory of an installed overlay at ``digest`` on
-        ``os_name`` (this OS): outside the overlay root, its own."""
-        return self.path.parent / self.STATE_DIR / self.name / (
-            "%s-%s" % (os_name or _aos.current_os(), digest.split(":", 1)[-1][:16].lower()))
+    def state_dir(self, os_name: "Optional[str]" = None) -> Path:
+        """The state directory of an installed overlay on ``os_name`` (this
+        OS): outside the overlay root, its own, kept across syncs and
+        digests until the overlay is removed."""
+        return self.path.parent / self.STATE_DIR / self.name / (os_name or _aos.current_os())
 
-    def setup_marker(self, digest: str) -> Path:
-        """Beside :meth:`state_dir`: written once setup succeeded for that digest."""
-        state = self.state_dir(digest)
-        return state.with_name(state.name + ".setup")
+    def setup_record_path(self, os_name: "Optional[str]" = None) -> Path:
+        """Where the setup record of this overlay on ``os_name`` (this OS) is kept."""
+        return self.path.parent / self.STATE_DIR / self.name / ("%s.setup.json" % (os_name or _aos.current_os()))
+
+    def read_setup_record(self) -> "dict[str, Optional[str]]":
+        """``{"digest": ..., "failed": ...}`` on this OS: the digest of the
+        last setup that succeeded, and the digest whose ``install`` or
+        ``sync`` failed since (not activated until a setup of it succeeds);
+        each None when there is none."""
+        import json
+
+        try:
+            data = json.loads(self.setup_record_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        return {key: data[key] if isinstance(data.get(key), str) else None for key in ("digest", "failed")}
+
+    def write_setup_record(self, digest: "Optional[str]", failed: "Optional[str]" = None) -> None:
+        """Record the last setup that succeeded on this OS, and a digest whose setup failed."""
+        import json
+
+        from dotagents._fs import write_text_lf
+
+        path = self.setup_record_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_lf(path, json.dumps({"digest": digest, "failed": failed}) + "\n", atomic=True)
 
     # -- the install record ---------------------------------------------------
 

@@ -1,5 +1,5 @@
 {
-  "description": "Resolution and composition. 'overlays' maps identity to manifest; 'files' lists an overlay's files, from which the fields a manifest does not write take their defaults (skills, rules, context, paths). 'expect' gives the visiting order, the composition order and what the active overlays contribute, or the cycle; with 'facts', the environment they build together.",
+  "description": "Resolution and composition. 'overlays' maps identity to manifest; 'files' lists an overlay's files, from which the fields a manifest does not write take their defaults (skills, rules, context, paths). A 'files' entry may instead map each path to its text, for the files read as env files. 'expect' gives the visiting order, the composition order and what the active overlays contribute, or the cycle; with 'facts', the environment they build together, or the refusal.",
   "spec": "spec/v0/composition.md",
   "cases": [
     {
@@ -833,6 +833,194 @@
           "HIGH_OVERLAY_ROOT": "/ov/high",
           "PYTHONPATH": "/ov/high/lib/python:/ov/low/lib/python",
           "MANPATH": "/ov/manpages/man"
+        }
+      }
+    },
+    {
+      "id": "chain-across-overlays",
+      "description": "A later overlay's values see what an earlier one set, in composition order, and every root variable.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        },
+        "high": {
+          "priority": 900,
+          "env": {
+            "TOOL_BIN": "${TOOL_HOME}/bin",
+            "LOW_ROOT": "${LOW_OVERLAY_ROOT}"
+          }
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "files": {
+        "low": {
+          "env": "TOOL_HOME=${AOS_OVERLAY_ROOT}/tool\nTOOL_CONF=${TOOL_HOME}/conf\n"
+        },
+        "high": {}
+      },
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "TOOL_HOME": "/ov/low/tool",
+          "TOOL_CONF": "/ov/low/tool/conf",
+          "TOOL_BIN": "/ov/low/tool/bin",
+          "LOW_ROOT": "/ov/low"
+        }
+      }
+    },
+    {
+      "id": "chain-paths-to-later-env",
+      "description": "A path addition of an earlier overlay is in the environment a later overlay's env sees.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        },
+        "high": {
+          "priority": 900,
+          "env": {
+            "SEEN_PATH": "${PATH}"
+          }
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "files": {
+        "low": {
+          "bin/tool": ""
+        },
+        "high": {}
+      },
+      "facts": {
+        "os": "linux",
+        "base_env": {
+          "PATH": "/usr/bin"
+        },
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "PATH": "/ov/low/bin:/usr/bin",
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "SEEN_PATH": "/ov/low/bin:/usr/bin"
+        }
+      }
+    },
+    {
+      "id": "chain-no-forward-across-overlays",
+      "description": "An earlier overlay does not see what a later one sets: the name is undefined, an error.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "A": "${HIGH_ONLY}"
+          }
+        },
+        "high": {
+          "priority": 900,
+          "env": {
+            "HIGH_ONLY": "x"
+          }
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "error": "undefined-variable",
+          "subject": "A"
+        }
+      }
+    },
+    {
+      "id": "chain-secret-across-overlays",
+      "description": "A later overlay cannot read, by a placeholder, a variable an earlier one took from a secret reference.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "TOKEN": {
+              "secret": "deploy"
+            }
+          }
+        },
+        "high": {
+          "priority": 900
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "files": {
+        "low": {},
+        "high": {
+          "env": "AUTH=Bearer ${TOKEN}\n"
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        },
+        "grants": {
+          "secret": [
+            "deploy"
+          ]
+        },
+        "secrets": {
+          "deploy": "s3cret"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "error": "secret-placeholder",
+          "subject": "AUTH"
         }
       }
     }
