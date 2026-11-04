@@ -563,7 +563,7 @@ class Overlay:
     #: Beside the store's overlays: one install record per overlay.
     RECORDS_DIR = ".dotagents-install"
     #: Beside the store's overlays: ``<name>/<os>/`` state directories and
-    #: ``<name>/<os>.setup.json`` setup records.
+    #: ``<name>/<os>.prepared.json`` preparation records.
     STATE_DIR = ".dotagents-state"
     #: An install record kept inside the overlay: read when the record beside
     #: it is absent, and removed by the next install.
@@ -590,34 +590,32 @@ class Overlay:
         digests until the overlay is removed."""
         return self.path.parent / self.STATE_DIR / self.name / (os_name or _aos.current_os())
 
-    def setup_record_path(self, os_name: "Optional[str]" = None) -> Path:
-        """Where the setup record of this overlay on ``os_name`` (this OS) is kept."""
-        return self.path.parent / self.STATE_DIR / self.name / ("%s.setup.json" % (os_name or _aos.current_os()))
+    def preparation_path(self, os_name: "Optional[str]" = None) -> Path:
+        """Where the preparation record of this overlay on ``os_name`` (this OS) is kept."""
+        return self.path.parent / self.STATE_DIR / self.name / ("%s.prepared.json" % (os_name or _aos.current_os()))
 
-    def read_setup_record(self) -> "dict[str, Optional[str]]":
-        """``{"digest": ..., "failed": ...}`` on this OS: the digest of the
-        last setup that succeeded, and the digest whose ``install`` or
-        ``sync`` failed since (not activated until a setup of it succeeds);
-        each None when there is none."""
+    def read_preparation(self) -> "Optional[dict[str, str]]":
+        """``{"digest", "phase"}`` of the last preparation (dependencies and
+        setup) that succeeded on this OS, or None."""
         import json
 
         try:
-            data = json.loads(self.setup_record_path().read_text(encoding="utf-8"))
+            data = json.loads(self.preparation_path().read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            data = {}
-        if not isinstance(data, dict):
-            data = {}
-        return {key: data[key] if isinstance(data.get(key), str) else None for key in ("digest", "failed")}
+            return None
+        if not isinstance(data, dict) or not isinstance(data.get("digest"), str):
+            return None
+        return {"digest": data["digest"], "phase": str(data.get("phase", ""))}
 
-    def write_setup_record(self, digest: "Optional[str]", failed: "Optional[str]" = None) -> None:
-        """Record the last setup that succeeded on this OS, and a digest whose setup failed."""
+    def write_preparation(self, digest: str, phase: str) -> None:
+        """Record a preparation that succeeded on this OS."""
         import json
 
         from dotagents._fs import write_text_lf
 
-        path = self.setup_record_path()
+        path = self.preparation_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        write_text_lf(path, json.dumps({"digest": digest, "failed": failed}) + "\n", atomic=True)
+        write_text_lf(path, json.dumps({"digest": digest, "phase": phase}) + "\n", atomic=True)
 
     # -- the install record ---------------------------------------------------
 

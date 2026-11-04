@@ -47,9 +47,9 @@ and an error saying a command is required, and exits 2.
 | Command | Contract |
 | --- | --- |
 | `init [-g] [--dest D] [--from SRC] [--bin-dir D] [--agents a,b] [--no-hooks] [--powershell-env-hook] [--no-venv] [--force] [--dry-run]` | Merge the base block into `<store>/AGENTS.md`, write `<store>/bin/dotagents[.cmd]`, and per active agent (`--agents`, else detected + `claude`) write its include and hooks. Then bring the scope's Python venvs up to date (`_pyvenv.sync_venvs`; a failure is a warning; not with `--dest` or `--no-venv`). `--force` replaces `AGENTS.md`'s content, backed up under `<store>/install_backup/<timestamp>/`. `--from` records its base in `<store>/dotagents/config.toml`. |
-| `overlays add NAME\|GLOB... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--no-venv] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does), publish its skills, install the Python dependencies its `runtime.python` declares into the scope venv (`_pyvenv`; not with `--no-venv`), run its `setup` (phase `install` the first time it succeeds here, `sync` after that), recompose the managed block. Before anything of an overlay is written it is refused when its `overlay.cfg` does not validate (named files included), its tree has no digest (a link, a refused name), its git commit holds a link or submodule, this machine lacks what its `runtime`, setup or scripts need, or its store pins another digest. A glob (`'*'`, `'py*'`) stands for every name the repos offer that matches it; one matching nothing is an error. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused. An overlay whose copy, requirements or setup fail is logged and skipped, along with what requires it; the others still install, and the command exits 1 naming each failure. One this run was installing for the first time is removed again; one already installed stays, refused until a setup of it succeeds. No name: exit 2. |
-| `overlays remove NAME... [-g] [--force] [--no-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Run each overlay's setup in its `remove` phase when one succeeded here (a failure is reported and the removal goes ahead), delete the overlay dirs, their state and setup records, unpublish the skills they published, recompose the block, rewrite the venv layering (installed requirements stay). Refuses an overlay another installed overlay requires unless `--force`. No name: exit 2. |
-| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it), checked as `add` checks a source: the install is made to hold exactly the overlay's members (new and changed files land, everything else goes, caches and setup output left inside it included); a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`, then the venv dependencies (when they changed), then setup in its `sync` phase (`install` when none succeeded here yet), on every sync. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/` or is refused, or its dependencies or setup fail. |
+| `overlays add NAME\|GLOB... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--no-venv] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does), publish its skills, bring the scope venv up to date (`_pyvenv`; not with `--no-venv`), prepare it -- its dependency files built into their environments (`_deps`), then its `setup`, in the phase `install` the first time a preparation succeeds here and `sync` after that (`--no-setup`: neither) -- and recompose the managed block. Before anything of an overlay is written it is refused when its `overlay.cfg` does not validate (named files included), its tree has no digest (a link, a refused name), its git commit holds a link or submodule, this machine lacks what its `runtime`, setup or scripts need, or its store pins another digest. A glob (`'*'`, `'py*'`) stands for every name the repos offer that matches it; one matching nothing is an error. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused. An overlay whose copy, venv or preparation fails is logged and skipped, along with what requires it; the others still install, and the command exits 1 naming each failure. One this run was installing for the first time is removed again (its environments rebuilt without it); one already installed stays, activated only for the digest it was last prepared for. No name: exit 2. |
+| `overlays remove NAME... [-g] [--force] [--no-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Run each overlay's setup in its `remove` phase when a preparation succeeded here (a failure is reported and the removal goes ahead), delete the overlay dirs, their state and preparation records, rebuild the environments they were in without them (an isolated one, or one left empty, deleted), unpublish the skills they published, recompose the block, rewrite the venv layering (installed requirements stay). Refuses an overlay another installed overlay requires unless `--force`. No name: exit 2. |
+| `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it), checked as `add` checks a source: the install is made to hold exactly the overlay's members (new and changed files land, everything else goes, caches and setup output left inside it included); a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`, then prepares each synced overlay in its `sync` phase (`install` when no preparation succeeded here yet), whether its digest changed or not: its environments rebuilt, then its setup. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/` or is refused, or its dependencies or setup fail. |
 | `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` and refused overlays flagged) and what the repos offer. |
 | `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; its declarations, a refused manifest's problems, tree digest, pin, what this machine lacks for it, its weakenings, skills, member count, recorded source and commit. No name: exit 2. |
 | `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
@@ -209,12 +209,16 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
   host_env, named, read_file, providers, provider_values, windows)` (`granted`,
   `resolve`: a reference resolves only when granted), `class Context(*, os_name,
   root, identity, read, secrets=None, env_scripts_enabled=True, files=(),
-  interpreters=(), state=None)` (`files`: the overlay's member paths, which decide
-  its defaults; `interpreters`: those the consumer can run; `state`: its state
+  interpreters=(), state=None, packages=None)` (`files`: the overlay's member
+  paths, which decide its defaults; `interpreters`: those the consumer can run;
+  `state`: its state directory; `packages`: runtime → its environment's packages
   directory; `placeholders()` — the `AOS_OVERLAY_ROOT`, `AOS_OVERLAY_NAME` and
   `AOS_OVERLAY_STATE` its placeholders see).
-- Defaults: `DEFAULT_KEYS`, `DEFAULT_PATHS` (`bin` → `PATH`, `lib/python` →
-  `PYTHONPATH`, both prepended), `DEFAULT_SCRIPTS` (the extension order with the
+- Defaults: `DEFAULT_KEYS` (with `deps`), `DEFAULT_PATHS` (`bin` → `PATH`,
+  `lib/python` → `PYTHONPATH`, `lib/node` → `NODE_PATH`, each prepended),
+  `DEFAULT_DEPENDENCIES` (`lib/python/requirements.txt`, `lib/node/package.json`
+  with the `package-lock.json` beside it), `PACKAGE_VARIABLES` (runtime → the
+  variable its packages go on), `DEFAULT_SCRIPTS` (the extension order with the
   OSes each applies on), `default_on(manifest, key)`, `default_paths(manifest,
   files)`, `paths_of`, `rules_of`, `context_of`, `skills_of`, `env_files_of`
   (each `(manifest, files)`: the field's defaults that are on and present, then
@@ -236,14 +240,33 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
   raises `Refused`), `read_env_script_output(data, *, max_bytes) -> dict` (one
   JSON object, even over several lines, else one per non-blank line), `plan(manifest,
   ctx, *, pinned, enforces_network=False, scripts=None) -> dict` (`supported`,
-  `setup`, `python`, `node`, `needs`, `ungranted`, `weakenings`), `class
+  `setup`, `python`, `node`, `dependencies`, `needs`, `ungranted`, `weakenings`:
+  `deps-network` per dependency file, `unlocked-dependencies` per one that is not
+  a lock; raises `Refused` for `partial-lock`), `class
   Activation`, `effective(manifest, ctx, *, base_env, pinned,
   enforces_network=False) -> Activation` (the state variable from `ctx.state`),
   `insecure_url(url)`.
-- Setup phases: `SETUP_CHANGES = ("add", "sync", "remove")`, `SETUP_PHASES =
-  ("install", "sync", "remove")`, `setup_phase(change, recorded) -> Optional[str]`
-  — `install` when no setup succeeded (`recorded` is None), `sync` on every add or
-  sync after one, `remove` on removal after one, else None.
+- Dependencies: `requirements_locked(text, path) -> bool` (every requirement
+  hashed; `Refused("partial-lock")` when only some are), `environment_name(variant)`
+  (`shared`, `isolated` or a normalized name), `dependencies_of(manifest, files,
+  os_name, read=None) -> list[{"runtime", "file", "lock", "environment"}]` (a
+  selected variant naming `requirements`, `lock` or `package` replaces the default
+  file; `[defaults] deps = false` turns the defaults off), `overlay_paths(manifest,
+  ctx)` (the default additions, each runtime's `ctx.packages` directory, then
+  `paths`), `environment_key(dependency, identity) -> (runtime, environment,
+  owner)`, `asked_versions(runtime, text) -> dict` (an `==` pin per normalized
+  Python name, or a `package.json`'s ranges), `environments(members, removed=())
+  -> {"environments", "conflicts", "blocked", "left"}` (members of one
+  environment asking for one package at two versions are blocked; a Python
+  environment is locked when every file is, a Node.js one with one locked member).
+- Preparation: `SETUP_CHANGES = ("add", "sync", "activate", "remove")`,
+  `SETUP_PHASES = ("install", "sync", "remove")`, `setup_phase(change, recorded,
+  digest) -> Optional[str]` (add and sync: `install` with no record, `sync` with
+  any; activate: only for another digest; remove: `remove` after a record),
+  `preparation(change, record, digest, setup, dependencies, fails=None) -> dict`
+  (`setup_phase`, `setup_arguments`, `steps` — `empty-state`, `deps:<runtime>`,
+  `setup`, `record` or `delete` —, the `record` after them and whether the digest
+  `activates`; a failed sync keeps only the recorded digest active).
 - Resolution: `class ResolveError(Exception)` (`chain`), `resolve(requires_of,
   requested) -> (visiting order, missing)`, `order_key(priority, name, identity)`.
 
@@ -251,11 +274,18 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
 
 Which installed overlays are active, and how each is applied.
 
-- `refusal(overlay) -> Optional[str]` — why an overlay may not be activated: its
-  setup (`install` or `sync`) failed for this digest and none succeeded since; or,
-  pinned, a tree with no digest, a digest that is not its pin, an excluded entry
-  (a `__pycache__`, a `.pyc`) in its copy; or a store setting that is invalid.
-- `active(overlays, logger=None) -> list` — the ones not refused; each refusal
+- `refusal(overlay, *, prepared=True) -> Optional[str]` — why an overlay may not
+  be activated: a store setting that is invalid; pinned, a tree with no digest, a
+  digest that is not its pin, an excluded entry (a `__pycache__`, a `.pyc`) in its
+  copy; a requirements file hashed in part; and, with `prepared`, for an overlay
+  with something to prepare, a digest other than the one its last preparation
+  succeeded for here. dotagents does not prepare at activation: it refuses, and
+  `overlays sync` prepares.
+- `needs_preparation(overlay) -> bool` — a dependency file or a setup on this OS.
+  `preparing(path)` — a context manager: the overlay at `path` counts as prepared
+  while it is being installed and prepared.
+- `active(overlays, logger=None) -> list` — the ones not refused, less those whose
+  dependencies conflict in one environment (`_deps.conflicts`); each refusal
   logged once per process. `Scope.overlays` is this over `Scope.installed_overlays`.
 - `digest_of(overlay) -> (digest, why)` — memoized per process on the install
   record and manifest. `is_pinned(overlay) -> bool`.
@@ -268,7 +298,7 @@ Which installed overlays are active, and how each is applied.
 - `context(overlay, *, host_env=None) -> _aos.Context` — its root, env files read
   from inside it, its store's grants and secrets (`env` provider: `host_env`,
   default `os.environ`), its env-script opt-in, its default paths, its state
-  directory.
+  directory and its environments' packages directories (`_deps.packages_for`).
 - `describe(weakenings)`, `report(logger, weakenings)` — one warning line,
   `overlay[id subject, ...]; ...`.
 
@@ -492,13 +522,13 @@ returns the exit code.
     files but the excluded names; the manifest included); raise `DigestError` for
     a link or a refused name. `tree_digest() -> str`.
   - `state_dir(os_name=None) -> Path` — the overlay's own, per OS, kept across
-    syncs. `setup_record_path(os_name=None) -> Path`, `read_setup_record() ->
-    {"digest", "failed"}` (the last setup that succeeded on this OS, and the
-    digest whose setup failed since; each None when there is none),
-    `write_setup_record(digest, failed=None)`.
+    syncs. `preparation_path(os_name=None) -> Path`
+    (`.dotagents-state/<name>/<os>.prepared.json`), `read_preparation() ->
+    Optional[{"digest", "phase"}]` (the last preparation that succeeded on this
+    OS), `write_preparation(digest, phase)`.
   - `read_install_record() -> dict` — `{"source", "commit", "digest", "files":
     {rel: sha256}, "installed"}`; `{}` when absent. `forget()` — delete the record
-    and the state directories and setup records of a removed overlay.
+    and the state directories and preparation records of a removed overlay.
   - `rule_blocks(rel_paths) -> tuple[list[str], list[str]]` — `(blocks, warnings)`:
     each file's leading `- **` bullets up to its next `## ` heading.
   - `install_to(dest_overlay_dir, dry_run, *, backup_root=None, source=None,
@@ -973,20 +1003,19 @@ code. `AGENTS_NO_PYVENV=1` (or `true`/`yes`/`on`) turns it all off.
   `{"digest", "requirements", "pth"}`), `PTH_FILE = "dotagents-layers.pth"` (in its
   site-packages), `DISABLE_ENV = "AGENTS_NO_PYVENV"`.
 - `sync_venvs(scope, *, dry_run=False, logger=None) -> list[Path]` — the user venv
-  (base requirements + the dependencies the user store's overlays declare), then
-  the project's when `wants_venv` (its own overlays' only). pip runs only when the
-  digest changed: one `pip install` of the base and every `requirements` file, and
-  one per `lock` with `--require-hashes --no-deps --only-binary=:all:`, each with
-  `--find-links` from `AGENTS_PIP_SOURCE`; a file with anything but requirement
-  lines, or a lock that is not its `lock_digest`, is refused first. The `.pth` is rewritten when
-  it differs: the store's own libs, then each lower store's venv site-packages and
-  libs, then `runtime_entry()`. Each venv's launchers (`_launchers.sync`) serve its
+  (the base requirements), then the project's when `wants_venv`. pip runs only
+  when the base changed, with `--find-links` from `AGENTS_PIP_SOURCE`. Overlays'
+  dependencies are built into their environments by `_deps`, not here. The `.pth`
+  is rewritten when it differs: the store's own libs and its shared Python
+  environment, then each lower store's venv site-packages, libs and shared
+  environment, then `runtime_entry()`. `write_layers(scope)` rewrites only the
+  `.pth` of each venv a sync made (after a shared environment was rebuilt). Each venv's launchers (`_launchers.sync`) serve its
   store's overlays and every lower store's; a project venv a sync made that is no
   longer wanted keeps its launchers current too. With `AGENTS_NO_PYVENV` it logs
   which scripts get no launcher. Raises `VenvError` or `LauncherError` (both
   `SystemExit`) on failure.
 - `wants_venv(scope, level, store, libs) -> bool` — always for `user`; for `project`
-  when it has overlay requirements, libs or scripts; never for `system` (a venv an
+  when its overlays have Python dependencies, libs or scripts; never for `system` (a venv an
   administrator made there is still layered).
 - `store_overlays(scope, stores) -> list[Overlay]` — the overlays in play
   installed in any of `stores`.
@@ -1000,13 +1029,45 @@ code. `AGENTS_NO_PYVENV=1` (or `true`/`yes`/`on`) turns it all off.
   venv made there any other way is never an agents venv.
 - `layers(scope) -> list[tuple[str, Path, list[Path]]]` — `(level, store, libs)`,
   highest first (an overlay's libs: its `PYTHONPATH` additions).
-  `python_dependencies(overlay) -> Optional[(file, locked, lock_digest)]` (its
-  `runtime.python` variant on this OS), `requirement_files(scope, store) -> list`
-  of those, `check_dependencies(path, locked, lock_digest) -> list[str]`.
+  `check_dependencies(path, locked, lock_digest) -> list[str]` (requirement lines
+  only, a lock pinned with hashes and matching its `lock_digest`).
   `runtime_entry() -> str` (the `.pyz`, else the dir holding `dotagents`).
   `venv_dir(store)`, `venv_python(venv)`, `site_packages(venv)`, `triplet()`,
   `os_bucket()`, `read_state(venv)`, `disabled(environ=None)`,
   `is_pyvenv_python(path)`.
+
+## `dotagents._deps`
+
+Overlays' dependency environments. An overlay's dependency files
+(`_aos.dependencies_of`) go into the environment its runtime variant names with
+`environment`: `shared` (default) or a name, per store, or `isolated`, per
+overlay. Python: `<store>/.pyvenv/<triplet>/envs/{shared,named/<n>,isolated/<id>}/<generation>/`,
+filled by `pip install --target` (the venv's pip; `sys.executable`'s with
+`AGENTS_NO_PYVENV`); the shared one is in the venv's `.pth`, a named or isolated
+one (and the shared one without a venv) goes on `PYTHONPATH` after `lib/python/`.
+Node.js: `<store>/.nodeenv/<os>/<kind>/<generation>/node_modules`, on `NODE_PATH`
+after `lib/node/`. A `current` file beside the generations names the build in use.
+
+- `rebuild(scope, store, key, *, exclude=(), dry_run=False, logger=None) ->
+  list[str]` — build environment `key` again into a new generation from every
+  member's file at once, in composition order (members: the store's overlays not
+  refused but for their preparation, less `exclude`), and switch to it only when
+  it succeeded; an environment left with no member is deleted. Python: one pip
+  run, `--require-hashes --no-deps --only-binary=:all:` when every file is a lock,
+  else the files' requirements with their hashes left out. Node.js: `npm ci` from
+  a lone locked member's `package.json` and lock, else `npm install` from one
+  `package.json` holding every member's dependencies, from copies only. Builds
+  once per process for unchanged inputs. Returns the identities a conflict
+  blocks; raises `DependencyError`.
+- `conflicts(overlays) -> dict[identity, why]` — overlays of one environment in
+  one store asking for a package at different versions.
+- `dependencies(overlay)`, `keys_of(overlay)`, `members(overlays)`,
+  `store_members(scope, store, *, exclude=())`, `packages_for(overlay) -> dict`
+  (what a session adds), `packages_dir(store, key) -> Optional[Path]`,
+  `env_dir(store, key)`, `runtime_root(store, runtime)`, `kind(key)`,
+  `npm_command() -> Optional[list[str]]` (Windows: `node` and npm's
+  `npm-cli.js`, never `npm.cmd`), `signature(scope)` (the env cache's input),
+  `CURRENT`, `BUILD_TIMEOUT`, `class DependencyError`.
 
 ## `dotagents._pipwheel`
 

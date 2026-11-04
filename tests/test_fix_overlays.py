@@ -631,7 +631,7 @@ def test_a_failed_setup_rolls_back_that_overlay_and_merges_the_rest(world):
     _overlay(src, "aaa", routing=["- AAA-ROUTE -> x"])
     _overlay(src, "bbb", routing=["- BBB-ROUTE -> y"], skill="bbb-skill", setup="import sys\nsys.exit(4)\n")
     _overlay(src, "ccc", routing=["- CCC-ROUTE -> z"])
-    with pytest.raises(SystemExit, match="setup for overlay 'bbb' failed"):
+    with pytest.raises(SystemExit, match="preparation for overlay 'bbb' failed"):
         _add(src, store, "aaa", "bbb")
     assert sorted(p.name for p in (store / "overlays").iterdir() if not p.name.startswith(".")) == ["aaa"]
     assert not (store / "skills" / "bbb-skill").exists()

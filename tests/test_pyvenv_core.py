@@ -1,7 +1,8 @@
 """Scope venvs (`dotagents._pyvenv`): one per store, created from the running
-interpreter, holding duho plus every installed overlay's requirements, and
-layered project > user > system through a `.pth` -- and `env` pointing
-AGENTS_PYTHON at the active one while keeping its libs off PYTHONPATH."""
+interpreter, holding duho and layering the stores' shared Python environments
+(`dotagents._deps`) project > user > system through a `.pth` -- and `env`
+pointing AGENTS_PYTHON at the active one while keeping its libs off
+PYTHONPATH."""
 import json
 import os
 import re
@@ -33,17 +34,12 @@ def make_wheel(directory: Path, name: str, source: str = "X = 1\n", version: str
 DECLARE_LIB = '[[paths]]\nvariable = "PYTHONPATH"\npath = "lib"\n'
 
 
-def _store_with_lib_overlay(store: Path, name: str, requirement: "str | None" = None) -> Path:
-    """An overlay declaring its lib/ on PYTHONPATH and, with ``requirement``,
-    its Python dependencies (runtime.python requirements)."""
+def _store_with_lib_overlay(store: Path, name: str) -> Path:
+    """An overlay declaring its lib/ on PYTHONPATH."""
     overlay = store / "overlays" / name
     (overlay / "lib").mkdir(parents=True)
     (overlay / "lib" / ("%s_lib.py" % name)).write_text("WHO = %r\n" % name, encoding="utf-8")
-    manifest = DECLARE_LIB
-    if requirement:
-        (overlay / "requirements.txt").write_text(requirement + "\n", encoding="utf-8")
-        manifest += '[[runtime.python]]\nrequirements = "requirements.txt"\n'
-    (overlay / "overlay.cfg").write_text(manifest, encoding="utf-8")
+    (overlay / "overlay.cfg").write_text(DECLARE_LIB, encoding="utf-8")
     return overlay
 
 
@@ -157,7 +153,6 @@ def test_sync_installs_layers_and_skips_pip_when_unchanged(tmp_path, monkeypatch
     wheels.mkdir()
     (wheels / pip_wheel_file.name).write_bytes(pip_wheel_file.read_bytes())
     make_wheel(wheels, "basedep", "WHO = 'base'\n")
-    make_wheel(wheels, "projdep", "WHO = 'project'\n")
     monkeypatch.setenv(_pipwheel.PIP_SOURCE_ENV, str(wheels))
     monkeypatch.setenv("PIP_NO_INDEX", "1")
     monkeypatch.setattr(_pyvenv, "BASE_REQUIREMENTS", ("basedep",))
@@ -172,7 +167,7 @@ def test_sync_installs_layers_and_skips_pip_when_unchanged(tmp_path, monkeypatch
     u1 = _store_with_lib_overlay(user, "u1")
     (u1 / "overlay.cfg").write_text('name = "u1"\n' + DECLARE_LIB + '[scripts]\nu1tool = "lib/u1_lib.py"\n',
                                     encoding="utf-8")
-    _store_with_lib_overlay(project, "p1", requirement="projdep")
+    _store_with_lib_overlay(project, "p1")
     scope = Scope("project", project, user_root=user, project_root=project.parent)
 
     assert _pyvenv.sync_venvs(scope) == [_pyvenv.venv_dir(user), _pyvenv.venv_dir(project)]
@@ -183,7 +178,7 @@ def test_sync_installs_layers_and_skips_pip_when_unchanged(tmp_path, monkeypatch
         out = subprocess.run([str(launcher)], env=dict(os.environ, U1_OVERLAY_ROOT=str(u1)),
                              capture_output=True, text=True)
         assert out.returncode == 0, out.stderr
-    assert len(installs) == 2
+    assert len(installs) == 1, "only the user venv installs dotagents' own requirements"
     pvenv = _pyvenv.venv_dir(project)
     assert not (_pyvenv.site_packages(pvenv) / "pip").exists(), "pip ran from the wheel"
     pth = (_pyvenv.site_packages(pvenv) / _pyvenv.PTH_FILE).read_text(encoding="utf-8").splitlines()
@@ -191,16 +186,13 @@ def test_sync_installs_layers_and_skips_pip_when_unchanged(tmp_path, monkeypatch
                    str(_pyvenv.site_packages(_pyvenv.venv_dir(user))),
                    str(user / "overlays" / "u1" / "lib"),
                    _pyvenv.runtime_entry()]
-    code = ("import basedep, projdep, u1_lib, p1_lib, dotagents._fs; "
-            "print(basedep.WHO, projdep.WHO, u1_lib.WHO, p1_lib.WHO)")
+    code = ("import basedep, u1_lib, p1_lib, dotagents._fs; "
+            "print(basedep.WHO, u1_lib.WHO, p1_lib.WHO)")
     out = subprocess.run([str(_pyvenv.venv_python(pvenv)), "-c", code], capture_output=True, text=True)
-    assert out.stdout.split() == ["base", "project", "u1", "p1"], out.stderr
+    assert out.stdout.split() == ["base", "u1", "p1"], out.stderr
 
     _pyvenv.sync_venvs(scope)
-    assert len(installs) == 2, "nothing changed, so pip did not run"
-    (project / "overlays" / "p1" / "requirements.txt").write_text("projdep\nbasedep\n", encoding="utf-8")
-    _pyvenv.sync_venvs(scope)
-    assert len(installs) == 3
+    assert len(installs) == 1, "nothing changed, so pip did not run"
 
 
 def _overlay_repo(tmp_path: Path) -> Path:

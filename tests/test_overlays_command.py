@@ -742,12 +742,12 @@ def test_setup_is_told_install_then_sync_on_every_sync_then_remove(tmp_path):
     (src / "with-setup" / "file.md").write_text("changed\n", encoding="utf-8")
     sync()
     assert runs.read_text(encoding="utf-8") == "install:False:True,sync:True:True,sync:True:True,"
-    assert installed.read_setup_record() == {"digest": installed.tree_digest(), "failed": None}
+    assert installed.read_preparation() == {"digest": installed.tree_digest(), "phase": "sync"}
     state = installed.state_dir()
     assert _run(OverlayRemove, name=["with-setup"], global_scope=True, agents_dir=scope.agents_root,
                 dry_run=False) == 0
     assert runs.read_text(encoding="utf-8").endswith(",remove:True:True,")
-    assert not state.exists() and not installed.setup_record_path().exists()
+    assert not state.exists() and not installed.preparation_path().exists()
 
 
 def test_a_failed_sync_refuses_the_copy_until_setup_succeeds(tmp_path, caplog):
@@ -780,12 +780,34 @@ def test_a_failed_sync_refuses_the_copy_until_setup_succeeds(tmp_path, caplog):
         with pytest.raises(SystemExit):
             sync()
         assert "FLAKY" not in env(), "the digest whose sync failed is not activated"
-    assert "its setup failed for this digest" in caplog.text
-    assert installed.read_setup_record() == {"digest": first, "failed": installed.tree_digest()}
+    assert "it was prepared for %s, not this digest" % first in caplog.text
+    assert installed.read_preparation() == {"digest": first, "phase": "install"}
     (src / "flaky" / "fail.md").unlink()
     assert sync() == 0
     assert env()["FLAKY"] == "on"
-    assert installed.read_setup_record()["failed"] is None
+    assert installed.read_preparation() == {"digest": installed.tree_digest(), "phase": "sync"}
+
+
+def test_a_failed_sync_of_the_prepared_digest_keeps_it_active(tmp_path):
+    from dotagents import _env
+    from dotagents.cli import OverlayAdd, OverlaySync
+
+    src = tmp_path / "src_overlays"
+    _add_setup_overlay(src, "steady", "sys.exit(6 if os.path.isfile(os.path.join(agents, 'FAIL')) else 0)\n")
+    (src / "steady" / "overlay.cfg").write_text(
+        '[[setup]]\ninterpreter = "python"\npath = "setup.py"\n[env]\nSTEADY = "on"\n', encoding="utf-8")
+    scope = make_scope(tmp_path)
+    assert _run(OverlayAdd, name=["steady"], repo=[str(src)], global_scope=True,
+                agents_dir=scope.agents_root, copy=True, dry_run=False) == 0
+    installed = Overlay(scope.overlay_root / "steady")
+    recorded = installed.read_preparation()
+    (scope.agents_root / "FAIL").write_text("x", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        _run(OverlaySync, pattern="steady", repo=[str(src)], global_scope=True,
+             agents_dir=scope.agents_root, copy=True, dry_run=False)
+    assert installed.read_preparation() == recorded
+    env = _env.get_environment(scope, base_env={"PATH": ""}, logger=logging.getLogger("t"))
+    assert env["STEADY"] == "on", "the recorded digest stays active"
 
 
 def test_a_failed_remove_phase_is_reported_and_the_removal_goes_ahead(tmp_path, caplog):

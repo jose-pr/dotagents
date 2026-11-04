@@ -1566,8 +1566,8 @@ def env_cache_key(scope: Scope, base_env: "dict[str, str]", *parts: str) -> str:
         for rel in ("bin", "lib"):
             items.append("default %s %s" % (overlay.path / rel, _stat_sig(overlay.path / rel)))
         items.append("record %s %s" % (overlay.install_record_path, _stat_sig(overlay.install_record_path)))
-        # A failed setup refuses the overlay until one succeeds.
-        items.append("setup %s %s" % (overlay.setup_record_path(), _stat_sig(overlay.setup_record_path())))
+        # An overlay is activated only for the digest it was prepared for.
+        items.append("prepared %s %s" % (overlay.preparation_path(), _stat_sig(overlay.preparation_path())))
         doc = overlay.document()
         for entry in doc.get("env_files", []):
             rel = entry if isinstance(entry, str) else entry["path"]
@@ -1583,6 +1583,10 @@ def env_cache_key(scope: Scope, base_env: "dict[str, str]", *parts: str) -> str:
         "venv %s %s" % (store, _stat_sig(_pyvenv.venv_dir(store) / _pyvenv.STATE_FILE))
         for store in scope.stores
     ]
+    # The builds of the dependency environments, on PYTHONPATH and NODE_PATH.
+    from dotagents import _deps
+
+    items += _deps.signature(scope)
     items += sorted("%s=%s" % kv for kv in base_env.items())
     h = hashlib.sha256()
     for item in items:

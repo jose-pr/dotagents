@@ -1,5 +1,5 @@
 {
-  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (the overlay's files by relative path, with the text of those read as env files; the fields a manifest does not write take their defaults from them), providers, interpreters (the interpreters the consumer can run here; absent, python, node, powershell, bash and sh), env_scripts_enabled (the consumer's policy; absent, true), enforces_network, and for setup phases change ('add', 'update', 'rerun' or 'remove'), digest (the overlay's) and recorded_digest (the digest of the last setup of this overlay that succeeded on this OS; absent, none). 'expect' gives the resulting environment, the selected setup and runtime variants, what a probe needs, and the weakenings as [id, subject], and with a change the setup_phase (null when setup does not run) and setup_arguments (the phase, then the variant's args); or the refusal.",
+  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (the overlay's files by relative path, with the text of those read as env files; the fields a manifest does not write take their defaults from them), providers, interpreters (the interpreters the consumer can run here; absent, python, node, powershell, bash and sh), env_scripts_enabled (the consumer's policy; absent, true), enforces_network, packages (each runtime's installed packages directory), and for setup phases change ('add', 'sync', 'activate' or 'remove'), digest (the overlay's), record (the digest and phase of the last preparation of this overlay that succeeded on this OS; absent, none) and fails (the step that fails: 'deps' or 'setup'). 'expect' gives the resulting environment, the selected setup and runtime variants, the dependencies (runtime, file, lock or null, environment), what a probe needs, and the weakenings as [id, subject], and with a change the setup_phase (null when nothing runs), setup_arguments (the phase, then the variant's args; null when no setup runs), the steps in order ('empty-state', 'deps:<runtime>', 'setup', 'record', 'delete'), the record afterwards, and whether the digest activates; or the refusal.",
   "spec": "spec/v0/environment.md#order-of-application",
   "cases": [
     {
@@ -22,6 +22,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -132,6 +133,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -241,6 +243,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -339,6 +342,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -411,6 +415,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -513,6 +518,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -609,6 +615,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -656,6 +663,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -718,6 +726,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -844,6 +853,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -900,6 +910,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -952,6 +963,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "python"
@@ -1001,6 +1013,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -1040,6 +1053,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1123,6 +1137,14 @@
         "node": {
           "version": "20"
         },
+        "dependencies": [
+          {
+            "runtime": "python",
+            "file": "requirements.txt",
+            "lock": null,
+            "environment": "shared"
+          }
+        ],
         "needs": {
           "interpreters": [
             "bash",
@@ -1136,6 +1158,10 @@
           ]
         },
         "weakenings": [
+          [
+            "deps-network",
+            "requirements.txt"
+          ],
           [
             "unlocked-dependencies",
             "requirements.txt"
@@ -1169,6 +1195,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1204,6 +1231,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1267,6 +1295,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "bash",
@@ -1362,6 +1391,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1483,6 +1513,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1518,6 +1549,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1555,6 +1587,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1591,6 +1624,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1628,6 +1662,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1668,6 +1703,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1708,6 +1744,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1760,6 +1797,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1804,6 +1842,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1864,6 +1903,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1911,6 +1951,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1946,6 +1987,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -1998,6 +2040,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -2059,6 +2102,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -2128,6 +2172,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -2185,6 +2230,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -2256,6 +2302,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -2293,6 +2340,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -2333,6 +2381,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -2372,6 +2421,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "python"
@@ -2423,6 +2473,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -2469,6 +2520,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "powershell"
@@ -2519,6 +2571,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "node"
@@ -2566,6 +2619,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -2609,6 +2663,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -2660,6 +2715,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "python",
@@ -2723,6 +2779,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "python"
@@ -2779,6 +2836,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -2834,6 +2892,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -2872,6 +2931,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -2909,6 +2969,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -2953,6 +3014,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "powershell"
@@ -2994,6 +3056,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -3037,6 +3100,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
@@ -3080,6 +3144,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -3126,6 +3191,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "python"
@@ -3180,6 +3246,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -3229,6 +3296,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "python"
@@ -3245,7 +3313,7 @@
     },
     {
       "id": "phase-add",
-      "description": "First add, nothing recorded: install.",
+      "description": "First add, nothing recorded: the state directory is made empty, setup runs install, and the digest and phase are recorded.",
       "manifest": {},
       "facts": {
         "os": "linux",
@@ -3274,6 +3342,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -3289,12 +3358,85 @@
         "setup_phase": "install",
         "setup_arguments": [
           "install"
-        ]
+        ],
+        "steps": [
+          "empty-state",
+          "setup",
+          "record"
+        ],
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "activates": true
       }
     },
     {
-      "id": "phase-update",
-      "description": "A new digest after a setup that succeeded: sync, the phase before the declared arguments.",
+      "id": "phase-add-installed",
+      "description": "An add of an overlay already prepared under this identity is a sync.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "add",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": "sync",
+        "setup_arguments": [
+          "sync"
+        ],
+        "steps": [
+          "setup",
+          "record"
+        ],
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "sync"
+        },
+        "activates": true
+      }
+    },
+    {
+      "id": "phase-sync",
+      "description": "A sync to a new digest: sync, the phase before the declared arguments.",
       "manifest": {
         "setup": [
           {
@@ -3314,8 +3456,11 @@
         "files": {
           "setup.sh": ""
         },
-        "change": "update",
-        "recorded_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "change": "sync",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
         "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
       },
       "expect": {
@@ -3336,6 +3481,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -3347,12 +3493,21 @@
         "setup_arguments": [
           "sync",
           "--quiet"
-        ]
+        ],
+        "steps": [
+          "setup",
+          "record"
+        ],
+        "record": {
+          "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "phase": "sync"
+        },
+        "activates": true
       }
     },
     {
-      "id": "phase-update-same-digest",
-      "description": "Nothing changed: setup does not run.",
+      "id": "phase-sync-same-digest",
+      "description": "Every sync runs setup, also when the digest did not change; the user asking to run setup again is such a sync.",
       "manifest": {},
       "facts": {
         "os": "linux",
@@ -3362,8 +3517,11 @@
         "files": {
           "setup.sh": ""
         },
-        "change": "update",
-        "recorded_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "change": "sync",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
         "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
       },
       "expect": {
@@ -3382,6 +3540,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -3394,13 +3553,24 @@
             "setup.sh"
           ]
         ],
-        "setup_phase": null,
-        "setup_arguments": null
+        "setup_phase": "sync",
+        "setup_arguments": [
+          "sync"
+        ],
+        "steps": [
+          "setup",
+          "record"
+        ],
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "sync"
+        },
+        "activates": true
       }
     },
     {
-      "id": "phase-update-first-setup",
-      "description": "An update with nothing recorded (the earlier digest had no setup, or it failed): install.",
+      "id": "phase-sync-first-setup",
+      "description": "A sync with nothing recorded (the earlier digest had nothing to prepare, or its install failed): install.",
       "manifest": {},
       "facts": {
         "os": "linux",
@@ -3410,7 +3580,7 @@
         "files": {
           "setup.sh": ""
         },
-        "change": "update",
+        "change": "sync",
         "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
       },
       "expect": {
@@ -3429,6 +3599,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -3444,12 +3615,22 @@
         "setup_phase": "install",
         "setup_arguments": [
           "install"
-        ]
+        ],
+        "steps": [
+          "empty-state",
+          "setup",
+          "record"
+        ],
+        "record": {
+          "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "phase": "install"
+        },
+        "activates": true
       }
     },
     {
-      "id": "phase-rerun",
-      "description": "Run again on the user's request after a setup that succeeded: sync.",
+      "id": "phase-activate-new-digest",
+      "description": "A consumer with no sync of its own, before it activates a digest other than the recorded one: sync.",
       "manifest": {},
       "facts": {
         "os": "linux",
@@ -3459,9 +3640,12 @@
         "files": {
           "setup.sh": ""
         },
-        "change": "rerun",
-        "recorded_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        "change": "activate",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
       },
       "expect": {
         "ungranted": [],
@@ -3479,6 +3663,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -3494,12 +3679,21 @@
         "setup_phase": "sync",
         "setup_arguments": [
           "sync"
-        ]
+        ],
+        "steps": [
+          "setup",
+          "record"
+        ],
+        "record": {
+          "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "phase": "sync"
+        },
+        "activates": true
       }
     },
     {
-      "id": "phase-rerun-never",
-      "description": "Run again with nothing recorded: install.",
+      "id": "phase-activate-same-digest",
+      "description": "Activating the recorded digest outside a sync: nothing runs.",
       "manifest": {},
       "facts": {
         "os": "linux",
@@ -3509,7 +3703,11 @@
         "files": {
           "setup.sh": ""
         },
-        "change": "rerun",
+        "change": "activate",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
         "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
       },
       "expect": {
@@ -3528,6 +3726,61 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": null,
+        "setup_arguments": null,
+        "steps": [],
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "activates": true
+      }
+    },
+    {
+      "id": "phase-activate-first",
+      "description": "Activating with nothing recorded: install.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "activate",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -3543,12 +3796,22 @@
         "setup_phase": "install",
         "setup_arguments": [
           "install"
-        ]
+        ],
+        "steps": [
+          "empty-state",
+          "setup",
+          "record"
+        ],
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "activates": true
       }
     },
     {
       "id": "phase-remove",
-      "description": "Removing after a setup that succeeded: remove, with the variant's own timeout and network, reported as for any phase.",
+      "description": "Removing after a preparation that succeeded: remove, with the variant's own timeout and network, then the state directory, the record and the overlay's dependencies are deleted.",
       "manifest": {},
       "facts": {
         "os": "linux",
@@ -3559,7 +3822,10 @@
           "setup.sh": ""
         },
         "change": "remove",
-        "recorded_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
         "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
       },
       "expect": {
@@ -3578,6 +3844,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -3593,12 +3860,18 @@
         "setup_phase": "remove",
         "setup_arguments": [
           "remove"
-        ]
+        ],
+        "steps": [
+          "setup",
+          "delete"
+        ],
+        "record": null,
+        "activates": false
       }
     },
     {
       "id": "phase-remove-never-set-up",
-      "description": "Removing with nothing recorded: setup does not run.",
+      "description": "Removing with nothing recorded: setup does not run; the state directory is still deleted.",
       "manifest": {},
       "facts": {
         "os": "linux",
@@ -3627,6 +3900,7 @@
         },
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [
             "sh"
@@ -3640,12 +3914,261 @@
           ]
         ],
         "setup_phase": null,
-        "setup_arguments": null
+        "setup_arguments": null,
+        "steps": [
+          "delete"
+        ],
+        "record": null,
+        "activates": false
+      }
+    },
+    {
+      "id": "phase-remove-fails",
+      "description": "A failed remove: reported, and everything is deleted anyway.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "remove",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "fails": "setup"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": "remove",
+        "setup_arguments": [
+          "remove"
+        ],
+        "steps": [
+          "setup",
+          "delete"
+        ],
+        "record": null,
+        "activates": false
+      }
+    },
+    {
+      "id": "phase-install-fails",
+      "description": "A failed install: nothing is recorded and the overlay is not activated.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "add",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "fails": "setup"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": "install",
+        "setup_arguments": [
+          "install"
+        ],
+        "steps": [
+          "empty-state",
+          "setup"
+        ],
+        "record": null,
+        "activates": false
+      }
+    },
+    {
+      "id": "phase-sync-fails-new-digest",
+      "description": "A failed sync to a new digest: the record still names the previous digest, and the new one is not activated.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "sync",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "fails": "setup"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": "sync",
+        "setup_arguments": [
+          "sync"
+        ],
+        "steps": [
+          "setup"
+        ],
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "activates": false
+      }
+    },
+    {
+      "id": "phase-sync-fails-same-digest",
+      "description": "A failed sync of the recorded digest: the record stands, so that digest stays active; the failure is reported.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "setup.sh": ""
+        },
+        "change": "sync",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "fails": "setup"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "setup-network",
+            "setup.sh"
+          ]
+        ],
+        "setup_phase": "sync",
+        "setup_arguments": [
+          "sync"
+        ],
+        "steps": [
+          "setup"
+        ],
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "activates": true
       }
     },
     {
       "id": "phase-no-setup",
-      "description": "No setup selected on this OS: no phase runs.",
+      "description": "Nothing to prepare on this OS (no setup, no dependencies): no phase runs.",
       "manifest": {
         "setup": [
           {
@@ -3675,13 +4198,968 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []
         },
         "weakenings": [],
         "setup_phase": null,
-        "setup_arguments": null
+        "setup_arguments": null,
+        "steps": [],
+        "record": null,
+        "activates": true
+      }
+    },
+    {
+      "id": "phase-deps-only",
+      "description": "Dependencies and no setup: the phase still applies; dependencies install and the record is kept, with no script to tell.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests>=2.31\n"
+        },
+        "change": "add",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "packages": {
+          "python": "/srv/ov-envs/python/shared/site-packages",
+          "node": "/srv/ov-envs/node/shared/node_modules"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python:/srv/ov-envs/python/shared/site-packages"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "python",
+            "file": "lib/python/requirements.txt",
+            "lock": null,
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "lib/python/requirements.txt"
+          ],
+          [
+            "unlocked-dependencies",
+            "lib/python/requirements.txt"
+          ]
+        ],
+        "setup_phase": "install",
+        "setup_arguments": null,
+        "steps": [
+          "empty-state",
+          "deps:python",
+          "record"
+        ],
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "activates": true
+      }
+    },
+    {
+      "id": "phase-deps-before-setup",
+      "description": "Dependencies install before setup runs, Python then Node.js, so setup can use them.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests>=2.31\n",
+          "lib/node/package.json": "{\"name\": \"docs-tools\", \"private\": true, \"dependencies\": {\"marked\": \"^14.1.0\"}}\n",
+          "lib/node/package-lock.json": "{}",
+          "setup.sh": ""
+        },
+        "change": "sync",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "packages": {
+          "python": "/srv/ov-envs/python/shared/site-packages",
+          "node": "/srv/ov-envs/node/shared/node_modules"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python:/srv/ov-envs/python/shared/site-packages",
+          "NODE_PATH": "/srv/ov/docs-tools/lib/node:/srv/ov-envs/node/shared/node_modules"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "python",
+            "file": "lib/python/requirements.txt",
+            "lock": null,
+            "environment": "shared"
+          },
+          {
+            "runtime": "node",
+            "file": "lib/node/package.json",
+            "lock": "lib/node/package-lock.json",
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "node",
+            "python",
+            "sh"
+          ],
+          "commands": [
+            "npm"
+          ]
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "lib/node/package.json"
+          ],
+          [
+            "deps-network",
+            "lib/python/requirements.txt"
+          ],
+          [
+            "setup-network",
+            "setup.sh"
+          ],
+          [
+            "unlocked-dependencies",
+            "lib/python/requirements.txt"
+          ]
+        ],
+        "setup_phase": "sync",
+        "setup_arguments": [
+          "sync"
+        ],
+        "steps": [
+          "deps:python",
+          "deps:node",
+          "setup",
+          "record"
+        ],
+        "record": {
+          "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "phase": "sync"
+        },
+        "activates": true
+      }
+    },
+    {
+      "id": "phase-deps-fail",
+      "description": "A failed dependency install stops the sync before setup; the previous record stands.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests>=2.31\n",
+          "setup.sh": ""
+        },
+        "change": "sync",
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "fails": "deps"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "setup.sh",
+          "args": [],
+          "timeout": 300,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "python",
+            "file": "lib/python/requirements.txt",
+            "lock": null,
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "python",
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "lib/python/requirements.txt"
+          ],
+          [
+            "setup-network",
+            "setup.sh"
+          ],
+          [
+            "unlocked-dependencies",
+            "lib/python/requirements.txt"
+          ]
+        ],
+        "setup_phase": "sync",
+        "setup_arguments": [
+          "sync"
+        ],
+        "steps": [
+          "deps:python"
+        ],
+        "record": {
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "phase": "install"
+        },
+        "activates": false
+      }
+    },
+    {
+      "id": "deps-python",
+      "description": "lib/python/requirements.txt installs into the shared Python environment, whose packages follow lib/python/ on PYTHONPATH; unhashed, it is reported unlocked, and installing needs the network.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests>=2.31\n",
+          "lib/python/tool.py": ""
+        },
+        "packages": {
+          "python": "/srv/ov-envs/python/shared/site-packages",
+          "node": "/srv/ov-envs/node/shared/node_modules"
+        },
+        "base_env": {
+          "PYTHONPATH": "/opt/py"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python:/srv/ov-envs/python/shared/site-packages:/opt/py",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "python",
+            "file": "lib/python/requirements.txt",
+            "lock": null,
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "lib/python/requirements.txt"
+          ],
+          [
+            "unlocked-dependencies",
+            "lib/python/requirements.txt"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "deps-python-locked",
+      "description": "A hash on every requirement makes the file a lock: no unlocked weakening; the network is still reported.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests==2.32.3 \\\n    --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nidna==3.10 --hash=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+        },
+        "packages": {
+          "python": "/srv/ov-envs/python/shared/site-packages",
+          "node": "/srv/ov-envs/node/shared/node_modules"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python:/srv/ov-envs/python/shared/site-packages"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "python",
+            "file": "lib/python/requirements.txt",
+            "lock": "lib/python/requirements.txt",
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "lib/python/requirements.txt"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "deps-python-partial-lock",
+      "description": "Hashes on some requirements and not others: refused.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests==2.32.3 --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nidna==3.10\n"
+        }
+      },
+      "expect": {
+        "error": "partial-lock",
+        "subject": "lib/python/requirements.txt"
+      }
+    },
+    {
+      "id": "deps-node",
+      "description": "lib/node/package.json with a package-lock.json beside it: installed with npm ci into the shared node_modules, on NODE_PATH after lib/node/; needs node and npm.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/node/package.json": "{\"name\": \"docs-tools\", \"private\": true, \"dependencies\": {\"marked\": \"^14.1.0\"}}\n",
+          "lib/node/package-lock.json": "{}",
+          "lib/node/tool.js": ""
+        },
+        "packages": {
+          "python": "/srv/ov-envs/python/shared/site-packages",
+          "node": "/srv/ov-envs/node/shared/node_modules"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "NODE_PATH": "/srv/ov/docs-tools/lib/node:/srv/ov-envs/node/shared/node_modules"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "node",
+            "file": "lib/node/package.json",
+            "lock": "lib/node/package-lock.json",
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "node"
+          ],
+          "commands": [
+            "npm"
+          ]
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "lib/node/package.json"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "deps-node-unlocked",
+      "description": "No package-lock.json: npm install, reported unlocked.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/node/package.json": "{\"name\": \"docs-tools\", \"private\": true, \"dependencies\": {\"marked\": \"^14.1.0\"}}\n"
+        },
+        "packages": {
+          "python": "/srv/ov-envs/python/shared/site-packages",
+          "node": "/srv/ov-envs/node/shared/node_modules"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "NODE_PATH": "/srv/ov/docs-tools/lib/node:/srv/ov-envs/node/shared/node_modules"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "node",
+            "file": "lib/node/package.json",
+            "lock": null,
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "node"
+          ],
+          "commands": [
+            "npm"
+          ]
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "lib/node/package.json"
+          ],
+          [
+            "unlocked-dependencies",
+            "lib/node/package.json"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "deps-absent",
+      "description": "No dependency file in its place: nothing installs. A requirements.txt at the root or a node_modules/ has no meaning.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "requirements.txt": "requests>=2.31\n",
+          "lib/python/tool.py": "",
+          "package.json": "{\"name\": \"docs-tools\", \"private\": true, \"dependencies\": {\"marked\": \"^14.1.0\"}}\n",
+          "lib/node/node_modules/x/index.js": ""
+        },
+        "packages": {
+          "python": "/srv/ov-envs/python/shared/site-packages",
+          "node": "/srv/ov-envs/node/shared/node_modules"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "deps-off",
+      "description": "[defaults] deps = false: nothing installs; lib/python/ stays on PYTHONPATH.",
+      "manifest": {
+        "defaults": {
+          "deps": false
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests>=2.31\n"
+        },
+        "packages": {
+          "python": "/srv/ov-envs/python/shared/site-packages",
+          "node": "/srv/ov-envs/node/shared/node_modules"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "deps-declared-lock",
+      "description": "A declared runtime.python lock replaces the default file.",
+      "manifest": {
+        "runtime": {
+          "python": [
+            {
+              "version": "3.9",
+              "lock": "locks/posix.txt"
+            }
+          ]
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests>=2.31\n",
+          "locks/posix.txt": "requests==2.32.3 \\\n    --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nidna==3.10 --hash=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+        },
+        "packages": {
+          "python": "/srv/ov-envs/python/shared/site-packages",
+          "node": "/srv/ov-envs/node/shared/node_modules"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python:/srv/ov-envs/python/shared/site-packages"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": {
+          "version": "3.9",
+          "lock": "locks/posix.txt"
+        },
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "python",
+            "file": "locks/posix.txt",
+            "lock": "locks/posix.txt",
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "locks/posix.txt"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "deps-declared-requirements",
+      "description": "A declared requirements file replaces it too, and is reported unlocked.",
+      "manifest": {
+        "runtime": {
+          "python": [
+            {
+              "requirements": "reqs/base.txt"
+            }
+          ]
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests==2.32.3 \\\n    --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nidna==3.10 --hash=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+          "reqs/base.txt": "requests>=2.31\n"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": {
+          "requirements": "reqs/base.txt"
+        },
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "python",
+            "file": "reqs/base.txt",
+            "lock": null,
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "reqs/base.txt"
+          ],
+          [
+            "unlocked-dependencies",
+            "reqs/base.txt"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "deps-declared-node-package",
+      "description": "runtime.node package names another package.json; its package-lock.json beside it pins it.",
+      "manifest": {
+        "runtime": {
+          "node": [
+            {
+              "version": "20",
+              "package": "web/package.json"
+            }
+          ]
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/node/package.json": "{\"name\": \"docs-tools\", \"private\": true, \"dependencies\": {\"marked\": \"^14.1.0\"}}\n",
+          "web/package.json": "{\"name\": \"docs-tools\", \"private\": true, \"dependencies\": {\"marked\": \"^14.1.0\"}}\n",
+          "web/package-lock.json": "{}"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "NODE_PATH": "/srv/ov/docs-tools/lib/node"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": {
+          "version": "20",
+          "package": "web/package.json"
+        },
+        "dependencies": [
+          {
+            "runtime": "node",
+            "file": "web/package.json",
+            "lock": "web/package-lock.json",
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "node"
+          ],
+          "commands": [
+            "npm"
+          ]
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "web/package.json"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "deps-isolated",
+      "description": "A variant that names no file chooses the environment of the default one: isolated, the overlay's own.",
+      "manifest": {
+        "runtime": {
+          "python": [
+            {
+              "environment": "isolated"
+            }
+          ]
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests>=2.31\n"
+        },
+        "packages": {
+          "python": "/srv/ov-envs/docs-tools/python/site-packages"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib/python:/srv/ov-envs/docs-tools/python/site-packages"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": {
+          "environment": "isolated"
+        },
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "python",
+            "file": "lib/python/requirements.txt",
+            "lock": null,
+            "environment": "isolated"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "lib/python/requirements.txt"
+          ],
+          [
+            "unlocked-dependencies",
+            "lib/python/requirements.txt"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "deps-named",
+      "description": "A named environment, compared normalized.",
+      "manifest": {
+        "runtime": {
+          "node": [
+            {
+              "environment": "Web_Tools"
+            }
+          ]
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/node/package.json": "{\"name\": \"docs-tools\", \"private\": true, \"dependencies\": {\"marked\": \"^14.1.0\"}}\n"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "NODE_PATH": "/srv/ov/docs-tools/lib/node"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": {
+          "environment": "Web_Tools"
+        },
+        "dependencies": [
+          {
+            "runtime": "node",
+            "file": "lib/node/package.json",
+            "lock": null,
+            "environment": "web-tools"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "node"
+          ],
+          "commands": [
+            "npm"
+          ]
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "lib/node/package.json"
+          ],
+          [
+            "unlocked-dependencies",
+            "lib/node/package.json"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "deps-windows",
+      "description": "On Windows, ';' separates PYTHONPATH and NODE_PATH as any list variable.",
+      "manifest": {},
+      "facts": {
+        "os": "windows",
+        "root": "C:\\ov\\docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "lib/python/requirements.txt": "requests>=2.31\n",
+          "lib/node/package.json": "{\"name\": \"docs-tools\", \"private\": true, \"dependencies\": {\"marked\": \"^14.1.0\"}}\n"
+        },
+        "packages": {
+          "python": "C:\\envs\\python\\shared\\Lib\\site-packages",
+          "node": "C:\\envs\\node\\shared\\node_modules"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "C:\\ov\\docs-tools",
+          "PYTHONPATH": "C:\\ov\\docs-tools\\lib\\python;C:\\envs\\python\\shared\\Lib\\site-packages",
+          "NODE_PATH": "C:\\ov\\docs-tools\\lib\\node;C:\\envs\\node\\shared\\node_modules"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [
+          {
+            "runtime": "python",
+            "file": "lib/python/requirements.txt",
+            "lock": null,
+            "environment": "shared"
+          },
+          {
+            "runtime": "node",
+            "file": "lib/node/package.json",
+            "lock": null,
+            "environment": "shared"
+          }
+        ],
+        "needs": {
+          "interpreters": [
+            "node",
+            "python"
+          ],
+          "commands": [
+            "npm"
+          ]
+        },
+        "weakenings": [
+          [
+            "deps-network",
+            "lib/node/package.json"
+          ],
+          [
+            "deps-network",
+            "lib/python/requirements.txt"
+          ],
+          [
+            "unlocked-dependencies",
+            "lib/node/package.json"
+          ],
+          [
+            "unlocked-dependencies",
+            "lib/python/requirements.txt"
+          ]
+        ]
       }
     },
     {
@@ -3720,6 +5198,7 @@
         "setup": null,
         "python": null,
         "node": null,
+        "dependencies": [],
         "needs": {
           "interpreters": [],
           "commands": []

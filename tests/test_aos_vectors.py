@@ -225,6 +225,7 @@ def _context(manifest: dict, facts: dict, identity: str, root: str, tree=None) -
         secrets=secrets, env_scripts_enabled=facts.get("env_scripts_enabled", True),
         files=list(files) if tree is None else tree,
         interpreters=facts.get("interpreters", _aos.INTERPRETERS), state=facts.get("state"),
+        packages=facts.get("packages"),
     )
 
 
@@ -264,21 +265,47 @@ def test_compose(case):
     result["skill_collisions"] = sorted(collisions)
     if "facts" in case:
         facts = case["facts"]
-        env = _aos.Environment(facts.get("base_env", {}), facts["os"] == "windows")
-        for identity in active:
-            env.set(Overlay.root_var_for(identity), facts["roots"][identity])
+        expect = case["expect"]
+
+        def texts(identity):
+            tree = files.get(identity, [])
+            # A mapping of path to text also gives the files an overlay reads.
+            return tree if isinstance(tree, dict) else {}
+
+        def deps(identity):
+            text = texts(identity)
+            return _aos.dependencies_of(overlays[identity], list(files.get(identity, [])), facts["os"],
+                                        lambda rel: text[rel].encode("utf-8") if rel in text else None)
+
+        reduced = {"active": active}
         try:
-            for identity in active:
-                tree = files.get(identity, [])
-                # A mapping of path to text also gives the files an overlay reads.
-                texts = tree if isinstance(tree, dict) else {}
-                ctx = _context(overlays[identity], dict(facts, files=texts), identity,
-                               facts["roots"][identity], tree=list(tree))
-                _aos.apply_overlay(env, overlays[identity], ctx, [])
+            members = [(i, d, texts(i).get(d["file"])) for i in active for d in deps(i)]
+            installed = _aos.environments(members, [(i, d) for i in facts.get("removed", []) for d in deps(i)])
         except _aos.Refused as refused:
-            result = {"active": active, "env": {"error": refused.code, "subject": refused.subject}}
+            reduced["env"] = {"error": refused.code, "subject": refused.subject}
         else:
-            result = {"active": active, "env": env.values}
+            for built in installed["environments"]:
+                del built["key"]
+            active = [i for i in active if i not in installed["blocked"]]
+            reduced["active"] = active
+            for key in ("environments", "conflicts", "blocked", "left"):
+                if key in expect:
+                    reduced[key] = installed[key]
+            env = _aos.Environment(facts.get("base_env", {}), facts["os"] == "windows")
+            for identity in active:
+                env.set(Overlay.root_var_for(identity), facts["roots"][identity])
+            try:
+                for identity in active:
+                    ctx = _context(overlays[identity],
+                                   dict(facts, files=texts(identity),
+                                        packages=facts.get("packages", {}).get(identity, {})),
+                                   identity, facts["roots"][identity], tree=list(files.get(identity, [])))
+                    _aos.apply_overlay(env, overlays[identity], ctx, [])
+            except _aos.Refused as refused:
+                reduced["env"] = {"error": refused.code, "subject": refused.subject}
+            else:
+                reduced["env"] = env.values
+        result = reduced
     assert json.loads(json.dumps(result)) == case["expect"]
 
 
@@ -301,8 +328,6 @@ def test_effective(case):
         got["env_scripts"] = result.scripts
         got["weakenings"] = sorted({tuple(w) for w in result.weakenings})
         if "change" in facts:
-            setup = got["setup"]
-            phase = None if setup is None else _aos.setup_phase(facts["change"], facts.get("recorded_digest"))
-            got["setup_phase"] = phase
-            got["setup_arguments"] = None if phase is None else [phase] + setup["args"]
+            got.update(_aos.preparation(facts["change"], facts.get("record"), facts.get("digest"),
+                                        got["setup"], got["dependencies"], facts.get("fails")))
     assert strict(json.loads(json.dumps(got))) == strict(case["expect"])

@@ -5,22 +5,23 @@ interpreter running dotagents. A store's ``.pyvenv/`` holds the agents' venvs
 only -- where skills, overlay helpers and setup scripts run; a project's own
 code gets its venvs beside the store, in the project root's ``.pyvenv/`` (the
 python overlay's ``dotagents pyvenv``). The user store's venv always holds
-:data:`BASE_REQUIREMENTS` (duho, for every skill) and the Python dependencies
-each overlay installed there declares (``runtime.python``: a ``requirements``
-file, or a ``lock`` installed in hash-checking mode, binary wheels only). A
-project gets its own venv only when one of its overlays declares
-dependencies, a ``PYTHONPATH`` directory or a script; otherwise a project
-session uses the user venv. dotagents keeps one venv per store, not one per
-overlay digest.
+:data:`BASE_REQUIREMENTS` (duho, for every skill). A project gets its own venv
+only when one of its overlays has Python dependencies, a ``PYTHONPATH``
+directory or a script; otherwise a project session uses the user venv.
+
+Overlays' Python dependencies are not installed here but in their
+environments (:mod:`dotagents._deps`), built under ``<venv>/envs/``; the
+store's shared environment is the one this venv layers in.
 
 The venvs layer through a ``.pth`` file in each venv's site-packages. It lists,
-highest precedence first: the store's own overlay libs, then each lower store's
-venv site-packages and libs (user, then system); an overlay's libs are the
-directories it declares on ``PYTHONPATH``. A project venv thus sees the
-project's requirements, then the user venv's packages, then the system's, with
-every overlay lib in the same project > user > system order the rest of
-dotagents uses, and dotagents itself last (overlay libs import it). A ``.pth``
-applies to that venv's interpreter only, so no other Python changes.
+highest precedence first: the store's own overlay libs and its shared Python
+environment, then each lower store's venv site-packages, libs and shared
+environment (user, then system); an overlay's libs are the directories it
+declares on ``PYTHONPATH``. A project venv thus sees the project's packages,
+then the user's, then the system's, with every overlay lib in the same
+project > user > system order the rest of dotagents uses, and dotagents
+itself last (overlay libs import it). A ``.pth`` applies to that venv's
+interpreter only, so no other Python changes.
 
 Each venv also holds the launchers of the scripts its store's overlays and
 every lower store's declare (``scripts``), in ``<venv>/overlays/``
@@ -164,31 +165,6 @@ def layers(scope) -> "list[tuple[str, Path, list[Path]]]":
     return out
 
 
-def python_dependencies(overlay) -> "Optional[tuple[Path, bool, Optional[str]]]":
-    """``(file, locked, lock_digest)`` of the ``runtime.python`` variant that
-    applies on this OS, or None when it declares no dependencies."""
-    from dotagents import _aos
-
-    variant = _aos.first_variant(overlay.document().get("runtime", {}).get("python", []), _aos.current_os())
-    if variant is None:
-        return None
-    if "lock" in variant:
-        return overlay.path.joinpath(*variant["lock"].split("/")), True, variant.get("lock_digest")
-    if "requirements" in variant:
-        return overlay.path.joinpath(*variant["requirements"].split("/")), False, None
-    return None
-
-
-def requirement_files(scope, store: Path) -> "list[tuple[Path, bool, Optional[str]]]":
-    """:func:`python_dependencies` of each overlay in play installed in ``store``."""
-    out = []
-    for overlay in store_overlays(scope, [store]):
-        found = python_dependencies(overlay)
-        if found is not None:
-            out.append(found)
-    return out
-
-
 def check_dependencies(path: Path, locked: bool, lock_digest: "Optional[str]") -> "list[str]":
     """Why a requirements or lock file may not be installed; empty when it may:
     only requirement lines (and, in a lock, ``==`` pins with hashes), and a
@@ -216,14 +192,17 @@ def store_overlays(scope, stores) -> list:
 
 def wants_venv(scope, level: str, store: Path, libs: "list[Path]") -> bool:
     """The user store always has a venv (duho); a project's only when it has
-    dependencies, libs or scripts of its own; nothing installs into the
-    system store."""
+    Python dependencies, libs or scripts of its own; nothing installs into
+    the system store."""
+    from dotagents import _deps
+
     if level == "user":
         return True
     if level == "system":
         return False
-    return bool(libs or requirement_files(scope, store)
-                or any(o.scripts() for o in store_overlays(scope, [store])))
+    overlays = store_overlays(scope, [store])
+    return bool(libs or any(o.scripts() for o in overlays)
+                or any(key[0] == "python" for o in overlays for key in _deps.keys_of(o)))
 
 
 def sync_venvs(scope, *, dry_run: bool = False, logger=None) -> "list[Path]":
@@ -250,35 +229,54 @@ def sync_venvs(scope, *, dry_run: bool = False, logger=None) -> "list[Path]":
                 _launchers.sync(venv, venv_python(venv), _stack_overlays(scope, stack[index:]), logger=logger)
             continue
         reqs = list(BASE_REQUIREMENTS) if level == "user" else []
-        _sync_one(scope, store, reqs, requirement_files(scope, store), stack[index:],
-                  dry_run=dry_run, logger=logger)
+        _sync_one(scope, store, reqs, stack[index:], dry_run=dry_run, logger=logger)
         done.append(venv_dir(store))
     return done
 
 
-def _sync_one(scope, store: Path, reqs: "list[str]", files: "list[tuple[Path, bool, Optional[str]]]", stack,
-              *, dry_run: bool, logger) -> None:
+def _sync_one(scope, store: Path, reqs: "list[str]", stack, *, dry_run: bool, logger) -> None:
     venv = venv_dir(store)
-    digest = _digest(reqs, files)
+    digest = _digest(reqs)
     state = read_state(venv)
     vpy = ensure_venv(venv, dry_run=dry_run, logger=logger)
     if vpy is None:  # dry run, venv missing
-        _log(logger, "info", "pyvenv: would install %s", _describe(reqs, files))
+        _log(logger, "info", "pyvenv: would install %s", ", ".join(reqs) or "nothing")
         return
-    if state.get("digest") != digest and (reqs or files):
-        _install(scope, vpy, reqs, files, dry_run=dry_run, logger=logger)
+    if state.get("digest") != digest and reqs:
+        _install(scope, vpy, reqs, dry_run=dry_run, logger=logger)
     if dry_run:
         return
+    entries = _write_pth(venv, stack)
+    _launchers.sync(venv, vpy, _stack_overlays(scope, stack), logger=logger)
+    state = {"digest": digest, "requirements": reqs, "pth": entries}
+    if read_state(venv) != state:
+        _write_atomic(venv / STATE_FILE, json.dumps(state, indent=2) + "\n")
+
+
+def _write_pth(venv: Path, stack) -> "list[str]":
     entries = _pth_entries(stack)
     pth = site_packages(venv) / PTH_FILE
     text = "".join(e + "\n" for e in entries)
     if _read(pth) != text:
         pth.parent.mkdir(parents=True, exist_ok=True)
         _write_atomic(pth, text)
-    _launchers.sync(venv, vpy, _stack_overlays(scope, stack), logger=logger)
-    state = {"digest": digest, "requirements": reqs + [str(f) for f, _locked, _digest in files], "pth": entries}
-    if read_state(venv) != state:
-        _write_atomic(venv / STATE_FILE, json.dumps(state, indent=2) + "\n")
+    return entries
+
+
+def write_layers(scope) -> None:
+    """Rewrite the ``.pth`` layering of each venv a sync made in ``scope``,
+    so it names the shared Python environments' current builds."""
+    if disabled():
+        return
+    stack = layers(scope)
+    for index, (_level, store, _libs) in enumerate(stack):
+        venv = venv_dir(store)
+        if venv_python(venv).is_file() and (venv / STATE_FILE).is_file():
+            entries = _write_pth(venv, stack[index:])
+            state = read_state(venv)
+            if state.get("pth") != entries:
+                state["pth"] = entries
+                _write_atomic(venv / STATE_FILE, json.dumps(state, indent=2) + "\n")
 
 
 def _stack_overlays(scope, stack) -> list:
@@ -297,8 +295,11 @@ def runtime_entry() -> str:
 
 
 def _pth_entries(stack) -> "list[str]":
-    """The own store's libs, then each lower store's venv site-packages and
-    libs, then dotagents itself -- last, so every venv's own packages win."""
+    """The own store's libs and shared Python environment, then each lower
+    store's venv site-packages, libs and shared environment, then dotagents
+    itself -- last, so every venv's own packages win."""
+    from dotagents import _deps
+
     entries: "list[str]" = []
     for position, (_level, store, libs) in enumerate(stack):
         if position:
@@ -306,6 +307,9 @@ def _pth_entries(stack) -> "list[str]":
             if venv_python(lower).is_file():
                 entries.append(str(site_packages(lower)))
         entries += [str(lib) for lib in libs]
+        shared = _deps.packages_dir(store, ("python", "shared", ""))
+        if shared is not None:
+            entries.append(str(shared))
     entries.append(runtime_entry())
     out: "list[str]" = []
     for entry in entries:
@@ -314,41 +318,23 @@ def _pth_entries(stack) -> "list[str]":
     return out
 
 
-def _install(scope, vpy: Path, reqs: "list[str]", files: "list[tuple[Path, bool, Optional[str]]]", *,
-             dry_run: bool, logger) -> None:
-    """``reqs`` and the unlocked files in one pip run; each lock in its own,
-    in hash-checking mode, dependencies not followed, binary wheels only (no
-    build step fetches anything unhashed). A file with anything but
-    requirement lines, or a lock that is not its ``lock_digest``, is refused
-    before pip runs."""
+def _install(scope, vpy: Path, reqs: "list[str]", *, dry_run: bool, logger) -> None:
+    """dotagents' own requirements, in one pip run."""
     from dotagents._pipwheel import find_links
 
-    problems = [problem for path, locked, lock_digest in files
-                for problem in check_dependencies(path, locked, lock_digest)]
-    if problems:
-        raise VenvError("error: refusing to install: %s" % "; ".join(problems))
     cache = Path(scope.user_root) / ".cache" / "pip"
     links: "list[str]" = []
     for link in find_links(cache_dir=cache, logger=logger):
         links += ["--find-links", link]
-    base = ["install", "--disable-pip-version-check", "--no-input", *links]
-    runs = []
-    unlocked = [path for path, locked, _digest in files if not locked]
-    if reqs or unlocked:
-        runs.append(base + [arg for path in unlocked for arg in ("-r", str(path))] + reqs)
-    for path, locked, _digest in files:
-        if locked:
-            runs.append(base + ["--require-hashes", "--no-deps", "--only-binary=:all:", "-r", str(path)])
-    _log(logger, "info", "pyvenv: installing %s into %s%s", _describe(reqs, files),
-         vpy.parent.parent, " [dry-run]" if dry_run else "")
+    _log(logger, "info", "pyvenv: installing %s into %s%s", ", ".join(reqs), vpy.parent.parent,
+         " [dry-run]" if dry_run else "")
     if dry_run:
         return
-    for args in runs:
-        command = pip_command(vpy, cache_dir=cache, logger=logger) + args
-        rc = subprocess.run(command).returncode
-        if rc != 0:
-            raise VenvError("error: pip could not install %s into %s (exit %d)"
-                            % (_describe(reqs, files), vpy.parent.parent, rc))
+    command = pip_command(vpy, cache_dir=cache, logger=logger) + [
+        "install", "--disable-pip-version-check", "--no-input", *links] + reqs
+    rc = subprocess.run(command).returncode
+    if rc != 0:
+        raise VenvError("error: pip could not install %s into %s (exit %d)" % (", ".join(reqs), vpy.parent.parent, rc))
 
 
 def active_venv(scope, environ: "Optional[dict]" = None) -> "Optional[Path]":
@@ -372,19 +358,11 @@ def is_pyvenv_python(path: str) -> bool:
     return len(parents) > 2 and parents[2].name == PYVENV_DIR
 
 
-def _digest(reqs: "list[str]", files: "list[tuple[Path, bool, Optional[str]]]") -> str:
+def _digest(reqs: "list[str]") -> str:
     h = hashlib.sha256()
     for req in reqs:
         h.update(req.encode("utf-8") + b"\0")
-    for path, locked, _lock_digest in files:
-        h.update(str(path).encode("utf-8") + (b"\0L\0" if locked else b"\0")
-                 + (_read(path) or "").encode("utf-8") + b"\0")
     return h.hexdigest()
-
-
-def _describe(reqs: "list[str]", files: "list[tuple[Path, bool, Optional[str]]]") -> str:
-    parts = list(reqs) + ["%s %s" % ("--require-hashes -r" if locked else "-r", f) for f, locked, _d in files]
-    return ", ".join(parts) or "nothing"
 
 
 def _read(path: Path) -> "Optional[str]":

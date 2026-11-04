@@ -12,9 +12,10 @@ command that walks overlays logs why, once per process.
 
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Iterator, Optional
 
 from dotagents import _aos, _policy
 
@@ -65,37 +66,72 @@ def digest_of(overlay: Any) -> "tuple[Optional[str], Optional[str]]":
     return digest, why
 
 
-def refusal(overlay: Any) -> "Optional[str]":
-    """Why ``overlay`` may not be activated, or None: its pin does not
-    verify, or its setup (``install`` or ``sync``) failed for this digest
-    and has not succeeded since."""
+#: Overlays this process is installing and preparing: activated as if
+#: prepared until their preparation ends, so their libs, launchers and root
+#: variables are in place for it.
+_PREPARING: "set[str]" = set()
+
+
+@contextlib.contextmanager
+def preparing(path: "str | os.PathLike[str]") -> "Iterator[None]":
+    """Treat the overlay at ``path`` as prepared while the block runs."""
+    key = os.path.normcase(os.path.abspath(str(path)))
+    _PREPARING.add(key)
+    try:
+        yield
+    finally:
+        _PREPARING.discard(key)
+
+
+def needs_preparation(overlay: Any) -> bool:
+    """Whether ``overlay`` has something to prepare on this OS: a dependency
+    file or a setup. Raises :class:`dotagents._aos.Refused` for a
+    requirements file only partly hashed."""
+    from dotagents import _deps
+
+    return bool(_deps.dependencies(overlay)) or overlay.setup_variant() is not None
+
+
+def refusal(overlay: Any, *, prepared: bool = True) -> "Optional[str]":
+    """Why ``overlay`` may not be activated, or None: a store setting that is
+    invalid; pinned, a tree with no digest, a digest that is not its pin or
+    an excluded entry in its copy; a requirements file only partly hashed;
+    and, with ``prepared``, a digest that is not the one its last
+    preparation (dependencies and setup) succeeded for on this OS."""
     try:
         pin = _policy.for_overlay(overlay).pin(overlay.name)
     except _policy.PolicyError as exc:
         return str(exc.code)
-    failed = overlay.read_setup_record()["failed"]
-    if failed is not None:
-        digest, _why = digest_of(overlay)
-        try:
-            if digest is not None and _aos.same_digest(digest, failed):
-                return "its setup failed for this digest %s" % digest
-        except ValueError:
-            pass
-    if pin is None:
-        return None
-    digest, why = digest_of(overlay)
-    if digest is None:
-        return "pinned, and %s" % why
-    if not _aos.same_digest(digest, pin):
-        return "its tree digest %s is not its pin %s" % (digest, pin)
-    foreign = _aos.foreign_entries(overlay.path)
-    if foreign:
-        return "its copy holds %s, which is not part of the overlay" % ", ".join(foreign[:5])
+    if pin is not None:
+        digest, why = digest_of(overlay)
+        if digest is None:
+            return "pinned, and %s" % why
+        if not _aos.same_digest(digest, pin):
+            return "its tree digest %s is not its pin %s" % (digest, pin)
+        foreign = _aos.foreign_entries(overlay.path)
+        if foreign:
+            return "its copy holds %s, which is not part of the overlay" % ", ".join(foreign[:5])
+    try:
+        needs = needs_preparation(overlay)
+    except _aos.Refused as refused:
+        return "%s %s (hash every requirement or none)" % (refused.code, refused.subject)
+    if prepared and needs and os.path.normcase(os.path.abspath(str(overlay.path))) not in _PREPARING:
+        recorded = overlay.read_preparation()
+        digest, why = digest_of(overlay)
+        if digest is None:
+            return why
+        if recorded is None:
+            return "it is not prepared here (its dependencies and setup have not succeeded)"
+        if recorded["digest"].lower() != digest.lower():
+            return "it was prepared for %s, not this digest %s" % (recorded["digest"], digest)
     return None
 
 
 def active(overlays: "Iterable[Any]", logger=None) -> "list[Any]":
-    """The ``overlays`` that may be activated; each refusal is logged once."""
+    """The ``overlays`` that may be activated, less those whose dependencies
+    conflict with another's in one environment; each refusal is logged once."""
+    from dotagents import _deps
+
     out = []
     for overlay in overlays:
         why = refusal(overlay)
@@ -104,7 +140,11 @@ def active(overlays: "Iterable[Any]", logger=None) -> "list[Any]":
         else:
             _warn(logger, "overlay %s is refused: %s (fix it with `dotagents overlays sync %s`, or change "
                           "its pin)", overlay.name, why, overlay.name)
-    return out
+    blocked = _deps.conflicts(out)
+    for overlay in out:
+        if overlay.normalized_name in blocked:
+            _warn(logger, "overlay %s is refused: %s", overlay.name, blocked[overlay.normalized_name])
+    return [overlay for overlay in out if overlay.normalized_name not in blocked]
 
 
 def is_pinned(overlay: Any) -> bool:
@@ -146,8 +186,10 @@ def state_dir(overlay: Any) -> "Optional[Path]":
 def context(overlay: Any, *, host_env: "Optional[dict[str, str]]" = None) -> _aos.Context:
     """How ``overlay`` is applied on this OS: its root, its env files read
     from it, its store's grants and secrets, whether its store lets its env
-    scripts run, its member files (its defaults), the interpreters here and
-    its state directory."""
+    scripts run, its member files (its defaults), the interpreters here, its
+    state directory and the packages directories of its environments."""
+    from dotagents import _deps
+
     policy = _policy.for_overlay(overlay)
     root = os.path.abspath(str(overlay.path))
     state = state_dir(overlay)
@@ -169,6 +211,7 @@ def context(overlay: Any, *, host_env: "Optional[dict[str, str]]" = None) -> _ao
         os_name=_aos.current_os(), root=root, identity=overlay.name, read=read,
         secrets=policy.secrets_for(overlay.name, host_env), env_scripts_enabled=policy.env_scripts(overlay.name),
         files=files(overlay), interpreters=interpreters(), state=None if state is None else str(state),
+        packages=_deps.packages_for(overlay),
     )
 
 

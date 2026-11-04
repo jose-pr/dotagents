@@ -200,85 +200,139 @@ def _remove_tree(path: Path) -> None:
         shutil.rmtree(str(path), onerror=_retry)
 
 
-def _run_setup(scope, dest_dir: Path, name: str, *, change: str, no_setup=False, dry_run, logger,
-               source_dir=None, timeout: "Optional[int]" = None) -> int:
-    """Run an installed overlay's selected ``setup`` variant in the phase
-    ``change`` (``add``, ``sync`` or ``remove``) calls for
-    (:func:`dotagents._aos.setup_phase`), honoring `--no-setup`.
+def _prepare(scope, dest_dir: Path, name: str, *, change: str, no_setup=False, dry_run, logger,
+             source_dir=None, timeout: "Optional[int]" = None) -> int:
+    """Prepare an installed overlay in the phase ``change`` (``add``,
+    ``sync`` or ``remove``) calls for (:func:`dotagents._aos.setup_phase`):
+    ``install`` when no preparation succeeded here (its record on this OS),
+    ``sync`` on every add or sync after one, ``remove`` before the overlay is
+    deleted after one. An overlay with no dependency file and no setup on
+    this OS has nothing to prepare.
 
-    The phase comes from the overlay's setup record on this OS (the digest
-    of the last setup that succeeded): ``install`` with none, ``sync`` on
-    every add or sync after one, ``remove`` before the overlay is deleted
-    after one. An ``install`` or ``sync`` that succeeds records its digest;
-    one that fails records this digest as failed, which
-    :func:`dotagents._activate.refusal` refuses until a setup succeeds. The
-    state directory is the overlay's own, kept across syncs; ``install``
-    starts it empty.
+    ``install`` empties the state directory, then installs the dependencies,
+    runs setup and records the digest and phase; ``sync`` does the same but
+    the emptying; ``remove`` runs setup only (the caller deletes the rest and
+    rebuilds the environments). A preparation stops at the first step that
+    fails, and nothing is recorded: the overlay is then activated only for
+    the digest it was last prepared for (:func:`dotagents._activate.refusal`).
+    ``--no-setup`` prepares nothing.
 
-    It runs outside any agent session, in the overlay's own process
-    environment (:func:`dotagents._env.overlay_process_env`: the base
-    environment, every overlay's root variable and this overlay's
-    declarations) plus ``AOS_OVERLAY_ROOT`` / ``AOS_OVERLAY_NAME`` /
-    ``AOS_OVERLAY_STATE`` (its state directory, where it writes),
-    ``AOS_SETUP_PHASE``, and ``AGENTS_HOME`` / ``AGENTS_SCOPE_ROOT`` /
-    ``AGENTS_SCOPE``. Its weakenings (``setup-network``,
-    ``network-not-enforced``: dotagents cannot deny a process the network,
-    ``no-timeout``) are reported first. On a `--dry-run` the installed dir
-    may not exist yet, so the SOURCE overlay (`source_dir`) is inspected.
-    Returns the exit status, 0 when skipped or absent."""
-    from dotagents import _activate, _aos, _env
+    Dependencies are built into their environments (:mod:`dotagents._deps`),
+    every member's file at once. Setup runs outside any agent session, in the
+    overlay's own process environment (:func:`dotagents._env.overlay_process_env`)
+    plus ``AOS_OVERLAY_ROOT`` / ``AOS_OVERLAY_NAME`` / ``AOS_OVERLAY_STATE``
+    (its state directory, where it writes), ``AOS_SETUP_PHASE``, and
+    ``AGENTS_HOME`` / ``AGENTS_SCOPE_ROOT`` / ``AGENTS_SCOPE``. The
+    weakenings (``deps-network``, ``unlocked-dependencies``,
+    ``setup-network``, ``network-not-enforced``: dotagents cannot deny a
+    process the network, ``no-timeout``) are reported first. On a
+    `--dry-run` the installed dir may not exist yet, so the SOURCE overlay
+    (`source_dir`) is inspected. Returns the exit status, 0 when there is
+    nothing to do."""
+    from dotagents import _activate, _aos, _deps, _env
     from dotagents._overlays import Overlay
 
     overlay = Overlay(dest_dir, scope.agents_root)
     if dry_run and source_dir is not None and not overlay.path.is_dir():
-        overlay = Overlay(source_dir)
+        overlay = Overlay(source_dir, scope.agents_root)
     variant = overlay.setup_variant()
-    if variant is None:
-        if change != "remove":
-            # A default setup.<ext> present that this machine cannot run.
-            plan = _aos.plan(overlay.document(), _activate.context(overlay), pinned=True)
-            _activate.report(logger, [(name, ident, subject) for ident, subject in plan["weakenings"]
-                                      if ident == "script-not-run"])
+    try:
+        dependencies = _deps.dependencies(overlay)
+    except _aos.Refused as refused:
+        logger.error("%s: %s %s (hash every requirement or none)", name, refused.code, refused.subject)
+        return 1
+    if variant is None and change != "remove":
+        # A default setup.<ext> present that this machine cannot run.
+        plan = _aos.plan(overlay.document(), _activate.context(overlay), pinned=True)
+        _activate.report(logger, [(name, ident, subject) for ident, subject in plan["weakenings"]
+                                  if ident == "script-not-run"])
+    if variant is None and not dependencies:
         return 0
     if no_setup:
-        logger.info("skipping setup for %s (--no-setup)", name)
+        logger.info("not preparing %s (--no-setup)%s", name, "" if change == "remove" else
+                    ": it is not activated until a sync prepares it")
         return 0
-    record = overlay.read_setup_record()
-    phase = _aos.setup_phase(change, record["digest"])
+    record = overlay.read_preparation()
+    recorded = record["digest"] if record else None
+    try:
+        digest = recorded if change == "remove" else overlay.tree_digest()
+    except _aos.DigestError as exc:
+        logger.error("%s: the overlay has no tree digest (%s)", name, exc)
+        return 1
+    phase = _aos.setup_phase(change, recorded, digest)
     if phase is None:
         return 0
-    try:
-        # `remove` keeps the record as it is.
-        digest = record["digest"] if phase == "remove" else overlay.tree_digest()
-    except _aos.DigestError as exc:
-        logger.error("setup for %s: the overlay has no tree digest (%s)", name, exc)
-        return 1
     plan = _aos.plan(overlay.document(), _activate.context(overlay), pinned=True)
     _activate.report(logger, [(name, ident, subject) for ident, subject in plan["weakenings"]])
-    if dry_run:
-        return overlay.run_setup(variant, phase=phase, env={}, python=sys.executable,
-                                 base_path=os.environ.get("PATH"), dry_run=True, logger=logger, timeout=timeout)
-    env = _env.overlay_process_env(scope, overlay, base_env=dict(os.environ), logger=logger)
-    if env is None:
-        if phase != "remove":
-            overlay.write_setup_record(record["digest"], failed=digest)
-        return 1
-    state = overlay.state_dir()
-    if phase == "install" and state.is_dir():
-        # Whatever an earlier attempt left: install starts from an empty directory.
-        _remove_tree(state)
-    state.mkdir(parents=True, exist_ok=True)
-    env["AOS_OVERLAY_STATE"] = env[_aos.state_variable(overlay.name)] = str(state)
-    env["AGENTS_SCOPE_ROOT"] = str(scope.agents_root)
-    env["AGENTS_SCOPE"] = scope.level
-    rc = overlay.run_setup(variant, phase=phase, env=env, python=_env.interpreter(env),
-                           base_path=os.environ.get("PATH"), dry_run=False, logger=logger, timeout=timeout)
+    keys = [_aos.environment_key(d, overlay.normalized_name) for d in dependencies]
+    logger.info("preparing %s: %s", name, phase)
+    if phase == "install":
+        state = overlay.state_dir()
+        if state.is_dir():
+            # Whatever an earlier attempt left: install starts from an empty directory.
+            logger.info("%s: emptying its state directory%s", name, " [dry-run]" if dry_run else "")
+            if not dry_run:
+                _remove_tree(state)
     if phase != "remove":
+        for key in keys:
+            try:
+                blocked = _deps.rebuild(scope, overlay.store, key, dry_run=dry_run, logger=logger)
+            except _deps.DependencyError as exc:
+                logger.error("%s: its %s dependencies are not installed: %s", name, key[0], exc)
+                return 1
+            if overlay.normalized_name in blocked:
+                logger.error("%s: its %s dependencies conflict with another overlay's (see above)", name, key[0])
+                return 1
+        if not dry_run and any(key[:2] == ("python", "shared") for key in keys):
+            _refresh_layers(scope, logger)
+    if variant is not None:
+        if dry_run:
+            return overlay.run_setup(variant, phase=phase, env={}, python=sys.executable,
+                                     base_path=os.environ.get("PATH"), dry_run=True, logger=logger,
+                                     timeout=timeout)
+        env = _env.overlay_process_env(scope, overlay, base_env=dict(os.environ), logger=logger)
+        if env is None:
+            return 1
+        state = overlay.state_dir()
+        state.mkdir(parents=True, exist_ok=True)
+        env["AOS_OVERLAY_STATE"] = env[_aos.state_variable(overlay.name)] = str(state)
+        env["AGENTS_SCOPE_ROOT"] = str(scope.agents_root)
+        env["AGENTS_SCOPE"] = scope.level
+        rc = overlay.run_setup(variant, phase=phase, env=env, python=_env.interpreter(env),
+                               base_path=os.environ.get("PATH"), dry_run=False, logger=logger, timeout=timeout)
         if rc:
-            overlay.write_setup_record(record["digest"], failed=digest)
-        else:
-            overlay.write_setup_record(digest)
-    return rc
+            return rc
+    if phase != "remove" and not dry_run:
+        overlay.write_preparation(digest, phase)  # type: ignore[arg-type]
+    return 0
+
+
+def _rebuild_without(scope, store: Path, names: "set[str]", keys, *, dry_run: bool, logger) -> None:
+    """After removing ``names``: build every environment they were in again
+    from the overlays left (an isolated one, or one left empty, is deleted).
+    A failure is reported, and the environment stays as it was."""
+    from dotagents import _deps
+
+    shared_python = False
+    for key in keys:
+        try:
+            _deps.rebuild(scope, store, key, exclude=names, dry_run=dry_run, logger=logger)
+        except _deps.DependencyError as exc:
+            logger.error("the %s:%s environment was not rebuilt without %s (it is kept as it was; the next "
+                         "add or sync rebuilds it): %s", key[0], key[1], ", ".join(sorted(names)), exc)
+        shared_python = shared_python or key[:2] == ("python", "shared")
+    if shared_python and not dry_run:
+        _refresh_layers(scope, logger)
+
+
+def _refresh_layers(scope, logger) -> None:
+    """Point the venvs' ``.pth`` layering at the shared Python environments' current builds."""
+    from dotagents import _pyvenv
+
+    try:
+        _pyvenv.write_layers(scope)
+    except OSError as exc:
+        logger.error("the venv layering was not rewritten: %s", exc)
 
 
 def _probe(overlay, logger) -> "list[str]":
@@ -294,7 +348,10 @@ def _probe(overlay, logger) -> "list[str]":
     ctx = _activate.context(overlay)
     scripts = [s for s in doc.get("env_scripts", []) if _aos.os_matches(s, ctx.os)] \
         if ctx.env_scripts_enabled else []
-    plan = _aos.plan(doc, ctx, pinned=True, scripts=scripts)
+    try:
+        plan = _aos.plan(doc, ctx, pinned=True, scripts=scripts)
+    except _aos.Refused as refused:
+        return ["%s %s: hash every requirement or none" % (refused.code, refused.subject)]
     problems = []
     if not plan["supported"]:
         problems.append("it does not support %s (runtime.os)" % ctx.os)
@@ -494,7 +551,7 @@ def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: b
     unconfigured. An EXISTING install is made to match the source (see
     `Overlay.install_to`), local edits backed up first. Raises on setup
     failure. Returns the skills the overlay ships."""
-    from dotagents import _aos, _overlays, _policy, _skills
+    from dotagents import _activate, _aos, _overlays, _policy, _skills
     from dotagents._sources import record_display, source_record
 
     if not _overlays.Overlay.is_valid_name(name):  # backstop: never a path outside overlays/
@@ -545,24 +602,30 @@ def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: b
         )
         if published:
             logger.info("published %d skill(s) from %s", published, name)
-    # Requirements before setup, so a setup script can import them.
-    what = "requirements"
-    rc = 0 if _sync_venvs(scope, no_venv=no_venv, dry_run=dry_run, logger=logger) else 1
-    if not rc:
-        what = "setup"
-        rc = _run_setup(scope, dest, name, change="add", no_setup=no_setup,
-                        dry_run=dry_run, logger=logger, source_dir=src, timeout=setup_timeout)
+    # The venv before the preparation, so setup runs under the scope's interpreter.
+    what = "the venv"
+    with _activate.preparing(dest):
+        rc = 0 if _sync_venvs(scope, no_venv=no_venv, dry_run=dry_run, logger=logger) else 1
+        if not rc:
+            what = "preparation"
+            rc = _prepare(scope, dest, name, change="add", no_setup=no_setup,
+                          dry_run=dry_run, logger=logger, source_dir=src, timeout=setup_timeout)
     if rc:
         if fresh and not dry_run:
+            from dotagents import _deps
+
             owned = _skills.owned_overlay_skills(dest, scope.shared_skills_dir)
+            keys = _deps.keys_of(_overlays.Overlay(dest, scope.agents_root))
             _remove_tree(dest)
             _overlays.Overlay(dest).forget()
+            _rebuild_without(scope, scope.agents_root, {_overlays.Overlay.normalize_name(name)}, keys,
+                             dry_run=False, logger=logger)
             _skills.unpublish_skills(scope.shared_skills_dir, owned, logger=logger)
             logger.error("%s for overlay %s failed; the install was rolled back", what, name)
         else:
             logger.error(
-                "%s for overlay %s failed; it stays installed and is not activated until its setup "
-                "succeeds (fix it and run `overlays sync %s`)", what, name, name,
+                "%s for overlay %s failed; it stays installed and is activated only for the digest it "
+                "was last prepared for (fix it and run `overlays sync %s`)", what, name, name,
             )
         raise SystemExit("error: %s for overlay %r failed (exit %d)" % (what, name, rc))
     return skills
@@ -807,7 +870,7 @@ class OverlayRemove(DotAgentsArgs):
     ("--dry-run",)
 
     def __call__(self) -> int:
-        from dotagents import _overlays, _skills
+        from dotagents import _deps, _overlays, _skills
 
         if not self.name:
             return _usage_error("overlays remove needs at least one overlay name")
@@ -851,8 +914,11 @@ class OverlayRemove(DotAgentsArgs):
         try:
             for name, overlay_dir in targets:
                 if self.dry_run:
-                    _run_setup(scope, overlay_dir, name, change="remove", no_setup=self.no_setup, dry_run=True,
-                               logger=self._logger_, timeout=self.setup_timeout)
+                    _prepare(scope, overlay_dir, name, change="remove", no_setup=self.no_setup, dry_run=True,
+                             logger=self._logger_, timeout=self.setup_timeout)
+                    _rebuild_without(scope, scope.agents_root, {_overlays.Overlay.normalize_name(name)},
+                                     _deps.keys_of(_overlays.Overlay(overlay_dir, scope.agents_root)),
+                                     dry_run=True, logger=self._logger_)
                     removed_names.add(name)
                     self._logger_.info("removed overlay %s (%s) [dry-run]", name, overlay_dir)
                     continue
@@ -864,14 +930,18 @@ class OverlayRemove(DotAgentsArgs):
                 )
                 # Setup's `remove` phase, while its copy and state still exist;
                 # a failure is reported and the removal goes ahead.
-                rc = _run_setup(scope, overlay_dir, name, change="remove", no_setup=self.no_setup,
-                                dry_run=False, logger=self._logger_, timeout=self.setup_timeout)
+                keys = _deps.keys_of(_overlays.Overlay(overlay_dir, scope.agents_root))
+                rc = _prepare(scope, overlay_dir, name, change="remove", no_setup=self.no_setup,
+                              dry_run=False, logger=self._logger_, timeout=self.setup_timeout)
                 if rc:
                     self._logger_.error("setup for overlay %s failed in its remove phase (exit %d); "
                                         "removing it anyway", name, rc)
+                # Its state directory, preparation record and environments go with it.
                 _remove_tree(overlay_dir)
                 _overlays.Overlay(overlay_dir).forget()
                 removed_names.add(name)
+                _rebuild_without(scope, scope.agents_root, {_overlays.Overlay.normalize_name(name)}, keys,
+                                 dry_run=False, logger=self._logger_)
                 unpublished = _skills.unpublish_skills(
                     scope.shared_skills_dir, owned, logger=self._logger_
                 )
@@ -888,8 +958,7 @@ class OverlayRemove(DotAgentsArgs):
                 # Prune what the removed skills left in agents' own skills dirs.
                 _link_agent_skills(scope, self._logger_)
 
-        # The layering drops the removed overlays' libs. Their requirements
-        # stay installed: another overlay may need the same packages.
+        # The layering drops the removed overlays' libs.
         if removed_names and not _sync_venvs(
             scope, no_venv=self.no_venv, dry_run=self.dry_run, logger=self._logger_
         ):
@@ -1064,7 +1133,12 @@ class OverlayShow(_RepoArgs):
         ctx = _activate.context(overlay)
         env_scripts = [s for s in doc.get("env_scripts", []) if _aos.os_matches(s, ctx.os)] \
             if ctx.env_scripts_enabled else []
-        plan = _aos.plan(doc, ctx, pinned=pin is not None, scripts=env_scripts)
+        try:
+            plan = _aos.plan(doc, ctx, pinned=pin is not None, scripts=env_scripts)
+        except _aos.Refused:
+            # A requirements file only partly hashed: `refused` says so; the rest is shown without it.
+            unread = dict(doc, defaults=dict(doc.get("defaults", {}), deps=False))
+            plan = _aos.plan(unread, ctx, pinned=pin is not None, scripts=env_scripts)
         weakenings = list(plan["weakenings"])
         activation = _aos.effective(doc, ctx, base_env={}, pinned=pin is not None)
         if activation.error is None:
@@ -1095,6 +1169,8 @@ class OverlayShow(_RepoArgs):
             "env_scripts": [s["path"] for s in doc.get("env_scripts", [])],
             "env_scripts_enabled": ctx.env_scripts_enabled,
             "setup": plan["setup"],
+            "dependencies": plan["dependencies"],
+            "prepared": overlay.read_preparation() if found else None,
             "runtime": doc.get("runtime", {}),
             "needs": plan["needs"],
             "missing": _probe(overlay, self._logger_),
@@ -1130,6 +1206,11 @@ class OverlayShow(_RepoArgs):
             "  env scripts: %s%s" % (listed(info["env_scripts"]), "" if not info["env_scripts"] else
                                      (" (enabled)" if info["env_scripts_enabled"] else " (not enabled)")),
             "  setup:       %s" % ("%s %s" % (setup["interpreter"], setup["path"]) if setup else "-"),
+            "  deps:        %s" % listed("%s (%s:%s, %s)" % (d["file"], d["runtime"], d["environment"],
+                                                           "locked" if d["lock"] else "unlocked")
+                                         for d in info["dependencies"]),
+            "  prepared:    %s" % ("%s (%s)" % (info["prepared"]["digest"], info["prepared"]["phase"])
+                                   if info["prepared"] else "-"),
             "  needs:       %s" % listed(info["needs"]["interpreters"] + info["needs"]["commands"]),
             "  scripts:     %s" % listed(sorted(info["scripts"])),
             "  skills:      %s" % listed(info["skills"]),
@@ -1243,7 +1324,7 @@ class OverlaySync(_RepoArgs):
         return src, origin
 
     def __call__(self) -> int:
-        from dotagents import _overlays, _scope, _skills
+        from dotagents import _activate, _overlays, _scope, _skills
         from dotagents._sources import SourceError, source_record
 
         scope = self.resolve_scope()
@@ -1301,16 +1382,17 @@ class OverlaySync(_RepoArgs):
                         dest_dir, scope.shared_skills_dir, copy=self.copy,
                         overwrite=True, logger=self._logger_,  # a published copy matches too
                     )
-                if not _sync_venvs(scope, no_venv=self.no_venv, dry_run=self.dry_run,
-                                   logger=self._logger_):
-                    failures.append(name)
-                    continue
-                rc = _run_setup(scope, dest_dir, name, change="sync",
-                                dry_run=self.dry_run, logger=self._logger_,
-                                no_setup=self.no_setup, source_dir=overlay_src, timeout=self.setup_timeout)
+                with _activate.preparing(dest_dir):
+                    if not _sync_venvs(scope, no_venv=self.no_venv, dry_run=self.dry_run,
+                                       logger=self._logger_):
+                        failures.append(name)
+                        continue
+                    rc = _prepare(scope, dest_dir, name, change="sync", dry_run=self.dry_run,
+                                  logger=self._logger_, no_setup=self.no_setup, source_dir=overlay_src,
+                                  timeout=self.setup_timeout)
                 if rc:
-                    self._logger_.error("setup for overlay %s failed (exit %d); this copy is not activated "
-                                        "until its setup succeeds, and the previous one is not kept", name, rc)
+                    self._logger_.error("preparing overlay %s failed (exit %d); it is activated only for the "
+                                        "digest it was last prepared for", name, rc)
                     failures.append(name)
 
             # A `requires` added upstream: install what no store provides yet.

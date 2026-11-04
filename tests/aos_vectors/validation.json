@@ -992,6 +992,23 @@
       }
     },
     {
+      "id": "fixture-runtime-bad-environment",
+      "description": "tests/fixtures/invalid/runtime-bad-environment.cfg",
+      "document": {
+        "runtime": {
+          "python": [
+            {
+              "environment": "-shared"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime/python/0/environment"
+      }
+    },
+    {
       "id": "fixture-runtime-bad-version",
       "description": "tests/fixtures/invalid/runtime-bad-version.cfg",
       "document": {
@@ -1041,6 +1058,23 @@
       "expect": {
         "valid": false,
         "at": "/runtime/python/0"
+      }
+    },
+    {
+      "id": "fixture-runtime-node-package-name",
+      "description": "tests/fixtures/invalid/runtime-node-package-name.cfg",
+      "document": {
+        "runtime": {
+          "node": [
+            {
+              "package": "web/packages.json"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/runtime/node/0/package"
       }
     },
     {
