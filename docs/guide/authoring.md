@@ -87,16 +87,28 @@ position = "append"      # or "prepend", the default
 os = ["linux", "macos"]  # optional
 ```
 
-An overlay's Python dependencies are declared, never found by a file name:
+An overlay's packages are `lib/python/requirements.txt` and `lib/node/package.json`,
+installed by default on `add` and every `sync`, before setup. A requirements file is a
+lock when every requirement carries a `--hash` (one hashed in part is refused); a
+`package.json` is locked by the `package-lock.json` beside it (`npm ci`; without it
+`npm install`, reported `unlocked-dependencies`). A variant can name another file or
+another environment:
 
 ```toml
 [[runtime.python]]
 version = "3.9"
-requirements = "requirements.txt"   # or lock = "locks/all.txt" + lock_digest = "sha256:..."
+requirements = "deps/requirements.txt"   # or lock = "locks/all.txt" + lock_digest = "sha256:..."
+environment = "isolated"                 # "shared" (default), a name, or "isolated"
+
+[[runtime.node]]
+package = "web/package.json"
 ```
 
-dotagents installs them into the scope venv; a lock installs with
-`--require-hashes --no-deps --only-binary=:all:`.
+Overlays in one shared or named environment install together; if two pin one package
+to two versions, neither is activated. Choose `isolated` (or a name of your own) to
+keep yours apart. `lib/python/` is on `PYTHONPATH` and `lib/node/` on `NODE_PATH`,
+each before the environment's packages; `[defaults] deps = false` turns the default
+files off.
 
 ## Commands on PATH: `[scripts]`
 
@@ -169,7 +181,8 @@ variants per OS with `[[setup]]`. See the contract in
 
 - idempotent; it gets the phase as its first argument and `$AOS_SETUP_PHASE`:
   `install` the first time, `sync` on every add or sync after that, `remove` before
-  the overlay is deleted; a phase it does not know is success (exit 0);
+  the overlay is deleted; a phase it does not know is success (exit 0); your
+  dependencies are installed before it runs;
 - cwd is your installed overlay root; write only into `$AOS_OVERLAY_STATE`, kept
   across syncs;
 - the environment is the user's, the overlays' root variables, your own declarations,

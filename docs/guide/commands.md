@@ -220,10 +220,11 @@ dotagents overlays show python             # describe one: declarations, digest,
 - **`add`** takes names or globs: `'*'` is every overlay the repos offer, so with
   a store registry it installs everything the registry names, and `'py*'` the ones
   starting with `py`; a glob that matches nothing is an error. One overlay failing
-  (its copy, requirements or setup) does not stop the rest: it is logged, what
+  (its copy, its dependencies or its setup) does not stop the rest: it is logged, what
   requires it is skipped, everything else installs, and the command exits 1 naming
   each failure. A failed overlay this run was installing for the first time is
-  removed again; one that was already installed is left in place, not set up.
+  removed again; one that was already installed is left in place, activated only for
+  the digest it was last prepared for.
   `add` installs what each manifest's `requires` names first, each requirement
   installed and set up before the overlay that needs it (`--no-requires` to skip); a
   requirement the scope already has, in its own store or the user store for a project,

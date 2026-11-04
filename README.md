@@ -162,10 +162,16 @@ store's shared `skills/` so every agent sees the same skills.
   so the copy keeps the overlay's AOS tree digest. A source is refused before
   anything is written when its manifest does not validate, this machine lacks what
   its `runtime` needs, or the store pins it to another digest. A fresh `add` whose
-  setup fails is rolled back.
+  preparation (dependencies, then setup) fails is rolled back.
+- An overlay's packages install by default: `lib/python/requirements.txt` (a lock when
+  every requirement has a `--hash`) and `lib/node/package.json` (locked by the
+  `package-lock.json` beside it), on `add` and every `sync`, before setup. They go
+  into the store's **shared** environment, a named one, or the overlay's own
+  (`[[runtime.python]] environment = "isolated"`); two overlays pinning one package
+  to two versions in one environment are both refused, naming the package.
+  `[defaults] deps = false` turns this off.
 - Each store has a Python venv, `<store>/.pyvenv/<version>-<os>-<arch>/`, where skills
-  run (`$AGENTS_PYTHON`): duho, the dependencies each overlay declares
-  (`[[runtime.python]]`, a requirements or a hash-checked lock file) and every agent
+  run (`$AGENTS_PYTHON`): duho, the store's shared Python environment and every agent
   `lib/` import there, layered project > user > system. pip comes from the
   interpreter, else its pinned wheel (cache, `AGENTS_PIP_SOURCE`, your index mirror,
   or a `.pyz` built `--with-pip`).
@@ -178,7 +184,9 @@ store's shared `skills/` so every agent sees the same skills.
 - `list` and `show` flag a `requires` no installed overlay provides; `show` names the
   repo an installed overlay came from.
 
-**Overlay setup.** An overlay's setup is the `[[setup]]` variant its `overlay.cfg`
+**Overlay setup.** An overlay is activated only for the digest its last preparation
+(dependencies, then setup) succeeded for on this machine; `overlays sync` prepares it.
+An overlay's setup is the `[[setup]]` variant its `overlay.cfg`
 declares for this OS (interpreter, args, timeout, network), else one `setup.<ext>` at its
 root, the first this machine can run (`.py`, `.js`, `.mjs`, `.cjs`, then `.ps1` on
 Windows, `.bash`, `.sh` elsewhere), taken to need the network. dotagents runs it

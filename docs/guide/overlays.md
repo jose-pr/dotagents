@@ -267,7 +267,7 @@ Keys dotagents applies:
 | `[defaults]` | `bin`, `lib`, `env`, `env_scripts`, `setup`, `context`, `skills`, `rules = false` each turn one default off; any other key is refused. |
 | `env`, `env_files`, `paths` | Environment values (text with `${NAME}` placeholders, a path in the overlay, a secret reference), env files (`aos` or `dotenv`), and further path additions (`prepend` / `append`, per OS). |
 | `env_scripts` | Programs that compute variables (`interpreter`, `path`, `timeout`), after the default `env.<ext>`; one naming a root `env.<ext>` configures it; the store can turn them off. |
-| `runtime` | `os`, `commands`, `python` (version, `requirements` or `lock` + `lock_digest`), `node`: probed before an install. |
+| `runtime` | `os`, `commands`, `python` (version, `requirements` or `lock` + `lock_digest`, `environment`), `node` (version, `package`, `environment`): probed before an install. |
 | `setup` | Variants per OS (`interpreter`, `path`, `args`, `timeout`, `network`), tried before the default `setup.<ext>`; one naming a root `setup.<ext>` configures it. Told its phase: `install`, `sync`, `remove`. |
 | `[scripts]` | Commands: `name = "path.py"` or `{ path, interpreter, os }`; dotagents launches python scripts. No file is a command by its name. |
 | `[harness.<id>]` | `context` and `skills = false` for one harness (`claude-code`, `codex`, `gemini-cli`, ...); `model` / `effort` are shown, not applied. |
@@ -387,19 +387,50 @@ ever used as an agents' venv. `init` and every
 `overlays add` / `sync` / `remove` keep it current:
 
 - The user store's venv always has **duho**, so any skill can build a command line
-  on it, plus the dependencies each overlay installed there declares under
-  `[[runtime.python]]`: a `requirements` file (reported `unlocked-dependencies`),
-  installed in one pip run with the others so pip sees every constraint at once, or a
-  `lock` (every line pinned with `==` and hashed; its `lock_digest` checked first),
-  installed in its own run with `--require-hashes --no-deps --only-binary=:all:`.
-  Either file holds requirement lines only: no `-r`, index option, URL or path.
-  pip runs only when a file changed. The venv is the store's, not one per overlay.
-- A project gets its own venv only when one of its overlays declares dependencies,
-  has a library dir or a script; otherwise a project session uses the user venv.
+  on it.
+- A project gets its own venv only when one of its overlays has Python dependencies,
+  a library dir or a script; otherwise a project session uses the user venv.
 - The venvs **layer like everything else**. A `.pth` file in each venv lists, highest
-  precedence first: the store's own overlay libs, then the user venv's packages and
-  libs, then the system store's. dotagents itself comes last. So in a project venv,
-  the project's packages and libs win, then the user's, then the system's.
+  precedence first: the store's own overlay libs and its shared Python environment,
+  then the user venv's packages, libs and shared environment, then the system
+  store's. dotagents itself comes last. So in a project venv, the project's packages
+  and libs win, then the user's, then the system's.
+
+### Dependencies and their environments
+
+An overlay's packages install by default from `lib/python/requirements.txt` and
+`lib/node/package.json`, on `add` and on every `sync`, after the copy lands and before
+setup; `[defaults] deps = false` turns that off, and a `[[runtime.python]]` variant
+naming `requirements` or `lock`, or a `[[runtime.node]]` variant naming `package`,
+replaces the default file. Every install is reported `deps-network`, and a file that
+is not pinned `unlocked-dependencies`.
+
+- **Pinned.** A requirements file is a lock when every requirement has a `--hash`
+  (only some is refused, `partial-lock`), a declared `lock` too (its `lock_digest`
+  checked first); a lock installs with `--require-hashes --no-deps
+  --only-binary=:all:`. Requirement lines only: no `-r`, index option, URL or path. A
+  `package.json` is pinned by the `package-lock.json` beside it: `npm ci`, else `npm
+  install`. npm works from copies of those two files only, so no `.npmrc` in an
+  overlay configures it.
+- **Environments.** `environment = "shared"` (the default) is the store's one
+  environment per runtime; a name is shared by the store's overlays that choose it;
+  `"isolated"` is the overlay's own. Python ones live in
+  `<store>/.pyvenv/<triplet>/envs/`, Node.js ones in `<store>/.nodeenv/<os>/`. The
+  shared Python environment is in the venv's `.pth`; a named or isolated one goes on
+  `PYTHONPATH` after the overlay's `lib/python/`, and Node.js `node_modules` on
+  `NODE_PATH` after `lib/node/`.
+- **Together.** The overlays of one environment install in one run, in priority
+  order: pip in hash-checking mode only when every file is a lock (otherwise the
+  hashes are left out and it is reported unlocked), npm with `ci` only for a lone
+  locked member. Two of them pinning one package to two versions (Python `==` pins,
+  names compared normalized; `package.json` ranges) are both refused, with the
+  package named; the environment holds the rest. Give one of them its own
+  environment.
+- **Rebuilt.** Every `add`, `sync` and `remove` that touches an environment builds it
+  again, into a new directory, from the files of the overlays left in it, and switches
+  to it only when that worked: a failed build leaves the old one, and nothing a
+  removed overlay needed stays behind. An environment no overlay uses any more, and an
+  isolated one on removal, is deleted.
 - `dotagents env` points **`AGENTS_PYTHON`** at the active venv (and names it in
   `AGENTS_PYVENV`). A `python` setup or env script and the stores' `env.py` run under
   it, and the managed block tells agents to run skill scripts with it. A store's own
@@ -442,10 +473,15 @@ network = true                 # reported as the weakening setup-network
 ```
 
 - It is told its **phase**, as its first argument (before `args`) and as
-  `AOS_SETUP_PHASE`: `install` the first time it runs here, `sync` on every `add` or
-  `sync` after an install succeeded (whether or not the files changed), and `remove`
-  when `overlays remove` deletes the overlay, before its copy and state go. The record
-  of which setup succeeded is kept per overlay and OS. `--no-setup` skips it.
+  `AOS_SETUP_PHASE`: `install` the first time the overlay is prepared here, `sync` on
+  every `add` or `sync` after that (whether or not the files changed), and `remove`
+  when `overlays remove` deletes the overlay, before its copy, state and isolated
+  environment go. Each phase runs after the overlay's dependencies are installed;
+  `install` first empties the state directory. A record of the last preparation that
+  succeeded (digest and phase) is kept per overlay and OS, and the overlay is
+  activated only for that digest: one dotagents finds at another digest (copied in by
+  hand, or prepared with `--no-setup`) is refused until `overlays sync` prepares it.
+  `--no-setup` prepares nothing.
 - It must be **idempotent** -- running it twice leaves what running it once did -- and
   treat a phase it does not know as success with nothing to do (exit 0):
 
@@ -475,8 +511,10 @@ network = true                 # reported as the weakening setup-network
 - **Network**: dotagents cannot deny a process the network, so a variant that does not
   declare it is reported `network-not-enforced`.
 - A **non-zero exit fails the install** with a clear error, and a fresh `add` is
-  rolled back. An `install` or `sync` that fails on an overlay already installed
-  leaves it refused (not activated) until a setup of it succeeds; the previous copy is
-  not kept. A failed `remove` is reported and the overlay is removed anyway.
+  rolled back. An `install` or `sync` that fails leaves the record as it was: a
+  sync of the digest already prepared keeps it active, and a new digest is refused
+  until a preparation of it succeeds (the copy is replaced in place, so the previous
+  digest cannot stay active). A failed `remove` is reported and the overlay is
+  removed anyway.
 
 See [Authoring an overlay](authoring.md) to build your own.

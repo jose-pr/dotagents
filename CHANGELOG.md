@@ -31,13 +31,19 @@ dotagents implements the [Agent Overlay Specification](https://boriken-dev.githu
   and `AOS_SETUP_PHASE`: `install` on the first `add`, `sync` on every `add` or
   `sync` after one succeeded, and `remove` when `overlays remove` deletes the
   overlay (new: setup used to run with no argument, and never on removal). A script
-  must treat a phase it does not know as success. It runs in the overlay's own
-  environment, with `AOS_OVERLAY_ROOT`, `AOS_OVERLAY_NAME` and `AOS_OVERLAY_STATE`
-  (where it writes, kept across syncs and deleted on removal; sessions see it as
-  `<NAME>_OVERLAY_STATE`). An `install` or `sync` that fails keeps the overlay
-  from being activated until a setup of it succeeds; a failed `remove` is reported
-  and the removal goes ahead. `AGENTS_OVERLAY_DIR` is gone (it is
+  must treat a phase it does not know as success. It runs after the overlay's
+  dependencies are installed, in the overlay's own environment, with
+  `AOS_OVERLAY_ROOT`, `AOS_OVERLAY_NAME` and `AOS_OVERLAY_STATE` (where it writes,
+  kept across syncs, emptied before `install` and deleted on removal; sessions see
+  it as `<NAME>_OVERLAY_STATE`). `AGENTS_OVERLAY_DIR` is gone (it is
   `AOS_OVERLAY_ROOT`). `setup_timeout` is now a variant's `timeout`.
+- An overlay with dependencies or a setup is activated only for the digest its last
+  preparation succeeded for on this machine (recorded in
+  `<store>/overlays/.dotagents-state/<name>/<os>.prepared.json`). One dotagents finds
+  at another digest -- an install that failed, a copy made without dotagents, or one
+  installed with `--no-setup` -- is refused until `overlays sync` prepares it; a
+  failed sync of the digest already prepared keeps it active. A failed `remove`
+  phase is reported and the removal goes ahead.
 - An overlay's `env.py` runs as an AOS env script: one `env.<ext>`, chosen in the
   same order, with the overlay's own environment and no arguments, a 60-second
   timeout, printing one JSON object (over one or several lines) or one object per
@@ -51,10 +57,23 @@ dotagents implements the [Agent Overlay Specification](https://boriken-dev.githu
   used to hold.
 - An overlay's `CONTEXT.md` comes after the stores' `AGENTS.md` in `context`, as AOS
   orders the base context first.
-- Python dependencies are declared (`[[runtime.python]]` with `requirements`, or a
-  `lock` and its `lock_digest`, installed with `--require-hashes --no-deps
-  --only-binary=:all:`); a root `requirements.txt` means nothing by its name. A
-  requirements or lock file with anything but requirement lines is refused.
+- Dependencies install by default from `lib/python/requirements.txt` and
+  `lib/node/package.json`, on `add` and every `sync`, before setup, into an
+  environment: `shared` (the default, one per runtime per store; dotagents' store
+  venv layers the shared Python one), a name, or `isolated`, chosen with
+  `environment` in a `[[runtime.python]]` / `[[runtime.node]]` variant, which may
+  also name another file (`requirements`, `lock` with `lock_digest`, `package`). A
+  root `requirements.txt` means nothing by its name, and overlays' packages are no
+  longer installed into the venv itself. A requirements file is a lock when every
+  requirement has a `--hash` (hashed in part: refused), installed with
+  `--require-hashes --no-deps --only-binary=:all:`; a `package.json` with a
+  `package-lock.json` beside it installs with `npm ci`, else `npm install`. Every
+  install is reported `deps-network`, and an unpinned file `unlocked-dependencies`.
+  Overlays of one environment install together and the environment is rebuilt from
+  the remaining members on every add, sync and removal; two members pinning one
+  package to two versions are both refused, the package named. `lib/node/` goes on
+  `NODE_PATH`, each environment's packages after the overlay's `lib/<runtime>/`.
+  `[defaults] deps = false` turns the default files off.
 - The installed copy holds exactly the overlay's files, so it keeps the overlay's tree
   digest: the install record moved beside it, to
   `<store>/overlays/.dotagents-install/<name>.json` (with the commit and the tree
@@ -116,8 +135,9 @@ dotagents implements the [Agent Overlay Specification](https://boriken-dev.githu
 
 1. In each overlay you author, rename `overlay.toml` to `overlay.cfg`, and move its
    Python modules from `lib/` to `lib/python/` (fix anything that names the old
-   path). Declare what is not a default: a `requirements.txt` as
-   `[[runtime.python]] requirements = "requirements.txt"`, a `bin/<name>.py` command
+   path), and a root `requirements.txt` to `lib/python/requirements.txt` (or declare
+   it as `[[runtime.python]] requirements = "requirements.txt"`). Declare what is
+   not a default: a `bin/<name>.py` command
    as `[scripts] <name> = "bin/<name>.py"`, `setup_timeout` as a `[[setup]]`
    entry's `timeout`. Make a root `env` file plain `NAME=value` lines (or an
    `env.py`); write a literal `${` in one as `$${`, or single-quote the value. Have
@@ -125,8 +145,12 @@ dotagents implements the [Agent Overlay Specification](https://boriken-dev.githu
    `sync`, `remove`) as its first argument, exiting 0 for one it does not know.
 2. Install the new dotagents, then `dotagents overlays sync -g` (and in each project
    with overlays, `dotagents overlays sync`): it installs the `overlay.cfg` overlays,
-   moves the install records beside them, and runs each setup in its `install`
-   phase (no setup has a record yet).
+   moves the install records beside them, builds their dependency environments and
+   runs each setup in its `install` phase (nothing is recorded as prepared yet;
+   until this sync, an overlay with dependencies or a setup is refused). To drop the
+   packages an older dotagents installed into the store venv itself, delete
+   `<store>/.pyvenv/` just before this sync, which makes it again; deleting it later
+   takes the dependency environments with it, so sync again after.
 3. Optionally pin what you trust: `dotagents overlays show <name>` prints its digest;
    put it in the store's `dotagents.toml` as `[overlays.<name>] pin = "..."`.
 
