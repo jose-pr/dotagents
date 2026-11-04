@@ -23,12 +23,12 @@ dotagents overlays add engineering
 
 Each overlay is an [AOS](https://boriken-dev.github.io/agent-overlay-spec/) overlay:
 its `overlay.cfg` declares only what is not a default (`requires`, routing, rules, and
-what it needs: `net`'s environment and Python dependencies, the `git` that
-`engineering`, `private-sync` and `release` run). It installs into your scope's
+what it needs: `net`'s environment, its `curl` command and Python dependencies, the
+`git` that `engineering`, `private-sync` and `release` run). It installs into your scope's
 `overlays/<name>/` (what its manifest `requires` first), merges its always-on
 rules/routing into `AGENTS.md`, publishes any skills to the shared skills dir, and
 runs its setup if it has one (none of these do). `dotagents env` then puts every
-installed overlay's existing `bin/` on `PATH`, its `lib/` on `PYTHONPATH`, applies
+installed overlay's `bin/` on `PATH`, its `lib/python/` on `PYTHONPATH`, applies
 what it declares, and exports one `$<NAME>_OVERLAY_ROOT` per overlay -- the
 variable every routing line and cross-reference here uses instead of a hard path, so
 the store can live anywhere (`$AGENTS_HOME`) and nothing breaks when it moves. See the dotagents docs for the full overlay model:
@@ -104,13 +104,14 @@ in your scope. The manifest declares only what is not a default. Minimal shape:
   overlay.cfg      # name, description, requires, routing lines, optional priority, needs
   kb/…             # knowledge-base files the routing points at ($<NAME>_OVERLAY_ROOT/kb/…)
   rules/, flows/, references/, tools/   # other content, one category dir per kind -- never <name>/<name>/
-  bin/, lib/       # optional; on PATH / PYTHONPATH by default ([defaults] bin/lib = false);
-                   #   each bin/<name>.py also gets a `<name>` launcher on PATH
+  bin/, lib/python/  # optional; on PATH / PYTHONPATH by default ([defaults] bin/lib = false);
+                   #   a command (a launcher on PATH) is a [scripts] entry: curl = "bin/curl.py"
   cmds/            # optional duho command modules, discovered as `dotagents <name>`
                    #   and served as MCP tools by `DOTAGENTS_MCP=stdio dotagents`
-  env, env.py      # optional; a dotenv file, and a script printing one JSON object per
-                   #   line -- prefer static `[env]` values in overlay.cfg
+  env, env.py      # optional; a dotenv file, and a script printing JSON objects
+                   #   -- prefer static `[env]` values in overlay.cfg
   CONTEXT.md       # optional; emitted by `dotagents context` (<NAME_OVERLAY_ROOT> expands)
+  rules/<name>.md  # optional; always-on rules, merged into AGENTS.md
   skills/<skill>/  # optional skills, published to the shared skills dir
   setup.py         # optional idempotent install-time script, run once per digest --
                    #   only for real install work; it writes into $AOS_OVERLAY_STATE

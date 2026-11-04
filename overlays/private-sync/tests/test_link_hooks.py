@@ -1,7 +1,7 @@
 """Sync-hook discovery across the flat hooks/ dir and overlay-provided
 ``overlays/<name>/hooks/`` dirs (the overlay-dir install model).
 
-Moved here with the logic (D85): `_link` is this overlay's `lib/_link.py`, put on
+Moved here with the logic (D85): `_link` is this overlay's `lib/python/_link.py`, put on
 `sys.path` by the sibling `conftest.py` -- it is no longer `dotagents._link`."""
 import os
 

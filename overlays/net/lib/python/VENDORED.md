@@ -1,9 +1,9 @@
-# Vendored code in `overlays/net/lib/`
+# Vendored code in `overlays/net/lib/python/`
 
-**Nothing third-party is vendored here.** `lib/` holds one module of this
+**Nothing third-party is vendored here.** `lib/python/` holds one module of this
 overlay's own:
 
-- **`lib/certifi/`** — an OS-trust-store shim, *not* the real cert bundle. Pure
+- **`lib/python/certifi/`** — an OS-trust-store shim, *not* the real cert bundle. Pure
   stdlib (`os` + `ssl`), ships no certificates.
 
 The HTTP code is not vendored either. `syshttp` and `curlike` are packages of

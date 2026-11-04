@@ -1,4 +1,4 @@
-"""The ``curl`` the overlay puts on PATH: ``lib/curlshim``, which runs the
+"""The ``curl`` the overlay puts on PATH: ``lib/python/curlshim``, which runs the
 real curl with the agent proxy added when there is one, else curlike's
 standard-library curl. Started by the launcher dotagents makes for this file
 in the agents' venv, ``<venv>/overlays/curl`` (``curl.exe`` on Windows, a
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-LIB = HERE.parent / "lib"
+LIB = HERE.parent / "lib" / "python"
 PREFIX = "AGENTS_"
 
 
@@ -35,7 +35,7 @@ def entry():
 
 
 def _libs_first():
-    """The overlay's ``lib/``, then every overlay's (``$AGENTS_PYTHONPATH``),
+    """The overlay's ``lib/python/``, then every overlay's (``$AGENTS_PYTHONPATH``),
     ahead of this process's imports and of ``PYTHONPATH`` for what it starts
     (a URL hook, the real curl), even outside a ``dotagents env`` session.
     Empty parts are left out: an empty PYTHONPATH entry means the current

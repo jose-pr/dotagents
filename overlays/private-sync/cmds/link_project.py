@@ -4,7 +4,7 @@ Discovered command module shipped BY THIS OVERLAY (D84 per-overlay `cmds/`
 discovery, D85): `dotagents.cli._discover` walks each installed overlay's
 `<overlay-root>/cmds/` dir, so installing `private-sync` is what makes
 `link-project` exist. Plain dotagents ships no private-sync command (D85) -- both
-the command and its logic (`../lib/_link.py`) live here.
+the command and its logic (`../lib/python/_link.py`) live here.
 
 Renamed from the old bare `link` (D85): the command acts on **a project's
 `.agents`**, and the underlying function was already `link_project()`.
@@ -13,9 +13,9 @@ Importing the logic: `duho.discover_commands` imports this file as a standalone
 module under a synthesized name, not as a package member -- so neither a relative
 import nor a plain sibling import is available. A plain `import _link` is
 preferred when it resolves to our module: `dotagents env` puts every installed
-overlay's `lib/` on `PYTHONPATH`, so in an env-applied shell it does. When it
+overlay's `lib/python/` on `PYTHONPATH`, so in an env-applied shell it does. When it
 does not (a bare shell, a relocated store), `_load_link()` below resolves
-`<overlay-root>/lib/_link.py` **by path**, which needs no PYTHONPATH at all.
+`<overlay-root>/lib/python/_link.py` **by path**, which needs no PYTHONPATH at all.
 """
 
 import importlib.util
@@ -49,7 +49,7 @@ def _load_link():
         if not (hasattr(module, "link_project") and hasattr(module, "sync_agents")):
             module = None
     if module is None:
-        source = OVERLAY_ROOT / "lib" / "_link.py"
+        source = OVERLAY_ROOT / "lib" / "python" / "_link.py"
         if not source.is_file():
             raise ImportError("private-sync overlay is incomplete: no %s" % source)
         spec = importlib.util.spec_from_file_location(_LIB_KEY, str(source))

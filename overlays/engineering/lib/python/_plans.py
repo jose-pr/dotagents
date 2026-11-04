@@ -53,7 +53,7 @@ SECTIONS = {
     "verification": "Verification",
     "reporting": "Reporting",
 }
-_TEMPLATE = Path(__file__).resolve().parents[1] / "references" / "plan_template.md"
+_TEMPLATE = Path(__file__).resolve().parents[2] / "references" / "plan_template.md"
 _FALLBACK_TEMPLATE = (
     "# <Plan Title>\n\nStatus: draft\nExecutor: <family/subrole from MODELS.md>\n\n"
     "## Progress\n\n- [ ] Phase 1: <name>\n\n## Known Facts & Context\n\n- <fact>\n\n"

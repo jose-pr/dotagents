@@ -1,4 +1,4 @@
-"""lib/curlshim, the launcher's choice: a URL hook's ``_CURL`` wrapper, else the
+"""lib/python/curlshim, the launcher's choice: a URL hook's ``_CURL`` wrapper, else the
 real curl with the agent proxy added, else curlike. The real curl is a fake
 (``fake_curl``) that records its argv, its ``-K`` files and its environment;
 curlike serves for real against loopback servers. Settings are read under the
@@ -17,7 +17,7 @@ import pytest
 pytest.importorskip("curlike")
 proxylib = pytest.importorskip("proxylib")
 
-import curlshim  # noqa: E402  (lib/, via conftest)
+import curlshim  # noqa: E402  (lib/python/, via conftest)
 import fake_curl  # noqa: E402  (tests/)
 from syshttp import proxy as agent_proxy  # noqa: E402
 

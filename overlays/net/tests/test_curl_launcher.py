@@ -110,7 +110,7 @@ def test_curl_by_name_gets_every_argument_and_nothing_else_runs(launcher_dir, tm
     assert record["argv"] == ARGS
     assert os.listdir(str(work)) == [], "a redirection or a second command ran"
     first = record["env"]["PYTHONPATH"].split(os.pathsep)[0]
-    assert os.path.normcase(os.path.realpath(first)) == os.path.normcase(os.path.realpath(str(OVERLAY / "lib")))
+    assert os.path.normcase(os.path.realpath(first)) == os.path.normcase(os.path.realpath(str(OVERLAY / "lib" / "python")))
 
 
 def test_without_the_overlay_root_the_launcher_says_so(launcher_dir):

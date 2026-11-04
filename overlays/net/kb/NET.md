@@ -15,7 +15,7 @@ installs into the interpreter `$AGENTS_PYTHON` names):
   the real curl. Reference: <https://jose-pr.github.io/curlike/> and its
   packaged `AGENTS.md`.
 
-The overlay's `curl` launcher (`lib/curlshim`) chooses between the two: the
+The overlay's `curl` launcher (`lib/python/curlshim`) chooses between the two: the
 real curl with the agent proxy added, else curlike.
 
 ## Settings: `AGENTS_<NAME>`
@@ -30,7 +30,7 @@ unprefixed**: the machine's `HTTPS_PROXY` or `NO_PROXY` are not the agents'.
 The real curl still reads its own variables as curl names them, and so does
 curlike for curl's own `CURL_CA_BUNDLE`.
 
-`dotagents env` puts `bin/` on `PATH` and `lib/` (the certifi shim) on
+`dotagents env` puts `bin/` on `PATH` and `lib/python/` (the certifi shim) on
 `PYTHONPATH`. The curl launcher also puts the overlay libs on `PYTHONPATH`
 for what it starts, so the shim works from any shell.
 
@@ -48,7 +48,7 @@ script needs no new launcher, and exits 2 when that variable is unset.
 Windows PowerShell 5.1 aliases `curl` to `Invoke-WebRequest`; there, type
 `curl.exe`.
 
-`bin/curl.py` calls `lib/curlshim`'s `main` with the launcher as its entry:
+`bin/curl.py` calls `lib/python/curlshim`'s `main` with the launcher as its entry:
 
 1. an `AGENTS_SYSHTTP_HOOKS_<KEY>_CURL` wrapper whose pattern matches the URL
    runs in curl's place;
@@ -93,7 +93,7 @@ resolves to one. They would parse the URL appended to them again, so its `&`
 or `;` would run the rest as a command. Use a `.py` or `.exe` wrapper.
 Messages never show a proxy's userinfo or credential.
 
-## certifi shim — `$NET_OVERLAY_ROOT/lib/certifi`
+## certifi shim — `$NET_OVERLAY_ROOT/lib/python/certifi`
 
 Not the real cert bundle, and never falls back to one: `certifi.where()` names a CA
 bundle FILE from the OS trust store —

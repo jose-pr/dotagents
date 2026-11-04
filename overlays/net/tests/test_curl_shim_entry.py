@@ -1,5 +1,5 @@
 """bin/curl.py, the script dotagents makes the `curl` launcher for (see
-test_curl_launcher.py), lib/curlshim behind it, and the one trap it has: once
+test_curl_launcher.py), lib/python/curlshim behind it, and the one trap it has: once
 the launcher and the overlay's bin/ are on PATH, "the real curl" must never
 resolve to the launcher.
 """
@@ -140,7 +140,7 @@ def test_the_launcher_puts_the_libs_on_pythonpath_for_what_it_starts(tmp_path):
 
     ov = tmp_path / "net"
     (ov / "bin").mkdir(parents=True)
-    shutil.copytree(BIN.parent / "lib", ov / "lib", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(BIN.parent / "lib" / "python", ov / "lib" / "python", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(BIN / "curl.py", ov / "bin" / "curl.py")
     other = tmp_path / "other-lib"
     other.mkdir()
@@ -159,5 +159,5 @@ def test_the_launcher_puts_the_libs_on_pythonpath_for_what_it_starts(tmp_path):
     [record] = fake_curl.records(log)
     assert record["argv"] == ["-s", "https://h/"]
     seen = [os.path.normcase(os.path.realpath(p)) for p in record["env"]["PYTHONPATH"].split(os.pathsep)]
-    want = [ov / "lib", other, fake_curl.HERE]
+    want = [ov / "lib" / "python", other, fake_curl.HERE]
     assert seen == [os.path.normcase(os.path.realpath(str(p))) for p in want]

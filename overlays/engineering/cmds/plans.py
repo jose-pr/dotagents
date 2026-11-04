@@ -65,9 +65,9 @@ from dotagents.cli import DotAgentsArgs
 
 
 def _load_model():
-    """The model beside this overlay's `lib/`, by path: the command works
+    """The model beside this overlay's `lib/python/`, by path: the command works
     whether or not that directory is on `sys.path`."""
-    path = Path(__file__).resolve().parents[1] / "lib" / "_plans.py"
+    path = Path(__file__).resolve().parents[1] / "lib" / "python" / "_plans.py"
     spec = importlib.util.spec_from_file_location("_dotagents_plans", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

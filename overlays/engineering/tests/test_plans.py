@@ -15,7 +15,7 @@ pytest.importorskip("dotagents")
 
 OVERLAY = Path(__file__).resolve().parents[1]
 MODULE = OVERLAY / "cmds" / "plans.py"
-_spec = importlib.util.spec_from_file_location("plans_model", OVERLAY / "lib" / "_plans.py")
+_spec = importlib.util.spec_from_file_location("plans_model", OVERLAY / "lib" / "python" / "_plans.py")
 plans = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(plans)
 
