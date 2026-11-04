@@ -1,1 +1,2 @@
 * text=auto eol=lf
+tests/aos_vectors/** -text

@@ -83,6 +83,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from dotagents._aos import valid_relpath
 from dotagents._overlays import Overlay
 
 
@@ -106,6 +107,8 @@ REGISTRY_FILE_SUFFIXES = (".json", ".toml", ".yaml", ".yml")
 REGISTRY_FILE_STEM = "dotagents"
 
 _GIT_PREFIXES = ("git@", "ssh://", "git://")
+#: The URL schemes a git location may use.
+_GIT_SCHEMES = ("https", "http", "ssh", "git", "file")
 
 
 class Spec(object):
@@ -170,14 +173,28 @@ def parse_spec(text: str) -> Spec:
         and (explicit_git or _is_git_location(head))
     ):
         location, ref = head, tail
+    if path is not None and not valid_relpath(path):
+        raise SourceError("error: overlay source %r: #%s is not a relative path" % (redact(text), path))
     if explicit_git or _is_git_location(location):
         # Passed to git as arguments: a leading `-` would be read as an option
         # (`@--upload-pack=<cmd>` ran <cmd>).
         for part, what in ((location, "location"), (ref, "ref")):
             if part and part.startswith("-"):
                 raise SourceError(
-                    "error: overlay source %r: the git %s must not start with '-'" % (text, what)
+                    "error: overlay source %r: the git %s must not start with '-'" % (redact(text), what)
                 )
+        # `<helper>::<address>` makes git run a remote helper program.
+        if "::" in location:
+            raise SourceError("error: overlay source %r: '::' (a git remote helper) is refused" % redact(text))
+        if "://" in location:
+            scheme, rest = location.split("://", 1)
+            if scheme.lower() not in _GIT_SCHEMES:
+                raise SourceError("error: overlay source %r: git over %s:// is refused" % (redact(text), scheme))
+            host = rest.split("/", 1)[0].rsplit("@", 1)[-1]
+        else:
+            host = location.split(":", 1)[0].rsplit("@", 1)[-1] if "@" in location else ""
+        if host.startswith("-"):
+            raise SourceError("error: overlay source %r: the host must not start with '-'" % redact(text))
         return Spec("git", location, ref, path)
     if "://" in location:
         return Spec("url", location, None, path)
@@ -359,14 +376,17 @@ class SourceCache(object):
         env = dict(os.environ)
         env["GIT_TERMINAL_PROMPT"] = "0"  # never hang on a credential prompt
         setting = ["-c", "http.schannelCheckRevoke=%s" % self.ssl_revoke]
+        # A checkout holds the blobs' bytes: what an overlay's tree digest is of.
+        exact = ["-c", "core.autocrlf=false", "-c", "core.symlinks=false"]
         try:
             proc = subprocess.run(
-                ["git", *setting, *args], cwd=str(cwd) if cwd else None, capture_output=True, text=True, env=env,
+                ["git", *setting, *exact, *args], cwd=str(cwd) if cwd else None, capture_output=True, text=True,
+                env=env,
             )
             if proc.returncode != 0 and _UNKNOWN_REVOKE_VALUE.search(proc.stderr or ""):
                 # An older git (no best-effort): its own default applies.
                 proc = subprocess.run(
-                    ["git", *args], cwd=str(cwd) if cwd else None, capture_output=True, text=True, env=env,
+                    ["git", *exact, *args], cwd=str(cwd) if cwd else None, capture_output=True, text=True, env=env,
                 )
         except OSError as exc:
             raise SourceError("error: git is needed for a git overlay source: %s" % exc)
@@ -403,7 +423,8 @@ class SourceCache(object):
             self._ensure_root()
             if self.logger:
                 self.logger.info("cloning %s", redact(spec.location))
-            self._git(["clone", "--quiet", "--", spec.location, str(dest)], None)
+            self._git(["clone", "--quiet", "--no-checkout", "--", spec.location, str(dest)], None)
+            self._exact_bytes(dest)
             if credentialed:
                 # Keep the credential out of the checkout's .git/config: fetch
                 # passes the full URL each time instead (see _fetch_args).
@@ -419,8 +440,49 @@ class SourceCache(object):
                     redact(spec.location), redact(proc.stderr.strip()),
                 )
             self._fresh.add(key)
+        if not self._exact_bytes(dest):
+            # Checked out before its attributes were set: every file again.
+            try:
+                (dest / ".git" / "index").unlink()
+            except OSError:
+                pass
+            self._git(["reset", "--quiet", "--hard"], dest, check=False)
         self._checkout_ref(dest, spec)
         return dest
+
+    #: ``.git/info/attributes`` of a checkout: no text, eol, filter, ident or
+    #: working-tree-encoding conversion, so its files are the blobs' bytes.
+    EXACT_ATTRIBUTES = "* -text -filter -ident -working-tree-encoding\n"
+
+    def _exact_bytes(self, dest: Path) -> bool:
+        """Make ``dest`` check out blobs unconverted; False when it did not before."""
+        info = dest / ".git" / "info" / "attributes"
+        try:
+            if info.read_text(encoding="utf-8") == self.EXACT_ATTRIBUTES:
+                return True
+        except OSError:
+            pass
+        info.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(info), "w", encoding="utf-8", newline="") as fh:
+            fh.write(self.EXACT_ATTRIBUTES)
+        return False
+
+    def special_entries(self, checkout: Path, subpath: "Optional[str]") -> "list[str]":
+        """The symbolic links and submodules of ``checkout``'s commit under
+        ``subpath``: an overlay holding one has no tree digest."""
+        args = ["ls-tree", "-r", "-z", "HEAD"] + (["--", subpath] if subpath else [])
+        proc = self._git(args, checkout, check=False)
+        out = []
+        for entry in proc.stdout.split("\0"):
+            meta, _tab, path = entry.partition("\t")
+            if meta.split(" ", 1)[0] in ("120000", "160000"):
+                out.append(path)
+        return out
+
+    def commit(self, checkout: Path) -> "Optional[str]":
+        """The commit ``checkout`` has checked out."""
+        proc = self._git(["rev-parse", "HEAD"], checkout, check=False)
+        return proc.stdout.strip() if proc.returncode == 0 else None
 
     @staticmethod
     def _fetch_args(spec: Spec, options: "list[str]", refspecs: "Optional[list[str]]" = None) -> "list[str]":
@@ -463,9 +525,8 @@ class SourceCache(object):
 # Registry documents
 # --------------------------------------------------------------------------
 
-def parse_document(text: str, suffix: str, origin: str) -> "dict[str, str]":
-    """The ``name -> spec`` mapping of a registry document (the whole document,
-    or its ``overlays`` key)."""
+def _loads(text: str, suffix: str, origin: str) -> "Any":
+    """A registry document's value, read by its file suffix."""
     suffix = suffix.lower()
     if suffix == ".json":
         loads, what, errors = json.loads, "JSON", (ValueError,)
@@ -494,17 +555,36 @@ def parse_document(text: str, suffix: str, origin: str) -> "dict[str, str]":
             "error: registry %s: unknown format %r (use .json, .toml, .yaml or .yml)" % (origin, suffix)
         )
     try:
-        doc = loads(text)
+        return loads(text)
     except errors as exc:
         raise SourceError("error: registry %s is not valid %s: %s" % (origin, what, redact(str(exc))))
+
+
+def load_document(path: Path) -> "dict[str, Any]":
+    """A local registry file's whole document ({} when it is not a mapping)."""
+    doc = _loads(_read_text(path, str(path)), path.suffix, str(path))
+    return doc if isinstance(doc, dict) else {}
+
+
+def parse_document(text: str, suffix: str, origin: str) -> "dict[str, str]":
+    """The ``name -> spec`` mapping of a registry document: the whole
+    document, or its ``overlays`` key, whose entries may also be tables with
+    a ``source`` and the store's own settings (:mod:`dotagents._policy`); a
+    table without one offers nothing."""
+    doc = _loads(text, suffix, origin)
     if isinstance(doc, dict) and isinstance(doc.get("overlays"), dict):
         doc = doc["overlays"]
     if not isinstance(doc, dict):
         raise SourceError("error: registry %s must be a mapping of overlay name -> source" % origin)
     entries: "dict[str, str]" = {}
     for key, value in doc.items():
+        if isinstance(value, dict):
+            if "source" not in value:
+                continue  # settings only (a pin, grants): no source offered
+            value = value["source"]
         if not isinstance(value, str) or not value.strip():
-            raise SourceError("error: registry %s: entry %r must be a source string" % (origin, key))
+            raise SourceError("error: registry %s: entry %r must be a source string, or a table "
+                              "with one" % (origin, key))
         entries[str(key)] = value.strip()
     return entries
 
@@ -634,7 +714,7 @@ class RegistryRepo(object):
         target = locate(spec, self.cache)
         if not target.is_dir():
             raise SourceError("error: registry %s: %r resolves to %s, not a directory" % (self.origin, key, spec.display()))
-        if not (target / "overlay.toml").is_file():
+        if not (target / Overlay.MANIFEST_NAME).is_file():
             # A directory of overlays named as an entry: the one called `name`
             # (any spelling that normalizes to it, as a DirRepo would find it).
             found = DirRepo(target)._lookup(name)

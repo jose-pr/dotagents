@@ -33,6 +33,8 @@ def test_every_git_call_carries_the_setting_best_effort_by_default(tmp_path, arg
     cache = _sources.SourceCache(tmp_path / "cache")
     cache._git(["ls-remote", "https://example.invalid/r.git"], None)
     assert argv[-1][:3] == ["git", "-c", "http.schannelCheckRevoke=best-effort"]
+    # Every checkout holds the blobs' bytes (an overlay's tree digest is of them).
+    assert argv[-1][3:7] == ["-c", "core.autocrlf=false", "-c", "core.symlinks=false"]
     _sources.SourceCache(tmp_path / "cache", ssl_revoke="false")._git(["fetch"], None)
     assert argv[-1][:3] == ["git", "-c", "http.schannelCheckRevoke=false"]
 
@@ -77,7 +79,8 @@ def test_a_git_without_best_effort_runs_again_without_it(tmp_path, monkeypatch):
     monkeypatch.setattr(_sources.subprocess, "run", run)
     proc = _sources.SourceCache(tmp_path)._git(["ls-remote", "https://example.invalid/r.git"], None)
     assert proc.returncode == 0 and len(seen) == 2
-    assert seen[1] == ["git", "ls-remote", "https://example.invalid/r.git"]
+    assert seen[1] == ["git", "-c", "core.autocrlf=false", "-c", "core.symlinks=false",
+                       "ls-remote", "https://example.invalid/r.git"]
 
 
 def test_any_other_failure_has_no_hint(tmp_path, monkeypatch):

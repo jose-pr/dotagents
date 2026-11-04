@@ -1,0 +1,498 @@
+{
+  "description": "Resolution and composition. 'overlays' maps identity to manifest; 'files' lists an overlay's files where skills are discovered. 'expect' gives the visiting order, the composition order and what the active overlays contribute, or the cycle; with 'facts', the environment they build together.",
+  "spec": "spec/v0/composition.md",
+  "cases": [
+    {
+      "id": "order-priority-name",
+      "description": "Ascending (priority, name, identity); requires does not change the order.",
+      "overlays": {
+        "engineering": {
+          "name": "engineering",
+          "routing": [
+            "- eng"
+          ]
+        },
+        "python": {
+          "requires": [
+            "engineering"
+          ],
+          "routing": [
+            "- py"
+          ],
+          "priority": 300
+        },
+        "team": {
+          "name": "Alpha",
+          "priority": 700,
+          "routing": [
+            "- team"
+          ],
+          "context": [
+            "CONTEXT.md"
+          ]
+        },
+        "zeta": {
+          "name": "",
+          "routing": [
+            "- zeta"
+          ]
+        }
+      },
+      "requested": [
+        "team",
+        "python",
+        "zeta"
+      ],
+      "expect": {
+        "install_order": [
+          "team",
+          "engineering",
+          "python",
+          "zeta"
+        ],
+        "active": [
+          "python",
+          "engineering",
+          "zeta",
+          "team"
+        ],
+        "missing": [],
+        "root_variables": {
+          "python": "PYTHON_OVERLAY_ROOT",
+          "engineering": "ENGINEERING_OVERLAY_ROOT",
+          "zeta": "ZETA_OVERLAY_ROOT",
+          "team": "TEAM_OVERLAY_ROOT"
+        },
+        "routing": [
+          "- py",
+          "- eng",
+          "- zeta",
+          "- team"
+        ],
+        "rules": [],
+        "context": [
+          [
+            "team",
+            "CONTEXT.md"
+          ]
+        ],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "name-tiebreak-code-points",
+      "description": "Names compare by code point: 'B' (42) sorts before 'a' (61); equal names fall back to identity.",
+      "overlays": {
+        "one": {
+          "name": "a"
+        },
+        "two": {
+          "name": "B"
+        },
+        "three": {
+          "name": "a"
+        }
+      },
+      "requested": [
+        "one",
+        "two",
+        "three"
+      ],
+      "expect": {
+        "install_order": [
+          "one",
+          "two",
+          "three"
+        ],
+        "active": [
+          "two",
+          "one",
+          "three"
+        ],
+        "missing": [],
+        "root_variables": {
+          "two": "TWO_OVERLAY_ROOT",
+          "one": "ONE_OVERLAY_ROOT",
+          "three": "THREE_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "name-scalar-order",
+      "description": "Names compare by Unicode scalar value: U+FFFD before U+1F600, the reverse of UTF-16 code units.",
+      "overlays": {
+        "emoji": {
+          "name": "😀"
+        },
+        "replacement": {
+          "name": "�"
+        }
+      },
+      "requested": [
+        "emoji",
+        "replacement"
+      ],
+      "expect": {
+        "install_order": [
+          "emoji",
+          "replacement"
+        ],
+        "active": [
+          "replacement",
+          "emoji"
+        ],
+        "missing": [],
+        "root_variables": {
+          "replacement": "REPLACEMENT_OVERLAY_ROOT",
+          "emoji": "EMOJI_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "requires-normalized",
+      "description": "Requirements are normalized; each overlay is active once.",
+      "overlays": {
+        "team-review": {
+          "requires": [
+            "Engineering_Base"
+          ]
+        },
+        "engineering-base": {},
+        "other": {
+          "requires": [
+            "team.review"
+          ]
+        }
+      },
+      "requested": [
+        "other",
+        "team-review"
+      ],
+      "expect": {
+        "install_order": [
+          "engineering-base",
+          "team-review",
+          "other"
+        ],
+        "active": [
+          "engineering-base",
+          "other",
+          "team-review"
+        ],
+        "missing": [],
+        "root_variables": {
+          "engineering-base": "ENGINEERING_BASE_OVERLAY_ROOT",
+          "other": "OTHER_OVERLAY_ROOT",
+          "team-review": "TEAM_REVIEW_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "missing",
+      "description": "A requirement no source offers is reported with the overlay that requires it.",
+      "overlays": {
+        "rust": {
+          "requires": [
+            "engineering",
+            "toolchain"
+          ]
+        },
+        "engineering": {}
+      },
+      "requested": [
+        "rust",
+        "absent"
+      ],
+      "expect": {
+        "install_order": [
+          "engineering",
+          "rust"
+        ],
+        "active": [
+          "engineering",
+          "rust"
+        ],
+        "missing": [
+          [
+            "rust",
+            "toolchain"
+          ],
+          [
+            "",
+            "absent"
+          ]
+        ],
+        "root_variables": {
+          "engineering": "ENGINEERING_OVERLAY_ROOT",
+          "rust": "RUST_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "cycle",
+      "description": "A cycle is an error naming the chain.",
+      "overlays": {
+        "a": {
+          "requires": [
+            "b"
+          ]
+        },
+        "b": {
+          "requires": [
+            "c"
+          ]
+        },
+        "c": {
+          "requires": [
+            "a"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "expect": {
+        "error": "cycle",
+        "chain": [
+          "a",
+          "b",
+          "c",
+          "a"
+        ]
+      }
+    },
+    {
+      "id": "self-cycle",
+      "description": "An overlay that requires itself.",
+      "overlays": {
+        "a": {
+          "requires": [
+            "a"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "expect": {
+        "error": "cycle",
+        "chain": [
+          "a",
+          "a"
+        ]
+      }
+    },
+    {
+      "id": "skills",
+      "description": "Declared skills, discovered skills, and collisions (names compare without ASCII case) won by the overlay later in order.",
+      "overlays": {
+        "base": {
+          "priority": 100
+        },
+        "docs": {
+          "skills": [
+            "search",
+            "Lint"
+          ],
+          "priority": 600
+        },
+        "extra": {
+          "skills": []
+        }
+      },
+      "requested": [
+        "base",
+        "docs",
+        "extra"
+      ],
+      "files": {
+        "base": [
+          "skills/search/SKILL.md",
+          "skills/lint/SKILL.md",
+          "skills/README.md"
+        ],
+        "docs": [
+          "skills/search/SKILL.md",
+          "skills/Lint/SKILL.md"
+        ],
+        "extra": [
+          "skills/hidden/SKILL.md"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "base",
+          "docs",
+          "extra"
+        ],
+        "active": [
+          "base",
+          "extra",
+          "docs"
+        ],
+        "missing": [],
+        "root_variables": {
+          "base": "BASE_OVERLAY_ROOT",
+          "extra": "EXTRA_OVERLAY_ROOT",
+          "docs": "DOCS_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {
+          "Lint": "docs",
+          "search": "docs"
+        },
+        "skill_collisions": [
+          "lint",
+          "search"
+        ]
+      }
+    },
+    {
+      "id": "env-across-overlays",
+      "description": "Root variables first; then each overlay's env and paths in order: the later overlay wins and its prepends come first.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "MODE": "low",
+            "ONLY_LOW": "1"
+          },
+          "paths": [
+            {
+              "variable": "PATH",
+              "path": "bin"
+            }
+          ]
+        },
+        "high": {
+          "priority": 900,
+          "env": {
+            "MODE": "high",
+            "LOW_ROOT_SEEN": {
+              "value": "x",
+              "if_unset": true
+            }
+          },
+          "paths": [
+            {
+              "variable": "PATH",
+              "path": "bin"
+            },
+            {
+              "variable": "PATH",
+              "path": "tools",
+              "position": "append"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {
+          "PATH": "/usr/bin:/bin"
+        },
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "PATH": "/ov/high/bin:/ov/low/bin:/usr/bin:/bin:/ov/high/tools",
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "MODE": "high",
+          "ONLY_LOW": "1",
+          "LOW_ROOT_SEEN": "x"
+        }
+      }
+    },
+    {
+      "id": "env-across-overlays-windows",
+      "description": "The same on Windows: ';', backslashes, and names without regard to case.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "MODE": "low"
+          },
+          "paths": [
+            {
+              "variable": "PATH",
+              "path": "bin"
+            }
+          ]
+        },
+        "high": {
+          "priority": 900,
+          "env": {
+            "mode": "high"
+          },
+          "paths": [
+            {
+              "variable": "Path",
+              "path": "bin"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "low",
+        "high"
+      ],
+      "facts": {
+        "os": "windows",
+        "base_env": {
+          "Path": "C:\\Windows;C:\\Windows\\System32"
+        },
+        "roots": {
+          "low": "C:\\ov\\low",
+          "high": "C:\\ov\\high"
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "Path": "C:\\ov\\high\\bin;C:\\ov\\low\\bin;C:\\Windows;C:\\Windows\\System32",
+          "LOW_OVERLAY_ROOT": "C:\\ov\\low",
+          "HIGH_OVERLAY_ROOT": "C:\\ov\\high",
+          "MODE": "high"
+        }
+      }
+    }
+  ]
+}

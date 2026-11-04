@@ -1,0 +1,1493 @@
+{
+  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (env file contents), providers, env_scripts_enabled, enforces_network. 'expect' gives the resulting environment, the selected setup and runtime variants, what a probe needs, and the weakenings as [id, subject]; or the refusal.",
+  "spec": "spec/v0/environment.md#order-of-application",
+  "cases": [
+    {
+      "id": "bare",
+      "description": "No manifest: only the root variable; unpinned is reported.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": false
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "unpinned",
+            ""
+          ]
+        ]
+      }
+    },
+    {
+      "id": "environment-linux",
+      "description": "Env files, env and paths in order on Linux; host and named secrets resolve.",
+      "manifest": {
+        "env_files": [
+          "env/defaults.cfg",
+          {
+            "path": "env/windows.cfg",
+            "os": [
+              "windows"
+            ]
+          },
+          {
+            "path": "env/banner.env",
+            "format": "dotenv"
+          }
+        ],
+        "env": {
+          "TOOL_CONFIG": {
+            "path": "conf/tool.toml"
+          },
+          "SYSHTTP_PREFIX": {
+            "value": "AGENTS_",
+            "if_unset": true
+          },
+          "DOCS_TOKEN": {
+            "provider": "env",
+            "key": "DOCS_TOKEN",
+            "optional": true
+          },
+          "RELEASE_KEY": {
+            "secret": "docs-release-key",
+            "optional": true
+          },
+          "TOOL_MODE": "strict"
+        },
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "bin"
+          },
+          {
+            "variable": "PYTHONPATH",
+            "path": "lib",
+            "position": "append"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/defaults.cfg": "#!toml\nTOOL_MODE = \"read-only\"\nTOOL_CACHE = { value = \"off\", if_unset = true }\n",
+          "env/windows.cfg": "#!json\n{\"TOOL_SHELL\": \"pwsh\"}\n",
+          "env/banner.env": "TOOL_BANNER=\"Docs: read only\"\nexport TOOL_LOCALE=en\n"
+        },
+        "base_env": {
+          "PATH": "/usr/bin::/bin:/srv/ov/docs-tools/bin",
+          "SYSHTTP_PREFIX": "MINE_",
+          "TOOL_CACHE": "on"
+        },
+        "host_env": {
+          "DOCS_TOKEN": "t0ken"
+        },
+        "secrets": {
+          "docs-release-key": "k3y"
+        },
+        "grants": {
+          "env": [
+            "DOCS_TOKEN"
+          ],
+          "secret": [
+            "docs-release-key"
+          ]
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/srv/ov/docs-tools/bin:/usr/bin:/bin",
+          "SYSHTTP_PREFIX": "MINE_",
+          "TOOL_CACHE": "on",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "TOOL_MODE": "strict",
+          "TOOL_BANNER": "Docs: read only",
+          "TOOL_LOCALE": "en",
+          "TOOL_CONFIG": "/srv/ov/docs-tools/conf/tool.toml",
+          "DOCS_TOKEN": "t0ken",
+          "RELEASE_KEY": "k3y",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-passthrough",
+            "DOCS_TOKEN"
+          ],
+          [
+            "secret-read",
+            "secret:docs-release-key"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "environment-windows",
+      "description": "The same overlay on Windows: the windows env file applies, ';' and '\\', names without case.",
+      "manifest": {
+        "env_files": [
+          "env/defaults.cfg",
+          {
+            "path": "env/windows.cfg",
+            "os": [
+              "windows"
+            ]
+          },
+          {
+            "path": "env/banner.env",
+            "format": "dotenv"
+          }
+        ],
+        "env": {
+          "TOOL_CONFIG": {
+            "path": "conf/tool.toml"
+          },
+          "SYSHTTP_PREFIX": {
+            "value": "AGENTS_",
+            "if_unset": true
+          },
+          "DOCS_TOKEN": {
+            "provider": "env",
+            "key": "DOCS_TOKEN",
+            "optional": true
+          },
+          "RELEASE_KEY": {
+            "secret": "docs-release-key",
+            "optional": true
+          },
+          "TOOL_MODE": "strict"
+        },
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "bin"
+          },
+          {
+            "variable": "PYTHONPATH",
+            "path": "lib",
+            "position": "append"
+          }
+        ]
+      },
+      "facts": {
+        "os": "windows",
+        "root": "C:\\ov\\docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/defaults.cfg": "#!toml\nTOOL_MODE = \"read-only\"\nTOOL_CACHE = { value = \"off\", if_unset = true }\n",
+          "env/windows.cfg": "#!json\n{\"TOOL_SHELL\": \"pwsh\"}\n",
+          "env/banner.env": "TOOL_BANNER=\"Docs: read only\"\nexport TOOL_LOCALE=en\n"
+        },
+        "base_env": {
+          "Path": "C:\\Windows",
+          "syshttp_prefix": "MINE_"
+        },
+        "host_env": {
+          "docs_token": "t0ken"
+        },
+        "grants": {
+          "env": [
+            "DOCS_TOKEN"
+          ]
+        }
+      },
+      "expect": {
+        "ungranted": [
+          "secret:docs-release-key"
+        ],
+        "supported": true,
+        "env": {
+          "Path": "C:\\ov\\docs-tools\\bin;C:\\Windows",
+          "syshttp_prefix": "MINE_",
+          "DOCS_TOOLS_OVERLAY_ROOT": "C:\\ov\\docs-tools",
+          "TOOL_MODE": "strict",
+          "TOOL_CACHE": "off",
+          "TOOL_SHELL": "pwsh",
+          "TOOL_BANNER": "Docs: read only",
+          "TOOL_LOCALE": "en",
+          "TOOL_CONFIG": "C:\\ov\\docs-tools\\conf\\tool.toml",
+          "DOCS_TOKEN": "t0ken",
+          "PYTHONPATH": "C:\\ov\\docs-tools\\lib"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-passthrough",
+            "DOCS_TOKEN"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "ungranted",
+      "description": "Nothing granted: an optional reference stays unset and is listed; the host value is never read.",
+      "manifest": {
+        "env_files": [
+          "env/defaults.cfg",
+          {
+            "path": "env/windows.cfg",
+            "os": [
+              "windows"
+            ]
+          },
+          {
+            "path": "env/banner.env",
+            "format": "dotenv"
+          }
+        ],
+        "env": {
+          "TOOL_CONFIG": {
+            "path": "conf/tool.toml"
+          },
+          "SYSHTTP_PREFIX": {
+            "value": "AGENTS_",
+            "if_unset": true
+          },
+          "DOCS_TOKEN": {
+            "provider": "env",
+            "key": "DOCS_TOKEN",
+            "optional": true
+          },
+          "RELEASE_KEY": {
+            "secret": "docs-release-key",
+            "optional": true
+          },
+          "TOOL_MODE": "strict"
+        },
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "bin"
+          },
+          {
+            "variable": "PYTHONPATH",
+            "path": "lib",
+            "position": "append"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/defaults.cfg": "#!toml\nTOOL_MODE = \"read-only\"\nTOOL_CACHE = { value = \"off\", if_unset = true }\n",
+          "env/windows.cfg": "#!json\n{\"TOOL_SHELL\": \"pwsh\"}\n",
+          "env/banner.env": "TOOL_BANNER=\"Docs: read only\"\nexport TOOL_LOCALE=en\n"
+        },
+        "host_env": {
+          "DOCS_TOKEN": "t0ken"
+        },
+        "secrets": {
+          "docs-release-key": "k3y"
+        }
+      },
+      "expect": {
+        "ungranted": [
+          "env:DOCS_TOKEN",
+          "secret:docs-release-key"
+        ],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "TOOL_MODE": "strict",
+          "TOOL_CACHE": "off",
+          "TOOL_BANNER": "Docs: read only",
+          "TOOL_LOCALE": "en",
+          "TOOL_CONFIG": "/srv/ov/docs-tools/conf/tool.toml",
+          "SYSHTTP_PREFIX": "AGENTS_",
+          "PATH": "/srv/ov/docs-tools/bin",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "ungranted-required",
+      "description": "A required reference that is not granted cannot be resolved.",
+      "manifest": {
+        "env": {
+          "KEY": {
+            "secret": "deploy-key"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secrets": {
+          "deploy-key": "k"
+        }
+      },
+      "expect": {
+        "error": "unresolved-reference",
+        "subject": "KEY"
+      }
+    },
+    {
+      "id": "optional-unresolved",
+      "description": "Optional references that cannot be resolved leave the variable unset.",
+      "manifest": {
+        "env": {
+          "A": {
+            "provider": "env",
+            "key": "ABSENT",
+            "optional": true
+          },
+          "B": {
+            "secret": "absent",
+            "optional": true
+          },
+          "C": {
+            "provider": "vault",
+            "key": "k",
+            "optional": true
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "ungranted": [
+          "env:ABSENT",
+          "secret:absent",
+          "vault:k"
+        ],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "unresolved",
+      "description": "A reference that cannot be resolved refuses, naming the variable.",
+      "manifest": {
+        "env": {
+          "A": "x",
+          "TOKEN": {
+            "provider": "env",
+            "key": "ABSENT"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "error": "unresolved-reference",
+        "subject": "TOKEN"
+      }
+    },
+    {
+      "id": "unknown-provider",
+      "description": "A provider the consumer does not have cannot be resolved.",
+      "manifest": {
+        "env": {
+          "V": {
+            "provider": "vault",
+            "key": "k"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "error": "unresolved-reference",
+        "subject": "V"
+      }
+    },
+    {
+      "id": "file-provider",
+      "description": "The file provider removes one trailing line feed.",
+      "manifest": {
+        "env": {
+          "A": {
+            "provider": "file",
+            "key": "keys/a"
+          },
+          "B": {
+            "provider": "file",
+            "key": "keys/b"
+          },
+          "C": {
+            "provider": "file",
+            "key": "c"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {
+          "keys/a": "alpha\n",
+          "keys/b": "beta\r\n\n",
+          "c": "gamma"
+        },
+        "grants": {
+          "file": [
+            "keys/a",
+            "keys/b",
+            "c"
+          ]
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "A": "alpha",
+          "B": "beta\r\n",
+          "C": "gamma"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "secret-read",
+            "file:c"
+          ],
+          [
+            "secret-read",
+            "file:keys/a"
+          ],
+          [
+            "secret-read",
+            "file:keys/b"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "file-provider-escape",
+      "description": "A file key that is not a relative path is refused.",
+      "manifest": {
+        "env": {
+          "A": {
+            "provider": "file",
+            "key": "../etc/passwd"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "../etc/passwd"
+      }
+    },
+    {
+      "id": "file-provider-no-dir",
+      "description": "With no secrets directory a file reference cannot be resolved.",
+      "manifest": {
+        "env": {
+          "A": {
+            "provider": "file",
+            "key": "a"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "error": "unresolved-reference",
+        "subject": "A"
+      }
+    },
+    {
+      "id": "if-unset-empty",
+      "description": "An empty value is a value: if_unset keeps it.",
+      "manifest": {
+        "env": {
+          "A": {
+            "value": "x",
+            "if_unset": true
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "base_env": {
+          "A": ""
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "A": "",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "sensitive",
+      "description": "Setting a sensitive variable through env is reported; a path addition to PATH or PYTHONPATH is not.",
+      "manifest": {
+        "env": {
+          "LD_PRELOAD": "/x.so",
+          "https_proxy": "http://p",
+          "OPENAI_BASE_URL": "http://x",
+          "GIT_CONFIG_COUNT": "1",
+          "SAFE": "1"
+        },
+        "paths": [
+          {
+            "variable": "PYTHONPATH",
+            "path": "lib"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "LD_PRELOAD": "/x.so",
+          "https_proxy": "http://p",
+          "OPENAI_BASE_URL": "http://x",
+          "GIT_CONFIG_COUNT": "1",
+          "SAFE": "1",
+          "PYTHONPATH": "/srv/ov/docs-tools/lib"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-sensitive",
+            "GIT_CONFIG_COUNT"
+          ],
+          [
+            "env-sensitive",
+            "LD_PRELOAD"
+          ],
+          [
+            "env-sensitive",
+            "OPENAI_BASE_URL"
+          ],
+          [
+            "env-sensitive",
+            "https_proxy"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "sensitive-path-addition",
+      "description": "A path addition to any other sensitive variable is reported.",
+      "manifest": {
+        "paths": [
+          {
+            "variable": "LD_LIBRARY_PATH",
+            "path": "lib"
+          },
+          {
+            "variable": "PSModulePath",
+            "path": "ps"
+          },
+          {
+            "variable": "MANPATH",
+            "path": "man"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "LD_LIBRARY_PATH": "/srv/ov/docs-tools/lib",
+          "PSModulePath": "/srv/ov/docs-tools/ps",
+          "MANPATH": "/srv/ov/docs-tools/man"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-sensitive",
+            "LD_LIBRARY_PATH"
+          ],
+          [
+            "env-sensitive",
+            "PSModulePath"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "env-file-reserved",
+      "description": "An env file cannot set a reserved variable.",
+      "manifest": {
+        "env_files": [
+          "env/a.cfg"
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/a.cfg": "ENGINEERING_OVERLAY_ROOT = \"/tmp/fake\"\n"
+        }
+      },
+      "expect": {
+        "error": "invalid-env-file",
+        "subject": "env/a.cfg"
+      }
+    },
+    {
+      "id": "env-file-path-conflict",
+      "description": "An env file cannot set a variable the overlay's paths name.",
+      "manifest": {
+        "env_files": [
+          {
+            "path": "env/a.env",
+            "format": "dotenv"
+          }
+        ],
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "bin"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/a.env": "PATH=/tmp\n"
+        }
+      },
+      "expect": {
+        "error": "env-path-conflict",
+        "subject": "PATH"
+      }
+    },
+    {
+      "id": "paths-order",
+      "description": "Prepends in order, existing components without duplicates or empties, appends in order; a repeated entry counts once.",
+      "manifest": {
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "a"
+          },
+          {
+            "variable": "PATH",
+            "path": "b"
+          },
+          {
+            "variable": "PATH",
+            "path": "z",
+            "position": "append"
+          },
+          {
+            "variable": "PATH",
+            "path": "a"
+          },
+          {
+            "variable": "MANPATH",
+            "path": "man",
+            "position": "append"
+          },
+          {
+            "variable": "PATH",
+            "path": "w",
+            "os": [
+              "windows"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "base_env": {
+          "PATH": ":/usr/bin:/srv/ov/docs-tools/z::/srv/ov/docs-tools/a"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "PATH": "/srv/ov/docs-tools/a:/srv/ov/docs-tools/b:/usr/bin:/srv/ov/docs-tools/z",
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "MANPATH": "/srv/ov/docs-tools/man"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "setup-variants",
+      "description": "The first variant whose os matches; defaults filled in; network and no timeout reported.",
+      "manifest": {
+        "setup": [
+          {
+            "os": [
+              "windows"
+            ],
+            "interpreter": "powershell",
+            "path": "s/w.ps1"
+          },
+          {
+            "os": [
+              "unix"
+            ],
+            "interpreter": "sh",
+            "path": "s/u.sh",
+            "network": true,
+            "timeout": 0
+          },
+          {
+            "interpreter": "python",
+            "path": "s/any.py"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "s/u.sh",
+          "args": [],
+          "timeout": 0,
+          "network": true
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "no-timeout",
+            "s/u.sh"
+          ],
+          [
+            "setup-network",
+            "s/u.sh"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "setup-network-not-enforced",
+      "description": "No network declared, and the consumer cannot deny it.",
+      "manifest": {
+        "setup": [
+          {
+            "interpreter": "python",
+            "path": "s/any.py"
+          }
+        ]
+      },
+      "facts": {
+        "os": "windows",
+        "root": "C:\\ov\\docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "enforces_network": false
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "C:\\ov\\docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "python",
+          "path": "s/any.py",
+          "args": [],
+          "timeout": 300,
+          "network": false
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "network-not-enforced",
+            "s/any.py"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "state-directory",
+      "description": "With a state directory, its variable is set beside the root's.",
+      "manifest": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "s.sh"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "state": "/var/lib/consumer/state/docs-tools"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "DOCS_TOOLS_OVERLAY_STATE": "/var/lib/consumer/state/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "s.sh",
+          "args": [],
+          "timeout": 300,
+          "network": false
+        },
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "setup-none-for-os",
+      "description": "No variant matches: no setup on this OS.",
+      "manifest": {
+        "setup": [
+          {
+            "os": [
+              "windows"
+            ],
+            "interpreter": "powershell",
+            "path": "s/w.ps1"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "runtime",
+      "description": "Runtime variant selection, needs and unlocked dependencies.",
+      "manifest": {
+        "runtime": {
+          "os": [
+            "linux",
+            "windows"
+          ],
+          "commands": [
+            "git",
+            {
+              "name": "gh",
+              "os": [
+                "macos"
+              ]
+            },
+            {
+              "name": "bash",
+              "os": [
+                "unix"
+              ]
+            }
+          ],
+          "python": [
+            {
+              "os": [
+                "windows"
+              ],
+              "version": "3.11",
+              "lock": "l/w.txt"
+            },
+            {
+              "version": "3.9",
+              "requirements": "requirements.txt"
+            }
+          ],
+          "node": [
+            {
+              "version": "20"
+            }
+          ]
+        },
+        "scripts": {
+          "a": "bin/a.ps1",
+          "b": {
+            "path": "bin/b",
+            "interpreter": "bash",
+            "os": [
+              "unix"
+            ]
+          },
+          "c": false
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": {
+          "version": "3.9",
+          "requirements": "requirements.txt"
+        },
+        "node": {
+          "version": "20"
+        },
+        "needs": {
+          "interpreters": [
+            "bash",
+            "node",
+            "powershell",
+            "python"
+          ],
+          "commands": [
+            "bash",
+            "git"
+          ]
+        },
+        "weakenings": [
+          [
+            "unlocked-dependencies",
+            "requirements.txt"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "runtime-unsupported-os",
+      "description": "An OS outside runtime.os.",
+      "manifest": {
+        "runtime": {
+          "os": [
+            "windows"
+          ]
+        }
+      },
+      "facts": {
+        "os": "macos",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": false,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "env-scripts-disabled",
+      "description": "Env scripts run only when enabled; disabled, nothing is reported or needed.",
+      "manifest": {
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env/a.py"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    },
+    {
+      "id": "env-scripts-enabled",
+      "description": "Enabled: each script for this OS, with defaults, reported.",
+      "manifest": {
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env/a.py"
+          },
+          {
+            "interpreter": "bash",
+            "path": "env/b.sh",
+            "timeout": 0,
+            "os": [
+              "unix"
+            ]
+          },
+          {
+            "interpreter": "powershell",
+            "path": "env/c.ps1",
+            "os": [
+              "windows"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "env_scripts_enabled": true
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env/a.py",
+            "args": [],
+            "timeout": 60
+          },
+          {
+            "interpreter": "bash",
+            "path": "env/b.sh",
+            "args": [],
+            "timeout": 0
+          }
+        ],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [
+            "bash",
+            "python"
+          ],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-script",
+            "env/a.py"
+          ],
+          [
+            "env-script",
+            "env/b.sh"
+          ],
+          [
+            "no-timeout",
+            "env/b.sh"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "mcp-passthrough",
+      "description": "MCP servers that read the host environment and secrets: granted ones are reported, the rest listed as not granted; plain http to a remote host is reported.",
+      "manifest": {
+        "mcp": {
+          "servers": [
+            {
+              "name": "s",
+              "transport": "stdio",
+              "command": "node",
+              "env": {
+                "A": "x",
+                "T": {
+                  "provider": "env",
+                  "key": "HOST_T"
+                },
+                "K": {
+                  "secret": "api-key"
+                }
+              },
+              "env_passthrough": [
+                "HOME_DIR"
+              ]
+            },
+            {
+              "name": "r",
+              "transport": "streamable-http",
+              "url": "https://h.example/x",
+              "headers_env": {
+                "Authorization": "AUTH"
+              }
+            },
+            {
+              "name": "plain",
+              "transport": "streamable-http",
+              "url": "http://h.example:8080/x"
+            },
+            {
+              "name": "local",
+              "transport": "streamable-http",
+              "url": "http://127.0.0.1:9000/x"
+            }
+          ]
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "grants": {
+          "env": [
+            "HOST_T",
+            "HOME_DIR"
+          ],
+          "secret": [
+            "api-key"
+          ]
+        }
+      },
+      "expect": {
+        "ungranted": [
+          "env:AUTH"
+        ],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": [
+          [
+            "env-passthrough",
+            "HOME_DIR"
+          ],
+          [
+            "env-passthrough",
+            "HOST_T"
+          ],
+          [
+            "insecure-transport",
+            "plain"
+          ],
+          [
+            "secret-read",
+            "secret:api-key"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "missing-env-file",
+      "description": "A listed env file that does not exist.",
+      "manifest": {
+        "env_files": [
+          "env/absent.cfg"
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "error": "missing-file",
+        "subject": "env/absent.cfg"
+      }
+    },
+    {
+      "id": "invalid-env-file",
+      "description": "An env file whose values are not env values.",
+      "manifest": {
+        "env_files": [
+          "env/bad.cfg"
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/bad.cfg": "A = 3\n"
+        }
+      },
+      "expect": {
+        "error": "invalid-env-file",
+        "subject": "env/bad.cfg"
+      }
+    },
+    {
+      "id": "unreadable-env-file",
+      "description": "An env file that does not read as its format.",
+      "manifest": {
+        "env_files": [
+          {
+            "path": "env/bad.env",
+            "format": "dotenv"
+          },
+          "env/bad.cfg"
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/bad.env": "not a line\n",
+          "env/bad.cfg": "A = 'x'\n"
+        }
+      },
+      "expect": {
+        "error": "invalid-env-file",
+        "subject": "env/bad.env"
+      }
+    },
+    {
+      "id": "env-file-format-line",
+      "description": "An aos env file names its own format.",
+      "manifest": {
+        "env_files": [
+          "env/a.cfg"
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/a.cfg": "#!json\n{\"A\": {\"value\": \"x\"}, \"B\": {\"path\": \"p\"}}\n"
+        }
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "A": "x",
+          "B": "/srv/ov/docs-tools/p"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "weakenings": []
+      }
+    }
+  ]
+}
