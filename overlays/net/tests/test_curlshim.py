@@ -379,6 +379,30 @@ def test_the_agents_no_proxy_keeps_the_configured_proxy_off_a_group(fake, monkey
     ]
 
 
+def test_the_agents_no_proxy_outranks_curls_own_variables(fake, monkeypatch):
+    """With nothing added, curl would read its own HTTPS_PROXY and not go direct."""
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("HTTPS_PROXY", "http://global.example:3128")
+    monkeypatch.setenv("AGENTS_NO_PROXY", "internal.example")
+    fake.main(["https://api.internal.example/health"])
+    assert fake.argv() == ["--noproxy", "api.internal.example", "https://api.internal.example/health"]
+
+
+@pytest.mark.parametrize(
+    "urls",
+    [
+        ["https://api.internal.example/", "https://api.example.com/"],
+        ["https://api.example.com/", "https://api.internal.example/"],
+        ["--url", "https://api.internal.example/", "--url", "https://api.example.com/"],
+    ],
+)
+def test_the_agents_no_proxy_holds_for_each_url_of_a_group(urls, fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_NO_PROXY", "internal.example")
+    fake.main(urls)
+    assert fake.argv() == ["--proxy", "http://proxy.example:3128", "--noproxy", "api.internal.example", *urls]
+
+
 def test_the_callers_u_keeps_the_agent_proxy_without_its_credential(fake, monkeypatch):
     _agent_proxy(monkeypatch)
     fake.main(["-U", "me:pw", "https://api.example.com/"])
@@ -486,6 +510,352 @@ def test_exit_7_when_no_system_proxy_answers(fake, monkeypatch, capsys):
     assert capsys.readouterr().err.startswith(
         "curl: (7) no proxy of the list is reachable: 127.0.0.1:%d, 127.0.0.1:%d" % (first, second)
     )
+
+
+# --------------------------------------------------------------------------
+# the CA bundle, for a proxy that terminates TLS
+# --------------------------------------------------------------------------
+
+
+def test_the_proxy_ca_goes_in_the_config_file(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_PROXY_CA", "/ca/union.pem")
+    fake.main(["-s", "https://api.example.com/"])
+    assert fake.argv() == ["--proxy", "http://proxy.example:3128", "-K", "<K>", "-s", "https://api.example.com/"]
+    assert fake.runs()[-1]["config"] == ['cacert = "/ca/union.pem"\n']
+
+
+def test_the_credential_and_the_ca_share_the_config_file(fake, monkeypatch):
+    _agent_proxy(monkeypatch)
+    monkeypatch.setenv("AGENTS_PROXY_CA", "C:\\ca\\union.pem")
+    fake.main(["https://api.example.com/"])
+    assert fake.runs()[-1]["config"] == [
+        'proxy-header = "Proxy-Authorization: %s"\ncacert = "C:\\\\ca\\\\union.pem"\n' % BEARER
+    ]
+
+
+def test_the_ca_bundle_serves_and_the_proxy_ca_comes_first(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_CA_BUNDLE", "/ca/bundle.pem")
+    fake.main(["https://api.example.com/"])
+    assert fake.runs()[-1]["config"] == ['cacert = "/ca/bundle.pem"\n']
+    monkeypatch.setenv("AGENTS_PROXY_CA", "/ca/union.pem")
+    fake.main(["https://api.example.com/"])
+    assert fake.runs()[-1]["config"] == ['cacert = "/ca/union.pem"\n']
+
+
+def test_the_callers_u_still_gets_the_ca(fake, monkeypatch):
+    _agent_proxy(monkeypatch)
+    monkeypatch.setenv("AGENTS_PROXY_CA", "/ca/union.pem")
+    fake.main(["-U", "me:pw", "https://api.example.com/"])
+    assert fake.runs()[-1]["config"] == ['cacert = "/ca/union.pem"\n']
+
+
+@pytest.mark.parametrize(
+    "steer",
+    [
+        ["-k"],
+        ["--insecure"],
+        ["-sk"],
+        ["--cacert", "mine.pem"],
+        ["--capath", "mine"],
+        ["--ca-native"],
+        ["--expand-cacert", "mine.pem"],
+    ],
+)
+def test_a_group_that_steers_tls_gets_no_ca(steer, fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_PROXY_CA", "/ca/union.pem")
+    fake.main([*steer, "https://api.example.com/"])
+    assert fake.argv() == ["--proxy", "http://proxy.example:3128", *steer, "https://api.example.com/"]
+
+
+def test_a_config_file_of_the_callers_gets_neither_proxy_nor_ca(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_PROXY_CA", "/ca/union.pem")
+    fake.main(["-K", "mine.curlrc", "https://api.example.com/"])
+    assert fake.argv() == ["-K", "mine.curlrc", "https://api.example.com/"]
+
+
+@pytest.mark.parametrize("argv", [["-d", "-k"], ["-H", "--insecure"], ["-o", "--cacert"], ["--no-insecure"]])
+def test_an_option_value_is_not_steering_tls(argv, fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_PROXY_CA", "/ca/union.pem")
+    fake.main([*argv, "https://api.example.com/"])
+    assert fake.runs()[-1]["config"] == ['cacert = "/ca/union.pem"\n']
+
+
+def test_each_next_group_decides_for_itself(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_PROXY_CA", "/ca/union.pem")
+    fake.main(["-k", "https://a.example/", "--next", "https://b.example/"])
+    proxy = ["--proxy", "http://proxy.example:3128"]
+    assert fake.argv() == [*proxy, "-k", "https://a.example/", "--next", *proxy, "-K", "<K>", "https://b.example/"]
+    assert fake.runs()[-1]["config"] == ['cacert = "/ca/union.pem"\n']
+
+
+def test_no_proxy_injected_means_no_ca(fake, monkeypatch):
+    monkeypatch.setenv("AGENTS_PROXY_CA", "/ca/union.pem")
+    fake.main(["https://api.example.com/"])
+    assert fake.argv() == ["https://api.example.com/"]
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_NO_PROXY", "example.com")
+    fake.main(["https://api.example.com/"])
+    assert fake.argv() == ["https://api.example.com/"] and fake.runs()[-1]["config"] == []
+    fake.main(["-x", "http://mine:1", "https://other.example/"])
+    assert fake.argv() == ["-x", "http://mine:1", "https://other.example/"]
+
+
+# --------------------------------------------------------------------------
+# a proxy curl cannot use: the settings once more
+# --------------------------------------------------------------------------
+
+NEW_PROXY = "http://restarted.example:3128"
+NEW_BEARER = "Bearer eyJuZXciOiAidG9rZW4ifQ"
+
+
+def _dotagents(fake, settings):
+    """A ``dotagents`` beside the fake curl whose ``env`` prints ``settings``: a
+    mapping as JSON, a string as it is; exit 3 for ``None``. The fake curl's
+    directory is all of PATH, so the POSIX script uses shell builtins only."""
+    payload = fake.dir / "env.json"
+    if settings is not None:
+        payload.write_text(settings if isinstance(settings, str) else json.dumps(settings), encoding="utf-8")
+    if os.name == "nt":
+        body = "@exit /b 3\n" if settings is None else '@type "%s"\n' % payload
+        (fake.dir / "dotagents.cmd").write_text(body, encoding="utf-8")
+    else:
+        body = "exit 3" if settings is None else "IFS= read -r line < '%s'; printf '%%s\\n' \"$line\"" % payload
+        script = fake.dir / "dotagents"
+        script.write_text("#!/bin/sh\n%s\n" % body, encoding="utf-8")
+        script.chmod(0o755)
+
+
+def test_a_refused_proxy_is_replaced_by_the_settings_of_now(fake, monkeypatch, capsys):
+    _agent_proxy(monkeypatch)
+    monkeypatch.setenv("FAKE_CURL_RC", "7,0")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY, "AGENTS_SYSHTTP_PROXY_AUTH": NEW_BEARER})
+    assert fake.main(["https://api.example.com/"]) == 0
+    first, second = fake.runs()
+    assert "http://proxy.example:3128" in first["argv"] and NEW_PROXY in second["argv"]
+    assert second["config"] == ['proxy-header = "Proxy-Authorization: %s"\n' % NEW_BEARER]
+    err = capsys.readouterr().err
+    assert err == "curl: the proxy settings have changed: trying once more with the current ones\n"
+
+
+def test_the_old_credential_never_meets_the_new_proxy(fake, monkeypatch):
+    _agent_proxy(monkeypatch)
+    monkeypatch.setenv("FAKE_CURL_RC", "7,0")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY})
+    assert fake.main(["https://api.example.com/"]) == 0
+    assert fake.runs()[-1]["config"] == []
+
+
+def test_a_new_ca_comes_with_the_new_proxy(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_PROXY_CA", "/ca/old.pem")
+    monkeypatch.setenv("FAKE_CURL_RC", "7,0")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY, "AGENTS_PROXY_CA": "/ca/new.pem"})
+    assert fake.main(["https://api.example.com/"]) == 0
+    assert fake.runs()[-1]["config"] == ['cacert = "/ca/new.pem"\n']
+
+
+def test_settings_that_no_longer_name_a_proxy_go_direct(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("AGENTS_SYSHTTP_SYSTEM_PROXY", "0")
+    monkeypatch.setenv("FAKE_CURL_RC", "7,0")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": None})
+    assert fake.main(["https://api.example.com/"]) == 0
+    assert fake.argv() == ["https://api.example.com/"]
+
+
+def test_the_same_settings_are_curls_failure(fake, monkeypatch):
+    _agent_proxy(monkeypatch)
+    monkeypatch.setenv("FAKE_CURL_RC", "7")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": "http://proxy.example:3128", "AGENTS_SYSHTTP_PROXY_AUTH": BEARER})
+    assert fake.main(["https://api.example.com/"]) == 7
+    assert len(fake.runs()) == 1
+
+
+def test_only_one_more_run(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("FAKE_CURL_RC", "7")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY})
+    assert fake.main(["https://api.example.com/"]) == 7
+    assert len(fake.runs()) == 2
+
+
+@pytest.mark.parametrize("settings", [None, "not json", "[]"])
+def test_dotagents_that_cannot_say_is_curls_failure(settings, fake, monkeypatch):
+    _agent_proxy(monkeypatch)
+    monkeypatch.setenv("FAKE_CURL_RC", "7")
+    _dotagents(fake, settings)
+    assert fake.main(["https://api.example.com/"]) == 7
+    assert len(fake.runs()) == 1
+
+
+def test_no_dotagents_is_curls_failure(fake, monkeypatch):
+    _agent_proxy(monkeypatch)
+    monkeypatch.setenv("FAKE_CURL_RC", "7")
+    assert fake.main(["https://api.example.com/"]) == 7
+    assert len(fake.runs()) == 1
+
+
+def test_a_dotagents_in_the_current_directory_is_not_run(fake, tmp_path, monkeypatch):
+    planted = tmp_path / "cwd"
+    planted.mkdir()
+    for name in ("dotagents", "dotagents.cmd"):
+        (planted / name).write_text("", encoding="utf-8")
+        (planted / name).chmod(0o755)
+    monkeypatch.chdir(planted)
+    monkeypatch.setenv("PATH", os.pathsep.join([".", str(fake.dir)]))
+    assert curlshim._dotagents() is None
+
+
+def test_what_dotagents_prints_stays_unprinted(fake, monkeypatch, capfd):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("FAKE_CURL_RC", "7,0")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": "http://agent:s3cret@restarted.example:3128", "OTHER_TOKEN": "t0ken"})
+    assert fake.main(["https://api.example.com/"]) == 0
+    out, err = capfd.readouterr()
+    assert "s3cret" not in out + err and "t0ken" not in out + err
+    assert "s3cret" not in " ".join(fake.runs()[-1]["argv"])
+    assert fake.runs()[-1]["config"] == ['proxy-user = "agent:s3cret"\n']
+
+
+def test_only_route_settings_are_taken(fake, monkeypatch):
+    monkeypatch.setenv("AGENTS_PYTHON", "kept")
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY", "http://old.example:3128")
+    _dotagents(fake, {"AGENTS_PYTHON": "replaced", "AGENTS_HTTPS_PROXY": "http://new.example:3128", "HTTPS_PROXY": "http://m:1"})
+    assert curlshim._reload_route_settings()
+    assert os.environ["AGENTS_PYTHON"] == "kept" and "AGENTS_SYSHTTP_PROXY" not in os.environ
+    assert os.environ["AGENTS_HTTPS_PROXY"] == "http://new.example:3128" and "HTTPS_PROXY" not in os.environ
+
+
+def test_dotagents_runs_with_the_recursion_marker_and_no_stderr(fake, monkeypatch):
+    seen = {}
+
+    class _Done:
+        returncode = 0
+        stdout = b"{}"
+
+    def run(command, **kwargs):
+        seen.update(kwargs, command=command)
+        return _Done()
+
+    _dotagents(fake, {})
+    monkeypatch.setattr(curlshim.subprocess, "run", run)
+    assert curlshim._session_environment() == {}
+    assert seen["command"][1:] == ["env", "--format", "json"]
+    assert seen["env"]["AGENTS_CURL_SHIM"] == "1" and seen["stderr"] == subprocess.DEVNULL
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["-w", "%{http_code}", "https://a.example/"],
+        ["-sw", "%{http_code}", "https://a.example/"],
+        ["--write-out", "%{http_code}", "https://a.example/"],
+        ["-i", "https://a.example/"],
+        ["-D", "-", "https://a.example/"],
+        ["-d", "@-", "https://a.example/"],
+        ["--data-binary", "@-", "https://a.example/"],
+        ["-F", "f=@-", "https://a.example/"],
+        ["-F", "f=<-", "https://a.example/"],
+        ["-T", "-", "https://a.example/"],
+        ["-T", ".", "https://a.example/"],
+        ["https://a.example/", "--next", "https://b.example/"],
+    ],
+)
+def test_what_a_second_run_would_spoil_is_not_run_again(argv, fake, monkeypatch):
+    """Output the failed attempt printed, a stdin it read, a `--next` transfer
+    that already happened."""
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("FAKE_CURL_RC", "7")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY})
+    assert fake.main(argv) == 7
+    assert len(fake.runs()) == 1
+
+
+def test_a_body_is_sent_again_when_the_proxy_refused_the_connection(fake, monkeypatch):
+    """Exit 7: nothing left this machine."""
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("FAKE_CURL_RC", "7,0")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY})
+    assert fake.main(["-d", "x=1", "https://api.example.com/"]) == 0
+    assert NEW_PROXY in fake.runs()[-1]["argv"]
+
+
+def test_other_exits_and_a_proxy_not_ours_are_left_alone(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY})
+    monkeypatch.setenv("FAKE_CURL_RC", "60")
+    assert fake.main(["https://api.example.com/"]) == 60
+    assert len(fake.runs()) == 1
+    monkeypatch.setenv("FAKE_CURL_RC", "7")
+    assert fake.main(["-x", "http://mine:1", "https://api.example.com/"]) == 7
+    assert len(fake.runs()) == 2
+
+
+def test_a_new_prefix_gateway_is_curls_failure(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("FAKE_CURL_RC", "7")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY, "AGENTS_SYSHTTP_PROXY_TYPE": "prefix:/fetch/"})
+    assert fake.main(["https://api.example.com/"]) == 7
+    assert len(fake.runs()) == 1
+
+
+def test_a_malformed_new_proxy_is_curls_failure(fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("FAKE_CURL_RC", "7")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": "http://[bad:3128"})
+    assert fake.main(["https://api.example.com/"]) == 7
+    assert len(fake.runs()) == 1
+
+
+def test_a_refused_tunnel_runs_again_after_curl_confirms_it(fake, monkeypatch):
+    """Exit 56 is also a transfer lost halfway: the 502 is asked for first."""
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("FAKE_CURL_RC", "56,0,0")
+    monkeypatch.setenv("FAKE_CURL_OUT", ",502,")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY})
+    assert fake.main(["https://api.example.com/"]) == 0
+    first, probe, second = fake.runs()
+    assert probe["argv"][:2] == ["--proxy", "http://proxy.example:3128"] and "%{http_connect}" in probe["argv"]
+    assert NEW_PROXY in second["argv"]
+
+
+@pytest.mark.parametrize("connect", ["200", "000", "407"])
+def test_a_transfer_lost_halfway_is_not_run_again(connect, fake, monkeypatch):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("FAKE_CURL_RC", "56,0")
+    monkeypatch.setenv("FAKE_CURL_OUT", ",%s" % connect)
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY})
+    assert fake.main(["-d", "x=1", "https://api.example.com/"]) == 56
+    assert len(fake.runs()) == 2, "the first attempt and the question to the proxy"
+
+
+def test_the_probe_carries_the_proxys_credential_in_a_config_file(fake, monkeypatch):
+    _agent_proxy(monkeypatch)
+    monkeypatch.setenv("FAKE_CURL_RC", "56,0,0")
+    monkeypatch.setenv("FAKE_CURL_OUT", ",502,")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY})
+    assert fake.main(["https://api.example.com/"]) == 0
+    probe = fake.runs()[1]
+    assert BEARER not in " ".join(probe["argv"])
+    assert probe["config"] == ['proxy-header = "Proxy-Authorization: %s"\n' % BEARER]
+
+
+def test_s_keeps_the_note_off_stderr_and_s_s_keeps_it_on(fake, monkeypatch, capsys):
+    _agent_proxy(monkeypatch, auth=None)
+    monkeypatch.setenv("FAKE_CURL_RC", "7,0")
+    _dotagents(fake, {"AGENTS_SYSHTTP_PROXY": NEW_PROXY})
+    assert fake.main(["-s", "https://api.example.com/"]) == 0
+    assert capsys.readouterr().err == ""
+    monkeypatch.setenv("AGENTS_SYSHTTP_PROXY", "http://proxy.example:3128")
+    monkeypatch.setenv("FAKE_CURL_RC", "7,0,7,0")
+    assert fake.main(["-sS", "https://api.example.com/"]) == 0
+    assert capsys.readouterr().err.startswith("curl: the proxy settings have changed")
 
 
 # --------------------------------------------------------------------------

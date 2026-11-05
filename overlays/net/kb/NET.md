@@ -58,11 +58,13 @@ Windows PowerShell 5.1 aliases `curl` to `Invoke-WebRequest`; there, type
    group's URL (`AGENTS_SYSHTTP_PROXY`, an `AGENTS_*_PROXY` variable, else,
    when curl's own proxy variables are unset too, the system's configuration)
    and the group does not choose its own (`-x`, `--noproxy`, `--proxy1.0`,
-   `--preproxy`, `--socks*`, `-K`). A host in `AGENTS_NO_PROXY` gets nothing
-   added. The credential goes in a private `-K` config file, removed
-   afterwards: never on the command line, which other accounts can read. The
-   real curl runs with `AGENTS_CURL_SHIM=1`, so a "curl" that calls this
-   launcher again is served by curlike instead of looping;
+   `--preproxy`, `--socks*`, `-K`). A host in `AGENTS_NO_PROXY` goes direct:
+   nothing is added for it, or `--noproxy` when curl has a proxy to skip (the
+   one added for another URL of the group, its own `HTTPS_PROXY`). The
+   credential goes in a private `-K` config file, removed afterwards: never on
+   the command line, which other accounts can read. So does the CA bundle
+   (below). The real curl runs with `AGENTS_CURL_SHIM=1`, so a "curl" that
+   calls this launcher again is served by curlike instead of looping;
 3. else, or under a `prefix` gateway, **curlike** serves it, with
    curl's exit codes and messages. An option it lacks is
    `curl: (2) Unsupported options: …`, never silently ignored.
@@ -82,6 +84,8 @@ real curl as typed, and is exit 2 when there is none.
 | `AGENTS_SYSHTTP_PROXY_AUTH_HEADER` | the header it rides in (default `Proxy-Authorization`) |
 | `AGENTS_SYSHTTP_PROXY_TYPE` | `connect` (default) or `prefix[:/endpoint]` |
 | `AGENTS_NO_PROXY` | hosts that go direct |
+| `AGENTS_PROXY_CA` | the CA bundle for a group that gets a proxy added, as a config-file `cacert`: for a proxy that terminates TLS, a union of its CA and the usual roots |
+| `AGENTS_CA_BUNDLE` | the same when `AGENTS_PROXY_CA` is unset |
 | `AGENTS_CURL` | `0`/`n`/`no`/`false`/`off`: run the real curl exactly as typed; `1`/`y`/`yes`/`true`/`on` or unset: the launcher; anything else is exit 2 |
 | `AGENTS_CURL_SSL_REVOKE` | `best-effort` (default), `true`, `false`: revocation for a Schannel curl |
 | `AGENTS_PYTHON` | the interpreter a `.py` hook wrapper runs under |
@@ -92,6 +96,22 @@ them), `cmd`, `powershell`, `pwsh` or `wsl` itself, or a program that
 resolves to one. They would parse the URL appended to them again, so its `&`
 or `;` would run the rest as a command. Use a `.py` or `.exe` wrapper.
 Messages never show a proxy's userinfo or credential.
+
+**The CA bundle** is added only with a proxy, and not to a group that chose how
+the origin is verified (`-k`, `--insecure`, `--cacert`, `--capath`,
+`--ca-native`, `-K`). It takes the place of the OS store, of curl's own
+`CURL_CA_BUNDLE` and of a `cacert` in `.curlrc`, and it reaches the real curl only:
+curlike verifies with the OS store or `CURL_CA_BUNDLE`. A file that does not exist
+is curl's exit 2, naming it.
+
+**A proxy curl cannot use**: when curl exits 7 (refused) or 56 with a 502 to CONNECT
+from a proxy this launcher gave it, `dotagents env` is asked for the settings again,
+which is what a shell that predates a proxy restart is missing. If the proxy, its
+credential, its CA or `AGENTS_NO_PROXY` differ, curl runs once more with them, all
+taken together; otherwise its failure stands. These are not run again, since the
+first attempt has already had an effect: more than one `--next` group, stdout written
+on failing (`-w`, `-i`, `-D`), stdin read (`@-`, `<-`, `-T -`). A 502 to a plain `http://`
+request is the proxy's reply to the request, exit 0, and is left as curl reports it.
 
 ## certifi shim — `$NET_OVERLAY_ROOT/lib/python/certifi`
 

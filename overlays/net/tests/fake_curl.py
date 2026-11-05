@@ -1,6 +1,8 @@
 """A fake real curl for the launcher's tests: an executable named ``curl``
 (``curl.exe`` on Windows, made with pip's vendored distlib launcher) that
-records what it was started with and exits with ``FAKE_CURL_RC``.
+records what it was started with, prints ``FAKE_CURL_OUT`` and exits with
+``FAKE_CURL_RC``. Both are ``,``-separated, one per run, the last for any
+further run.
 
 The record (JSON, at ``FAKE_CURL_LOG``, one object per run appended as a
 line): ``argv`` (its arguments), ``config`` (the text of each ``-K`` /
@@ -33,9 +35,16 @@ def main():
                 config.append("<unreadable: %s>" % exc)
     names = [n for n in os.environ.get("FAKE_CURL_ENV", "").split(":") if n]
     record = {"argv": argv, "config": config, "env": {n: os.environ.get(n) for n in names}}
+    run = len(records(os.environ["FAKE_CURL_LOG"]))
     with open(os.environ["FAKE_CURL_LOG"], "a", encoding="utf-8") as log:
         log.write(json.dumps(record) + "\n")
-    return int(os.environ.get("FAKE_CURL_RC", "0"))
+    sys.stdout.write(_this_run("FAKE_CURL_OUT", "", run))
+    return int(_this_run("FAKE_CURL_RC", "0", run))
+
+
+def _this_run(name, default, run):
+    values = os.environ.get(name, default).split(",")
+    return values[min(run, len(values) - 1)]
 
 
 def install(directory):

@@ -7,14 +7,19 @@ curlike's own (``pycurl``), called by ``bin/curl.py`` as :func:`main`.
      refused: the interpreter would parse the URL's ``&`` or ``;`` again.
   2. **The real curl, when one is on PATH** (never this launcher), with the
      caller's argv and its exit code -- with ONE addition per ``--next``
-     group: the proxy syshttp would use for the group's URL (``SYSHTTP_PROXY``,
+     group: the proxy syshttp would use for the group's URLs (``SYSHTTP_PROXY``,
      a ``*_PROXY`` variable under the prefix, else the system's
      configuration), unless the group steers the proxy itself or only curl's
-     own unprefixed variables name one. ``--proxy`` is added and its
-     credential goes in a private ``-K`` config file (never on the command
-     line, which other accounts can read); and for a Schannel curl (Windows),
-     ``--ssl-revoke-best-effort`` (``CURL_SSL_REVOKE``). A leading ``-q``
-     stays first. ``CURL=0`` runs it exactly as typed.
+     own unprefixed variables name one. ``--proxy`` is added, with
+     ``--noproxy`` for those of its URLs ``NO_PROXY`` under the prefix sends
+     direct. The credential and the CA bundle (``PROXY_CA``, else ``CA_BUNDLE``,
+     unless the group steers TLS) go in a private ``-K`` config file (never on
+     the command line, which other accounts can read); and for a Schannel curl
+     (Windows), ``--ssl-revoke-best-effort`` (``CURL_SSL_REVOKE``). A leading
+     ``-q`` stays first. ``CURL=0`` runs it exactly as typed. When curl cannot
+     use the proxy it was given, the settings are read once more from
+     ``dotagents env`` and, if they changed, curl runs once more
+     (:func:`_replan`).
   3. **Else curlike** (``curlike.main``): the common curl surface over the
      standard library. So is a request through a ``prefix`` gateway, which
      curl cannot express.
@@ -30,6 +35,8 @@ nothing here imports curlike or syshttp until a request needs them, so
 :func:`find_real_curl` works without either.
 """
 
+import contextlib
+import json
 import os
 import re
 import shutil
@@ -61,6 +68,24 @@ _CURL_PROXY_VARIABLES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy
 _MAP_PROXY_VARIABLES = tuple(
     n for s in ("HTTP", "HTTPS", "FTP", "WS", "WSS", "ALL") for n in (s.lower() + "_proxy", s + "_PROXY")
 )
+#: The bundle for a group's origin when a proxy is injected: ``PROXY_CA`` (a
+#: union of the proxy's CA and the usual roots, for a proxy that terminates
+#: TLS), else ``CA_BUNDLE``, the setting syshttp's client reads.
+PROXY_CA = "PROXY_CA"
+CA_BUNDLE = "CA_BUNDLE"
+# A group with one of these chose how the origin is verified.
+_TLS_STEERING = ("-k", "--insecure", "--cacert", "--capath", "--ca-native")
+# curl's exit when the proxy it was given is unusable: 7 refused; a refused
+# CONNECT is 56 (curl 8.18, OpenSSL, Linux) or 7 (curl 8.21, Schannel, Windows).
+# 56 is also any lost connection, so that one needs _refuses_tunnel.
+_REFUSED = 7
+_LOST = 56
+# What a failed attempt has already printed to stdout, which a second run would add to.
+_PRINTS_ON_FAILURE = ("-w", "--write-out", "-i", "--include", "--show-headers", "-D", "--dump-header")
+# The settings that decide a request's route and trust, by the end of their name.
+_ROUTE_SETTINGS = ("PROXY", "PROXY_AUTH", "PROXY_AUTH_HEADER", "PROXY_TYPE", PROXY_CA, CA_BUNDLE)
+# Seconds for `dotagents env`, which runs every env file of the session's stores.
+_ENV_TIMEOUT = 30
 # Programs that read a command line as script text: an argument appended to
 # them is parsed again, so a URL's `&` or `;` runs as a command.
 _INTERPRETERS = ("cmd", "powershell", "pwsh", "wsl")
@@ -189,41 +214,114 @@ def _quote(value):
     return '"%s"' % value.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _options(group):
+    """``(name, value)`` for what a group holds as curl reads it: one pair per
+    letter of a short cluster, ``--expand-NAME`` as ``--NAME``, value ``None``
+    for a flag, name ``None`` for a positional."""
+    args = list(group)
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        i += 1
+        if arg == "--":
+            for positional in args[i:]:
+                yield None, positional
+            return
+        if arg.startswith("--"):
+            name, eq, value = arg.partition("=")
+            takes = _takes_value(name)
+            if takes and not eq:
+                value = args[i] if i < len(args) else ""
+                i += 1
+            if name.startswith("--expand-"):
+                name = "--" + name[len("--expand-") :]
+            yield name, value if takes else None
+        elif arg.startswith("-") and len(arg) > 1:
+            for j in range(1, len(arg)):
+                short = "-" + arg[j]
+                if _takes_value(short):
+                    value = arg[j + 1 :]
+                    if not value:
+                        value = args[i] if i < len(args) else ""
+                        i += 1
+                    yield short, value
+                    break
+                yield short, None
+        else:
+            yield None, arg
+
+
+def _urls(group):
+    """Every URL of the group, the scheme defaulted as curl defaults it."""
+    from curlike import requested_url
+
+    return [requested_url(["--url", value]) for name, value in _options(group) if name in (None, "--url") and value]
+
+
+def _host(url):
+    """``url``'s host, or ``None`` for one curl alone can read (a ``[1-3]`` glob)."""
+    from urllib.parse import urlsplit
+
+    try:
+        return urlsplit(url).hostname
+    except ValueError:
+        return None
+
+
+def _trust_lines(env, group):
+    """The config line naming the CA bundle for a group a proxy is injected
+    into, unless the group chose how the origin is verified. It outranks curl's
+    own ``CURL_CA_BUNDLE``, as an agent proxy setting outranks curl's variables."""
+    bundle = env.get(PROXY_CA, CA_BUNDLE)
+    if not bundle or any(name in _TLS_STEERING for name, _value in _options(group)):
+        return []
+    return ["cacert = %s" % _quote(bundle)]
+
+
 def agent_proxy_argv(group):
     """``(extra leading argv, config lines)`` so real curl uses, for this
     ``--next`` group, the proxy syshttp would; ``([], [])`` when nothing is
     injected.
 
-    The proxy is syshttp's answer for the group's URL (its ``NO_PROXY``
-    under the prefix applied; ``SYSHTTP_PROXY`` alone when the group names
-    no URL). Nothing is injected when the group steers the proxy
-    (:func:`_steers`), or when no agent setting names one and curl's own
-    unprefixed variables do (curl reads them itself). A caller's ``-U``
-    keeps the proxy and replaces the credential. The credential is a config
-    line (``proxy-header`` for a header credential, ``proxy-user`` for
-    userinfo), never an argument. A prefix gateway is not expressible to
-    curl -- see :func:`use_real_curl`."""
+    The proxy is syshttp's first answer for the group's URLs (its ``NO_PROXY``
+    under the prefix applied; ``SYSHTTP_PROXY`` alone when the group names no
+    URL), and curl gets the URLs answered DIRECT as ``--noproxy`` when it has a
+    proxy to skip: the one injected, or its own unprefixed variables. Nothing is
+    injected when the group steers the proxy (:func:`_steers`), or when no agent
+    setting names one and curl's own unprefixed variables do (curl reads them
+    itself). A caller's ``-U`` keeps the proxy and replaces the credential. The
+    credential is a config line (``proxy-header`` for a header credential,
+    ``proxy-user`` for userinfo), never an argument, and so is the CA bundle
+    (:func:`_trust_lines`). A prefix gateway is not expressible to curl -- see
+    :func:`use_real_curl`."""
     from syshttp import proxy
 
     env = _env()
     if not group:
         return [], []
-    if not _agent_routing(env) and any(os.environ.get(n, "").strip() for n in _CURL_PROXY_VARIABLES):
+    curl_has_its_own = any(os.environ.get(n, "").strip() for n in _CURL_PROXY_VARIABLES)
+    if not _agent_routing(env) and curl_has_its_own:
         return [], []
     if _steers(group):
         return [], []
-    from curlike import caller_steering, requested_url
+    from curlike import caller_steering
 
     proxy_user = caller_steering(group)[2]
-    url = requested_url(group)
-    if url:
-        entry = _first_reachable(url)
+    urls = _urls(group)
+    if urls:
+        answers = [_first_reachable(url) for url in urls]
     elif env.get(proxy.PROXY):
-        entry = proxy.configured_proxy()
+        answers = [proxy.configured_proxy()]
     else:
         return [], []
-    if entry is None or entry.is_gateway:
+    entry = next((answer for answer in answers if answer is not None), None)
+    if entry is not None and entry.is_gateway:
         return [], []
+    direct = [_host(url) for url, answer in zip(urls, answers) if answer is None]
+    direct = sorted({host for host in direct if host})
+    noproxy = ["--noproxy", ",".join(direct)] if direct and (entry is not None or curl_has_its_own) else []
+    if entry is None:
+        return noproxy, []
     config = []
     if proxy_user:
         pass  # curl already has -U on its own argv
@@ -231,7 +329,7 @@ def agent_proxy_argv(group):
         config = ["proxy-header = %s" % _quote("%s: %s" % item) for item in entry.headers.items()]
     elif entry.username is not None:
         config = ["proxy-user = %s" % _quote("%s:%s" % (entry.username, entry.password or ""))]
-    return ["--proxy", entry.url], config
+    return ["--proxy", entry.url, *noproxy], config + _trust_lines(env, group)
 
 
 def use_real_curl(argv):
@@ -369,6 +467,157 @@ def _child_env():
     return env
 
 
+@contextlib.contextmanager
+def _planned_argv(groups, plans, revoke):
+    """argv for curl with each group's plan applied; its config files live
+    in a private directory until the block ends."""
+    workdir = None
+    try:
+        argv = []
+        for index, group in enumerate(groups):
+            extra, config = plans[index] if plans else ([], [])
+            if config:
+                if workdir is None:
+                    workdir = tempfile.mkdtemp(prefix="curlshim-")
+                path = os.path.join(workdir, "group%d.curlrc" % index)
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write("\n".join(config) + "\n")
+                extra = [*extra, "-K", path]
+            lead, rest = _lead(group) if index == 0 else (group[:1], group[1:])
+            argv += [*lead, *revoke, *extra, *rest]
+        yield argv
+    finally:
+        if workdir is not None:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _run_plans(curl_path, groups, plans, revoke):
+    with _planned_argv(groups, plans, revoke) as argv:
+        return _run([curl_path, *argv], "the real curl", env=_child_env())
+
+
+def _replayable(group):
+    """Whether a second run of a group that failed adds nothing to the first:
+    it printed nothing to stdout on failing, and stdin is still there to read."""
+    for name, value in _options(group):
+        if name in _PRINTS_ON_FAILURE:
+            return False
+        if name in ("-T", "--upload-file") and value in ("-", "."):
+            return False
+        if value and name is not None and ("@-" in value or "<-" in value):
+            return False
+    return True
+
+
+def _dotagents():
+    """The ``dotagents`` on PATH's absolute directories, or ``None``. The current
+    directory is never searched: this runs on a failure, in whatever directory
+    the caller stands in."""
+    exts = os.environ.get("PATHEXT", ".COM;.EXE;.CMD").lower().split(";") if os.name == "nt" else [""]
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if directory and os.path.isabs(directory):
+            for ext in exts:
+                candidate = os.path.join(directory, "dotagents" + ext)
+                if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                    return candidate
+    return None
+
+
+def _session_environment():
+    """What ``dotagents env`` assembles now over this environment, as a mapping
+    (a value of ``None`` is an unset), or ``None`` when it cannot say. Its output
+    holds secrets: nothing of it is printed. The recursion marker sends a curl
+    that an env file runs to curlike, so it cannot come back here."""
+    program = _dotagents()
+    if not program:
+        return None
+    try:
+        run = subprocess.run(
+            [program, "env", "--format", "json"],
+            env=_child_env(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=_ENV_TIMEOUT,
+        )
+        found = json.loads(run.stdout) if run.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    return found if isinstance(found, dict) else None
+
+
+def _reload_route_settings():
+    """Take the route and trust settings from :func:`_session_environment` into
+    this process, all of them together so that a credential never meets another
+    proxy. Whether it could."""
+    found = _session_environment()
+    if found is None:
+        return False
+    if os.name == "nt":
+        found = {name.upper(): value for name, value in found.items()}
+    prefixes = _env().prefixes
+    for name in {*os.environ, *found}:
+        if name.startswith(prefixes) and name.upper().endswith(_ROUTE_SETTINGS):
+            value = found.get(name)
+            if isinstance(value, str):
+                os.environ[name] = value
+            else:
+                os.environ.pop(name, None)
+    return True
+
+
+def _refuses_tunnel(curl_path, group, plan):
+    """Whether the proxy of ``plan`` answers CONNECT with 502, which tells a
+    refused tunnel (nothing reached the origin or stdout) from a transfer lost
+    halfway, both exit 56. Asked by curl with the same proxy and credential."""
+    urls = _urls(group)
+    if not urls:
+        return False
+    probe = ["-s", "-I", "-o", os.devnull, "--max-time", "10", "-w", "%{http_connect}", urls[0]]
+    with _planned_argv([probe], [plan], []) as argv:
+        try:
+            run = subprocess.run(
+                [curl_path, *argv],
+                env=_child_env(),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            return False
+    return run.stdout.strip() == b"502"
+
+
+def _replan(curl_path, argv, groups, plans, code):
+    """The plans for one more run after exit ``code``, or ``None``. A shell that
+    predates a proxy restart holds the old address, so the settings are read again
+    as re-evaluating the session would. Only a changed answer runs curl again,
+    and only for one group that can run twice: an earlier ``--next`` transfer
+    would repeat."""
+    if code not in (_REFUSED, _LOST) or not any("--proxy" in extra for extra, _config in plans):
+        return None
+    if len(groups) != 1 or not _replayable(groups[0]) or not _reload_route_settings():
+        return None
+    import proxylib
+
+    try:
+        if not use_real_curl(argv):
+            return None
+        fresh = [agent_proxy_argv(group) for group in groups]
+    except (ValueError, ImportError, proxylib.NoReachableProxyError):
+        return None
+    if fresh == plans or (code == _LOST and not _refuses_tunnel(curl_path, groups[0], plans[0])):
+        return None
+    return fresh
+
+
+def _quiet(group):
+    """Whether curl's ``-s`` holds for the group, without the ``-S`` that shows errors."""
+    names = [name for name, _value in _options(group)]
+    return ("-s" in names or "--silent" in names) and "-S" not in names and "--show-error" not in names
+
+
 def maybe_run_system_curl(argv, entry=None):
     """Run the real curl with the configured proxy applied; ``None`` when
     curlike must serve the request (no real curl, or a prefix gateway). A
@@ -395,25 +644,13 @@ def maybe_run_system_curl(argv, entry=None):
     except (ValueError, ImportError) as exc:
         print("curl: ignoring the configured proxy: %s" % _redacted(str(exc)), file=sys.stderr)
         plans = []
-    workdir = None
-    try:
-        command = [curl_path]
-        for index, group in enumerate(groups):
-            extra, config = plans[index] if plans else ([], [])
-            if config:
-                if workdir is None:
-                    workdir = tempfile.mkdtemp(prefix="curlshim-")
-                path = os.path.join(workdir, "group%d.curlrc" % index)
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    handle.write("\n".join(config) + "\n")
-                extra = [*extra, "-K", path]
-            lead, rest = _lead(group) if index == 0 else (group[:1], group[1:])
-            command += [*lead, *revoke, *extra, *rest]
-        return _run(command, "the real curl", env=_child_env())
-    finally:
-        if workdir is not None:
-            shutil.rmtree(workdir, ignore_errors=True)
+    code = _run_plans(curl_path, groups, plans, revoke)
+    fresh = _replan(curl_path, argv, groups, plans, code) if plans else None
+    if fresh is None:
+        return code
+    if not _quiet(groups[0]):
+        print("curl: the proxy settings have changed: trying once more with the current ones", file=sys.stderr)
+    return _run_plans(curl_path, groups, fresh, revoke)
 
 
 def run_real_curl_as_typed(argv, entry=None):
