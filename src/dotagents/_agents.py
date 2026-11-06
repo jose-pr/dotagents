@@ -619,7 +619,8 @@ class ClaudeAgent(Agent):
     # calls only, so the SessionStart hook never reaches PowerShell tool calls.
     # Closed via a PreToolUse hook (no matcher -- fires for every tool) that,
     # for a PowerShell call specifically, prepends a guarded env-loader to that
-    # call's OWN command via `updatedInput`.
+    # call's OWN command via `updatedInput`. It states no `permissionDecision`:
+    # "allow" would run what the permission system would have asked about.
     #
     # INLINE `-Command`, deliberately NOT a `.ps1` file: a `.ps1` is subject to
     # PowerShell's script execution policy (AllSigned, or a locked-down
@@ -654,7 +655,7 @@ class ClaudeAgent(Agent):
         r"""'if (-not $env:AGENTS_RUNTIME_SET) { $env:AGENTS_RUNTIME_SET = "1"; $s = if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" }; $c = "$s\bin\dotagents.cmd"; if (-not (Test-Path $c)) { $c = (Get-Command dotagents -ErrorAction SilentlyContinue).Source }; if ($c) { $oe = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); try { & $c env --diff --format powershell --cache 2>$null | Invoke-Expression } finally { [Console]::OutputEncoding = $oe } } }; '; """
         r'$u = $h.tool_input.PSObject.Copy(); '
         r'$u.command = $p + $h.tool_input.command; '
-        r'@{hookSpecificOutput=@{hookEventName="PreToolUse";permissionDecision="allow";updatedInput=$u}} | ConvertTo-Json -Depth 10 -Compress '
+        r'@{hookSpecificOutput=@{hookEventName="PreToolUse";updatedInput=$u}} | ConvertTo-Json -Depth 10 -Compress '
         r'}'
     )
 
@@ -757,11 +758,11 @@ class ClaudeAgent(Agent):
 
     #: Identity (statusMessage) of the PowerShell PreToolUse env-loader entry.
     PRETOOLUSE_STATUS = "Checking PowerShell env"
-    #: Opt-in (`init --powershell-env-hook`): the loader returns
-    #: `permissionDecision: "allow"` -- the only documented way for PreToolUse
-    #: to rewrite a command without prompting on every call -- which skips the
-    #: approval prompt for EVERY PowerShell tool call (deny/ask rules still
-    #: apply). Off, `init` removes an entry an earlier release wired.
+    #: Opt-in (`init --powershell-env-hook`): the loader states no permission
+    #: decision, and Claude Code judges the rewritten command, so a PowerShell
+    #: call asks unless the tool as a whole is allowed: a narrow allow rule or
+    #: a read-only command no longer matches once the loader leads it.
+    #: Off, `init` removes an entry an earlier release wired.
     powershell_env_hook: bool = False
 
     def _wire_powershell_pretooluse(self, hooks: dict) -> bool:

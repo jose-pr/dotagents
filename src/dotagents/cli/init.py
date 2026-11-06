@@ -70,8 +70,9 @@ class Init(DotAgentsArgs):
 
     powershell_env_hook: bool = False
     (
-        "Windows, Claude Code: also wire the PowerShell-tool env loader. It "
-        "AUTO-APPROVES every PowerShell tool call (skips the permission prompt)."
+        "Windows, Claude Code: also wire the PowerShell-tool env loader. Rules then "
+        "judge the rewritten command, so a PowerShell call asks unless PowerShell "
+        "itself is allowed."
     )
     ("--powershell-env-hook",)
 
