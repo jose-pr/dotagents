@@ -144,10 +144,12 @@ Claude Code's PowerShell tool never reads `$CLAUDE_ENV_FILE`, so its commands do
 see the env layers. On Windows, `init --powershell-env-hook` adds a `PreToolUse` hook
 (matched on the `PowerShell` tool) that prepends the `dotagents env` change set to each
 PowerShell call (`env --diff --cache`, so an unchanged environment is not reassembled
-on every call). **It auto-approves every PowerShell tool call**: rewriting a command
-without a prompt on each one requires `permissionDecision: "allow"`, which skips the
-approval prompt (your deny and ask rules still apply). It is off by default, and a
-plain `init` removes one an earlier release wired.
+on every call). It states no permission decision, so a call asks, is denied or runs as
+your rules say. **Your rules judge the rewritten command**: a narrow allow rule such as
+`PowerShell(Get-Location:*)`, or a command that would pass as read-only, no longer
+matches once the loader leads it, so each PowerShell call asks unless `PowerShell`
+itself is in your allow rules. It is off by default, and a plain `init` removes one an
+earlier release wired.
 
 The env half never truncates the file and is guarded by `[ -n "$CLAUDE_ENV_FILE" ]`
 (see the [hooks docs](https://code.claude.com/docs/en/hooks#persist-environment-variables)):

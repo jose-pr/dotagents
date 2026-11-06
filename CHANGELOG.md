@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The Claude Code PowerShell-tool env loader (`init --powershell-env-hook`) no longer
+  answers `permissionDecision: "allow"`, which ran calls that would have asked and, under
+  `--permission-mode dontAsk` or with no way to ask, calls that would have been refused.
+  It now only rewrites the call and the permission system decides. A PowerShell call
+  therefore asks unless `PowerShell` itself is allowed, since rules judge the rewritten
+  command. An `init --powershell-env-hook` replaces a loader already wired.
+
 ## [0.9.0] - 2026-11-04
 
 dotagents implements the [Agent Overlay Specification](https://boriken-dev.github.io/agent-overlay-spec/)
