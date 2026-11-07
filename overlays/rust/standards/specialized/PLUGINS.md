@@ -100,6 +100,20 @@ providers/<kind>/<name>/plugin/ that provider as a cdylib: one providers! line
   kinds), so a file that is not a provider is never run.
 - **A failure to load one provider never takes down the others**; the report
   lists what loaded, what was skipped and why, and what failed.
+- **The host says how a provider may arrive**: native libraries, and which
+  sources it adds (script, wasm, remote). A host that adds none offers its
+  extension points to Rust and C alone, and its docs say so.
+- **The host publishes its kinds' descriptions**: the kinds crate's
+  `<crate>.kinds.json` and each kind's `<Trait>Vtable::FLOOR_HASH`,
+  committed and held by the contract test, so a provider can be written
+  with no Rust.
+- **Pin and signature checks cover every way a provider arrives**: a library
+  file, a source file and what each source serves. A check that sees only
+  native files leaves the rest unchecked.
+- **Checking a library's bytes before it is mapped is `guatiao`'s job**: a
+  host never writes its own copy-and-lock step. Where `guatiao` lacks one,
+  it is added there ([DEPENDENCIES.md](../base/DEPENDENCIES.md), "When the
+  preferred crate falls short").
 - **Clean the target directory after renaming or removing a provider.** The
   old library is still there, and a loader will load both.
 
