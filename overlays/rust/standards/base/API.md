@@ -133,9 +133,12 @@ name a module for what it owns.
   (`with_capacity(n)`, `new_in(alloc)`), never a setter; the extra argument
   goes in the same position across the crate. (**house**: last, as `std`'s
   allocator API does.)
-- **A crate brought to these rules keeps each old name for one release** as
-  a `#[deprecated(note = "use X::builder")]` one-line wrapper over the
-  builder, removed in the next release that breaks the API.
+- **A crate is brought to these rules once, in one change**, every name at
+  once, with its `cargo public-api` snapshot regenerated in the same
+  commit, so the rename is not argued again site by site. A released crate
+  keeps each old name for one release as a `#[deprecated(note = "use
+  X::builder")]` one-line wrapper over the builder, removed in the next
+  release that breaks the API; an unreleased one renames outright.
 - **A constructor performs no I/O.** Opening, connecting and loading are
   named actions (`open`, `connect`, `load`), each documented with what it
   touches.
