@@ -9,6 +9,10 @@ index: [README.md](../README.md).
 - **A protocol is a crate of its own that knows nothing of the application**:
   no application types, no configuration, no provider kinds. The application
   adapts it; it does not adapt to the application. (**house**)
+- **Every wire type of the protocol lives in its crate**: the request and
+  response bodies as well as the frames. Two crates of one project that
+  speak it take them from there and never declare them again
+  ([VALUES.md](../base/VALUES.md), "Values that cross a wire or a file").
 - It carries the project's prefix while the project publishes nothing else
   under that protocol's name (`<project>-rtsp`); the README says it stands
   alone.
