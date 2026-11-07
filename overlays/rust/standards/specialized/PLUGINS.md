@@ -60,7 +60,9 @@ providers/<kind>/<name>/plugin/ that provider as a cdylib: one providers! line
   the test binary.
 - **Dependencies point one way**: a provider depends on the api crate, a
   shared kit and at most a protocol crate; never on the host, the core or
-  another provider. Code two providers share is a crate under `crates/`.
+  another provider. Code two providers share is a crate under `crates/`,
+  never a file each includes with `#[path]`: that compiles it once per
+  provider, and tests none of the copies as a library.
 
 ## The contract
 
