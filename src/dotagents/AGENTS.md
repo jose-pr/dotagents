@@ -155,143 +155,59 @@ are skipped.
 
 ## `dotagents._aos`
 
-The AOS format, pure and filesystem-free except for the tree digest: what
-`overlay.cfg` and env files read as, validation, the tree digest, and applying
-one overlay's `env`, `env_files` and `paths`. Passes the specification's
-conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
+What dotagents adds to `coqui_aos` (the Agent Overlay Specification's reader, a
+dependency: reading, validation, names, digests, substitution, the defaults an
+overlay's files give, setup phases; its own vectors are its tests). This module is
+applying one overlay for this machine and nothing else, passing the vectors for
+that (`tests/aos_vectors/`: `compose.json`'s environments and `effective.json`,
+revision in `REVISION`). A refusal from `coqui_aos` is a `coqui_aos.Error` with a
+`class_`; one from applying is `Refused`.
 
-- `EDITION = "0.1.0-draft"`. `FORMATS` (format-line name → format),
-  `supported_formats() -> list[str]` (`toml`, `json`, and `yaml` when PyYAML
-  imports), `DEFAULT_MAX_BYTES = 1 MiB`, `DEFAULT_MAX_DEPTH = 64`.
-- `class ReadError(ValueError)` — `code` is the vectors' class (`parse-error`,
-  `null-value`, `duplicate-key`, `unsupported-format`, `too-large`, ...).
-  `select_format(data) -> (name, payload)`; `read_document(data, *, max_bytes,
-  max_depth) -> dict` — the format line (`#!json`, `#!yaml`; TOML by default),
-  static reading, the data model (no null, date, non-finite float, integer outside
-  64 bits; YAML without tags, anchors, merge keys, directives).
-  `parse_dotenv(data) -> list[(name, text, literal)]` — the `dotenv` env-file
-  grammar, `literal` for a single-quoted value; `read_dotenv(data, env=None, *,
-  windows=False, secret_variables=()) -> dict[str, str]` — the file applied over
-  `env`, each line substituted against what the earlier lines left.
-- Substitution: `substitute(text, lookup) -> str` — `${NAME}` and its operators
-  (defaults and alternates, `${#NAME}`, slices in code points, replacements, trims,
-  case), `$$` for `$`; `$NAME`, `$(...)` and backticks are characters; nothing runs
-  and an inserted value is never read again. `lookup(name)` gives a value or None
-  and raises for a secret. `class SubstitutionError(ReadError)` (`code`:
-  `undefined-variable`, `secret-placeholder`, `invalid-pattern`; `name`: the
-  placeholder's variable or the pattern).
-- Names: `valid_overlay_name`, `normalize_name`, `root_variable(identity)`,
-  `state_variable(identity)` (`<NAME>_OVERLAY_ROOT` / `_STATE`),
-  `RESERVED_OVERLAY_NAMES`, `DEVICE_NAMES`, `OVERLAY_NAME`, `valid_relpath(path)`
-  (the manifest's relative path), `EXCLUDED_COMPONENTS`, `valid_variable_name`,
-  `is_reserved_variable` (`AOS_*`, `*_OVERLAY_ROOT`, `*_OVERLAY_STATE`),
-  `is_sensitive(name)` with `SENSITIVE_NAMES` / `SENSITIVE_PREFIXES` /
-  `SENSITIVE_SUFFIXES` / `PATH_VARIABLES`.
-- `validate(doc, files=None) -> list[tuple[code, pointer]]` — the schema and the
-  semantic rules; `files` (the overlay's relative paths) also requires every named
-  file, listed skill and MCP skill to exist. `named_files(doc)`. `TIMEOUT_MAX`,
-  `SCRIPT_EXTENSIONS`, `script_interpreter(target)`.
-- Digest: `class DigestError(ValueError)` (`symlink`, `special-file`,
-  `non-utf8-name`, `invalid-name`, `case-collision`), `sha256_digest(data)`,
-  `file_digest(path)`, `same_digest(a, b)` (hex without regard to case; `ValueError`
-  for another form), `DIGEST_FORM`, `EMPTY_DIGEST`, `digest_entries(entries) ->
-  (digest, lines)`, `tree_entries(root)`, `tree_digest(root) -> str`,
-  `members(root) -> list[str]`, `member_paths(root) -> list[str]` (the same paths
-  without hashing or raising: what decides the defaults), `foreign_entries(root) -> list[str]` (excluded
-  names present: a mismatch in a verified copy).
+- `EDITION`, `PATH_VARIABLES`, `SCRIPT_EXTENSIONS`, `DIGEST_FORM`, `valid_relpath`
+  and `is_sensitive` (`coqui_aos`'s `valid_relative_path` / `is_sensitive_variable`).
+- Digests of an overlay on disk, through `coqui_aos.PathFS`: `sha256_digest(data)`,
+  `same_digest(a, b)` (hex without regard to case; `ValueError` for another form),
+  `tree_digest(root) -> str`, `members(root) -> list[str]`, `member_paths(root)` (the
+  same paths without hashing or raising: what decides the defaults),
+  `foreign_entries(root)` (excluded names present: a mismatch in a verified copy).
+  They raise `coqui_aos.Error` (`symlink`, `special-file`, `invalid-name`, ...).
 - OS and variants: `UNIX_NAMES`, `INTERPRETERS`, `current_os()`, `os_matches(entry,
-  os)`, `first_variant(variants, os)`, `version_tuple(text)`.
-- `check_requirements(text, *, locked) -> list[str]` — a requirements or lock
-  file: requirement lines only (no option, URL or path), a lock pinned with `==`
-  and `--hash=sha256:`.
-- Applying: `class Refused(Exception)` (`code`, `subject`, `detail`; never a
-  value), `class Environment(values, windows, *, secret=(), extra=None)` (names
-  case-blind on Windows: `key`, `get`, `set(name, value, *, secret=False)`,
-  `unset`, `copy`, `lookup(name)` — what a placeholder reads: `extra` first,
-  raising `SubstitutionError` for a variable in `secret`; `assigned`: the
-  variables set, in order), `resolve_path(root, rel, windows)`,
-  `reference_name(entry)`, `is_reference(entry)`, `class Secrets(*, grants,
-  host_env, named, read_file, providers, provider_values, windows)` (`granted`,
-  `resolve`: a reference resolves only when granted), `class Context(*, os_name,
-  root, identity, read, secrets=None, env_scripts_enabled=True, files=(),
-  interpreters=(), state=None, packages=None)` (`files`: the overlay's member
-  paths, which decide its defaults; `interpreters`: those the consumer can run;
-  `state`: its state directory; `packages`: runtime → its environment's packages
-  directory; `placeholders()` — the `AOS_OVERLAY_ROOT`, `AOS_OVERLAY_NAME` and
-  `AOS_OVERLAY_STATE` its placeholders see).
-- Defaults: `DEFAULT_KEYS` (with `deps`), `DEFAULT_PATHS` (`bin` → `PATH`,
-  `lib/python` → `PYTHONPATH`, `lib/node` → `NODE_PATH`, each prepended),
-  `DEFAULT_DEPENDENCIES` (`lib/python/requirements.txt`, `lib/node/package.json`
-  with the `package-lock.json` beside it), `PACKAGE_VARIABLES` (runtime → the
-  variable its packages go on), `DEFAULT_SCRIPTS` (the extension order with the
-  OSes each applies on), `default_on(manifest, key)`, `default_paths(manifest,
-  files)`, `paths_of`, `rules_of`, `context_of`, `skills_of`, `env_files_of`
-  (each `(manifest, files)`: the field's defaults that are on and present, then
-  its declared entries; a declared entry naming a default's file or directory
-  replaces it; `skills` adds), `default_script(manifest, field, stem, files,
-  os_name, interpreters) -> (entry, configured, present, others)` (the default
-  `env.<ext>` / `setup.<ext>`; a declared entry naming one configures it in
-  place), `setup_of(manifest, files, os_name, interpreters) -> (variant,
-  not_run)` (declared variants first, the default last, a default setup taken to
-  need the network unless configured).
+  os)`, `first_variant(variants, os)`, `script_interpreter(target)`,
+  `version_tuple(text)`.
+- `class Refused(Exception)` (`code`, `subject`, `detail`; never a value),
+  `class Environment(values, windows, *, secret=(), extra=None)` (names case-blind
+  on Windows: `key`, `get`, `set(name, value, *, secret=False)`, `unset`, `copy`,
+  `lookup(name)` — what a placeholder reads: `extra` first, raising
+  `coqui_aos.Error` (`secret-placeholder`) for a variable in `secret`; `assigned`),
+  `resolve_path(root, rel, windows)`, `reference_name(entry)`, `is_reference(entry)`,
+  `class Secrets(*, grants, host_env, named, read_file, providers,
+  provider_values, windows)` (`granted`, `resolve`: a reference resolves only when
+  granted), `class Context(*, os_name, root, identity, read, secrets=None,
+  env_scripts_enabled=True, files=(), interpreters=(), state=None,
+  packages=None)` (`files`: the overlay's member paths, which decide its defaults;
+  `interpreters`: those the consumer can run; `state`; `packages`: runtime → its
+  environment's packages directory; `placeholders()`).
+- Defaults, through `coqui_aos` on a tree of the member paths: `PACKAGE_VARIABLES`,
+  `DEFAULT_SCRIPTS`, `paths_of`, `env_files_of`, `overlay_paths(manifest, ctx)`,
+  `dependencies_of(manifest, files, os_name, read=None) -> list[dict]` (`partial-lock`
+  is `Refused`), `default_script(manifest, field, stem, files, os_name,
+  interpreters) -> (entry, configured, present, others)`, `setup_of(manifest, files,
+  os_name, interpreters) -> (variant, not_run)`.
 - Applying: `apply_paths(env, paths, ctx, weakenings)`, `read_env_file(item, ctx,
-  listed)` (an `aos` file's mapping, or a `dotenv` file's `parse_dotenv` lines),
-  `apply_overlay(env, manifest, ctx, weakenings) -> list[env script]`
-  (env files, `env`, paths, each after its defaults, text values substituted as
-  they are set: a `dotenv` file line by line, one mapping's entries against the
-  environment from before it, a secret-sourced variable never read and marked in
-  `env.secret`; the default env script then
-  the declared ones, `script-not-run` for a default present that cannot run;
-  raises `Refused`), `read_env_script_output(data, *, max_bytes) -> dict` (one
-  JSON object, even over several lines, else one per non-blank line), `plan(manifest,
-  ctx, *, pinned, enforces_network=False, scripts=None) -> dict` (`supported`,
-  `setup`, `python`, `node`, `dependencies`, `needs`, `ungranted`, `weakenings`:
-  `deps-network` per dependency file, `unlocked-dependencies` per one that is not
-  a lock; raises `Refused` for `partial-lock`), `class
-  Activation`, `effective(manifest, ctx, *, base_env, pinned,
-  enforces_network=False) -> Activation` (the state variable from `ctx.state`),
-  `insecure_url(url)`.
-- Dependencies: `requirements_locked(text, path) -> bool` (every requirement
-  hashed; `Refused("partial-lock")` when only some are), `environment_name(variant)`
-  (`shared`, `isolated` or a normalized name), `dependencies_of(manifest, files,
-  os_name, read=None) -> list[{"runtime", "file", "lock", "environment"}]` (a
-  selected variant naming `requirements`, `lock` or `package` replaces the default
-  file; `[defaults] deps = false` turns the defaults off), `overlay_paths(manifest,
-  ctx)` (the default additions, each runtime's `ctx.packages` directory, then
-  `paths`), `environment_key(dependency, identity) -> (runtime, environment,
-  owner)`, `asked_versions(runtime, text) -> dict` (an `==` pin per normalized
-  Python name, or a `package.json`'s ranges), `environments(members, removed=())
-  -> {"environments", "conflicts", "blocked", "left"}` (members of one
-  environment asking for one package at two versions are blocked; a Python
-  environment is locked when every file is, a Node.js one with one locked member).
-- Preparation: `SETUP_CHANGES = ("add", "sync", "activate", "remove")`,
-  `SETUP_PHASES = ("install", "sync", "remove")`, `setup_phase(change, recorded,
-  digest) -> Optional[str]` (add and sync: `install` with no record, `sync` with
-  any; activate: only for another digest; remove: `remove` after a record),
-  `preparation(change, record, digest, setup, dependencies, fails=None) -> dict`
-  (`setup_phase`, `setup_arguments`, `steps` — `empty-state`, `deps:<runtime>`,
-  `setup`, `record` or `delete` —, the `record` after them and whether the digest
-  `activates`; a failed sync keeps only the recorded digest active).
-- Resolution: `class ResolveError(Exception)` (`chain`), `resolve(requires_of,
-  requested) -> (visiting order, missing)`, `order_key(priority, name, identity)`.
-- Hooks (the hook vectors in `tests/aos_vectors/hooks*.json` pass): `HOOK_EVENTS`
-  (event → class, runs `hook.<ext>` by default, outputs, refusal, what `match` selects),
-  `SESSION_REASONS`, `TOOL_KINDS`; `[hooks]` and `[defaults] hooks` validate in
-  `validate`. `default_hook(files, os_name, interpreters)`, `hooks_of(manifest, files,
-  os_name, interpreters) -> (entries, script-not-run files)`, `hook_plan(manifest, facts)
-  -> {hooks, on, activates, needs, reports, non_defaults}` (`on` only while the digest is
-  the one allowed; `activates` false for a guard that is off), `hook_matches(event, match,
-  value)`, `hook_payload(event, known)` with `PAYLOAD_COMMON`, `PAYLOAD_KEYS`, `TOOL_KEYS`;
-  `read_hook_output(event, data, sets)` / `hook_result(event, run, limits)` raise
-  `HookFailure` (`.cause`: `not-run`, `payload-too-large`, `timeout`, `too-large`, `exit`,
-  `grant`, `output`) with `HOOK_OUTPUT_KEYS`, `MAX_HOOK_REASON`; `fire_event(event, runs,
-  applies, limits, windows) -> dict` combines hooks to the tightest (a run holding `start`, a
-  function, is started only when its turn comes); `apply_pre_env(env, identities, runs,
-  limits, reports, non_defaults)` applies `pre-env` output (raises `Refused("hook-refused")`);
-  `DEFAULT_HOOK_TIMEOUT = 30`, `DEFAULT_HOOK_LIMITS` (60 s a run, 120 s an event, 64 KiB
-  output and error, 1 MiB payload). `tree_entries(root, *, with_data=False)` hands back each
-  file's bytes (read once, at most `MAX_TREE_BYTES = 256 MiB`) instead of its digest, so a digest
-  and a copy can be made from the same bytes.
+  listed)`, `apply_overlay(env, manifest, ctx, weakenings) -> list[env script]`
+  (env files, `env`, paths, each after its defaults, text values substituted as they
+  are set; a secret-sourced variable never read and marked in `env.secret`; the
+  default env script then the declared ones; raises `Refused`),
+  `plan(manifest, ctx, *, pinned, enforces_network=False, scripts=None) -> dict`
+  (the OS, setup, runtimes, dependency files, interpreters and commands needed, the
+  references not granted, the weakenings), `class Activation`, `effective(manifest,
+  ctx, *, base_env, pinned, enforces_network=False) -> Activation` (`error`, `env`,
+  `scripts`, `plan`, `weakenings`).
+- Package environments: `asked_versions(runtime, text)`, `environment_key(dependency,
+  identity)`, `environments(members, removed=()) -> dict` (`environments`,
+  `conflicts`, `blocked`, `left`), `insecure_url(url)`.
+- Setup phases (`setup_phase`, `preparation`), composition order, `resolve` and the
+  other readers are `coqui_aos`'s.
 
 ## `dotagents._activate`
 
@@ -505,7 +421,7 @@ returns the exit code.
   variant runs when it declares no `timeout` and `--setup-timeout` is not given;
   `0` means no limit.
 - `load_manifest(path) -> (document, problems)` — `overlay.cfg` read
-  (`_aos.read_document`) and validated (`_aos.validate`); a refused one is `({},
+  (`coqui_aos.read_document`) and validated (`coqui_aos.validate`); a refused one is `({},
   [problem, ...])`; memoized on the file's mtime and size.
 - `class InstallResult` — what `install_to` did: `written`, `unchanged`,
   `replaced` (edited here, replaced by the source's file), `removed`, `backed_up`,
@@ -538,7 +454,7 @@ returns the exit code.
     dropped), `rules`, `requires` (normalized, de-duplicated), `priority`, `doc`.
   - `member_paths() -> list[str]` (no hashing). `skills()`, `rules()`,
     `context_files(harness_id=None)` — the field with its defaults
-    (`_aos.skills_of`, `rules_of`, `context_of`), then `harness.<id>.context`.
+    (`coqui_aos.skills_of`, `rules_of`, `context_of`), then `harness.<id>.context`.
     `harness_hints(harness_id) -> dict`. `setup_variant(os_name=None)` —
     `_aos.setup_of` here: a declared variant, else the default `setup.<ext>`.
   - `declared_scripts(os_name=None) -> {name: (path, interpreter)}` (its `scripts`

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Reading, validating, naming and digesting overlays, front matter, substitution, the defaults an
+  overlay's files give and the setup phases come from the `coqui-aos` package, the same reader
+  every other implementation of the Agent Overlay Specification is held to. New dependency:
+  `coqui-aos>=0.0.0a0,<0.1`, vendored in the `.pyz`. A refusal is a `coqui_aos.Error` with a
+  class; `dotagents._aos` keeps what is dotagents' own (applying one overlay for this machine,
+  its secrets and the package environments overlays share).
+
 ## [0.9.3] - 2026-11-11
 
 ### Changed
