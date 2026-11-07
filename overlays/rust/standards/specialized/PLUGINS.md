@@ -75,6 +75,10 @@ providers/<kind>/<name>/plugin/ that provider as a cdylib: one providers! line
 - **Provider calls are synchronous.** The host calls them from
   `spawn_blocking` or a thread of its own, never on an async worker; only a
   method documented as blocking with a timeout may block.
+- **A provider's configuration is its own settings type**, with the derives
+  ([CONFIG.md](../base/CONFIG.md), "Settings as data"), never a text field
+  (`settings_toml: String`), whose schema says nothing a host can check.
+  Text formats are the host's concern and never cross the kind.
 - **A provider's configuration is validated against its schema before it is
   built**, every time, by the host; reading a configuration is lenient, so
   validation is what refuses a misspelled key.
