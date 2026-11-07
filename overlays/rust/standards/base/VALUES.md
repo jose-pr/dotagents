@@ -55,6 +55,16 @@ thing with a lifecycle. Index: [README.md](../README.md). (`std::net::IpAddr`,
 - **No interior mutability.** A `Cell` or a cache inside a value makes
   equality and hashing depend on history.
 
+## Values that cross a wire or a file
+
+- **A value two programs exchange is one type**, declared in the crate that
+  owns the contract, described once ([CONFIG.md](CONFIG.md), "Settings as
+  data"), and used by both sides. A struct declared again on the other
+  side is a second contract that drifts without a failing test.
+- A side in another language reads it through its guatiao binding and the
+  type's schema; where no binding exists yet, through one copy that a test
+  checks against vectors the owning type writes.
+
 ## Tests
 
 - Equal spellings are equal and hash equal; unequal values are unequal.

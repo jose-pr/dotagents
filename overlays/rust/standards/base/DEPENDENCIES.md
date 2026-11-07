@@ -12,6 +12,8 @@ find, and they are found one consumer at a time.
 | Need | Use | Not |
 | --- | --- | --- |
 | Values, a schema, or providers crossing a language or library boundary | `guatiao` (and `guatiao-serde`, `guatiao-intake`) | a hand-written C struct tree, a JSON string across the boundary, raw `libloading` |
+| Settings a file, a person or a peer fills, or values crossing a wire: one description for parsing, validation, defaults and docs | `guatiao` with `derive` (`ToValue`, `FromValue`, `Schema`), read through `guatiao-serde`'s `text::{json,toml,yaml}` ([CONFIG.md](CONFIG.md), "Settings as data") | `#[serde]` attributes beside them, a hand-written JSON Schema, the struct declared again on the other side |
+| A form for settings | `guatiao-intake`: `form_for`, `#[derive(Form)]` for sections and widgets | a form laid out by hand from the field list |
 | Loading plugins from shared libraries | `guatiao` with `load` | `libloading` plus a hand-written entry symbol and registry |
 | A command line | `clap` with the derive API ([APPLICATION.md](../specialized/APPLICATION.md)) | a hand-written parser over `std::env::args`, `argh`, `pico-args` |
 | Serialisation | `serde` | hand-written visitors over a format crate's tree |

@@ -15,6 +15,37 @@ One order, everywhere:
 A higher source overrides a lower one for that setting only. The shipped
 header states the order once.
 
+## Settings as data
+
+- **A builder's settings are also one plain data type** (`TlsSettings`),
+  `Default` where every setting has one, which the builder accepts whole
+  (`X::builder(..).settings(s)`) beside its setters
+  ([API.md](API.md), "Constructors"). A file, a form or a peer fills that
+  type; no source needs glue of its own.
+- **The type is described once, by `guatiao`'s derives**:
+  `#[derive(ToValue, FromValue, Schema)]` (feature `derive`), `#[map(..)]`
+  for keys and defaults, `#[schema(..)]` for bounds, sections and
+  `sensitive`. Everything else comes from that one description:
+
+| Need | From |
+| --- | --- |
+| parsing JSON, TOML, YAML | `guatiao_serde::text::<format>::from_str_as::<T>`; any serde format through `from_deserializer` |
+| validation | `guatiao::schema::validate_map` against `T::schema()`, refusing what reading refuses |
+| defaults | `#[map(default)]` or `#[map(default = <expr>)]`, read and written into the schema's `default` |
+| docs | each field's `///` comment, as the schema's `description` |
+| a form | `guatiao_intake::form_for`, or `#[derive(Form)]` for sections and widgets |
+
+- **No second description**: no `#[serde(..)]` set beside `#[map(..)]`, no
+  hand-written JSON Schema, no doc table restating the fields. A field of a
+  serde type crosses through `guatiao_serde::Serde<T>` or
+  `#[map(with = guatiao_serde::adapt::any)]`.
+- **Exceptions.** A crate whose default build takes no dependency derives
+  behind an optional `guatiao` feature, as `C-SERDE` puts serde behind
+  `serde`. A crate that must take none, even optionally, keeps a plain
+  struct with `Default`, described once on the consumer's side. A side in a
+  language with no guatiao binding yet keeps one copy, checked by a test
+  against vectors the owning type writes.
+
 ## Environment variables
 
 - **Named `<PROJECT>_<SETTING>`**, upper case, the project's name as the
@@ -49,15 +80,16 @@ header states the order once.
   read.
 - **A secret appears in no log line, no error, no `Debug` and no `Display`.**
   The type holding it masks it ([VALUES.md](VALUES.md)).
-- A schema or configuration field holding one is marked as such (for
-  example `writeOnly`, or a crate's own sensitivity flag), and every
+- A schema or configuration field holding one is marked as such
+  (`#[schema(sensitive)]`, which writes `x-sensitive` and `writeOnly`), and every
   rendering of the configuration honours the mark at every depth, not only
   the top level.
 
 ## Configuration files
 
-- **Read through `serde` into typed structs**, with
-  `#[serde(deny_unknown_fields)]` on every struct a person writes: a
+- **Read into the settings type** (above), refusing unknown keys on every
+  struct a person writes (`#[map(deny_unknown_fields)]`, or
+  `#[serde(deny_unknown_fields)]` in a crate that is serde alone): a
   misspelled setting must not look like it worked.
 - **A missing file is not an error where defaults suffice; a malformed one
   is**, reported with the path and the position, never with the line's
