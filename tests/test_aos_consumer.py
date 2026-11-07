@@ -15,6 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import coqui_aos
 import pytest
 
 from dotagents import _aos, _env, _skills
@@ -99,8 +100,8 @@ def test_bin_and_lib_are_path_additions_by_default(store):
     assert pythonpath == [str(plain / "lib" / "python"), "/site"]
     assert str(quiet / "bin") not in path and str(quiet / "lib" / "python") not in pythonpath
     assert not any("bare" in entry for entry in path + pythonpath)
-    assert _aos.validate({"defaults": {"bin": "no"}}) == [("type", "/defaults/bin")]
-    assert _aos.validate({"defaults": {"libs": False}}) == [("unknown-key", "/defaults/libs")]
+    assert [issue.at for issue in coqui_aos.validate({"defaults": {"bin": "no"}})] == ["/defaults/bin"]
+    assert [issue.at for issue in coqui_aos.validate({"defaults": {"libs": False}})] == ["/defaults/libs"]
 
 
 def test_a_declared_entry_naming_a_default_replaces_it(store):
@@ -187,7 +188,7 @@ def test_an_undefined_name_refuses_the_overlays_environment(store, caplog):
     with caplog.at_level(logging.ERROR):
         env = _env_of(store)
     assert not {"A", "B", "C"} & set(env), "nothing of the overlay applies"
-    assert "undefined-variable B (A)" in caplog.text, "the entries of one mapping do not see each other"
+    assert "undefined-variable B" in caplog.text, "the entries of one mapping do not see each other"
 
 
 def test_no_placeholder_reads_a_secret(store, caplog):

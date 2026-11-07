@@ -17,6 +17,8 @@ import os
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Optional
 
+import coqui_aos
+
 from dotagents import _aos, _policy
 
 _log_once: "set[str]" = set()
@@ -58,7 +60,7 @@ def digest_of(overlay: Any) -> "tuple[Optional[str], Optional[str]]":
         return cached[1], cached[2]
     try:
         digest, why = overlay.tree_digest(), None
-    except _aos.DigestError as exc:
+    except coqui_aos.Error as exc:
         digest, why = None, "its tree has no digest (%s)" % exc
     except OSError as exc:
         digest, why = None, "its tree cannot be read (%s)" % exc

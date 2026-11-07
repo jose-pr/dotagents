@@ -19,6 +19,8 @@ from typing import Optional
 
 from duho import Cli, LoggingArgs
 
+import coqui_aos
+
 from dotagents._resources import base_agents_text
 from dotagents.cli._common import DotAgentsArgs, _write_stdout, store_base
 
@@ -203,7 +205,7 @@ def _remove_tree(path: Path) -> None:
 def _prepare(scope, dest_dir: Path, name: str, *, change: str, no_setup=False, dry_run, logger,
              source_dir=None, timeout: "Optional[int]" = None) -> int:
     """Prepare an installed overlay in the phase ``change`` (``add``,
-    ``sync`` or ``remove``) calls for (:func:`dotagents._aos.setup_phase`):
+    ``sync`` or ``remove``) calls for (:func:`coqui_aos.setup_phase`):
     ``install`` when no preparation succeeded here (its record on this OS),
     ``sync`` on every add or sync after one, ``remove`` before the overlay is
     deleted after one. An overlay with no dependency file and no setup on
@@ -256,10 +258,11 @@ def _prepare(scope, dest_dir: Path, name: str, *, change: str, no_setup=False, d
     recorded = record["digest"] if record else None
     try:
         digest = recorded if change == "remove" else overlay.tree_digest()
-    except _aos.DigestError as exc:
+    except coqui_aos.Error as exc:
         logger.error("%s: the overlay has no tree digest (%s)", name, exc)
         return 1
-    phase = _aos.setup_phase(change, recorded, digest)
+    found = coqui_aos.setup_phase(coqui_aos.Change(change), recorded, digest)
+    phase = None if found is None else found.value
     if phase is None:
         return 0
     plan = _aos.plan(overlay.document(), _activate.context(overlay), pinned=True)
@@ -394,10 +397,10 @@ def _check_source(scope, name: str, src: Path, cache, logger) -> "tuple[Optional
     try:
         members = overlay.members()
         digest = overlay.tree_digest()
-    except _aos.DigestError as exc:
+    except coqui_aos.Error as exc:
         raise SystemExit("error: overlay %s has no tree digest: %s" % (name, exc))
     if not problems:
-        problems = ["%s at %s" % (code, at) for code, at in _aos.validate(overlay.document(), members)]
+        problems = ["%s at %s" % (code, at) for code, at in coqui_aos.validate(overlay.document(), coqui_aos.OverlayTree(members))]
     if problems:
         raise SystemExit("error: overlay %s: %s is invalid: %s" % (name, Overlay.MANIFEST_NAME, "; ".join(problems)))
     commit = None

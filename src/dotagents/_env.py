@@ -106,6 +106,8 @@ import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
+import coqui_aos
+
 from dotagents import _activate, _aos
 from dotagents._scope import Scope, project_root_default
 
@@ -1087,8 +1089,8 @@ def _run_env_script(overlay, script: "dict", own: "_aos.Environment", ctx: "_aos
         )
         if status != 0:
             raise _aos.Refused("env-script-failed", script["path"], "exit %d" % status)
-        return list(_aos.read_env_script_output(out).items())
-    except (_aos.Refused, _aos.ReadError, _run.InterpreterError, OSError) as exc:
+        return list(coqui_aos.read_env_script_output(out).items())
+    except (_aos.Refused, coqui_aos.Error, _run.InterpreterError, OSError) as exc:
         if logger:
             logger.error("overlay %s: env script %s failed, nothing of it applies (%s)",
                          overlay.name, script["path"], getattr(exc, "detail", "") or exc)

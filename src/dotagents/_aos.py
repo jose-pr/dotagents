@@ -1,23 +1,20 @@
-"""The Agent Overlay Specification (AOS) format: reading, validation, digests
-and applying declarations.
+"""What dotagents adds to the AOS reader: applying one overlay for this consumer.
 
-This module is the format and nothing else: no store, no scope, no command.
-It reads ``overlay.cfg`` and env files into the AOS data model, validates a
-manifest against the schema's rules and the semantic ones, computes the tree
-digest, and applies one overlay's ``env``, ``env_files`` and ``paths`` to an
-environment. :mod:`dotagents._overlays`, :mod:`dotagents._env` and the
-``overlays`` commands give it a filesystem, secrets and a policy.
+Reading, validation, names, digests, substitution, the defaults an overlay's files give and the
+setup phases are :mod:`coqui_aos`. This module is the consumer side: the environment an overlay
+builds with this machine's secrets and files (:class:`Environment`, :class:`Secrets`,
+:class:`Context`, :func:`apply_overlay`, :func:`plan`, :func:`effective`) and the package
+environments overlays install into (:func:`environments`). :mod:`dotagents._overlays`,
+:mod:`dotagents._env` and the ``overlays`` commands give it a filesystem, secrets and a policy.
 
 The rules are those of AOS ``0.1.0-draft``
-(https://boriken-dev.github.io/agent-overlay-spec/); the error codes are the
-classes its conformance vectors name.
+(https://boriken-dev.github.io/agent-overlay-spec/); the error codes are the classes its
+conformance vectors name.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
-import math
 import os
 import re
 import stat
@@ -25,1344 +22,43 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
+import coqui_aos
+from coqui_aos import (
+    EXCLUDED_COMPONENTS,
+    Class,
+    Error,
+    OverlayTree,
+    PathFS,
+    default_on,
+    is_reserved_variable,
+    normalize_name,
+    root_variable,
+    state_variable,
+    substitute,
+)
+from coqui_aos import is_sensitive_variable as is_sensitive
+from coqui_aos import valid_relative_path as valid_relpath
+
 #: The AOS edition this module implements.
 EDITION = "0.1.0-draft"
-
-# --------------------------------------------------------------------------- #
-# Reading: bytes to the data model.
-# --------------------------------------------------------------------------- #
-
-#: Format names a format line may use, to the format they select. YAML is read
-#: only when PyYAML imports (the ``yaml`` extra).
-FORMATS = {"toml": "toml", "json": "json", "yaml": "yaml", "yml": "yaml"}
-DEFAULT_MAX_BYTES = 1024 * 1024
-DEFAULT_MAX_DEPTH = 64
-_INT_MIN, _INT_MAX = -(2 ** 63), 2 ** 63 - 1
-_SAFE_FORMAT_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
-
-
-class ReadError(ValueError):
-    """A document AOS refuses. ``code`` is the vectors' error class."""
-
-    def __init__(self, code: str, detail: str = ""):
-        super().__init__("%s: %s" % (code, detail) if detail else code)
-        self.code = code
-        self.detail = detail
-
-
-def _toml() -> Any:
-    try:
-        import tomllib  # type: ignore[import-not-found]
-
-        return tomllib
-    except ImportError:
-        pass
-    try:
-        import tomli  # type: ignore[import-not-found]
-
-        return tomli
-    except ImportError:
-        return None
-
-
-def _yaml() -> Any:
-    try:
-        import yaml  # type: ignore[import-untyped]
-
-        return yaml
-    except ImportError:
-        return None
-
-
-def supported_formats() -> "list[str]":
-    """The format names this reader reads here (``yaml`` needs PyYAML)."""
-    out = ["toml", "json"]
-    if _yaml() is not None:
-        out.append("yaml")
-    return out
-
-
-def select_format(data: bytes) -> "tuple[str, bytes]":
-    """The format a document's format line names (``toml`` without one) and
-    the bytes its parser is given."""
-    if data.startswith(b"\xef\xbb\xbf"):
-        data = data[3:]
-    if not data.startswith(b"#!"):
-        return "toml", data
-    end = data.find(b"\n")
-    line, rest = (data[2:], b"") if end < 0 else (data[2:end], data[end + 1:])
-    try:
-        text = line.decode("utf-8")
-    except UnicodeDecodeError:
-        raise ReadError("invalid-utf8", "the format line")
-    words = [word for word in re.split(r"[ \t\x0c\r]+", text) if word]
-    word = re.split(r"[/\\]", words[-1] if words else "")[-1].lstrip(".")
-    word = "".join(c.lower() if "A" <= c <= "Z" else c for c in word)
-    if not word:
-        raise ReadError("no-format-named")
-    return word, rest
-
-
-def read_document(
-    data: bytes, *, max_bytes: int = DEFAULT_MAX_BYTES, max_depth: int = DEFAULT_MAX_DEPTH
-) -> "dict[str, Any]":
-    """``data`` as an AOS document (``overlay.cfg``, an ``aos`` env file):
-    the format line, TOML by default, static reading, the data model.
-    Raises :class:`ReadError`."""
-    if len(data) > max_bytes:
-        raise ReadError("too-large")
-    name, payload = select_format(data)
-    kind = FORMATS.get(name)
-    if kind is None or (kind == "yaml" and _yaml() is None):
-        raise ReadError("unsupported-format", name if _SAFE_FORMAT_NAME.match(name) else "(not shown)")
-    try:
-        text = payload.decode("utf-8")
-    except UnicodeDecodeError:
-        raise ReadError("invalid-utf8")
-    if text.startswith("﻿"):
-        raise ReadError("parse-error", "a byte-order mark where the document starts")
-    if not text.strip(" \t\r\n"):
-        return {}
-    if kind == "toml":
-        toml = _toml()
-        if toml is None:
-            raise ReadError("unsupported-format", "toml (needs Python 3.11+ or tomli)")
-        try:
-            value = toml.loads(text)
-        except ValueError as exc:  # TOMLDecodeError
-            raise ReadError("parse-error", str(exc))
-    elif kind == "json":
-        value = _read_json(text)
-    else:
-        value = _read_yaml(text)
-    if not isinstance(value, dict):
-        raise ReadError("not-a-mapping")
-    _check_model(value, 1, max_depth)
-    return value
-
-
-def _read_json(text: str) -> Any:
-    def pairs(items: "list[tuple[str, Any]]") -> "dict[str, Any]":
-        out: "dict[str, Any]" = {}
-        for key, value in items:
-            if key in out:
-                raise ReadError("duplicate-key", key)
-            out[key] = value
-        return out
-
-    def constant(name: str) -> Any:
-        raise ReadError("parse-error", "%s is not JSON" % name)
-
-    try:
-        return json.loads(text, object_pairs_hook=pairs, parse_constant=constant)
-    except json.JSONDecodeError as exc:
-        raise ReadError("parse-error", str(exc))
-
-
-_YAML_INT = re.compile(r"^[-+]?[0-9]+$")
-_YAML_OCT = re.compile(r"^0o[0-7]+$")
-_YAML_HEX = re.compile(r"^0x[0-9a-fA-F]+$")
-_YAML_FLOAT = re.compile(r"^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$")
-_YAML_INF = re.compile(r"^[-+]?\.(?:inf|Inf|INF)$")
-_YAML_NAN = re.compile(r"^\.(?:nan|NaN|NAN)$")
-
-
-def _yaml_scalar(event: Any) -> Any:
-    """A plain scalar under the YAML 1.2 core schema; a quoted one is a string."""
-    if event.style is not None:
-        return event.value
-    value = event.value
-    if value in ("", "~", "null", "Null", "NULL"):
-        raise ReadError("null-value")
-    if value in ("true", "True", "TRUE"):
-        return True
-    if value in ("false", "False", "FALSE"):
-        return False
-    if _YAML_INT.match(value):
-        return int(value)
-    if _YAML_OCT.match(value):
-        return int(value[2:], 8)
-    if _YAML_HEX.match(value):
-        return int(value[2:], 16)
-    if _YAML_FLOAT.match(value):
-        return float(value)
-    if _YAML_INF.match(value) or _YAML_NAN.match(value):
-        raise ReadError("non-finite-float")
-    return value
-
-
-def _read_yaml(text: str) -> Any:
-    """One YAML document built from parser events, so no tag, anchor, alias
-    or merge key is ever applied."""
-    yaml = _yaml()
-    if any(c in text for c in "\x85  "):
-        raise ReadError("parse-error", "a Unicode line break YAML 1.1 and 1.2 read differently")
-    try:
-        events = list(yaml.parse(text, Loader=yaml.SafeLoader))
-    except yaml.YAMLError as exc:
-        raise ReadError("parse-error", str(exc).splitlines()[0])
-    stack: "list[Any]" = []
-    keys: "list[Optional[str]]" = []
-    root: Any = None
-    documents = 0
-
-    def add(value: Any) -> None:
-        nonlocal root
-        if not stack:
-            root = value
-            return
-        top = stack[-1]
-        if isinstance(top, list):
-            top.append(value)
-        elif keys[-1] is None:
-            if not isinstance(value, str):
-                raise ReadError("non-string-key")
-            if value == "<<":
-                raise ReadError("yaml-merge-key")
-            if value in top:
-                raise ReadError("duplicate-key", value)
-            keys[-1] = value
-        else:
-            top[keys[-1]] = value
-            keys[-1] = None
-
-    for event in events:
-        if isinstance(event, yaml.AliasEvent):
-            raise ReadError("yaml-anchor", "alias")
-        if getattr(event, "anchor", None) is not None:
-            raise ReadError("yaml-anchor", "anchor")
-        if getattr(event, "tag", None) is not None:
-            raise ReadError("yaml-tag")
-        if isinstance(event, yaml.DocumentStartEvent):
-            if event.version is not None or event.tags:
-                raise ReadError("yaml-directive")
-            documents += 1
-            if documents > 1:
-                raise ReadError("parse-error", "more than one document")
-        elif isinstance(event, yaml.ScalarEvent):
-            add(_yaml_scalar(event))
-        elif isinstance(event, (yaml.SequenceStartEvent, yaml.MappingStartEvent)):
-            value: Any = [] if isinstance(event, yaml.SequenceStartEvent) else {}
-            add(value)
-            stack.append(value)
-            keys.append(None)
-        elif isinstance(event, (yaml.SequenceEndEvent, yaml.MappingEndEvent)):
-            stack.pop()
-            keys.pop()
-    return {} if documents == 0 or root is None else root
-
-
-def _check_model(value: Any, depth: int, max_depth: int) -> None:
-    """Refuse what the data model has no type for. ``depth`` counts
-    containers, the top-level mapping being 1."""
-    if isinstance(value, (list, dict)) and depth > max_depth:
-        raise ReadError("too-deep")
-    if value is None:
-        raise ReadError("null-value")
-    if isinstance(value, (bool, str)):
-        if isinstance(value, str):
-            try:
-                value.encode("utf-8")
-            except UnicodeEncodeError:
-                raise ReadError("invalid-unicode")
-        return
-    if isinstance(value, int):
-        if not _INT_MIN <= value <= _INT_MAX:
-            raise ReadError("integer-range")
-        return
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ReadError("non-finite-float")
-        return
-    if isinstance(value, list):
-        for item in value:
-            _check_model(item, depth + 1, max_depth)
-        return
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise ReadError("non-string-key")
-            _check_model(key, depth, max_depth)
-            _check_model(item, depth + 1, max_depth)
-        return
-    raise ReadError("datetime-value" if hasattr(value, "isoformat") else "unsupported-value")
-
-
-_DOTENV_LINE = re.compile(r"^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=(.*)$")
-
-
-def parse_dotenv(data: bytes) -> "list[tuple[str, str, bool]]":
-    """A ``dotenv`` env file's lines as ``(name, text, literal)``, in order;
-    ``literal`` is true for a value in single quotes, which is never
-    substituted. No references, escapes or command substitution. Raises
-    :class:`ReadError`."""
-    if data.startswith(b"\xef\xbb\xbf"):
-        data = data[3:]
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        raise ReadError("invalid-utf8")
-    out: "list[tuple[str, str, bool]]" = []
-    folded: "set[str]" = set()
-    for line in text.split("\n"):
-        if line.endswith("\r"):
-            line = line[:-1]
-        stripped = line.strip(" \t")
-        if not stripped or stripped.startswith("#"):
-            continue
-        match = _DOTENV_LINE.match(line)
-        if not match:
-            raise ReadError("dotenv-syntax")
-        name, value = match.group(1), match.group(2).strip(" \t")
-        literal = False
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            literal = value[0] == "'"
-            value = value[1:-1]
-        if name.upper() in folded:
-            raise ReadError("duplicate-key", name)
-        folded.add(name.upper())
-        out.append((name, value, literal))
-    return out
-
-
-def read_dotenv(data: bytes, env: "Optional[dict[str, str]]" = None, *, windows: bool = False,
-                secret_variables: "Iterable[str]" = ()) -> "dict[str, str]":
-    """A ``dotenv`` env file applied over ``env``: each line substituted
-    against the environment the earlier lines left. Returns the values the
-    file sets. ``secret_variables`` are the variables of ``env`` whose value
-    came from a secret reference. Raises :class:`ReadError` (a
-    :class:`SubstitutionError` for a placeholder)."""
-    built = Environment(env or {}, windows, secret=secret_variables)
-    out: "dict[str, str]" = {}
-    for name, text, literal in parse_dotenv(data):
-        value = text if literal else substitute(text, built.lookup)
-        built.set(name, value)
-        out[name] = value
-    return out
-
-
-# --------------------------------------------------------------------------- #
-# Substitution: ``${NAME}`` and its operators in env values, applied when a
-# value is set.
-# --------------------------------------------------------------------------- #
-
-
-class SubstitutionError(ReadError):
-    """``undefined-variable``, ``secret-placeholder`` or ``invalid-pattern``;
-    ``name`` is the placeholder's variable, or the pattern."""
-
-    def __init__(self, code: str, name: str):
-        super().__init__(code, name)
-        self.name = name
-
-
-_NAME_AT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_SPACE = "[ \t\n\r\f\v]"
-# Digits and white space are ASCII only; Python's \d and \s would take others.
-_SLICE = re.compile(
-    r":{s}*(?:\({s}*(-?[0-9]+){s}*\)|([0-9]+|{s}-[0-9]+))(?::{s}*(-?[0-9]+))?{s}*".format(s=_SPACE))
-_WORD_OPERATORS = (":-", ":=", ":+", "-", "=", "+")
-
-
-def substitute(text: str, lookup: "Callable[[str], Optional[str]]") -> str:
-    """``text`` with every placeholder replaced. ``lookup(name)`` gives a
-    variable's value, None when it is unset, and raises
-    :class:`SubstitutionError` for one that holds a secret. Nothing runs and
-    nothing is read but through ``lookup``; an inserted value is never read
-    again."""
-    out: "list[str]" = []
-    index = 0
-    while index < len(text):
-        char = text[index]
-        if char != "$":
-            out.append(char)
-            index += 1
-            continue
-        after = text[index + 1:index + 2]
-        if after == "$":
-            out.append("$")
-            index += 2
-            continue
-        if after == "{":
-            close = _closing_brace(text, index + 2)
-            if close is not None:
-                found = _expression(text[index + 2:close], lookup)
-                if found is not None:
-                    out.append(found)
-                    index = close + 1
-                    continue
-        # No expression: the '$' is itself, and reading goes on after it.
-        out.append("$")
-        index += 1
-    return "".join(out)
-
-
-def _closing_brace(text: str, index: int) -> "Optional[int]":
-    """The '}' ending an expression that starts at ``index``: the first one
-    that does not close a '${' opened inside it."""
-    depth = 0
-    while index < len(text):
-        if text.startswith("${", index):
-            depth += 1
-            index += 2
-            continue
-        if text[index] == "}":
-            if depth == 0:
-                return index
-            depth -= 1
-        index += 1
-    return None
-
-
-def _required(name: str, lookup: "Callable[[str], Optional[str]]") -> str:
-    value = lookup(name)
-    if value is None:
-        raise SubstitutionError("undefined-variable", name)
-    return value
-
-
-def _expression(body: str, lookup: "Callable[[str], Optional[str]]") -> "Optional[str]":
-    """The text for ``${body}``, or None when it is no expression AOS defines."""
-    if body.startswith("#"):
-        name = _NAME_AT.fullmatch(body, 1)
-        if name is not None:
-            return str(len(_required(name.group(), lookup)))
-    name = _NAME_AT.match(body)
-    if name is None:
-        return None
-    key, rest = name.group(), body[name.end():]
-    if not rest:
-        return _required(key, lookup)
-    for operator in _WORD_OPERATORS:
-        if rest.startswith(operator):
-            word = rest[len(operator):]
-            value = lookup(key)
-            present = value is not None and not (operator[0] == ":" and value == "")
-            if operator.endswith("+"):
-                return substitute(word, lookup) if present else ""
-            return value if present else substitute(word, lookup)
-    if rest.startswith(":"):
-        found = _SLICE.fullmatch(rest)
-        if found is None:
-            return None
-        offset = int(found.group(1) or found.group(2))
-        length = None if found.group(3) is None else int(found.group(3))
-        return _slice(_required(key, lookup), offset, length)
-    if rest.startswith("/"):
-        spec = rest[1:]
-        kind = spec[:1] if spec[:1] in ("/", "#", "%") else ""
-        pattern, replacement = _split_pattern(spec[len(kind):])
-        return _replace(_required(key, lookup), kind, pattern, replacement)
-    if rest[:1] in ("#", "%"):
-        operator = rest[:2] if rest[:2] in ("##", "%%") else rest[:1]
-        return _trim(_required(key, lookup), operator, rest[len(operator):])
-    if rest in ("^", "^^", ",", ",,"):
-        value = _required(key, lookup)
-        if rest == "^^":
-            return value.upper()
-        if rest == ",,":
-            return value.lower()
-        return (value[:1].upper() if rest == "^" else value[:1].lower()) + value[1:]
-    return None
-
-
-def _slice(value: str, offset: int, length: "Optional[int]") -> str:
-    """Code points ``offset`` to the end, or ``length`` of them; negative
-    numbers count from the end."""
-    size = len(value)
-    if offset < 0:
-        offset += size
-        if offset < 0:
-            return ""
-    end = size if length is None else (offset + length if length >= 0 else size + length)
-    return value[offset:end] if end > offset else ""
-
-
-def _split_pattern(spec: str) -> "tuple[str, str]":
-    """A replacement's pattern and text, split at the first '/' not after a backslash."""
-    index = 0
-    while index < len(spec):
-        if spec[index] == "\\":
-            index += 2
-            continue
-        if spec[index] == "/":
-            return spec[:index], spec[index + 1:]
-        index += 1
-    return spec, ""
-
-
-def _glob(pattern: str) -> "re.Pattern[str]":
-    """A pattern as a regular expression matched whole: '*', '?', bracket
-    expressions, '\\x' for x. Raises :class:`SubstitutionError` for empty
-    brackets or a reversed range."""
-    parts: "list[str]" = []
-    index = 0
-    while index < len(pattern):
-        char = pattern[index]
-        if char == "\\" and index + 1 < len(pattern):
-            parts.append(re.escape(pattern[index + 1]))
-            index += 2
-            continue
-        close = pattern.find("]", index + 2) if char == "[" else -1
-        if char == "*":
-            parts.append(".*")
-        elif char == "?":
-            parts.append(".")
-        elif close >= 0:
-            body = pattern[index + 1:close]
-            negate = body[:1] in ("!", "^")
-            items = body[1:] if negate else body
-            if not items:
-                raise SubstitutionError("invalid-pattern", pattern)
-            members: "list[str]" = []
-            at = 0
-            while at < len(items):
-                if at + 2 < len(items) and items[at + 1] == "-":
-                    low, high = items[at], items[at + 2]
-                    if ord(high) < ord(low):
-                        raise SubstitutionError("invalid-pattern", pattern)
-                    members.append(re.escape(low) + "-" + re.escape(high))
-                    at += 3
-                else:
-                    members.append(re.escape(items[at]))
-                    at += 1
-            parts.append("[" + ("^" if negate else "") + "".join(members) + "]")
-            index = close + 1
-            continue
-        else:
-            parts.append(re.escape(char))
-        index += 1
-    return re.compile("".join(parts), re.DOTALL)
-
-
-def _ends(regex: "re.Pattern[str]", value: str, start: int) -> "list[int]":
-    """Every end at which the pattern matches the value from ``start``, shortest first."""
-    return [end for end in range(start, len(value) + 1) if regex.fullmatch(value, start, end)]
-
-
-def _replace(value: str, kind: str, pattern: str, replacement: str) -> str:
-    if not pattern:
-        return value
-    regex = _glob(pattern)
-    if kind == "#":
-        ends = _ends(regex, value, 0)
-        return replacement + value[ends[-1]:] if ends else value
-    if kind == "%":
-        for start in range(len(value) + 1):
-            if regex.fullmatch(value, start):
-                return value[:start] + replacement
-        return value
-    out: "list[str]" = []
-    position = 0
-    while True:
-        match = None
-        for start in range(position, len(value)):
-            ends = _ends(regex, value, start)
-            if ends and ends[-1] > start:
-                match = (start, ends[-1])
-                break
-        if match is None:
-            break
-        out.append(value[position:match[0]] + replacement)
-        position = match[1]
-        if kind != "/":
-            break
-    return "".join(out) + value[position:]
-
-
-def _trim(value: str, operator: str, pattern: str) -> str:
-    regex = _glob(pattern)
-    if operator in ("#", "##"):
-        ends = _ends(regex, value, 0)
-        if not ends:
-            return value
-        return value[ends[0] if operator == "#" else ends[-1]:]
-    starts = [start for start in range(len(value) + 1) if regex.fullmatch(value, start)]
-    if not starts:
-        return value
-    return value[:starts[-1] if operator == "%" else starts[0]]
-
-
-# --------------------------------------------------------------------------- #
-# Names and paths.
-# --------------------------------------------------------------------------- #
-
-#: Names an overlay may not have: dotagents' scope labels.
-RESERVED_OVERLAY_NAMES = frozenset({"default", "overlay", "system", "user", "project", "project-root"})
-#: Windows device names, refused as a whole name or before its first ``.``.
-DEVICE_NAMES = frozenset(
-    ["con", "prn", "aux", "nul"] + ["com%d" % i for i in range(1, 10)] + ["lpt%d" % i for i in range(1, 10)]
-)
-OVERLAY_NAME = re.compile(r"^[A-Za-z](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$")
-
-
-def valid_overlay_name(name: str) -> bool:
-    return (
-        bool(OVERLAY_NAME.match(name))
-        and name.lower() not in RESERVED_OVERLAY_NAMES
-        and name.split(".", 1)[0].lower() not in DEVICE_NAMES
-    )
-
-
-def normalize_name(name: str) -> str:
-    """An identity compared normalized: ASCII lowercase, ``_`` and ``.`` as ``-``."""
-    return name.lower().replace("_", "-").replace(".", "-")
-
-
-def _variable_stem(identity: str) -> str:
-    return re.sub(r"[^A-Z0-9]", "_", normalize_name(identity).upper())
-
-
-def root_variable(identity: str) -> str:
-    """``<NAME>_OVERLAY_ROOT``."""
-    return _variable_stem(identity) + "_OVERLAY_ROOT"
-
-
-def state_variable(identity: str) -> str:
-    """``<NAME>_OVERLAY_STATE``."""
-    return _variable_stem(identity) + "_OVERLAY_STATE"
-
-
-_FORBIDDEN = "/\\\\:*?\"<>|\\x00-\\x1f\\x7f-\\x9f\\u200c-\\u200f\\u202a-\\u202e\\u2066-\\u206f\\ufeff"
-_COMPONENT = "[^%s]*[^%s. ]" % (_FORBIDDEN, _FORBIDDEN)
-_RELPATH = re.compile("^%s(?:/%s)*$" % (_COMPONENT, _COMPONENT))
-
-
-def _ascii_fold(word: str) -> str:
-    """``word`` as a regex matching it in any ASCII case (``.git`` ->
-    ``\\.[Gg][Ii][Tt]``): re.IGNORECASE would also fold non-ASCII letters."""
-    return "".join("[%s%s]" % (c.upper(), c) if "a" <= c <= "z" else re.escape(c) for c in word)
-
-
-_EXCLUDED_WORDS = (".git", ".hg", ".svn", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-                   ".tox", ".venv", "node_modules")
-_DEVICE_WORDS = ("con", "prn", "aux", "nul", "conin$", "conout$")
-_RELPATH_EXCLUDED = re.compile(
-    "(?:^|/)(?:(?:%s)(?:/|$)|(?:%s|(?:%s|%s)[0-9¹²³])(?:\\.[^/]*)?(?:/|$)|[^/]*\\.%s(?:/|$))|~[0-9]"
-    % ("|".join(_ascii_fold(w) for w in _EXCLUDED_WORDS), "|".join(_ascii_fold(w) for w in _DEVICE_WORDS),
-       _ascii_fold("com"), _ascii_fold("lpt"), _ascii_fold("pyc"))
-)
-
-
-def valid_relpath(path: str) -> bool:
-    """A relative path as the manifest defines it."""
-    return isinstance(path, str) and bool(_RELPATH.match(path)) and not _RELPATH_EXCLUDED.search(path)
-
-
-#: Path components that are never part of an overlay.
-EXCLUDED_COMPONENTS = frozenset(
-    (".git", ".hg", ".svn", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox",
-     ".venv", "node_modules")
-)
-
-_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_RESERVED_VARIABLE = re.compile(r"^(?:AOS_.*|.*_OVERLAY_(?:ROOT|STATE))$", re.IGNORECASE)
-
-
-def valid_variable_name(name: str) -> bool:
-    return isinstance(name, str) and bool(_ENV_NAME.match(name))
-
-
-def is_reserved_variable(name: str) -> bool:
-    """``AOS_*``, ``*_OVERLAY_ROOT`` and ``*_OVERLAY_STATE``: the consumer's."""
-    return bool(_RESERVED_VARIABLE.match(name))
-
-
-SENSITIVE_NAMES = frozenset(
-    """PATH PATHEXT HOME USERPROFILE SHELL COMSPEC SYSTEMROOT BASH_ENV ENV ZDOTDIR PROMPT_COMMAND
-    IFS EDITOR VISUAL PAGER LESSOPEN LESSCLOSE XDG_CONFIG_HOME XDG_DATA_HOME APPDATA LOCALAPPDATA
-    TMPDIR TEMP TMP PSMODULEPATH CLASSPATH JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS
-    PERL5OPT PERL5LIB RUBYOPT RUBYLIB RUSTFLAGS GOPROXY GONOSUMDB GONOSUMCHECK GOPRIVATE GOFLAGS
-    SSH_ASKPASS SSLKEYLOGFILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE CLAUDE_CONFIG_DIR CODEX_HOME""".split()
-)
-SENSITIVE_PREFIXES = ("LD_", "DYLD_", "GIT_", "PYTHON", "NODE_", "NPM_CONFIG_", "PIP_", "UV_", "CARGO_",
-                      "RUSTC_", "DOTNET_", "COR_", "CORECLR_", "SSL_")
-SENSITIVE_SUFFIXES = ("_PROXY", "_BASE_URL")
-#: Path additions exist for these: adding to them is no weakening.
 PATH_VARIABLES = frozenset(("PATH", "PYTHONPATH", "NODE_PATH"))
-
-
-def is_sensitive(name: str) -> bool:
-    upper = name.upper()
-    return upper in SENSITIVE_NAMES or upper.startswith(SENSITIVE_PREFIXES) or upper.endswith(SENSITIVE_SUFFIXES)
-
-
-# --------------------------------------------------------------------------- #
-# Validation: the schema's rules, then those JSON Schema cannot express.
-# --------------------------------------------------------------------------- #
-
-_TOOL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-_OS_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
-_INTERPRETER = _OS_NAME
-_HARNESS_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-_PROVIDER = re.compile(r"^[a-z][a-z0-9_-]*$")
-_DIGEST = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
-_VERSION = re.compile(r"^[0-9]{1,9}(?:\.[0-9]{1,9}){0,2}$")
-_COMMAND_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
-_SCRIPT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_SCRIPT_PATH = re.compile(r"^[A-Za-z0-9_+-][A-Za-z0-9._+-]*(?:/[A-Za-z0-9_+-][A-Za-z0-9._+-]*)*$")
-_PACKAGE_JSON = re.compile(r"(?:^|/)package\.json$")
-_ENVIRONMENT_NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$")
-_SCRIPT_EXTENSION = re.compile(r"\.(?:py|sh|bash|ps1|js|mjs|cjs)$")
-_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
-_URL = re.compile(r"^[Hh][Tt][Tt][Pp][Ss]?://[^/?#@\s]+(?:[/?][^#\s]*)?$")
-TIMEOUT_MAX = 2147483647
-
 #: A ``scripts`` path's interpreter, by extension.
-SCRIPT_EXTENSIONS = {".py": "python", ".sh": "sh", ".bash": "bash", ".ps1": "powershell",
-                     ".js": "node", ".mjs": "node", ".cjs": "node"}
-
-
-def _is_int(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-class _Checker(object):
-    """Collects ``(code, pointer)`` problems while walking a document."""
-
-    def __init__(self) -> None:
-        self.issues: "list[tuple[str, str]]" = []
-
-    def add(self, code: str, at: str) -> None:
-        self.issues.append((code, at))
-
-    def type(self, value: Any, kind: str, at: str) -> bool:
-        ok = {
-            "string": isinstance(value, str),
-            "boolean": isinstance(value, bool),
-            "integer": _is_int(value),
-            "number": _is_number(value),
-            "array": isinstance(value, list),
-            "object": isinstance(value, dict),
-        }[kind]
-        if not ok:
-            self.add("type", at)
-        return ok
-
-    def pattern(self, value: Any, regex: "re.Pattern[str]", at: str) -> bool:
-        if not isinstance(value, str) or not regex.match(value):
-            self.add("pattern", at)
-            return False
-        return True
-
-    def relpath(self, value: Any, at: str) -> bool:
-        if not valid_relpath(value):
-            self.add("relative-path", at)
-            return False
-        return True
-
-    def text(self, value: Any, at: str) -> bool:
-        if not isinstance(value, str) or "\0" in value:
-            self.add("text", at)
-            return False
-        return True
-
-    def keys(self, value: "dict[str, Any]", allowed: Iterable[str], at: str) -> None:
-        allowed = set(allowed)
-        for key in value:
-            if key not in allowed:
-                self.add("unknown-key", "%s/%s" % (at, key))
-
-    def required(self, value: "dict[str, Any]", names: Iterable[str], at: str) -> bool:
-        missing = [n for n in names if n not in value]
-        if missing:
-            self.add("required", at)
-        return not missing
-
-    def array(self, value: Any, at: str, item: "Callable[[Any, str], Any]") -> None:
-        if self.type(value, "array", at):
-            for index, entry in enumerate(value):
-                item(entry, "%s/%d" % (at, index))
-
-    def oslist(self, value: Any, at: str) -> None:
-        self.array(value, at, lambda v, p: self.pattern(v, _OS_NAME, p))
-
-    def timeout(self, value: Any, at: str) -> None:
-        if not _is_int(value) or not 0 <= value <= TIMEOUT_MAX:
-            self.add("timeout", at)
-
-    def any_value(self, value: Any, at: str) -> None:
-        if value is None or not isinstance(value, (str, int, float, bool, list, dict)):
-            self.add("null-value", at)
-        elif isinstance(value, list):
-            for index, entry in enumerate(value):
-                self.any_value(entry, "%s/%d" % (at, index))
-        elif isinstance(value, dict):
-            for key, entry in value.items():
-                self.any_value(entry, "%s/%s" % (at, key))
-
-
-def _env_value_ok(value: Any) -> bool:
-    """Whether ``value`` is exactly one of the env value forms."""
-    if isinstance(value, str):
-        return "\0" not in value
-    if not isinstance(value, dict):
-        return False
-    optional_ok = lambda v: isinstance(v, bool)  # noqa: E731
-    flags = {"if_unset"}
-    sources = [k for k in ("value", "path", "secret", "provider") if k in value]
-    if len(sources) != 1:
-        return False
-    source = sources[0]
-    if source == "value":
-        return set(value) <= {"value"} | flags and isinstance(value["value"], str) and "\0" not in value["value"] \
-            and all(optional_ok(value[k]) for k in flags & set(value))
-    if source == "path":
-        return set(value) <= {"path"} | flags and valid_relpath(value["path"]) \
-            and all(optional_ok(value[k]) for k in flags & set(value))
-    flags = {"if_unset", "optional"}
-    if source == "secret":
-        return set(value) <= {"secret"} | flags and isinstance(value["secret"], str) and bool(value["secret"]) \
-            and all(optional_ok(value[k]) for k in flags & set(value))
-    provider, key = value.get("provider"), value.get("key")
-    if not (isinstance(provider, str) and _PROVIDER.match(provider)):
-        return False
-    if not (isinstance(key, str) and key and "\0" not in key):
-        return False
-    if provider == "file" and not valid_relpath(key):
-        return False
-    if provider == "env" and not _ENV_NAME.match(key):
-        return False
-    for name, item in value.items():
-        if name in ("provider", "key"):
-            continue
-        if name in flags:
-            if not optional_ok(item):
-                return False
-        elif not (isinstance(item, (str, bool)) or _is_int(item)):
-            return False
-    return True
-
-
-def _check_env_map(c: _Checker, value: Any, at: str) -> None:
-    if not c.type(value, "object", at):
-        return
-    for name, entry in value.items():
-        here = "%s/%s" % (at, name)
-        if not _ENV_NAME.match(name):
-            c.add("variable-name", here)
-        elif is_reserved_variable(name):
-            c.add("reserved-variable", here)
-        if not _env_value_ok(entry):
-            c.add("env-value", here)
-
-
-def _check_env_file(c: _Checker, value: Any, at: str) -> None:
-    if isinstance(value, str):
-        c.relpath(value, at)
-        return
-    if not c.type(value, "object", at):
-        return
-    c.keys(value, ("path", "format", "os"), at)
-    if c.required(value, ("path",), at):
-        c.relpath(value["path"], at + "/path")
-    if "format" in value and value["format"] not in ("aos", "dotenv"):
-        c.add("enum", at + "/format")
-    if "os" in value:
-        c.oslist(value["os"], at + "/os")
-
-
-def _check_path_addition(c: _Checker, value: Any, at: str) -> None:
-    if not c.type(value, "object", at):
-        return
-    c.keys(value, ("variable", "path", "position", "os"), at)
-    if c.required(value, ("variable", "path"), at):
-        variable = value["variable"]
-        if c.pattern(variable, _ENV_NAME, at + "/variable") and is_reserved_variable(variable):
-            c.add("reserved-variable", at + "/variable")
-        c.relpath(value["path"], at + "/path")
-    if "position" in value and value["position"] not in ("prepend", "append"):
-        c.add("enum", at + "/position")
-    if "os" in value:
-        c.oslist(value["os"], at + "/os")
-
-
-def _check_step(c: _Checker, value: Any, at: str, setup: bool) -> None:
-    if not c.type(value, "object", at):
-        return
-    c.keys(value, ("interpreter", "path", "args", "timeout", "os") + (("network",) if setup else ()), at)
-    if c.required(value, ("interpreter", "path"), at):
-        c.pattern(value["interpreter"], _INTERPRETER, at + "/interpreter")
-        c.relpath(value["path"], at + "/path")
-    if "args" in value:
-        c.array(value["args"], at + "/args", c.text)
-    if "timeout" in value:
-        c.timeout(value["timeout"], at + "/timeout")
-    if "network" in value and setup:
-        c.type(value["network"], "boolean", at + "/network")
-    if "os" in value:
-        c.oslist(value["os"], at + "/os")
-
-
-def _check_runtime(c: _Checker, value: Any, at: str) -> None:
-    if not c.type(value, "object", at):
-        return
-    c.keys(value, ("os", "commands", "python", "node"), at)
-    if "os" in value:
-        c.oslist(value["os"], at + "/os")
-
-    def command(entry: Any, here: str) -> None:
-        if isinstance(entry, str):
-            c.pattern(entry, _COMMAND_NAME, here)
-        elif c.type(entry, "object", here):
-            c.keys(entry, ("name", "os"), here)
-            if c.required(entry, ("name",), here):
-                c.pattern(entry["name"], _COMMAND_NAME, here + "/name")
-            if "os" in entry:
-                c.oslist(entry["os"], here + "/os")
-
-    if "commands" in value:
-        c.array(value["commands"], at + "/commands", command)
-
-    def python(entry: Any, here: str) -> None:
-        if not c.type(entry, "object", here):
-            return
-        c.keys(entry, ("version", "requirements", "lock", "lock_digest", "environment", "os"), here)
-        if "version" in entry:
-            c.pattern(entry["version"], _VERSION, here + "/version")
-        if "environment" in entry:
-            c.pattern(entry["environment"], _ENVIRONMENT_NAME, here + "/environment")
-        for field in ("requirements", "lock"):
-            if field in entry:
-                c.relpath(entry[field], "%s/%s" % (here, field))
-        if "requirements" in entry and "lock" in entry:
-            c.add("exclusive", here)
-        if "lock_digest" in entry:
-            c.pattern(entry["lock_digest"], _DIGEST, here + "/lock_digest")
-            if "lock" not in entry:
-                c.add("dependent-required", here)
-        if "os" in entry:
-            c.oslist(entry["os"], here + "/os")
-
-    def node(entry: Any, here: str) -> None:
-        if c.type(entry, "object", here):
-            c.keys(entry, ("version", "package", "environment", "os"), here)
-            if "version" in entry:
-                c.pattern(entry["version"], _VERSION, here + "/version")
-            if "package" in entry:
-                c.relpath(entry["package"], here + "/package")
-                if isinstance(entry["package"], str) and not _PACKAGE_JSON.search(entry["package"]):
-                    c.add("pattern", here + "/package")
-            if "environment" in entry:
-                c.pattern(entry["environment"], _ENVIRONMENT_NAME, here + "/environment")
-            if "os" in entry:
-                c.oslist(entry["os"], here + "/os")
-
-    if "python" in value:
-        c.array(value["python"], at + "/python", python)
-    if "node" in value:
-        c.array(value["node"], at + "/node", node)
-
-
-def _script_path_ok(value: Any) -> bool:
-    return isinstance(value, str) and bool(_SCRIPT_PATH.match(value)) and valid_relpath(value)
-
-
-def _check_scripts(c: _Checker, value: Any, at: str) -> None:
-    if not c.type(value, "object", at):
-        return
-    for name, target in value.items():
-        here = "%s/%s" % (at, name)
-        if not _SCRIPT_NAME.match(name) or name.lower().endswith(".exe"):
-            c.add("script-name", here)
-        if target is False:
-            continue
-        if isinstance(target, str):
-            if not (_script_path_ok(target) and _SCRIPT_EXTENSION.search(target)):
-                c.add("script-path", here)
-            continue
-        if not isinstance(target, dict):
-            c.add("type", here)
-            continue
-        c.keys(target, ("path", "interpreter", "os"), here)
-        if c.required(target, ("path", "interpreter"), here):
-            if not _script_path_ok(target["path"]):
-                c.add("script-path", here + "/path")
-            c.pattern(target["interpreter"], _INTERPRETER, here + "/interpreter")
-        if "os" in target:
-            c.oslist(target["os"], here + "/os")
-
-
-#: Each hook event: its class, whether ``hook.<ext>`` gets it by default, the outputs it takes,
-#: what a refusal is for it (None: it cannot be refused), and what ``match`` selects.
-HOOK_EVENTS: "dict[str, tuple[str, bool, tuple[str, ...], Optional[str], Optional[str]]]" = {
-    "pre-env": ("core", True, ("env",), "refuse", None),
-    "session-start": ("core", True, ("context", "env"), "refuse", "reason"),
-    "session-end": ("core", True, (), None, None),
-    "prompt": ("core", False, ("context", "block", "env"), "block", None),
-    "turn-end": ("core", True, (), None, None),
-    "cd": ("extended", True, ("env",), None, None),
-    "pre-compact": ("extended", True, ("context", "block"), "block", None),
-    "pre-tool": ("extended", False, ("context", "deny", "ask", "env"), "deny", "kind"),
-    "post-tool": ("extended", False, ("context",), None, "kind"),
+SCRIPT_EXTENSIONS = {
+    ".py": "python", ".sh": "sh", ".bash": "bash", ".ps1": "powershell",
+    ".js": "node", ".mjs": "node", ".cjs": "node",
 }
-SESSION_REASONS = ("new", "resume", "clear", "compact", "fork")
-TOOL_KINDS = ("read", "edit", "delete", "move", "search", "execute", "think", "fetch", "switch_mode", "other")
-#: The events whose entry takes ``sets``.
-_HOOK_SETS = frozenset(("session-start", "prompt", "cd", "pre-tool"))
-#: A manifest's own names: no field names one as a script to run.
-_MANIFEST_NAMES = ("overlay.cfg", "OVERLAY.md")
-
-
-def _check_hook_run(c: _Checker, value: Any, at: str) -> None:
-    if not isinstance(value, str):
-        c.add("type", at)
-    elif value in _MANIFEST_NAMES:
-        c.add("manifest-file", at)
-    elif not (_script_path_ok(value) and _SCRIPT_EXTENSION.search(value)):
-        c.add("script-path", at)
-
-
-def _check_hooks(c: _Checker, value: Any, at: str) -> None:
-    if not c.type(value, "object", at):
-        return
-    for event, entry in value.items():
-        here = "%s/%s" % (at, event)
-        if event not in HOOK_EVENTS:
-            c.add("unknown-key", here)
-            continue
-        if entry is False:
-            continue
-        if isinstance(entry, str):
-            _check_hook_run(c, entry, here)
-            continue
-        if not isinstance(entry, dict):
-            c.add("type", here)
-            continue
-        refusable, match = HOOK_EVENTS[event][3] is not None, HOOK_EVENTS[event][4]
-        allowed = ["run", "timeout", "on_failure"]
-        if match is not None:
-            allowed.append("match")
-        if event in _HOOK_SETS:
-            allowed.append("sets")
-        c.keys(entry, allowed, here)
-        if "run" in entry:
-            _check_hook_run(c, entry["run"], here + "/run")
-        if "match" in entry and match is not None:
-            kinds = SESSION_REASONS if match == "reason" else TOOL_KINDS
-            items = entry["match"]
-            if c.type(items, "array", here + "/match") and (
-                    not items or len(set(map(str, items))) != len(items)
-                    or any(not isinstance(item, str) or item not in kinds for item in items)):
-                c.add("enum", here + "/match")
-        if "sets" in entry and event in _HOOK_SETS:
-            items = entry["sets"]
-            if c.type(items, "array", here + "/sets"):
-                if not items or len(set(map(str, items))) != len(items):
-                    c.add("unique", here + "/sets")
-                for index, name in enumerate(items):
-                    if not valid_variable_name(name) or is_reserved_variable(name):
-                        c.add("variable", "%s/sets/%d" % (here, index))
-        if "timeout" in entry:
-            seconds = entry["timeout"]
-            if isinstance(seconds, float) and not isinstance(seconds, bool):
-                c.add("integer-required", here + "/timeout")
-            elif not _is_int(seconds) or not 1 <= seconds <= 3600:
-                c.add("timeout", here + "/timeout")
-        if "on_failure" in entry:
-            failures = ("report", "refuse") if refusable else ("report",)
-            if not isinstance(entry["on_failure"], str) or entry["on_failure"] not in failures:
-                c.add("enum", here + "/on_failure")
-
-
-def _check_harness(c: _Checker, value: Any, at: str) -> None:
-    if not c.type(value, "object", at):
-        return
-    for harness_id, hints in value.items():
-        here = "%s/%s" % (at, harness_id)
-        if not _HARNESS_ID.match(harness_id):
-            c.add("harness-id", here)
-        if not c.type(hints, "object", here):
-            continue
-        for key, item in hints.items():
-            spot = "%s/%s" % (here, key)
-            if key == "context":
-                c.array(item, spot, c.relpath)
-            elif key == "skills":
-                c.type(item, "boolean", spot)
-            elif key in ("model", "effort"):
-                if not (isinstance(item, str) and item):
-                    c.add("type", spot)
-            else:
-                c.any_value(item, spot)
-
-
-def _check_mcp(c: _Checker, value: Any, at: str) -> None:
-    if not c.type(value, "object", at):
-        return
-    c.keys(value, ("servers", "skills"), at)
-    names: "set[str]" = set()
-
-    def server(entry: Any, here: str) -> None:
-        if not c.type(entry, "object", here):
-            return
-        c.keys(entry, ("name", "transport", "timeout", "command", "args", "env", "env_passthrough", "url",
-                       "headers_env"), here)
-        if c.required(entry, ("name", "transport"), here):
-            name = entry["name"]
-            if c.pattern(name, _TOOL_NAME, here + "/name"):
-                if name in names:
-                    c.add("mcp-duplicate-server", here + "/name")
-                names.add(name)
-            if entry["transport"] not in ("stdio", "streamable-http"):
-                c.add("enum", here + "/transport")
-        if "timeout" in entry and not (_is_number(entry["timeout"]) and 0.001 <= entry["timeout"] <= TIMEOUT_MAX):
-            c.add("timeout", here + "/timeout")
-        if "command" in entry:
-            command = entry["command"]
-            if not (isinstance(command, str) and command and "\0" not in command):
-                c.add("type", here + "/command")
-            elif ("/" in command or "\\" in command) and not valid_relpath(command):
-                c.add("mcp-command", here + "/command")
-        if "args" in entry:
-            c.array(entry["args"], here + "/args", c.text)
-        if "env" in entry:
-            _check_env_map(c, entry["env"], here + "/env")
-            if isinstance(entry["env"], dict):
-                seen: "set[str]" = set()
-                for var in entry["env"]:
-                    if var.upper() in seen:
-                        c.add("env-name-case-duplicate", "%s/env/%s" % (here, var))
-                    seen.add(var.upper())
-        if "env_passthrough" in entry:
-            passthrough = entry["env_passthrough"]
-            c.array(passthrough, here + "/env_passthrough", lambda v, p: c.pattern(v, _ENV_NAME, p))
-            if isinstance(passthrough, list) and len(passthrough) != len(
-                    {json.dumps(v, sort_keys=True) for v in passthrough}):
-                c.add("unique", here + "/env_passthrough")
-        if "url" in entry:
-            url = entry["url"]
-            if not (isinstance(url, str) and _URL.match(url)) or (isinstance(url, str) and "#" in url):
-                c.add("mcp-url", here + "/url")
-        if "headers_env" in entry:
-            headers = entry["headers_env"]
-            if c.type(headers, "object", here + "/headers_env"):
-                for header, var in headers.items():
-                    spot = "%s/headers_env/%s" % (here, header)
-                    if not _HEADER_NAME.match(header):
-                        c.add("header-name", spot)
-                    c.pattern(var, _ENV_NAME, spot)
-        transport = entry.get("transport")
-        if transport == "stdio":
-            if "command" not in entry or "url" in entry or "headers_env" in entry:
-                c.add("mcp-transport", here)
-        elif transport == "streamable-http":
-            if "url" not in entry or any(k in entry for k in ("command", "args", "env", "env_passthrough")):
-                c.add("mcp-transport", here)
-
-    if "servers" in value:
-        c.array(value["servers"], at + "/servers", server)
-    linked: "set[str]" = set()
-
-    def skill(entry: Any, here: str) -> None:
-        if not c.type(entry, "object", here):
-            return
-        c.keys(entry, ("name", "server"), here)
-        if c.required(entry, ("name", "server"), here):
-            if c.pattern(entry["name"], _TOOL_NAME, here + "/name"):
-                if entry["name"] in linked:
-                    c.add("mcp-duplicate-skill", here + "/name")
-                linked.add(entry["name"])
-            if c.pattern(entry["server"], _TOOL_NAME, here + "/server") and entry["server"] not in names:
-                c.add("mcp-unknown-server", here + "/server")
-
-    if "skills" in value:
-        c.array(value["skills"], at + "/skills", skill)
-
-
-def named_files(doc: "dict[str, Any]") -> "list[tuple[str, str]]":
-    """Every ``(pointer, relative path)`` of a file a field requires to exist."""
-    out: "list[tuple[str, str]]" = []
-
-    def each(key: str, items: Any, field: "Optional[str]" = None) -> None:
-        if not isinstance(items, list):
-            return
-        for index, item in enumerate(items):
-            if field is None and isinstance(item, str):
-                out.append(("/%s/%d" % (key, index), item))
-            elif field is not None and isinstance(item, dict) and isinstance(item.get(field), str):
-                out.append(("/%s/%d/%s" % (key, index, field), item[field]))
-
-    each("rules", doc.get("rules"))
-    each("context", doc.get("context"))
-    files = doc.get("env_files")
-    if isinstance(files, list):
-        for index, item in enumerate(files):
-            if isinstance(item, str):
-                out.append(("/env_files/%d" % index, item))
-            elif isinstance(item, dict) and isinstance(item.get("path"), str):
-                out.append(("/env_files/%d/path" % index, item["path"]))
-    each("env_scripts", doc.get("env_scripts"), "path")
-    each("setup", doc.get("setup"), "path")
-    runtime = doc.get("runtime")
-    if isinstance(runtime, dict) and isinstance(runtime.get("python"), list):
-        for index, variant in enumerate(runtime["python"]):
-            if isinstance(variant, dict):
-                for field in ("requirements", "lock"):
-                    if isinstance(variant.get(field), str):
-                        out.append(("/runtime/python/%d/%s" % (index, field), variant[field]))
-    if isinstance(runtime, dict) and isinstance(runtime.get("node"), list):
-        for index, variant in enumerate(runtime["node"]):
-            if isinstance(variant, dict) and isinstance(variant.get("package"), str):
-                out.append(("/runtime/node/%d/package" % index, variant["package"]))
-    scripts = doc.get("scripts")
-    if isinstance(scripts, dict):
-        for name, target in scripts.items():
-            if isinstance(target, str):
-                out.append(("/scripts/%s" % name, target))
-            elif isinstance(target, dict) and isinstance(target.get("path"), str):
-                out.append(("/scripts/%s/path" % name, target["path"]))
-    hooks = doc.get("hooks")
-    if isinstance(hooks, dict):
-        for event, entry in hooks.items():
-            if isinstance(entry, str):
-                out.append(("/hooks/%s" % event, entry))
-            elif isinstance(entry, dict) and isinstance(entry.get("run"), str):
-                out.append(("/hooks/%s/run" % event, entry["run"]))
-    harness = doc.get("harness")
-    if isinstance(harness, dict):
-        for harness_id, hints in harness.items():
-            if isinstance(hints, dict) and isinstance(hints.get("context"), list):
-                for index, path in enumerate(hints["context"]):
-                    if isinstance(path, str):
-                        out.append(("/harness/%s/context/%d" % (harness_id, index), path))
-    return out
-
-
-def validate(doc: Any, files: "Optional[Iterable[str]]" = None) -> "list[tuple[str, str]]":
-    """Problems with a data model value as ``(code, pointer)``; empty when
-    it is valid. ``files``, the overlay's relative file paths, makes every
-    file a field names a requirement too."""
-    c = _Checker()
-    if not isinstance(doc, dict):
-        c.add("type", "")
-        return c.issues
-    for key in ("name", "description"):
-        if key in doc:
-            c.type(doc[key], "string", "/" + key)
-    if "requires" in doc:
-        def require(value: Any, at: str) -> None:
-            if c.pattern(value, OVERLAY_NAME, at) and not valid_overlay_name(value):
-                c.add("reserved-name", at)
-        c.array(doc["requires"], "/requires", require)
-    if "routing" in doc:
-        c.array(doc["routing"], "/routing", lambda v, p: c.type(v, "string", p))
-    for key in ("rules", "context"):
-        if key in doc:
-            c.array(doc[key], "/" + key, c.relpath)
-    if "priority" in doc:
-        c.type(doc["priority"], "integer", "/priority")
-    if "skills" in doc:
-        c.array(doc["skills"], "/skills", lambda v, p: c.pattern(v, _TOOL_NAME, p))
-        if isinstance(doc["skills"], list) and len(doc["skills"]) != len(
-                {json.dumps(v, sort_keys=True) for v in doc["skills"]}):
-            c.add("unique", "/skills")
-    env_names: "dict[str, str]" = {}
-    if "env" in doc:
-        _check_env_map(c, doc["env"], "/env")
-        if isinstance(doc["env"], dict):
-            for name in doc["env"]:
-                if name.upper() in env_names:
-                    c.add("env-name-case-duplicate", "/env/%s" % name)
-                env_names.setdefault(name.upper(), name)
-    if "env_files" in doc:
-        c.array(doc["env_files"], "/env_files", lambda v, p: _check_env_file(c, v, p))
-    if "paths" in doc:
-        c.array(doc["paths"], "/paths", lambda v, p: _check_path_addition(c, v, p))
-        if isinstance(doc["paths"], list):
-            for index, entry in enumerate(doc["paths"]):
-                if isinstance(entry, dict) and isinstance(entry.get("variable"), str) \
-                        and entry["variable"].upper() in env_names:
-                    c.add("env-path-conflict", "/paths/%d/variable" % index)
-    if "env_scripts" in doc:
-        c.array(doc["env_scripts"], "/env_scripts", lambda v, p: _check_step(c, v, p, False))
-    if "runtime" in doc:
-        _check_runtime(c, doc["runtime"], "/runtime")
-    if "setup" in doc:
-        c.array(doc["setup"], "/setup", lambda v, p: _check_step(c, v, p, True))
-    if "scripts" in doc:
-        _check_scripts(c, doc["scripts"], "/scripts")
-    if "mcp" in doc:
-        _check_mcp(c, doc["mcp"], "/mcp")
-    if "hooks" in doc:
-        _check_hooks(c, doc["hooks"], "/hooks")
-    if "harness" in doc:
-        _check_harness(c, doc["harness"], "/harness")
-    if "defaults" in doc and c.type(doc["defaults"], "object", "/defaults"):
-        for key, value in doc["defaults"].items():
-            if key in DEFAULT_KEYS:
-                c.type(value, "boolean", "/defaults/" + key)
-            else:
-                c.add("unknown-key", "/defaults/" + key)
-    known = {"name", "description", "requires", "routing", "rules", "priority", "context", "skills", "env",
-             "env_files", "paths", "env_scripts", "runtime", "setup", "scripts", "mcp", "harness", "defaults",
-             "hooks"}
-    for key, value in doc.items():
-        if key not in known:
-            c.any_value(value, "/" + key)
-    if files is not None:
-        have = set(files)
-        env = doc.get("env")
-        if isinstance(env, dict) and isinstance(doc.get("paths", []), list):
-            added = {entry["variable"].upper() for entry in default_paths(doc, have)}
-            for name in env:
-                if name.upper() in added:
-                    c.add("env-path-conflict", "/env/%s" % name)
-        for at, path in named_files(doc):
-            if path not in have:
-                c.add("missing-file", at)
-        hooks = doc.get("hooks")
-        if isinstance(hooks, dict) and not default_hook(have, "", ())[1]:
-            # A table with no run runs hook.<ext>, which has to be there.
-            for event, entry in hooks.items():
-                if isinstance(entry, dict) and "run" not in entry:
-                    c.add("missing-file", "/hooks/%s" % event)
-        skills = doc.get("skills")
-        if isinstance(skills, list):
-            for index, name in enumerate(skills):
-                if isinstance(name, str) and "skills/%s/SKILL.md" % name not in have:
-                    c.add("missing-skill", "/skills/%d" % index)
-        mcp = doc.get("mcp")
-        if isinstance(mcp, dict) and isinstance(mcp.get("skills"), list):
-            for index, link in enumerate(mcp["skills"]):
-                name = link.get("name") if isinstance(link, dict) else None
-                if isinstance(name, str) and "skills/%s/SKILL.md" % name not in have:
-                    c.add("missing-skill", "/mcp/skills/%d/name" % index)
-    return sorted(set(c.issues), key=lambda issue: (issue[1], issue[0]))
-
-
-# --------------------------------------------------------------------------- #
-# Integrity: the tree digest.
-# --------------------------------------------------------------------------- #
-
+DIGEST_FORM = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
 _REPARSE_POINT = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: symlinks and junctions
-DIGEST_FORM = _DIGEST
-EMPTY_DIGEST = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
-class DigestError(ValueError):
-    """A tree whose digest cannot be computed. ``code`` is the vectors' class."""
 
-    def __init__(self, code: str, path: str = ""):
-        super().__init__("%s: %s" % (code, path) if path else code)
-        self.code = code
-        self.path = path
+# --------------------------------------------------------------------------- #
+# Digests of an overlay on disk.
+# --------------------------------------------------------------------------- #
 
 
 def sha256_digest(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
-
-
-def file_digest(path: "str | os.PathLike[str]") -> str:
-    h = hashlib.sha256()
-    with open(str(path), "rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            h.update(chunk)
-    return "sha256:" + h.hexdigest()
+    return str(coqui_aos.Digest.of(data))
 
 
 def same_digest(a: str, b: str) -> bool:
@@ -1372,99 +68,20 @@ def same_digest(a: str, b: str) -> bool:
     return a.lower() == b.lower()
 
 
-def _excluded(components: "Iterable[bytes]") -> bool:
-    names = [c.decode("utf-8", "replace") for c in components]
-    return any(name in EXCLUDED_COMPONENTS for name in names) or names[-1].endswith(".pyc")
+def tree_digest(root: "str | os.PathLike[str]") -> str:
+    """The tree digest of the overlay at ``root``. Raises :class:`coqui_aos.Error`."""
+    return str(coqui_aos.tree_digest(PathFS(), Path(root)).digest)
 
 
-def digest_entries(entries: "Iterable[tuple[tuple[bytes, ...], str, Any]]") -> "tuple[str, list[bytes]]":
-    """The tree digest of ``(components, kind, data)`` entries, and its lines.
-    ``kind`` is ``file``, ``dir``, ``symlink`` or ``special``; ``data`` is a
-    file's bytes, or its digest when it is a ``str``."""
-    lines = []
-    for components, kind, data in entries:
-        if kind == "dir" or _excluded(components):
-            continue
-        shown = b"/".join(components).decode("utf-8", "replace")
-        if kind == "symlink":
-            raise DigestError("symlink", shown)
-        if kind != "file":
-            raise DigestError("special-file", shown)
-        try:
-            path = b"/".join(components).decode("utf-8")
-        except UnicodeDecodeError:
-            raise DigestError("non-utf8-name", shown)
-        if not valid_relpath(path):
-            raise DigestError("invalid-name", shown)
-        digest = data if isinstance(data, str) else sha256_digest(data)
-        lines.append(path.encode("utf-8") + b"\0" + digest.encode("ascii") + b"\n")
-    folded: "dict[bytes, bytes]" = {}
-    for line in lines:
-        path = line.split(b"\0", 1)[0]
-        if folded.setdefault(path.lower(), path) != path:
-            raise DigestError("case-collision", path.decode("utf-8"))
-    lines.sort(key=lambda line: line.split(b"\0", 1)[0])
-    return sha256_digest(b"".join(lines)), lines
+def members(root: "str | os.PathLike[str]") -> "list[str]":
+    """The relative paths of an overlay's members (the files the digest counts), sorted. Raises
+    :class:`coqui_aos.Error` as the digest would."""
+    return sorted(coqui_aos.tree_digest(PathFS(), Path(root)).files, key=lambda path: path.encode("utf-8"))
 
 
 def _is_reparse(info: os.stat_result) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & _REPARSE_POINT)
 
-
-MAX_TREE_BYTES = 256 * 1024 * 1024
-
-
-def tree_entries(root: "str | os.PathLike[str]", *, with_data: bool = False,
-                 ) -> "list[tuple[tuple[bytes, ...], str, Any]]":
-    """A directory's entries for :func:`digest_entries`, read without
-    following any link inside it; a file's data is its digest, or with
-    ``with_data`` its bytes -- each file read once, so the digest of the
-    entries is the digest of exactly the bytes handed back (at most
-    :data:`MAX_TREE_BYTES` of them, else :class:`DigestError` ``too-large``)."""
-    out: "list[tuple[tuple[bytes, ...], str, Any]]" = []
-    total = [0]
-
-    def walk(directory: str, prefix: "tuple[bytes, ...]") -> None:
-        with os.scandir(directory) as it:
-            found = sorted(it, key=lambda e: e.name)
-        for entry in found:
-            components = prefix + (os.fsencode(entry.name),)
-            info = entry.stat(follow_symlinks=False)
-            if entry.name in EXCLUDED_COMPONENTS:
-                out.append((components, "dir" if stat.S_ISDIR(info.st_mode) else "file", ""))
-                continue
-            if stat.S_ISLNK(info.st_mode) or _is_reparse(info):
-                out.append((components, "symlink", ""))
-            elif stat.S_ISDIR(info.st_mode):
-                out.append((components, "dir", ""))
-                walk(entry.path, components)
-            elif stat.S_ISREG(info.st_mode):
-                if with_data:
-                    with open(entry.path, "rb") as fh:
-                        data = fh.read()
-                    total[0] += len(data)
-                    if total[0] > MAX_TREE_BYTES:
-                        raise DigestError("too-large", os.fsdecode(b"/".join(components)))
-                    out.append((components, "file", data))
-                else:
-                    out.append((components, "file", file_digest(entry.path)))
-            else:
-                out.append((components, "special", ""))
-
-    walk(str(root), ())
-    return out
-
-
-def tree_digest(root: "str | os.PathLike[str]") -> str:
-    """The tree digest of the overlay at ``root``. Raises :class:`DigestError`."""
-    return digest_entries(tree_entries(root))[0]
-
-
-def members(root: "str | os.PathLike[str]") -> "list[str]":
-    """The relative paths of an overlay's members (the files the digest
-    counts), sorted. Raises :class:`DigestError` as the digest would."""
-    _digest, lines = digest_entries(tree_entries(root))
-    return [line.split(b"\0", 1)[0].decode("utf-8") for line in lines]
 
 
 def member_paths(root: "str | os.PathLike[str]") -> "list[str]":
@@ -1500,14 +117,25 @@ def member_paths(root: "str | os.PathLike[str]") -> "list[str]":
 
 
 def foreign_entries(root: "str | os.PathLike[str]") -> "list[str]":
-    """Entries under ``root`` that are not part of the overlay (an excluded
-    name, a ``.pyc``): in a verified copy each one is a mismatch."""
-    out = []
-    for components, kind, _data in tree_entries(root):
-        if _excluded(components) and not any(
-                c.decode("utf-8", "replace") in EXCLUDED_COMPONENTS for c in components[:-1]):
-            out.append(b"/".join(components).decode("utf-8", "replace"))
+    """Entries under ``root`` that are not part of the overlay (an excluded name, a ``.pyc``): in a
+    verified copy each one is a mismatch."""
+    out: "list[str]" = []
+
+    def walk(directory: str, prefix: str) -> None:
+        with os.scandir(directory) as it:
+            found = sorted(it, key=lambda e: e.name)
+        for entry in found:
+            rel = prefix + entry.name
+            if entry.name in EXCLUDED_COMPONENTS or entry.name.endswith(".pyc"):
+                out.append(rel)
+                continue
+            info = entry.stat(follow_symlinks=False)
+            if stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode) and not _is_reparse(info):
+                walk(entry.path, rel + "/")
+
+    walk(str(root), "")
     return out
+
 
 
 # --------------------------------------------------------------------------- #
@@ -1561,63 +189,6 @@ def script_interpreter(target: Any) -> "Optional[str]":
 def version_tuple(text: str) -> "tuple[int, int, int]":
     parts = [int(p) for p in text.split(".")] + [0, 0, 0]
     return (parts[0], parts[1], parts[2])
-
-
-# --------------------------------------------------------------------------- #
-# Requirement and lock files.
-# --------------------------------------------------------------------------- #
-
-_REQUIREMENT = re.compile(
-    r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?"  # name
-    r"(?:\[[A-Za-z0-9._,\s-]*\])?"  # extras
-    r"\s*(?:(?:===|==|~=|!=|<=|>=|<|>)\s*[A-Za-z0-9.*+!_-]+"
-    r"(?:\s*,\s*(?:===|==|~=|!=|<=|>=|<|>)\s*[A-Za-z0-9.*+!_-]+)*)?"  # specifiers
-    r"\s*(?:;[^#]*)?$"  # marker
-)
-_PINNED = re.compile(r"^[^=<>!~;\[\s]+(?:\[[^\]]*\])?\s*==\s*[A-Za-z0-9.+!_-]+\s*(?:;.*)?$")
-_HASH = re.compile(r"^--hash=sha256:[0-9a-fA-F]{64}$")
-
-
-def check_requirements(text: str, *, locked: bool) -> "list[str]":
-    """Problems with a requirements (``locked=False``) or lock file: each
-    logical line must be a requirement and, in a lock, pinned with ``==`` and
-    carry ``--hash=sha256:`` options; any other line is refused."""
-    problems: "list[str]" = []
-    logical: "list[tuple[int, str]]" = []
-    pending, start = "", 0
-    for number, line in enumerate(text.splitlines(), 1):
-        if not pending:
-            start = number
-        if line.rstrip().endswith("\\"):
-            pending += line.rstrip()[:-1] + " "
-            continue
-        logical.append((start, pending + line))
-        pending = ""
-    if pending:
-        logical.append((start, pending))
-    for number, line in logical:
-        content = re.sub(r"(?:^|\s)#.*$", "", line).strip()
-        if not content:
-            continue
-        words = content.split()
-        hashes = [w for w in words if w.startswith("--hash")]
-        requirement = " ".join(w for w in words if not w.startswith("--hash"))
-        if requirement.startswith("-") or "://" in requirement or " @ " in " %s " % requirement:
-            problems.append("line %d: options, URLs and paths are not allowed" % number)
-            continue
-        if not _REQUIREMENT.match(requirement):
-            problems.append("line %d: not a requirement" % number)
-            continue
-        if any(not _HASH.match(h) for h in hashes):
-            problems.append("line %d: a hash that is not --hash=sha256:<hex>" % number)
-        if locked:
-            if not _PINNED.match(requirement):
-                problems.append("line %d: not pinned with ==" % number)
-            if not hashes:
-                problems.append("line %d: no --hash" % number)
-        elif hashes:
-            problems.append("line %d: hashes belong in a lock file" % number)
-    return problems
 
 
 # --------------------------------------------------------------------------- #
@@ -1677,7 +248,7 @@ class Environment(object):
         if key is None:
             return None
         if key in self.secret:
-            raise SubstitutionError("secret-placeholder", name)
+            raise Error(Class.SECRET_PLACEHOLDER, name)
         return self.values[key]
 
     def set(self, name: str, value: str, *, secret: bool = False) -> None:
@@ -1841,8 +412,8 @@ def _apply_mapping(env: Environment, mapping: "dict[str, Any]", ctx: Context,
         if "value" in entry:
             try:
                 value: "Optional[str]" = substitute(entry["value"], before.lookup)
-            except SubstitutionError as error:
-                raise Refused(error.code, name, error.name)
+            except Error as error:
+                raise Refused(error.class_.value, name)
         elif "path" in entry:
             value = resolve_path(ctx.root, entry["path"], ctx.windows)
         else:
@@ -1872,8 +443,8 @@ def _apply_dotenv(env: Environment, lines: "list[tuple[str, str, bool]]",
             raise Refused("reserved-variable", name)
         try:
             value = text if literal else substitute(text, env.lookup)
-        except SubstitutionError as error:
-            raise Refused(error.code, name, error.name)
+        except Error as error:
+            raise Refused(error.class_.value, name)
         if is_sensitive(name):
             weakenings.append(("env-sensitive", name))
         env.set(name, value)
@@ -1913,21 +484,21 @@ def apply_paths(env: Environment, paths: "list[dict[str, Any]]", ctx: Context,
 def read_env_file(item: "dict[str, Any]", ctx: Context,
                   listed: "set[str]") -> "dict[str, Any] | list[tuple[str, str, bool]]":
     """One env file, checked: an ``aos`` file's mapping, or a ``dotenv``
-    file's lines (:func:`parse_dotenv`). Raises :class:`Refused`."""
+    file's lines (:func:`coqui_aos.parse_dotenv`). Raises :class:`Refused`."""
     data = ctx.read(item["path"])
     if data is None:
         raise Refused("missing-file", item["path"])
     try:
         if item.get("format", "aos") == "dotenv":
-            found: "dict[str, Any] | list[tuple[str, str, bool]]" = parse_dotenv(data)
+            found: "dict[str, Any] | list[tuple[str, str, bool]]" = coqui_aos.parse_dotenv(data)
             names = [name for name, _text, _literal in found]
         else:
-            found = read_document(data)
-            if validate({"env": found}):
+            found = coqui_aos.read_document(data)
+            if coqui_aos.validate({"env": found}):
                 raise Refused("invalid-env-file", item["path"])
             names = list(found)
-    except ReadError as exc:
-        raise Refused("invalid-env-file", item["path"], exc.code)
+    except Error as exc:
+        raise Refused("invalid-env-file", item["path"], exc.class_.value)
     for name in names:
         if name.upper() in listed:
             raise Refused("env-path-conflict", name)
@@ -1935,23 +506,12 @@ def read_env_file(item: "dict[str, Any]", ctx: Context,
 
 
 # --------------------------------------------------------------------------- #
-# Defaults: what conventional files contribute unless ``defaults`` turns them off.
+# What an overlay's files give: coqui_aos reads them from a tree of its paths.
 # --------------------------------------------------------------------------- #
 
-#: The keys of ``defaults``; each is true unless the manifest writes it false.
-DEFAULT_KEYS = ("bin", "lib", "env", "env_scripts", "setup", "deps", "context", "skills", "rules", "hooks")
-#: Default path additions as ``(key, variable, directory)``, in the order they apply.
-DEFAULT_PATHS = (("bin", "PATH", "bin"), ("lib", "PYTHONPATH", "lib/python"), ("lib", "NODE_PATH", "lib/node"))
-#: The default dependency file of each runtime, and the lock looked for beside
-#: it (None: the file is a lock when every requirement in it has a hash).
-DEFAULT_DEPENDENCIES = (
-    ("python", "lib/python/requirements.txt", None),
-    ("node", "lib/node/package.json", "lib/node/package-lock.json"),
-)
 #: The list variable each runtime's installed packages are added to.
 PACKAGE_VARIABLES = {"python": "PYTHONPATH", "node": "NODE_PATH"}
-#: Default script extensions in the order a consumer tries them, with the OSes
-#: each applies on (``None``: every OS).
+#: Default script extensions in the order a consumer tries them, with the OSes each applies on.
 DEFAULT_SCRIPTS = (
     (".py", "python", None),
     (".js", "node", None),
@@ -1961,27 +521,13 @@ DEFAULT_SCRIPTS = (
     (".bash", "bash", ["unix"]),
     (".sh", "sh", ["unix"]),
 )
-_SKILL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-_RULES_FILE = re.compile(r"^rules/[^/]+\.md$")
 
 
-def default_on(manifest: "dict[str, Any]", key: str) -> bool:
-    """Whether the default ``key`` is on: true unless ``[defaults]`` says false."""
-    defaults = manifest.get("defaults")
-    return not (isinstance(defaults, dict) and defaults.get(key) is False)
-
-
-def _members(files: "Iterable[str]") -> "list[str]":
-    """The files that make a path present: digest members only."""
-    return [path for path in files if valid_relpath(path)]
-
-
-def _by_bytes(paths: "Iterable[str]") -> "list[str]":
-    return sorted(paths, key=lambda path: path.encode("utf-8"))
+def _tree(files: "Iterable[str]") -> OverlayTree:
+    return OverlayTree(files)
 
 
 def _named(entry: Any) -> Any:
-    """The file or directory an entry names: a string, or a mapping's ``path``."""
     return entry.get("path") if isinstance(entry, dict) else entry
 
 
@@ -1990,139 +536,51 @@ def _declared(manifest: "dict[str, Any]", field: str) -> "list[Any]":
     return list(value) if isinstance(value, list) else []
 
 
-def _merge(defaults: "list[Any]", declared: "list[Any]") -> "list[Any]":
-    """Default entries first, then declared ones; a declared entry naming the
-    same file or directory as a default entry replaces it."""
-    named = {_named(entry) for entry in declared}
-    return [entry for entry in defaults if _named(entry) not in named] + declared
-
-
-def default_paths(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[dict[str, Any]]":
-    """The default path additions that are on, present (a member file under
-    the directory) and not replaced by a declared entry with that ``path``."""
-    members = _members(files)
-    found = [
-        {"variable": variable, "path": directory}
-        for key, variable, directory in DEFAULT_PATHS
-        if default_on(manifest, key) and any(p.startswith(directory + "/") for p in members)
-    ]
-    named = {_named(entry) for entry in _declared(manifest, "paths")}
-    return [entry for entry in found if entry["path"] not in named]
-
-
 def paths_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[dict[str, Any]]":
     """The ``bin`` and ``lib`` defaults, then ``paths``."""
-    return default_paths(manifest, files) + _declared(manifest, "paths")
+    return coqui_aos.paths_of(manifest, _tree(files))
+
+
+def dependencies_of(
+    manifest: "dict[str, Any]",
+    files: "Iterable[str]",
+    os_name: str,
+    read: "Optional[Callable[[str], Optional[bytes]]]" = None,
+) -> "list[dict[str, Any]]":
+    """The dependency files installed for this OS, one per runtime, as ``{"runtime", "file", "lock",
+    "environment"}``. ``read`` gives a file's bytes, so a default requirements file is a lock when
+    every requirement has a hash; without it the default file counts as unlocked. Raises
+    :class:`Refused` (``partial-lock``)."""
+    tree = _tree(files)
+    path = "lib/python/requirements.txt"
+    if read is not None and path in tree:
+        data = read(path)
+        if data is not None:
+            tree.with_bytes(path, data)
+    try:
+        found = coqui_aos.dependencies_of(manifest, tree, os_name)
+    except coqui_aos.PartialLock as error:
+        raise Refused("partial-lock", error.subject)
+    return [
+        {"runtime": d.runtime.value, "file": d.file, "lock": d.lock, "environment": d.environment} for d in found
+    ]
 
 
 def overlay_paths(manifest: "dict[str, Any]", ctx: "Context") -> "list[dict[str, Any]]":
-    """What :func:`apply_paths` applies for one overlay: the defaults, then
-    each runtime's installed packages directory (``ctx.packages``, an entry
-    with ``packages`` instead of ``path``), then ``paths``."""
+    """What :func:`apply_paths` applies for one overlay: the defaults, then each runtime's installed
+    packages directory (``ctx.packages``, an entry with ``packages`` instead of ``path``), then
+    ``paths``."""
     packages = [
         {"variable": PACKAGE_VARIABLES[dep["runtime"]], "packages": ctx.packages[dep["runtime"]]}
         for dep in dependencies_of(manifest, ctx.files, ctx.os)
         if dep["runtime"] in ctx.packages
     ]
-    return default_paths(manifest, ctx.files) + packages + _declared(manifest, "paths")
-
-
-_HASH_OPTION = re.compile(r"(?:^|\s)--hash[=\s]")
-
-
-def requirements_locked(text: str, path: str) -> bool:
-    """Whether a requirements file is a lock: every requirement in it has a
-    ``--hash``. Raises :class:`Refused` (``partial-lock``) when only some do:
-    pip checks hashes for all or none."""
-    hashed = []
-    for line in re.sub(r"\\\r?\n", " ", text).splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            hashed.append(_HASH_OPTION.search(line) is not None)
-    if hashed and all(hashed):
-        return True
-    if any(hashed):
-        raise Refused("partial-lock", path)
-    return False
-
-
-def environment_name(variant: "dict[str, Any]") -> str:
-    """The environment a runtime variant installs into: ``shared``,
-    ``isolated`` or a name, normalized as an identity is."""
-    return normalize_name(variant.get("environment", "shared"))
-
-
-def dependencies_of(manifest: "dict[str, Any]", files: "Iterable[str]", os_name: str,
-                    read: "Optional[Callable[[str], Optional[bytes]]]" = None) -> "list[dict[str, Any]]":
-    """The dependency files installed for this OS, one per runtime, as
-    ``{"runtime", "file", "lock", "environment"}``: a selected variant naming
-    a file replaces the default one, and one naming none still chooses the
-    default file's environment. ``read`` gives a file's bytes, so a default
-    requirements file is a lock when every requirement has a hash; without
-    it, the default file counts as unlocked. Raises :class:`Refused`
-    (``partial-lock``)."""
-    runtime = manifest.get("runtime")
-    runtime = runtime if isinstance(runtime, dict) else {}
-    members = set(_members(files))
-    found = []
-    for name, default, beside in DEFAULT_DEPENDENCIES:
-        variant = first_variant(runtime.get(name, []), os_name) or {}
-        lock: "Optional[str]"
-        if name == "python" and ("lock" in variant or "requirements" in variant):
-            path = variant.get("lock", variant.get("requirements"))
-            lock = variant.get("lock")
-        elif name == "node" and "package" in variant:
-            path = variant["package"]
-            candidate = path[:-len("package.json")] + "package-lock.json"
-            lock = candidate if candidate in members else None
-        elif default_on(manifest, "deps") and default in members:
-            path = default
-            if beside is None:
-                data = read(path) if read is not None else None
-                text = data.decode("utf-8", "replace") if data is not None else None
-                lock = path if text is not None and requirements_locked(text, path) else None
-            else:
-                lock = beside if beside in members else None
-        else:
-            continue
-        found.append({"runtime": name, "file": path, "lock": lock, "environment": environment_name(variant)})
-    return found
-
-
-def rules_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[str]":
-    """Every ``rules/<name>.md`` by path bytes, then ``rules``."""
-    found: "list[str]" = []
-    if default_on(manifest, "rules"):
-        found = [path for path in _by_bytes(_members(files)) if _RULES_FILE.match(path)]
-    return _merge(found, _declared(manifest, "rules"))
-
-
-def context_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[str]":
-    """The root ``CONTEXT.md``, then ``context``."""
-    found: "list[str]" = []
-    if default_on(manifest, "context") and "CONTEXT.md" in _members(files):
-        found = ["CONTEXT.md"]
-    return _merge(found, _declared(manifest, "context"))
-
-
-def skills_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[str]":
-    """Every ``skills/<name>/SKILL.md`` with a skill name, and the skills
-    ``skills`` lists, by name bytes."""
-    found = set(_declared(manifest, "skills"))
-    if default_on(manifest, "skills"):
-        for path in _members(files):
-            parts = path.split("/")
-            if len(parts) == 3 and parts[0] == "skills" and parts[2] == "SKILL.md" and _SKILL_DIR.match(parts[1]):
-                found.add(parts[1])
-    return _by_bytes(found)
+    return coqui_aos.default_paths(manifest, _tree(ctx.files)) + packages + _declared(manifest, "paths")
 
 
 def env_files_of(manifest: "dict[str, Any]", files: "Iterable[str]") -> "list[Any]":
-    """The root file ``env`` read as dotenv, then ``env_files``."""
-    found: "list[Any]" = []
-    if default_on(manifest, "env") and "env" in _members(files):
-        found = [{"path": "env", "format": "dotenv"}]
-    return _merge(found, _declared(manifest, "env_files"))
+    return coqui_aos.env_files_of(manifest, _tree(files))
+
 
 
 def default_script(
@@ -2139,7 +597,7 @@ def default_script(
     declared = _declared(manifest, field)
     if not default_on(manifest, field):
         return None, False, [], declared
-    members = set(_members(files))
+    members = {path for path in files if valid_relpath(path)}
     present = [stem + ext for ext, _interpreter, _os in DEFAULT_SCRIPTS if stem + ext in members]
     configured = {entry["path"]: entry for entry in declared
                   if isinstance(entry, dict) and entry.get("path") in present}
@@ -2206,44 +664,6 @@ def apply_overlay(env: Environment, manifest: "dict[str, Any]", ctx: Context,
                 if selected["timeout"] == 0:
                     weakenings.append(("no-timeout", script["path"]))
     return scripts
-
-
-def read_env_script_output(data: bytes, *, max_bytes: int = DEFAULT_MAX_BYTES) -> "dict[str, Optional[str]]":
-    """An env script's standard output: the variables it sets (a string) or
-    unsets (None), in order. The whole output is one JSON object, possibly
-    over several lines; or else every line that is not blank is one. Raises
-    :class:`ReadError` (``env-script-output`` for a name or value it may not
-    set)."""
-    if len(data) > max_bytes:
-        raise ReadError("too-large")
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        raise ReadError("invalid-utf8")
-    whole = text.strip(" \t\r\n")
-    if not whole:
-        return {}
-    try:
-        objects = [_read_json(whole)]
-    except ReadError as error:
-        if error.code != "parse-error":
-            raise
-        objects = []
-        for line in text.split("\n"):
-            line = line[:-1] if line.endswith("\r") else line
-            if line.strip(" \t"):
-                objects.append(_read_json(line))
-    out: "dict[str, Optional[str]]" = {}
-    for value in objects:
-        if not isinstance(value, dict):
-            raise ReadError("env-script-output", "not an object")
-        for name, item in value.items():
-            if not valid_variable_name(name) or is_reserved_variable(name):
-                raise ReadError("env-script-output", "variable name")
-            if item is not None and not (isinstance(item, str) and "\0" not in item):
-                raise ReadError("env-script-output", "value")
-            out[name] = item
-    return out
 
 
 def setup_of(manifest: "dict[str, Any]", files: "Iterable[str]", os_name: str,
@@ -2392,81 +812,6 @@ def effective(manifest: "dict[str, Any]", ctx: Context, *, base_env: "dict[str, 
     return Activation(env=env, scripts=scripts, plan=found, weakenings=weakenings)
 
 
-#: What a consumer is doing to an overlay when it decides what to prepare:
-#: adding it, a sync (a fetch of its source, a change of source, ref or pin,
-#: or setup run again on request), activating a digest outside a sync, and
-#: removing it.
-SETUP_CHANGES = ("add", "sync", "activate", "remove")
-#: The phases setup is told, first argument and ``AOS_SETUP_PHASE``.
-SETUP_PHASES = ("install", "sync", "remove")
-
-
-def setup_phase(change: str, recorded: "Optional[str]", digest: "Optional[str]") -> "Optional[str]":
-    """The phase of an overlay's preparation for ``change`` (one of
-    :data:`SETUP_CHANGES`), or None when nothing runs. ``recorded`` is the
-    digest of the last preparation that succeeded on this OS, None when
-    there is none; ``digest`` the one at hand. Add and sync run ``install``
-    with no record, ``sync`` with any; activation runs them only for a digest
-    other than the recorded one; removal runs ``remove`` after a record."""
-    if change not in SETUP_CHANGES:
-        raise ValueError(change)
-    if change == "remove":
-        return "remove" if recorded is not None else None
-    if recorded is None:
-        return "install"
-    if change != "activate" or recorded.lower() != (digest or "").lower():
-        return "sync"
-    return None
-
-
-def preparation(change: str, record: "Optional[dict[str, str]]", digest: "Optional[str]",
-                setup: "Optional[dict[str, Any]]", dependencies: "list[dict[str, Any]]",
-                fails: "Optional[str]" = None) -> "dict[str, Any]":
-    """What preparing an overlay does: ``setup_phase``, ``setup_arguments``
-    (the phase, then the variant's ``args``), the ``steps`` in order
-    (``empty-state``, ``deps:<runtime>``, ``setup``, ``record`` or
-    ``delete``), the ``record`` after them (``{"digest", "phase"}``) and
-    whether the digest ``activates``. Nothing is prepared without a
-    dependency file or a setup. ``fails`` names the step that fails
-    (``deps`` or ``setup``): the steps stop there, except that a removal
-    still deletes everything; only the recorded digest stays active."""
-    recorded = record["digest"] if record else None
-    phase = None
-    if setup is not None or dependencies:
-        phase = setup_phase(change, recorded, digest)
-    steps: "list[str]" = []
-    if phase == "install":
-        steps.append("empty-state")
-    if phase in ("install", "sync"):
-        steps += ["deps:" + dependency["runtime"] for dependency in dependencies]
-    if phase is not None and setup is not None:
-        steps.append("setup")
-    failed = False
-    if fails is not None:
-        for index, step in enumerate(steps):
-            if step.split(":")[0] == fails:
-                steps, failed = steps[:index + 1], True
-                break
-    if change == "remove":
-        steps.append("delete")
-        after, activates = None, False
-    elif phase is None:
-        after, activates = record, True
-    elif failed:
-        after = record
-        activates = recorded is not None and recorded.lower() == (digest or "").lower()
-    else:
-        steps.append("record")
-        after, activates = {"digest": digest, "phase": phase}, True
-    return {
-        "setup_phase": phase,
-        "setup_arguments": None if phase is None or setup is None else [phase] + list(setup["args"]),
-        "steps": steps,
-        "record": after,
-        "activates": activates,
-    }
-
-
 _PINNED_REQUIREMENT = re.compile(
     r"^([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*(?:\[[^\]]*\])?\s*===?\s*([^\s;\\]+)")
 
@@ -2561,409 +906,3 @@ def insecure_url(url: str) -> bool:
 # --------------------------------------------------------------------------- #
 # Resolution and composition order.
 # --------------------------------------------------------------------------- #
-
-
-class ResolveError(Exception):
-    """A ``requires`` cycle; ``chain`` names it, ``a -> b -> a``."""
-
-    def __init__(self, code: str, chain: "list[str]"):
-        super().__init__("%s: %s" % (code, " -> ".join(chain)))
-        self.code = code
-        self.chain = chain
-
-
-def resolve(requires_of: "Callable[[str], Optional[Iterable[str]]]",
-            requested: "Iterable[str]") -> "tuple[list[str], list[list[str]]]":
-    """The visiting order of the active overlays and the missing
-    requirements ``[requirer, name]``. ``requires_of(identity)`` gives an
-    overlay's ``requires``, or None when no source offers it. Raises
-    :class:`ResolveError` on a cycle."""
-    order: "list[str]" = []
-    missing: "list[list[str]]" = []
-
-    def visit(name: str, chain: "list[str]") -> None:
-        if name in order:
-            return
-        if name in chain:
-            raise ResolveError("cycle", chain[chain.index(name):] + [name])
-        requires = requires_of(name)
-        if requires is None:
-            missing.append([chain[-1] if chain else "", name])
-            return
-        for dep in requires:
-            visit(normalize_name(dep), chain + [name])
-        order.append(name)
-
-    for name in requested:
-        visit(normalize_name(name), [])
-    return order, missing
-
-
-def order_key(priority: int, name: "Optional[str]", identity: str) -> "tuple[int, bytes, bytes]":
-    """The composition sort key: ``(priority, name, identity)``, strings by
-    their UTF-8 bytes; ``name`` falls back to the identity."""
-    shown = name if isinstance(name, str) and name else identity
-    return (priority, shown.encode("utf-8", "surrogatepass"), identity.encode("utf-8", "surrogatepass"))
-
-
-# --------------------------------------------------------------------------- #
-# Hooks: what runs at a session's events, what it is told, and what of its
-# output applies. The model only; :mod:`dotagents._hookrun` starts the
-# programs and :mod:`dotagents._hooks_engine` finds them.
-# --------------------------------------------------------------------------- #
-
-#: The payload's keys: these three for every event, then each event's own.
-PAYLOAD_COMMON = ("event", "harness", "cwd")
-PAYLOAD_KEYS = {
-    "pre-env": (),
-    "session-start": ("session", "reason"),
-    "session-end": ("session",),
-    "prompt": ("session", "prompt"),
-    "turn-end": ("session",),
-    "cd": ("session", "previous"),
-    "pre-compact": ("session", "trigger"),
-    "pre-tool": ("session", "tool"),
-    "post-tool": ("session", "tool", "status"),
-}
-TOOL_KEYS = ("kind", "name", "input")
-HOOK_OUTPUT_KEYS = ("context", "decision", "reason", "env")
-DEFAULT_HOOK_TIMEOUT = 30
-DEFAULT_HOOK_LIMITS = {
-    "timeout": 60,
-    "event_timeout": 120,
-    "max_output": 64 * 1024,
-    "max_stderr": 64 * 1024,
-    "max_payload": 1024 * 1024,
-}
-#: The longest ``reason``, in code points: it is shown beside what it is about.
-MAX_HOOK_REASON = 1024
-#: Characters a hook's text may not hold: controls other than tab, line feed and carriage return,
-#: and the bidirectional overrides and isolates, which change how the text around them reads.
-_HOOK_TEXT_REFUSED = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f‪-‮⁦-⁩]")
-#: Combined decisions, loosest first.
-_DECISION_RANK = {None: 0, "ask": 1, "deny": 2, "block": 2, "refuse": 2}
-
-
-class HookFailure(Exception):
-    """A run of a hook that failed; ``cause`` is the vectors' class."""
-
-    def __init__(self, cause: str):
-        super().__init__(cause)
-        self.cause = cause
-
-
-def default_hook(files: "Iterable[str]", os_name: str,
-                 interpreters: "Iterable[str]") -> "tuple[Optional[dict[str, str]], list[str]]":
-    """The ``hook.<ext>`` chosen by runtime, and every one present."""
-    members = set(_members(files))
-    present = [("hook" + ext) for ext, _i, _o in DEFAULT_SCRIPTS if "hook" + ext in members]
-    for ext, interpreter, names in DEFAULT_SCRIPTS:
-        path = "hook" + ext
-        entry = {"interpreter": interpreter, "path": path, "os": names}
-        if path in present and os_matches(entry, os_name) and interpreter in interpreters:
-            return {"path": path, "interpreter": interpreter}, present
-    return None, present
-
-
-def hooks_of(manifest: "dict[str, Any]", files: "Iterable[str]", os_name: str,
-             interpreters: "Iterable[str]" = INTERPRETERS) -> "tuple[list[dict[str, Any]], list[str]]":
-    """Every hook the overlay has, in event order, and the ``hook.<ext>`` files reported as
-    ``script-not-run`` because an entry needs one and none can run here.
-
-    An entry whose script cannot run here keeps ``path`` (None for a ``hook.<ext>`` none of
-    which can) so that firing it fails, and an ``on_failure = "refuse"`` guard fails closed."""
-    interpreters = list(interpreters)
-    declared = manifest.get("hooks")
-    declared = declared if isinstance(declared, dict) else {}
-    chosen, present = default_hook(files, os_name, interpreters)
-    entries: "list[dict[str, Any]]" = []
-    needs_default = False
-    for event, (_class, by_default, _outputs, _refusal, _match) in HOOK_EVENTS.items():
-        if event in declared:
-            value = declared[event]
-            if value is False:
-                continue
-            table = value if isinstance(value, dict) else {"run": value}
-        elif by_default and default_on(manifest, "hooks") and present:
-            table = {}
-        else:
-            continue
-        if "run" in table:
-            path: "Optional[str]" = table["run"]
-            interpreter: "Optional[str]" = SCRIPT_EXTENSIONS[table["run"][table["run"].rindex("."):]]
-        elif chosen is not None:
-            path, interpreter = chosen["path"], chosen["interpreter"]
-        else:
-            needs_default = True
-            if event not in declared:
-                # A default entry that cannot run: nothing runs, the files are reported.
-                continue
-            path = interpreter = None
-        entries.append({
-            "event": event, "path": path, "interpreter": interpreter,
-            "runs": interpreter is not None and interpreter in interpreters,
-            "match": table.get("match"), "sets": table.get("sets", []),
-            "timeout": table.get("timeout", DEFAULT_HOOK_TIMEOUT),
-            "on_failure": table.get("on_failure", "report"),
-            "payload": list(PAYLOAD_COMMON + PAYLOAD_KEYS[event]),
-        })
-    return entries, (present if needs_default else [])
-
-
-def hook_plan(manifest: "dict[str, Any]", facts: "dict[str, Any]") -> "dict[str, Any]":
-    """What a consumer would do with an overlay's hooks, or a scope's own, on one harness.
-
-    ``facts``: ``os``, ``interpreters``, ``files``, ``identity``, ``scope`` (``overlay``,
-    ``user`` or ``project``), ``digest`` and ``allowed`` (the one digest at which the user
-    allowed them); for a project, ``tree``, every file of the directory that holds its
-    configuration, whose digest is the one allowed; ``fires`` (the events the consumer can fire
-    on this harness; absent, every one), ``partial`` (those it fires for only some occurrences)
-    and ``limits`` (``timeout``, the consumer's bound on one run)."""
-    entries, not_run = hooks_of(manifest, facts.get("files", []), facts["os"],
-                                facts.get("interpreters", INTERPRETERS))
-    bound = dict(DEFAULT_HOOK_LIMITS, **facts.get("limits", {}))["timeout"]
-    for entry in entries:
-        entry["timeout"] = min(entry["timeout"], bound)
-    scope = facts.get("scope", "overlay")
-    digest = facts.get("digest")
-    if "tree" in facts:
-        # Every file of the directory, not only those the hooks name: a module beside a script
-        # is loaded by it.
-        digest = digest_entries([
-            (tuple(part.encode("utf-8") for part in path.split("/")), "file", text.encode("utf-8"))
-            for path, text in facts["tree"].items()
-        ])[0]
-    allowed = facts.get("allowed")
-    on = scope == "user" or (digest is not None and allowed is not None and same_digest(digest, allowed))
-    fires = facts.get("fires", list(HOOK_EVENTS))
-    partial = facts.get("partial", [])
-    non_defaults = [["script-not-run", path] for path in not_run]
-    reports: "list[list[str]]" = []
-    if entries and not on:
-        reports.append(["hook-not-allowed", facts.get("identity", "")])
-    elif on:
-        for entry in entries:
-            if entry["event"] not in fires:
-                reports.append(["hook-unsupported", entry["event"]])
-                continue
-            non_defaults.append(["hook", entry["event"]])
-            if entry["event"] in partial:
-                reports.append(["hook-partial", entry["event"]])
-    guarded = any(entry["on_failure"] == "refuse" for entry in entries)
-    return {
-        "hooks": entries,
-        "on": on and bool(entries),
-        # A guard that is off would fail open: the overlay waits for the user's yes.
-        "activates": on or not guarded,
-        "needs": sorted({entry["interpreter"] for entry in entries if entry["interpreter"]}),
-        "reports": sorted(reports),
-        "non_defaults": sorted(non_defaults),
-    }
-
-
-def hook_matches(event: str, match: "Optional[list[str]]", value: str) -> bool:
-    """Whether a hook whose ``match`` is ``match`` runs for this reason or tool kind.
-
-    A tool the consumer could not place (``other``) runs every ``pre-tool`` and ``post-tool``
-    hook, so a tool of an unknown kind never slips past a guard."""
-    if match is None:
-        return True
-    if HOOK_EVENTS[event][4] == "kind" and value == "other":
-        return True
-    return value in match
-
-
-def hook_payload(event: str, facts: "dict[str, Any]") -> "dict[str, Any]":
-    """The payload a hook of ``event`` receives: the event's own keys and nothing else of what
-    the consumer knows."""
-    payload: "dict[str, Any]" = {"event": event}
-    for key in PAYLOAD_COMMON[1:] + PAYLOAD_KEYS[event]:
-        if key not in facts:
-            continue
-        value = facts[key]
-        if key == "tool" and isinstance(value, dict):
-            value = {field: value[field] for field in TOOL_KEYS if field in value}
-        payload[key] = value
-    return payload
-
-
-def _hook_text(value: Any) -> bool:
-    """Text a hook may give the agent or the user: no control but tab, line feed and carriage
-    return, and no bidirectional override."""
-    return isinstance(value, str) and not _HOOK_TEXT_REFUSED.search(value)
-
-
-def read_hook_output(event: str, data: bytes, sets: "Iterable[str]" = ()) -> "dict[str, Any]":
-    """A successful run's standard output: what it asks for, or :class:`HookFailure`.
-
-    ``pre-env`` reads as an env script's output. Every other event reads one JSON object, whose
-    keys are those the event takes; a ``decision`` that is not one of the event's own is an
-    attempt to grant, and ``env`` may name only the variables the entry ``sets``."""
-    outputs = HOOK_EVENTS[event][2]
-    if event == "pre-env":
-        try:
-            return {"env": read_env_script_output(data)}
-        except ReadError:
-            raise HookFailure("output")
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        raise HookFailure("output")
-    whole = text.strip(" \t\r\n")
-    if not whole:
-        return {}
-    try:
-        value = _read_json(whole)
-    except ReadError:
-        raise HookFailure("output")
-    if not isinstance(value, dict):
-        raise HookFailure("output")
-    if "decision" in value:
-        decisions = [kind for kind in outputs if kind in ("block", "deny", "ask")]
-        if value["decision"] not in decisions:
-            raise HookFailure("grant")
-    for key in value:
-        if key not in HOOK_OUTPUT_KEYS:
-            raise HookFailure("output")
-    out: "dict[str, Any]" = {}
-    if "decision" in value:
-        out["decision"] = value["decision"]
-    if "reason" in value:
-        reason = value["reason"]
-        if "decision" not in value or not _hook_text(reason) or len(reason) > MAX_HOOK_REASON:
-            raise HookFailure("output")
-        out["reason"] = reason
-    if "context" in value:
-        if "context" not in outputs or not _hook_text(value["context"]):
-            raise HookFailure("output")
-        out["context"] = value["context"]
-    if "env" in value:
-        env = value["env"]
-        if "env" not in outputs or not isinstance(env, dict):
-            raise HookFailure("output")
-        declared = set(sets)
-        folded: "set[str]" = set()
-        for name, item in env.items():
-            if not valid_variable_name(name) or is_reserved_variable(name):
-                raise HookFailure("output")
-            if name not in declared or name.upper() in folded:
-                raise HookFailure("output")
-            folded.add(name.upper())
-            if item is not None and not (isinstance(item, str) and "\0" not in item):
-                raise HookFailure("output")
-        out["env"] = dict(env)
-    return out
-
-
-def _run_bytes(run: "dict[str, Any]") -> bytes:
-    import base64
-
-    if "stdout_base64" in run:
-        return base64.b64decode(run["stdout_base64"])
-    if "stdout_parts" in run:
-        return "".join(text * times for text, times in run["stdout_parts"]).encode("utf-8")
-    if "stdout_bytes" in run:
-        return run["stdout_bytes"]
-    return run.get("stdout", "").encode("utf-8")
-
-
-def hook_result(event: str, run: "dict[str, Any]", limits: "dict[str, int]") -> "dict[str, Any]":
-    """One run, as the consumer saw it, checked in a fixed order: started, payload, time, size,
-    exit status, then the output itself."""
-    limits = dict(DEFAULT_HOOK_LIMITS, **limits)
-    if run.get("not_run"):
-        raise HookFailure("not-run")
-    if run.get("payload_size", 0) > limits["max_payload"]:
-        raise HookFailure("payload-too-large")
-    if run.get("timed_out"):
-        raise HookFailure("timeout")
-    data = _run_bytes(run)
-    if run.get("too_large") or len(data) > limits["max_output"]:
-        raise HookFailure("too-large")
-    if run.get("exit", 0) != 0:
-        raise HookFailure("exit")
-    return read_hook_output(event, data, run.get("sets", ()))
-
-
-def fire_event(event: str, runs: "list[dict[str, Any]]", applies: "Optional[Iterable[str]]" = None,
-               limits: "Optional[dict[str, int]]" = None, windows: bool = False) -> "dict[str, Any]":
-    """Every hook of one event, in the order given, combined to the tightest result.
-
-    ``runs`` are what each hook did (``source``, ``on_failure``, the ``seconds`` it took, and the
-    run as :func:`hook_result` reads it); ``applies`` the outputs the consumer can apply on this
-    harness (``context``, ``env``, ``block``, ``deny``, ``ask``, ``refuse``; absent, every one).
-    A run that holds ``start``, a function returning the run's own keys, is started only when its
-    turn comes: after a block or a deny, or the event's bound, it never is. A hook that would
-    start after the event's own bound has passed fails as ``event-timeout``."""
-    _class, _default, outputs, refusal, _match = HOOK_EVENTS[event]
-    can = set(applies) if applies is not None else set(outputs) | {"refuse"}
-    bound = dict(DEFAULT_HOOK_LIMITS, **(limits or {}))["event_timeout"]
-    spent = 0.0
-    result: "dict[str, Any]" = {
-        "ran": [], "decision": None, "by": None, "reason": None, "context": [], "env": {},
-        "reports": [], "non_defaults": [],
-    }
-    for run in runs:
-        source = run["source"]
-        try:
-            if spent >= bound:
-                raise HookFailure("event-timeout")
-            result["ran"].append(source)
-            if "start" in run:
-                run = dict(run, **run["start"]())
-            spent += run.get("seconds", 0)
-            out = hook_result(event, run, limits or {})
-        except HookFailure as failure:
-            result["reports"].append(["hook-failed", source, event, failure.cause])
-            if run.get("on_failure", "report") != "refuse" or refusal is None:
-                continue
-            out = {"decision": refusal}
-        decision = out.get("decision")
-        if decision == "ask" and "ask" not in can:
-            result["reports"].append(["hook-ask-denied", source, event])
-            decision = "deny"
-        if decision is not None and decision not in can:
-            result["reports"].append(["hook-not-applied", source, event, decision])
-            decision = None
-        if _DECISION_RANK[decision] > _DECISION_RANK[result["decision"]]:
-            result.update(decision=decision, by=source, reason=out.get("reason"))
-        if _DECISION_RANK[decision] == 2:
-            # The prompt, compaction, call or session does not happen: nothing else applies.
-            result["context"] = []
-            result["env"] = {}
-            break
-        if out.get("context"):
-            if "context" in can:
-                result["context"].append([source, out["context"]])
-            else:
-                result["reports"].append(["hook-not-applied", source, event, "context"])
-        if "env" in out and out["env"]:
-            if "env" not in can:
-                result["reports"].append(["hook-not-applied", source, event, "env"])
-                continue
-            for name, value in out["env"].items():
-                # On Windows a name set under another case keeps the spelling it has.
-                key = next((k for k in result["env"] if windows and k.upper() == name.upper()), name)
-                result["env"][key] = value
-    result["non_defaults"] = sorted(["env-sensitive", n] for n in result["env"] if is_sensitive(n))
-    return result
-
-
-def apply_pre_env(env: Environment, identities: "list[str]", runs: "dict[str, dict[str, Any]]",
-                  limits: "Optional[dict[str, int]]", report: "list[list[str]]",
-                  non_defaults: "list[list[str]]") -> None:
-    """The ``pre-env`` hooks' output, every overlay's in composition order as one event (a run
-    may be given lazily, see :func:`fire_event`), applied to ``env`` after the root variables and
-    before any overlay's declarations. Reports and non-default settings are appended to the
-    lists. Raises :class:`Refused` (``hook-refused``) when an overlay's guard fails."""
-    ordered = [dict(runs[identity], source=identity) for identity in identities if identity in runs]
-    fired = fire_event("pre-env", ordered, None, limits, env.windows)
-    report.extend(fired["reports"])
-    non_defaults.extend(fired["non_defaults"])
-    if fired["decision"] == "refuse":
-        raise Refused("hook-refused", fired["by"])
-    for name, value in fired["env"].items():
-        if value is None:
-            env.unset(name)
-        else:
-            env.set(name, value)

@@ -41,6 +41,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import coqui_aos
+
 from dotagents import _launchers
 
 #: Installed into every user venv, so each skill can import duho. The range is
@@ -181,7 +183,25 @@ def check_dependencies(path: Path, locked: bool, lock_digest: "Optional[str]") -
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return ["%s is not UTF-8" % path]
-    return ["%s: %s" % (path, problem) for problem in _aos.check_requirements(text, locked=locked)]
+    # coqui_aos refuses at the first line; blank each refused line (and what it continues) to find
+    # the next, so every problem is reported.
+    problems: "list[str]" = []
+    lines = text.split("\n")
+    for _ in range(len(lines)):
+        try:
+            coqui_aos.check_requirements("\n".join(lines), locked)
+        except coqui_aos.Error as error:
+            problems.append("%s: line %s: %s" % (path, error.line, error.subject))
+            at = (error.line or 1) - 1
+            while at < len(lines):
+                continued = lines[at].rstrip().endswith("\\")
+                lines[at] = ""
+                at += 1
+                if not continued:
+                    break
+        else:
+            break
+    return problems
 
 
 def store_overlays(scope, stores) -> list:

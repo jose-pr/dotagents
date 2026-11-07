@@ -11,9 +11,10 @@ import logging
 import os
 from pathlib import Path
 
+import coqui_aos
 import pytest
 
-from dotagents import _aos, _overlays, _scope, _skills
+from dotagents import _overlays, _scope, _skills
 
 
 # --------------------------------------------------------------------------- #
@@ -982,7 +983,7 @@ def test_existing_bundled_overlay_manifests_still_parse(tmp_path):
     for manifest in manifests:
         overlay = Overlay(manifest.parent)
         assert overlay.manifest_problems() == [], manifest
-        assert _aos.validate(overlay.document(), overlay.members()) == [], manifest
+        assert coqui_aos.validate(overlay.document(), coqui_aos.OverlayTree(overlay.members())) == [], manifest
         parsed = overlay.read_manifest()
         assert isinstance(parsed["priority"], int)
         # None of the shipped overlays sets priority yet -> all default.

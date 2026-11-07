@@ -14,6 +14,8 @@ import re
 import urllib.parse
 from pathlib import Path
 
+import coqui_aos
+
 from dotagents import _aos
 
 _MAX_LINE = 16 * 1024 * 1024
@@ -76,9 +78,9 @@ class _ServerSpec:
                 text = value if isinstance(value, str) else value["value"]
                 try:
                     out[var] = _aos.substitute(text, before.lookup)
-                except _aos.SubstitutionError as error:
+                except coqui_aos.Error as error:
                     raise RuntimeError("MCP server %s: %s cannot be substituted (%s %s)" % (
-                        self.name, var, error.code, error.name))
+                        self.name, var, error.class_.value, ""))
             elif "path" in value:
                 out[var] = _aos.resolve_path(str(self.root), value["path"], os.name == "nt")
             else:

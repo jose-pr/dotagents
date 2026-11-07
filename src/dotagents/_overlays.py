@@ -46,6 +46,8 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+import coqui_aos
+
 from dotagents import _aos
 
 _log = logging.getLogger("dotagents")
@@ -95,9 +97,9 @@ def load_manifest(path: Path) -> "tuple[dict[str, Any], list[str]]":
     try:
         with open(key, "rb") as fh:
             data = fh.read()
-        doc = _aos.read_document(data)
-        problems = ["%s at %s" % (code, at or "/") for code, at in _aos.validate(doc)]
-    except _aos.ReadError as exc:
+        doc = coqui_aos.read_document(data)
+        problems = ["%s at %s" % (code, at or "/") for code, at in coqui_aos.validate(doc)]
+    except coqui_aos.Error as exc:
         doc, problems = {}, ["cannot be read (%s)" % exc]
     except OSError as exc:
         doc, problems = {}, ["cannot be read (%s)" % exc]
@@ -419,20 +421,20 @@ class Overlay:
     def skills(self) -> "list[str]":
         """The overlay's skills: every ``skills/<name>/SKILL.md`` (unless
         ``[defaults] skills = false``) and those ``skills`` lists."""
-        return _aos.skills_of(self.document(), self.member_paths())
+        return coqui_aos.skills_of(self.document(), coqui_aos.OverlayTree(self.member_paths()))
 
     def rules(self) -> "list[str]":
         """Its rules files: every ``rules/<name>.md`` (unless ``[defaults]
         rules = false``), then ``rules``; an entry naming a default file
         replaces it."""
-        return _aos.rules_of(self.document(), self.member_paths())
+        return coqui_aos.rules_of(self.document(), coqui_aos.OverlayTree(self.member_paths()))
 
     def context_files(self, harness_id: "Optional[str]" = None) -> "list[str]":
         """The files the overlay adds to an agent's initial context: the root
         ``CONTEXT.md`` (unless ``[defaults] context = false``), then
         ``context``, then ``harness.<harness_id>.context``."""
         doc = self.document()
-        out = _aos.context_of(doc, self.member_paths())
+        out = coqui_aos.context_of(doc, coqui_aos.OverlayTree(self.member_paths()))
         if harness_id:
             out += list(doc.get("harness", {}).get(harness_id, {}).get("context", []))
         return out
@@ -571,7 +573,7 @@ class Overlay:
 
     def members(self) -> "list[str]":
         """The overlay's members, relative and sorted: every regular file
-        except what AOS excludes. Raises :class:`dotagents._aos.DigestError`
+        except what AOS excludes. Raises :class:`coqui_aos.Error`
         for a tree that holds a link, a special file or a name AOS refuses."""
         return _aos.members(self.path)
 
@@ -581,7 +583,7 @@ class Overlay:
 
     def tree_digest(self) -> str:
         """The AOS tree digest of the overlay. Raises
-        :class:`dotagents._aos.DigestError`."""
+        :class:`coqui_aos.Error`."""
         return _aos.tree_digest(self.path)
 
     def state_dir(self, os_name: "Optional[str]" = None) -> Path:
@@ -735,7 +737,7 @@ class Overlay:
         The install record (:attr:`install_record_path`, beside the overlay)
         keeps the digest of every member written, the tree digest, `source`
         (where the overlay came from; the previous value when `None`) and the
-        resolved `commit`. Raises :class:`dotagents._aos.DigestError` before
+        resolved `commit`. Raises :class:`coqui_aos.Error` before
         writing anything when the overlay holds a link or a refused name."""
         from datetime import datetime, timezone
 
@@ -794,7 +796,7 @@ class Overlay:
                 for name in sorted(dirnames):
                     target = here / name
                     rel = "%s/%s" % (base, name) if base else name
-                    if os.path.islink(str(target)) or name in _aos.EXCLUDED_COMPONENTS or _is_junction(target):
+                    if os.path.islink(str(target)) or name in coqui_aos.EXCLUDED_COMPONENTS or _is_junction(target):
                         result.lines.append("remove (not part of the overlay): %s" % rel)
                         result.removed.append(rel + "/")
                         if not dry_run:

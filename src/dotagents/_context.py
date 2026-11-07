@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Iterable, Optional
 
+import coqui_aos
+
 from dotagents import _activate
 from dotagents import _agents
 from dotagents import _env
@@ -219,17 +221,13 @@ _BLOCK_SCALAR = re.compile(r'^[>|][+-]?[0-9]?[+-]?$')
 
 def _strip_frontmatter(text: str) -> str:
     """``text`` without a leading front matter block, as AOS defines it for
-    context files: after an optional byte-order mark, a first line that is
-    ``---``, up to the next line that is ``---`` or ``...`` (``LF`` or
-    ``CRLF``). Front matter is metadata, not context. An unclosed block is
-    left alone -- it is not front matter."""
-    lines = text.lstrip("\ufeff").splitlines(keepends=True)
-    if not lines or lines[0].rstrip("\r\n") != "---":
+    context files (:func:`coqui_aos.context_file_text`). Front matter is
+    metadata, not context. An unclosed block is left alone -- it is not front
+    matter -- and so is a head past the manifest bound."""
+    try:
+        return coqui_aos.context_file_text(text.encode("utf-8", "surrogatepass")).decode("utf-8", "surrogatepass")
+    except coqui_aos.Error:
         return text
-    for i, line in enumerate(lines[1:], start=1):
-        if line.rstrip("\r\n") in ("---", "..."):
-            return "".join(lines[i + 1:])
-    return text
 
 
 def _frontmatter(text: str) -> "dict[str, str]":
@@ -239,9 +237,11 @@ def _frontmatter(text: str) -> "dict[str, str]":
     metadata). A ``>`` / ``|`` block scalar and a plain value continued on
     indented lines are joined into one line -- the listing has one line per
     skill -- and matching surrounding quotes are dropped."""
-    lines = text.lstrip("﻿").splitlines()
-    if not lines or lines[0].strip() != "---":
+    data = text.encode("utf-8", "surrogatepass")
+    found = coqui_aos.split_front_matter(data)
+    if found.metadata is None:
         return {}
+    lines = found.metadata.decode("utf-8", "replace").splitlines()
     out: "dict[str, str]" = {}
     key: "Optional[str]" = None
     parts: "list[str]" = []
@@ -254,9 +254,7 @@ def _frontmatter(text: str) -> "dict[str, str]":
             value = value[1:-1]
         out[key] = value
 
-    for line in lines[1:]:
-        if line.strip() in ("---", "..."):
-            break
+    for line in lines:
         m = re.match(r'^([A-Za-z_][\w-]*):(?:\s+(.*))?$', line)
         if m and not line[:1].isspace():
             _flush()
@@ -265,8 +263,6 @@ def _frontmatter(text: str) -> "dict[str, str]":
             parts = [] if not value or _BLOCK_SCALAR.match(value) else [value]
         elif key is not None and line.strip() and line[:1].isspace():
             parts.append(line.strip())
-    else:
-        return {}  # never closed: not a frontmatter block
     _flush()
     return out
 
