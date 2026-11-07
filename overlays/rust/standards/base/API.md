@@ -202,7 +202,9 @@ A library changes nothing outside its own values:
 - no signal handlers, no change to the working directory or the
   environment;
 - no `println!`, `eprintln!`, `std::process::exit` or `abort` outside a test
-  or a binary's `main`. A library returns, errors or logs.
+  or a binary's `main`. A library, a provider library included, reports
+  through what it returns and through `tracing`, at `debug` for its own
+  settings; what a caller must act on is returned, never only logged.
 
 An application may keep process-wide state; it documents it at the
 declaration.

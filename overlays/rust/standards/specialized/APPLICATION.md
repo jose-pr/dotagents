@@ -46,7 +46,11 @@ command, a worker another program starts. Adds to the base standards; index:
 
 ## Output
 
-- **Results on stdout, diagnostics on stderr**, never mixed.
+- **Only the binary prints**, from `main` and the `cli` modules it calls. A
+  report a library returns (a load summary, `non_defaults()`) is formatted
+  there; a `pub fn` of the library never writes to stdout or stderr.
+- **Results on stdout, diagnostics on stderr**, never mixed; diagnostics go
+  through the `tracing` subscriber `main` installs.
 - **A machine-readable format** behind `--format json`, stable across
   releases, for anything another program may consume.
 - No colour when the output is not a terminal or `NO_COLOR` is set.
