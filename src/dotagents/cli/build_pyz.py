@@ -104,6 +104,10 @@ class BuildPyz(LoggingArgs, Cmd):
     "Pinned distlib version to vendor (overlay script launchers)."
     ("--distlib-version",)
 
+    coqui_aos_version: str = "0.0.0a0"
+    "Pinned coqui-aos version to vendor (the overlay reader)."
+    ("--coqui-aos-version",)
+
     # Declared only for Python < 3.11, but always vendored: the .pyz runs on
     # whatever interpreter launches it, and on 3.11+ `tomllib` wins anyway.
     tomli_version: str = "1.1.0"
@@ -160,6 +164,7 @@ class BuildPyz(LoggingArgs, Cmd):
                 "duho==%s" % self.duho_version,
                 "pathapi==%s" % self.pathapi_version,
                 "distlib==%s" % self.distlib_version,
+                "coqui-aos==%s" % self.coqui_aos_version,
                 "tomli==%s" % self.tomli_version,
             ]
             for name in names:
