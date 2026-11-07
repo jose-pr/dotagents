@@ -11,7 +11,7 @@ base for one kind of crate or feature, and never overrides it.
 
 | File | Read before |
 | --- | --- |
-| [base/API.md](base/API.md) | naming or renaming anything public, adding a module, an error type, a constructor or an async API |
+| [base/API.md](base/API.md) | naming or renaming anything public, adding a module, an error type, a constructor, a builder or an async API |
 | [base/UNSAFE.md](base/UNSAFE.md) | writing `unsafe`, an `unsafe fn`, a type whose fields carry a safety invariant, or a macro that expands to `unsafe` |
 | [base/DOCS.md](base/DOCS.md) | writing or editing `README.md`, a shipped `AGENTS.md`, the root `AGENTS.md`, or rustdoc |
 | [base/DEPENDENCIES.md](base/DEPENDENCIES.md) | adding a dependency, or writing what a preferred crate already does |
@@ -65,6 +65,8 @@ not a precedent to copy.
 - The root re-exports what the common task needs; every other item has one
   public path, and nothing public is reachable only through a `#[doc(hidden)]`
   item a human is meant to call.
+- Each configurable thing has one builder, its setters named for their
+  settings; no `_with`/`_without` function families.
 - No safe function can reach undefined behaviour for any input; a type whose
   fields carry a safety invariant keeps them private.
 - `#![forbid(unsafe_code)]` everywhere `unsafe` is not needed, and a test

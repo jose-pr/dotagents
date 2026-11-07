@@ -107,14 +107,35 @@ name a module for what it owns.
 
 - **`new` is infallible and cheap**; a fallible constructor returns `Result`
   and is `try_new` or named for its input (`from_parts`, `parse`).
-- **Three or more optional settings make a builder**, never a positional
-  list. A constructor taking ten arguments, several of them `Option`, is a
-  builder that was not written; and a builder lets a later setting default
-  without breaking callers.
-- **A variant that takes one extra resource is the `_in` or `with_` form**
-  (`new_in(alloc)`, `with_capacity(n)`), and the extra argument goes in the
-  same position across the crate. (**house**: last, as `std`'s allocator API
-  does.)
+- **One entry per configurable thing.** A type with nothing optional has
+  `new`; a type with optional settings has `X::builder(required..)`, its
+  setters, then `build()` or the action that uses them (`connect`, `bind`).
+  (`C-BUILDER`.) Three or more optional settings always make one: a
+  constructor taking ten arguments, several of them `Option`, is a builder
+  that was not written, and a builder lets a later setting default without
+  breaking callers.
+- **No `_with`/`_without` function families.** `config`, `config_with`,
+  `config_with_verifier`, `config_without_client_auth` and
+  `config_without_client_auth_with` are one builder written five times:
+  each new setting doubles them, and no name says what the others leave
+  out. (**house**)
+- **A choice the names would encode is a value**: an enum the builder takes
+  (`ClientAuth::{None, Optional(Trust), Required(Trust), Verifier(..)}`), as
+  an argument of `builder` when no default suits every caller, so no default
+  hides it. Never one function per combination.
+- **A setter is named for its setting**: `alpn(..)`, `policy(..)`,
+  `rekey(false)`, never `with_alpn` or `set_alpn`, as
+  `std::thread::Builder::name`, `reqwest::ClientBuilder::timeout` and
+  `tokio::runtime::Builder::worker_threads` are. (**house**) Settings go on
+  the builder, not on the built thing, whose plain names are its getters
+  (`C-GETTER`).
+- **`with_` and `_in` name a constructor taking one extra resource**
+  (`with_capacity(n)`, `new_in(alloc)`), never a setter; the extra argument
+  goes in the same position across the crate. (**house**: last, as `std`'s
+  allocator API does.)
+- **A crate brought to these rules keeps each old name for one release** as
+  a `#[deprecated(note = "use X::builder")]` one-line wrapper over the
+  builder, removed in the next release that breaks the API.
 - **A constructor performs no I/O.** Opening, connecting and loading are
   named actions (`open`, `connect`, `load`), each documented with what it
   touches.
