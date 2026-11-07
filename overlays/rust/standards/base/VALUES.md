@@ -64,6 +64,12 @@ thing with a lifecycle. Index: [README.md](../README.md). (`std::net::IpAddr`,
 - A side in another language reads it through its guatiao binding and the
   type's schema; where no binding exists yet, through one copy that a test
   checks against vectors the owning type writes.
+- **Not every crossing is a described value.** A format whose bytes are the
+  contract (a handshake, a frame) is pinned by shared vectors that every
+  implementation runs; a message a program forwards unchanged stays the
+  untyped JSON it arrived as; and a format a specification defines keeps a
+  reader that needs none of our libraries, held to the specification's
+  vectors.
 
 ## Tests
 

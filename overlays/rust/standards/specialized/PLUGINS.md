@@ -8,7 +8,9 @@ An extension point is anything others may add to: handlers, providers,
 anything chosen or loaded by name. One the application means to offer is
 one from its first, built-in implementation. A choice nobody outside the
 project will extend is a trait or an enum; a loader behind it is
-indirection with no return.
+indirection with no return. The seam an application embeds the host
+through, a command a specification defines and a security rule are not
+extension points either.
 
 ## The mechanism
 
@@ -29,7 +31,8 @@ indirection with no return.
 - **The application's built-in implementations are providers of the same
   kind**, registered with `Registry::register_local`, so they are found,
   filtered and configured as a loaded one is, and nothing is reachable only
-  because it is built in.
+  because it is built in. A closed enum of implementations that the host
+  matches on is an extension point that was not written.
 - **The host is the only code that maps a library**: one module of the
   application, named for it (`plugins`).
 
