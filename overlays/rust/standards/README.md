@@ -28,7 +28,7 @@ Comments and doc comments follow `$ENGINEERING_OVERLAY_ROOT/kb/COMMENTS.md`.
 | File | Applies when |
 | --- | --- |
 | [specialized/FFI.md](specialized/FFI.md) | the crate exports or imports a C ABI, ships a C header, or is driven by bindings in another language |
-| [specialized/PLUGINS.md](specialized/PLUGINS.md) | the project loads providers from shared libraries, or ships one |
+| [specialized/PLUGINS.md](specialized/PLUGINS.md) | the project offers an extension point (handlers, providers, anything chosen by name), or ships an extension for one |
 | [specialized/PROTOCOL.md](specialized/PROTOCOL.md) | the crate speaks a wire protocol: client, server, codec |
 | [specialized/LOADERS.md](specialized/LOADERS.md) | the crate turns text or files into data: a format, a configuration loader, a path or expression grammar |
 | [specialized/APPLICATION.md](specialized/APPLICATION.md) | the package builds a binary (a daemon, a command, a worker), or a library ships a command line |

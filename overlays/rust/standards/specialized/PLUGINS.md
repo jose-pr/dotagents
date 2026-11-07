@@ -1,20 +1,35 @@
 # Standard: plugins and providers
 
-Specialized standard: a project that loads providers from shared libraries,
-and every crate that ships one. Adds to [FFI.md](FFI.md); index:
+Specialized standard: a project that offers an extension point, and every
+crate that ships an extension for one. Adds to [FFI.md](FFI.md); index:
 [README.md](../README.md).
 
-Build this only when there are, or will soon be, two implementations loaded
-by name. One implementation behind a loader is indirection with no return.
+An extension point is anything others may add to: handlers, providers,
+anything chosen or loaded by name. One the application means to offer is
+one from its first, built-in implementation. A choice nobody outside the
+project will extend is a trait or an enum; a loader behind it is
+indirection with no return.
 
 ## The mechanism
 
-- **Plugins are built on `guatiao`**: a kind is a Rust trait under
+- **Every extension point is a `guatiao` kind**: a kind is a Rust trait under
   `#[guatiao::kind]`, a provider is a type with `#[derive(Provider)]`, a
   plugin library is one `providers!(..)` call, and the host loads, filters
   and offers through `guatiao`'s `Registry`. (**house**,
   [DEPENDENCIES.md](../base/DEPENDENCIES.md).) No project writes its own
   entry symbol, descriptor or registry.
+- **An extension may be written in any language a guatiao source loads**
+  (`guatiao-source-py`, `-js`, `-lua`, `-rhai`, `-wasm`, `-remote`, each
+  added with `Registry::add_source_file`): it needs no Rust and no build
+  of the host's.
+- **A native extension crosses guatiao's C ABI, never a Rust ABI**: a
+  kind's table is `repr(C)` and renders to C, so a library built by another
+  compiler, `rustc` or language loads. No Rust `dylib`, trait object or
+  Rust type crosses a library boundary.
+- **The application's built-in implementations are providers of the same
+  kind**, registered with `Registry::register_local`, so they are found,
+  filtered and configured as a loaded one is, and nothing is reachable only
+  because it is built in.
 - **The host is the only code that maps a library**: one module of the
   application, named for it (`plugins`).
 
@@ -99,7 +114,7 @@ OBS), `guatiao` does not apply.
 - **The shipped header lists every exported symbol.**
 - **A test loads the built library in the real host.**
 
-The two-implementations threshold, "The mechanism", "The contract", "The
-host" and "Tests" above do not apply. Of "Layout", only the rule that the
+The extension-point rule, "The mechanism", "The contract", "The host" and
+"Tests" above do not apply. Of "Layout", only the rule that the
 entry symbols live in a crate that is a `cdylib` and nothing else applies.
 [FFI.md](FFI.md) applies in full.
