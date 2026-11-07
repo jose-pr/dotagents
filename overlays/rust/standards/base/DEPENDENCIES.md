@@ -24,7 +24,12 @@ find, and they are found one consumer at a time.
 | Async runtime and server | `tokio` (only the features used), `axum` | a second runtime in the same binary |
 | Blocking HTTP client | `ureq` | an async client wrapped in `block_on` |
 | TLS | `rustls` with the `ring` provider | `openssl` where `rustls` will do |
-| Hashes, password hashing, constant-time comparison | the RustCrypto crates: `sha2`, `argon2`, `subtle` | a hand-written primitive, ever |
+| Hashes, password hashing | the RustCrypto crates: `sha2`, `argon2` | a hand-written primitive, ever |
+| Constant-time comparison | `subtle` (`ConstantTimeEq`); it answers at once for slices of unequal length, so where the length is secret compare fixed-length digests of both sides | a hand-written `constant_time_eq` |
+| Dates, times, RFC 3339 | `time` (`OffsetDateTime`, `format_description::well_known::Rfc3339`, features `parsing`, `formatting`): one date crate per build, and it is already in each of ours (**house**) | civil-date arithmetic by hand; `jiff` beside it |
+| Base64 | `base64` (`engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}`) | a hand encoder over a 64-character table |
+| Hex | `data-encoding` (`HEXLOWER`, `HEXLOWER_PERMISSIVE`), already beneath `coqui-peer` | a `hex(bytes)` helper per crate |
+| IP networks, CIDR | `coqui-net-acl` (`IpNet`: `FromStr`, `contains`, IPv4-mapped addresses) | parsing and masking prefixes by hand |
 | Sockets with options `std` lacks | `socket2` | `libc` calls written here |
 | Reading an executable's headers | `object` | parsing PE, ELF or Mach-O by hand |
 
