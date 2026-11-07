@@ -106,9 +106,9 @@ exception.
 - **A secret appears in no log line, no error, no `Debug` and no `Display`.**
   The type holding it masks it ([VALUES.md](VALUES.md)).
 - A schema or configuration field holding one is marked as such
-  (`#[schema(sensitive)]`, which writes `x-sensitive` and `writeOnly`), and every
-  rendering of the configuration honours the mark at every depth, not only
-  the top level.
+  (`#[schema(sensitive)]`, which writes `x-sensitive` and `writeOnly`), and
+  every rendering of the configuration honours the mark at every depth, not
+  only the top level.
 
 ## Configuration files
 
