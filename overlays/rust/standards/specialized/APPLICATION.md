@@ -68,6 +68,20 @@ Documented in the README and the shipped header, and tested:
 `main` returns `ExitCode` (or `Result<(), E>` mapped to one); it does not
 call `std::process::exit` past values that need dropping.
 
+## Non-default settings
+
+- **The application classifies what its libraries report**
+  ([CONFIG.md](../base/CONFIG.md), "Non-default settings"). A setting its
+  configuration asked for on purpose (a file, a flag, a choice in its
+  settings) is configuration: logged at `info` and shown in its settings
+  view. A loosening nobody asked for (a fallback, a default the program
+  chose itself, a configured setting the platform did not apply) is a
+  `warn`.
+- **It keeps where each setting came from**, its level in the precedence
+  order, so the two can be told apart.
+- **A risky choice made on purpose stays visible as a status** (a banner, a
+  line of `status` output), not as a warning repeated until it is ignored.
+
 ## Unattended by default
 
 - **Never prompt** unless standard input is a terminal and the command was not

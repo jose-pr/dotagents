@@ -18,7 +18,7 @@ base for one kind of crate or feature, and never overrides it.
 | [base/FEATURES.md](base/FEATURES.md) | adding a Cargo feature, an optional dependency, or a feature of a dependency |
 | [base/CONVERSIONS.md](base/CONVERSIONS.md) | adding a `From`, `TryFrom`, `FromStr`, `as_`/`to_`/`into_` method, or any other way into or out of a type |
 | [base/VALUES.md](base/VALUES.md) | adding a type that stands for a value: an address, a name, a version, an identifier |
-| [base/CONFIG.md](base/CONFIG.md) | reading an environment variable or a configuration file; handling a secret |
+| [base/CONFIG.md](base/CONFIG.md) | reading an environment variable or a configuration file; a builder's settings type; a setting looser than its default; handling a secret |
 | [base/TESTING.md](base/TESTING.md) | writing or reviewing tests, lints or CI gates |
 
 Comments and doc comments follow `$ENGINEERING_OVERLAY_ROOT/kb/COMMENTS.md`.
@@ -83,6 +83,8 @@ not a precedent to copy.
 - Conversions use the standard traits; value types implement the common
   traits and a `Debug` that shows the value, never a pointer or a secret.
 - Environment variables are prefixed, read when needed, and documented.
+- A setting looser than its default is reported as data
+  (`non_defaults()`), never warned about by the library.
 - A command line, if any, is built with `clap`'s derive API and holds no
   logic the library lacks.
 - `cargo fmt --check`, clippy with `-D warnings` over all targets and

@@ -68,7 +68,8 @@ src/
 ## Trust
 
 - **TLS verification is on**; turning it off is an explicit argument on one
-  client, never global, and is logged each time such a client is built.
+  client, never global, and is in that client's `non_defaults()`
+  ([CONFIG.md](../base/CONFIG.md), "Non-default settings").
 - Credentials never reach a log, an error or a `Debug`
   ([CONFIG.md](../base/CONFIG.md)).
 

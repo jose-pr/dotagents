@@ -46,6 +46,31 @@ header states the order once.
   language with no guatiao binding yet keeps one copy, checked by a test
   against vectors the owning type writes.
 
+## Non-default settings
+
+A default is the safe choice; choosing otherwise is configuration, not an
+exception.
+
+- **A library reports every setting looser than its default as data**:
+  `non_defaults() -> Vec<NonDefault>`, each `NonDefault { setting, value,
+  default }`, on the builder and on what it built. (**house**) Where the
+  settings are a described type, the list comes from the schema's
+  `default`, not from a comparison kept by hand.
+- **It logs one at `debug` at most, never `warn`**: only the application
+  knows whether it was asked for
+  ([APPLICATION.md](../specialized/APPLICATION.md), "Non-default settings").
+- **A setting the platform cannot honour is never silently ignored**: it is
+  an error when it is stricter than the default, else reported as not
+  applied (`not_applied()`, **house**), so configured-and-applied and
+  configured-and-not are told apart.
+- **A guard that refuses or forces a setting stays only where it protects
+  something concrete**, named in its doc comment: another local user taking
+  over a socket, a password crossing the network in the clear. One that
+  protects nothing is a plain option. Refusing a meaningless value (a zero
+  timeout) is validation, not a guard.
+- **No "weaken" in public names, docs, logs or UI**: a setting is default or
+  non-default.
+
 ## Environment variables
 
 - **Named `<PROJECT>_<SETTING>`**, upper case, the project's name as the
@@ -104,6 +129,8 @@ header states the order once.
 ## Tests
 
 - Each setting is tested at every level of the precedence order.
+- Each looser setting appears in `non_defaults()`, and the defaults report
+  none.
 - A test that needs a variable passes it to the code under test as an
   argument or runs a child process with it set; it does not mutate the test
   process's environment.
