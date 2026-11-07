@@ -23,7 +23,8 @@ extension points either.
 - **An extension may be written in any language a guatiao source loads**
   (`guatiao-source-py`, `-js`, `-lua`, `-rhai`, `-wasm`, `-remote`, each
   added with `Registry::add_source_file`): it needs no Rust and no build
-  of the host's.
+  of the host's. A browser maps no library: there a Dart client reaches
+  providers through a remote source (`package:guatiao/remote.dart`).
 - **A native extension crosses guatiao's C ABI, never a Rust ABI**: a
   kind's table is `repr(C)` and renders to C, so a library built by another
   compiler, `rustc` or language loads. No Rust `dylib`, trait object or

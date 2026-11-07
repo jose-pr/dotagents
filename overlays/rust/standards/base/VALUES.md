@@ -63,7 +63,9 @@ thing with a lifecycle. Index: [README.md](../README.md). (`std::net::IpAddr`,
   side is a second contract that drifts without a failing test.
 - A side in another language reads it through its guatiao binding and the
   type's schema; where no binding exists yet, through one copy that a test
-  checks against vectors the owning type writes.
+  checks against vectors the owning type writes. A browser is not such a
+  side for Dart: guatiao's Dart binding runs there (dart2js and dart2wasm,
+  over one wasm module) for values, schemas and forms.
 - **Not every crossing is a described value.** A format whose bytes are the
   contract (a handshake, a frame) is pinned by shared vectors that every
   implementation runs; a message a program forwards unchanged stays the
