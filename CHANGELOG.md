@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The sensitive-variable list holds `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, which point a
   harness at another configuration, with its own permissions and hooks.
 
+### Fixed
+
+- The session-start, PowerShell, Codex and Antigravity hook entries run the `dotagents` of the
+  store (`$AGENTS_HOME/bin`) or on PATH, never one in the project's own `.agents/bin`: the agent
+  can write there, and what it planted ran with the user's access.
+
 ### Changed
 
 - `private-sync`'s session start and sync-back are now overlay hooks (`session-start` and

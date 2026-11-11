@@ -53,7 +53,7 @@ and an error saying a command is required, and exits 2.
 | `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` and refused overlays flagged) and what the repos offer. |
 | `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; its declarations, a refused manifest's problems, tree digest, pin, what this machine lacks for it, its weakenings, skills, member count, recorded source and commit. No name: exit 2. |
 | `overlays hooks [NAME] [-g]` | An installed overlay's hooks (every overlay with some, without a name): per event the script and its settings, whether the hooks are allowed at the overlay's current digest, and per harness whether the event fires natively, is fired by dotagents itself (`pre-env`) or cannot fire. |
-| `overlays allow-hooks NAME [--digest D] [-g]` | Show the same, then allow the overlay's hooks at digest `D`, which must be the current one: without `--digest` it prints the digest to pass and allows nothing (exit 0); a wrong digest exits 2. The allowance is kept in the user store (`overlays/.dotagents-state/hooks-allowed.json`), one digest per overlay. |
+| `overlays allow-hooks NAME [--digest D] [--no-prompt] [-g]` | Show the same, then allow the overlay's hooks at digest `D`, which must be the current one: without `--digest` it prints the digest to pass and allows nothing (exit 0); a wrong digest exits 2. Then it asks at the terminal itself (`/dev/tty`, `CONIN$`): `allow NAME` to confirm; `--no-prompt` is for the user's own setup script. It refuses (exit 2) inside an agent harness's session and is not an MCP tool. The allowance is kept in the user store (`overlays/.dotagents-state/hooks-allowed.json`), one digest per overlay and store, and is only as strong as an agent's lack of write access to the user store. |
 | `overlays revoke-hooks NAME [-g]` | Take back the allowance. |
 | `hook EVENT --harness claude-code\|codex [--level user\|project] [--guard]` | Not for typing: what a harness's own hook entry runs (through `overlay_hook.py`). Reads the harness's payload on standard input, fires the overlays' hooks for the event (`user`: the user and system stores' overlays, `project`: the project store's), and answers in the harness's words; a hook's output never reaches the harness and the answer is never an approval. `--guard`: a failure of this program answers with a refusal where the event can be refused. Always exits 0 (2 for a bad argument). Not an MCP tool. |
 | `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
@@ -288,7 +288,9 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
   function, is started only when its turn comes); `apply_pre_env(env, identities, runs,
   limits, reports, non_defaults)` applies `pre-env` output (raises `Refused("hook-refused")`);
   `DEFAULT_HOOK_TIMEOUT = 30`, `DEFAULT_HOOK_LIMITS` (60 s a run, 120 s an event, 64 KiB
-  output and error, 1 MiB payload).
+  output and error, 1 MiB payload). `tree_entries(root, *, with_data=False)` hands back each
+  file's bytes (read once, at most `MAX_TREE_BYTES = 256 MiB`) instead of its digest, so a digest
+  and a copy can be made from the same bytes.
 
 ## `dotagents._activate`
 
@@ -958,11 +960,24 @@ its directory, bounded by `LIMITS`.
   dotagents can apply, `reasons`, `fires`), `CLAUDE`, `CODEX`, `ANYWHERE` (no
   harness known: nothing reported as unfireable), `HARNESSES`, `harness_of(ident) -> Harness`
   (an unknown id fires only `pre-env`), `partial_events(harness)`.
-- Allowances, in the user store only: `allowances_path(user_store)`,
-  `read_allowances`, `allowed_digest`, `allow(user_store, identity, digest)`,
-  `revoke(user_store, identity) -> bool`.
+- Settings, read from the user's own store only (never an overlay or a project):
+  `SETTING_BOUNDS` (`timeout`, `event_timeout`, `deadline`, `max_output`, `max_payload`, each
+  with its bounds), `settings_path(user_store)` (`overlays/.dotagents-state/hooks-settings.json`),
+  `read_settings`, `limits_for(user_store)` (`LIMITS` under them), `deadline_for` (default
+  `DEFAULT_DEADLINE = 150` s for everything a hook entry does, from the process's start),
+  `entry_timeout(user_store)` (the harness's own timeout for the entry: deadline + 20 s, at
+  most `ENTRY_TIMEOUT_CAP = 600`).
+- Allowances, in the user store only, keyed by the overlay's store and name:
+  `allowances_path(user_store)`, `read_allowances`, `allowed_digest(user_store, identity,
+  store=None)`, `allow(user_store, identity, digest, store=None)`, `revoke(...) -> bool`.
 - `install_notice(overlay, user_store) -> Optional[str]` — the line `overlays add/sync` logs
-  when an overlay has hooks that are off; `fresh_digest(overlay)` (never memoized), `overlay_plan(overlay, harness, user_store) ->
+  when an overlay has hooks that are off;
+- `read_tree(overlay, keep=False) -> (digest, files)` (the bytes the digest covers when `keep`),
+  `snapshot(user_store, overlay, digest, files) -> Path` — the copy a hook runs from, made once
+  per digest under `<user store>/.cache/hook-snapshots/` from exactly the bytes hashed (what
+  `AOS` excludes from a digest, `node_modules` and `__pycache__` included, is not in it), so a
+  file swapped after hashing, or a planted module, does not run; `fresh_digest(overlay)` (never memoized),
+  `overlay_plan(overlay, harness, user_store) ->
   plan` (`hook_plan` plus `digest`, `identity`), `declares_guard(overlay)`,
   `refusal(overlay) -> Optional[str]` (a guard that is off keeps its overlay out of
   `_activate.active`), `planned(overlays, harness, user_store)`, `has_live_pre_env(scope,
@@ -973,9 +988,19 @@ its directory, bounded by `LIMITS`.
   never the harness's id), `value_for_match`, `fire(event, facts, plans, harness, *,
   environment, limits=None) -> Fired`, `unsupported_reports(plans)`, `describe(report)`,
   `pre_env(plans, session, base, harness, *, cwd=None) -> (reports, non_defaults)`.
-- Wiring: `STATUS_PREFIX`, `ENTRY_TIMEOUT = 240`, `FORWARDER = "overlay_hook.py"`,
-  `wanted_events(store, harness) -> {event: guarded}`, `forwarder_args(harness, event,
-  level, guard)`.
+- Wiring: `STATUS_PREFIX`, `FORWARDER = "overlay_hook.py"`, `wanted_events(store, harness) ->
+  {event: guarded}`, `level_token(dest, user_store)` (`user` or `project-<hash>`: the only thing
+  in an entry's text besides the harness and the event), `sh_quote` / `ps_quote` (single-quote a
+  path for bash / PowerShell), `code_root()`, `forwarder_record(user_store, guards)`,
+  `record_path`, `write_record`, `remove_record`, `interpreter_problem(config_dir, token)` (the
+  recorded interpreter or dotagents is gone). The forwarder and its record live in the user's
+  harness config directory only; the entry runs `<python> -I <forwarder> <harness> <event>
+  <token>`.
+- Sessions: `session_base(environ)` — the environment a hook starts from: what `dotagents
+  launch` recorded in `AGENTS_SESSION_BASE` (each changed name's earlier value, null if unset)
+  undone, and the harness's own variables (`CLAUDE_ENV_FILE`, `CLAUDE_CODE_*`, `CODEX_*`)
+  dropped; `log_path`, `log_errors(user_store, errors)` and `LOG_LIMIT` — a hook's standard
+  error goes to `<user store>/.cache/hooks.log`, never to the harness.
 
 ## `dotagents._hook_dispatch`
 
@@ -987,7 +1012,10 @@ block.
   every hook of its event), `facts_of(harness, event, native) -> known`, `context_text(parts)`
   (each part inside a marker with a nonce chosen after the hooks ran),
   `write_env_block(path, label, changes)` (single-quoted values of validated names into
-  Claude's env file), `answer(harness, event, fired, env_file) -> (stdout, stderr)`,
+  Claude's env file; the file is split at line feeds only and a value holding any of
+  `LINE_SEPARATORS` is refused, `env_file_safe(changes)`), `hook_environment(scope, overlay,
+  environ)` (the overlay's process environment from `session_base`, with the user store's Python,
+  never a project's venv), `answer(harness, event, fired, env_file) -> (stdout, stderr)`,
   `refusal_answer(harness, event, why)`, `plans_for(scope, harness, level, event=None)`,
   `dispatch(harness_id, event, stdin, scope, level, environ) ->
   (stdout, stderr)`.
