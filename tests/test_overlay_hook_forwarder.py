@@ -98,6 +98,9 @@ def test_a_dotagents_planted_in_the_project_is_never_run(tmp_path):
     write(project / "dotagents" / "__init__.py", "")
     write(project / "dotagents" / "__main__.py", evil)
     write(project / "sitecustomize.py", "open(%r, 'w').write('x')\n" % str(marker))
+    write(project / "runpy.py", "open(%r, 'w').write('x')\n" % str(marker))  # what a child's own -c imports
+    for name in ("argparse", "duho", "logging", "pathapi"):  # and what dotagents imports after it
+        write(project / (name + ".py"), "open(%r, 'w').write('x')\n" % str(marker))
     done = run(forwarder, rig, "prompt", {"session_id": "s", "cwd": str(project), "prompt": "x"}, cwd=project,
                PYTHONPATH=str(project), HOOK_OUT=json.dumps({"context": "real"}))
     assert not marker.exists(), "what the project planted ran"

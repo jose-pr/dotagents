@@ -446,7 +446,7 @@ def test_a_failure_of_the_program_itself_answers_with_a_refusal_when_a_guard_exi
     assert capsys.readouterr().out == ""
 
 
-def test_standard_error_goes_to_the_users_log_made_printable_and_never_to_the_agent(tmp_path):
+def test_standard_error_goes_to_the_users_log_made_printable_and_never_to_the_agent(tmp_path, capsys):
     rig = Rig(tmp_path, "[hooks]\nprompt = {}\n")
     rig.allow()
     noisy = "note" + chr(27) + "[31m red" + chr(7)
@@ -455,3 +455,4 @@ def test_standard_error_goes_to_the_users_log_made_printable_and_never_to_the_ag
     log = (rig.store / ".cache" / "hooks.log").read_text(encoding="utf-8")
     assert "guard prompt: note?[31m red?" in log and chr(27) not in log
     assert "note" not in stdout and "note" not in stderr
+    assert "note" not in capsys.readouterr().err
