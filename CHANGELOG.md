@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-11
+
 ### Added
 
 - Overlay hooks, the AOS "Hooks" extension: an overlay's `hook.<ext>` and `[hooks]` table
@@ -1791,7 +1793,8 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
   before dispatch; a no-op for a plain install.
 
-[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/jose-pr/dotagents/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/jose-pr/dotagents/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/jose-pr/dotagents/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/jose-pr/dotagents/compare/v0.8.2...v0.8.3
