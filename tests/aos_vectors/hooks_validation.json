@@ -1,0 +1,660 @@
+{
+  "description": "(Hook cases only, filtered from the specification's validation.json by an id containing hooks.) Validating a data model value. 'files', when present, lists the overlay's files and every file a field names must be among them. An invalid case names the pointer of the offending value ('at'); an implementation reports a problem there or inside it. A case whose document writes 'about' also states whether the manifest still 'applies': a problem under /about never stops it.",
+  "spec": "spec/v0/manifest.md#validation",
+  "cases": [
+    {
+      "id": "defaults-hooks",
+      "description": "hooks is a key of defaults: false turns off hook.<ext>'s default events and keeps the declared ones.",
+      "document": {
+        "defaults": {
+          "hooks": false
+        },
+        "hooks": {
+          "pre-tool": {
+            "match": [
+              "execute"
+            ],
+            "on_failure": "refuse"
+          }
+        }
+      },
+      "files": [
+        "hook.sh"
+      ],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "fixture-hooks-match-on-prompt",
+      "description": "tests/fixtures/invalid/hooks-match-on-prompt.cfg",
+      "document": {
+        "hooks": {
+          "prompt": {
+            "match": [
+              "execute"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "fixture-hooks-refuse-after-tool",
+      "description": "tests/fixtures/invalid/hooks-refuse-after-tool.cfg",
+      "document": {
+        "hooks": {
+          "post-tool": {
+            "on_failure": "refuse"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/post-tool"
+      }
+    },
+    {
+      "id": "fixture-hooks-run-extension",
+      "description": "tests/fixtures/invalid/hooks-run-extension.cfg",
+      "document": {
+        "hooks": {
+          "session-start": "hooks/start.txt"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/session-start"
+      }
+    },
+    {
+      "id": "fixture-hooks-timeout-zero",
+      "description": "tests/fixtures/invalid/hooks-timeout-zero.cfg",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "timeout": 0
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "fixture-hooks-true",
+      "description": "tests/fixtures/invalid/hooks-true.cfg",
+      "document": {
+        "hooks": {
+          "turn-end": true
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/turn-end"
+      }
+    },
+    {
+      "id": "fixture-hooks-unknown-event",
+      "description": "tests/fixtures/invalid/hooks-unknown-event.cfg",
+      "document": {
+        "hooks": {
+          "pre_tool": "hook.py"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks"
+      }
+    },
+    {
+      "id": "fixture-hooks-unknown-kind",
+      "description": "tests/fixtures/invalid/hooks-unknown-kind.cfg",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "match": [
+              "Bash"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-not-a-table",
+      "description": "hooks maps events; it is not one script.",
+      "document": {
+        "hooks": "hook.py"
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks"
+      }
+    },
+    {
+      "id": "hooks-run-absolute",
+      "description": "A hook is a script in the overlay, never a program elsewhere.",
+      "document": {
+        "hooks": {
+          "prompt": "/usr/bin/guard.sh"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-run-escape",
+      "description": "A hook's path cannot leave the root.",
+      "document": {
+        "hooks": {
+          "prompt": "../guard.py"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-run-space",
+      "description": "A hook's path uses the characters a scripts path does, so a consumer can put it on a command line unquoted.",
+      "document": {
+        "hooks": {
+          "prompt": "hooks/my guard.sh"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-run-backslash",
+      "description": "A backslash is no separator.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "run": "hooks\\guard.ps1"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-run-exe",
+      "description": "A hook is a script with an interpreter, never a program file.",
+      "document": {
+        "hooks": {
+          "prompt": "bin/guard.exe"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-run-manifest",
+      "description": "No field names a manifest, a hook's run included.",
+      "document": {
+        "hooks": {
+          "prompt": "overlay.cfg"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt",
+        "class": "manifest-file"
+      }
+    },
+    {
+      "id": "hooks-timeout-float",
+      "description": "A timeout is an integer: 5.0 is not 5.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "timeout": 5.0
+          }
+        }
+      },
+      "files": [
+        "hook.py"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool/timeout"
+      }
+    },
+    {
+      "id": "hooks-timeout-too-large",
+      "description": "At most an hour.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "timeout": 3601
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-timeout-bool",
+      "description": "A boolean is not a number of seconds.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "timeout": true
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-match-empty",
+      "description": "An empty match would never run: it is refused rather than read as every one.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "match": []
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-match-duplicate",
+      "description": "A kind listed twice.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "match": [
+              "execute",
+              "execute"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-match-string",
+      "description": "match is an array.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "match": "execute"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-match-harness-tool",
+      "description": "match names tool kinds, never one harness's tool names.",
+      "document": {
+        "hooks": {
+          "post-tool": {
+            "match": [
+              "Write"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/post-tool"
+      }
+    },
+    {
+      "id": "hooks-match-reason-unknown",
+      "description": "A harness's own reason (startup) is not one of the session reasons.",
+      "document": {
+        "hooks": {
+          "session-start": {
+            "match": [
+              "startup"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/session-start"
+      }
+    },
+    {
+      "id": "hooks-match-on-pre-compact",
+      "description": "pre-compact takes no match.",
+      "document": {
+        "hooks": {
+          "pre-compact": {
+            "match": [
+              "manual"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-compact"
+      }
+    },
+    {
+      "id": "hooks-match-on-pre-env",
+      "description": "Nor pre-env.",
+      "document": {
+        "hooks": {
+          "pre-env": {
+            "match": [
+              "new"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-env"
+      }
+    },
+    {
+      "id": "hooks-match-on-session-end",
+      "description": "Only session-start, pre-tool and post-tool take match.",
+      "document": {
+        "hooks": {
+          "session-end": {
+            "match": [
+              "new"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/session-end"
+      }
+    },
+    {
+      "id": "hooks-on-failure-unknown",
+      "description": "on_failure is report or refuse; a hook's failure never chooses a decision of its own.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "on_failure": "deny"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-refuse-on-turn-end",
+      "description": "turn-end cannot be refused: the turn has ended.",
+      "document": {
+        "hooks": {
+          "turn-end": {
+            "on_failure": "refuse"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/turn-end"
+      }
+    },
+    {
+      "id": "hooks-refuse-on-session-end",
+      "description": "Nor session-end.",
+      "document": {
+        "hooks": {
+          "session-end": {
+            "on_failure": "refuse"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/session-end"
+      }
+    },
+    {
+      "id": "hooks-refuse-on-cd",
+      "description": "Nor cd: the directory has changed.",
+      "document": {
+        "hooks": {
+          "cd": {
+            "on_failure": "refuse"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/cd"
+      }
+    },
+    {
+      "id": "hooks-table-unknown-key",
+      "description": "A table holds run, match, timeout and on_failure; a harness's matcher is not one.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "matcher": "Bash"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-table-os",
+      "description": "A hook has no os key: hook.<ext>, chosen by runtime, gives each OS its own.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "run": "hooks/guard.sh",
+            "os": [
+              "unix"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-run-missing",
+      "description": "A script hooks names must be in the overlay.",
+      "document": {
+        "hooks": {
+          "prompt": "hooks/prompt.py"
+        }
+      },
+      "files": [
+        "hook.py"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-table-no-hook-file",
+      "description": "A table with no run runs hook.<ext>, which must be at the root.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "match": [
+              "execute"
+            ]
+          }
+        }
+      },
+      "files": [
+        "hooks/hook.py"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-table-no-hook-file-other-extension",
+      "description": "hook.cfg is no hook.<ext>.",
+      "document": {
+        "hooks": {
+          "prompt": {}
+        }
+      },
+      "files": [
+        "hook.cfg",
+        "Hook.py"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "defaults-hooks-string",
+      "description": "The hooks default is turned off by false, nothing else.",
+      "document": {
+        "defaults": {
+          "hooks": "no"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/defaults/hooks"
+      }
+    },
+    {
+      "id": "hooks-sets-on-post-tool",
+      "description": "post-tool takes no variables, so no sets.",
+      "document": {
+        "hooks": {
+          "post-tool": {
+            "sets": [
+              "A"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/post-tool"
+      }
+    },
+    {
+      "id": "hooks-sets-on-pre-env",
+      "description": "pre-env sets what an env script does: sets has no place there.",
+      "document": {
+        "hooks": {
+          "pre-env": {
+            "sets": [
+              "A"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-env"
+      }
+    },
+    {
+      "id": "hooks-sets-reserved",
+      "description": "A reserved variable cannot be declared.",
+      "document": {
+        "hooks": {
+          "session-start": {
+            "sets": [
+              "DOCS_OVERLAY_ROOT"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/session-start"
+      }
+    },
+    {
+      "id": "hooks-sets-empty",
+      "description": "An empty sets is written by leaving it out.",
+      "document": {
+        "hooks": {
+          "cd": {
+            "sets": []
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/cd"
+      }
+    },
+    {
+      "id": "hooks-sets-bad-name",
+      "description": "A variable name.",
+      "document": {
+        "hooks": {
+          "prompt": {
+            "sets": [
+              "A-B"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-event-case",
+      "description": "Event names match exactly.",
+      "document": {
+        "hooks": {
+          "Pre-Tool": "hook.py"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks"
+      }
+    }
+  ]
+}
