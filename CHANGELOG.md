@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-11-11
+
 ### Changed
 
 - Installing an overlay allows its hooks: `overlays add` and `overlays sync` allow the overlay's hooks
@@ -1812,7 +1814,8 @@ Patch release: the PATH/POSIX-conversion fix above (the only change since 0.3.0)
   affected module sources (`dotagents.cli`, `duho.presets`) to extracted temp files
   before dispatch; a no-op for a plain install.
 
-[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/jose-pr/dotagents/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/jose-pr/dotagents/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/jose-pr/dotagents/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/jose-pr/dotagents/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/jose-pr/dotagents/compare/v0.8.3...v0.9.0
