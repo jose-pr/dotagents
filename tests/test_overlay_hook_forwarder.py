@@ -246,12 +246,13 @@ def test_commands_and_libraries_the_project_holds_never_run_in_a_hook(tmp_path):
     assert len(rig.calls()) == 1, "the user's guard ran"
 
 
-@pytest.mark.parametrize("token", ["../../x", "user/../../x", "project-zz", "", "USER", "project-0123456789ab"])
+@pytest.mark.parametrize("token", ["x/../../outside", "../../x", "user/../../x", "project-zz", "", "USER", "project-0123456789ab"])
 def test_a_token_that_is_not_a_store_is_never_a_path(tmp_path, token):
     with pytest.raises(ValueError):
         _overlay_hooks.record_path(tmp_path, token)
     rig = Rig(tmp_path, "[hooks]\npre-tool = { on_failure = \"refuse\" }\n")
     forwarder = wire(rig, tmp_path)
+    (forwarder.parent / "overlay_hook.x").mkdir(exist_ok=True)
     secret = forwarder.parent.parent / "outside.json"
     secret.write_text(json.dumps({"python": sys.executable, "code_root": str(tmp_path), "store": "x",
                                   "guards": ["pre-tool"]}), encoding="utf-8")
