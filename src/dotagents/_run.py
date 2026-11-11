@@ -206,6 +206,106 @@ def run_step(argv: "list[str]", *, cwd: str, env: "dict[str, str]", timeout: int
         _end(process, job)
 
 
+def run_hook(argv: "list[str]", *, cwd: str, env: "dict[str, str]", timeout: int, stdin: bytes,
+             max_output: int, max_stderr: int) -> "dict[str, object]":
+    """Run one hook to completion, bounded: its standard input is ``stdin`` (written without
+    waiting on the hook, which may never read it), at most ``max_output`` bytes of its standard
+    output are kept and a run that writes more is stopped, and at most ``max_stderr`` bytes of
+    its standard error are kept, the rest read and dropped so it never blocks. It ends at
+    ``timeout`` seconds. Every process it started ends with it.
+
+    Returns ``exit``, ``stdout``, ``stderr``, ``timed_out``, ``too_large``, ``not_run`` (it could
+    not start) and ``seconds``."""
+    import threading
+    import time
+
+    result: "dict[str, object]" = {"exit": None, "stdout": b"", "stderr": b"", "timed_out": False,
+                                   "too_large": False, "not_run": False, "seconds": 0.0}
+    options: "dict" = {"cwd": cwd, "env": env, "stdin": subprocess.PIPE, "stdout": subprocess.PIPE,
+                       "stderr": subprocess.PIPE}
+    job = None
+    if os.name == "nt":
+        try:
+            job = _Job()
+        except OSError:
+            job = None
+        options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | (_CREATE_SUSPENDED if job else 0)
+    else:
+        options["start_new_session"] = True
+    started = time.monotonic()
+    try:
+        process = subprocess.Popen(argv, **options)
+    except (OSError, ValueError):
+        if job is not None:
+            job.close()
+        result["not_run"] = True
+        return result
+    if job is not None and not job.add(process):
+        job.close()
+        job = None
+    stopped = threading.Event()
+
+    def write() -> None:
+        try:
+            process.stdin.write(stdin)
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                process.stdin.close()
+            except (OSError, ValueError):
+                pass
+
+    def read(stream, key: str, bound: int, fatal: bool) -> None:
+        kept = bytearray()
+        total = 0
+        try:
+            while True:
+                chunk = stream.read1(65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if len(kept) < bound:
+                    kept += chunk[:bound - len(kept)]
+                if fatal and total > bound:
+                    # More than the bound was written: the run stops and nothing more is read.
+                    result["too_large"] = True
+                    stopped.set()
+                    break
+        except (OSError, ValueError):
+            pass
+        result[key] = bytes(kept)
+
+    threads = [threading.Thread(target=write, daemon=True),
+               threading.Thread(target=read, args=(process.stdout, "stdout", max_output, True), daemon=True),
+               threading.Thread(target=read, args=(process.stderr, "stderr", max_stderr, False), daemon=True)]
+    for thread in threads:
+        thread.start()
+    deadline = started + timeout
+    try:
+        while process.poll() is None and not stopped.is_set():
+            if time.monotonic() >= deadline:
+                result["timed_out"] = True
+                break
+            stopped.wait(0.02)
+    finally:
+        _end(process, job)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    for thread in threads:
+        thread.join(5)
+    for stream in (process.stdout, process.stderr):
+        try:
+            stream.close()
+        except (OSError, ValueError):
+            pass
+    result["exit"] = process.returncode
+    result["seconds"] = time.monotonic() - started
+    return result
+
+
 def _end(process: subprocess.Popen, job: "Optional[_Job]") -> None:
     """End ``process`` and everything it started."""
     if job is not None:
