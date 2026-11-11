@@ -95,19 +95,22 @@ def test_session_start_persists_env_via_claude_env_file(tmp_path):
 def test_hook_finds_dotagents_by_path_not_by_splicing_path():
     """The hook must find `dotagents` without a global install.
 
-    `init` populates `<scope>/bin/`; the hook runs the project's wrapper, else
-    the store's, else whatever `dotagents` is on PATH. It invokes it by path:
+    `init` populates `<scope>/bin/`; the hook runs the store's wrapper, else
+    whatever `dotagents` is on PATH, never the project's (the agent can write
+    there, and what it plants would run with the user's access). It invokes it by path:
     splicing both bins onto PATH made `env --diff` see them as a change and
     persist them into the session, so a later `cd` kept the first project's
     bin ahead of everything.
     """
-    project = '"$PWD/.agents/bin/dotagents"'
     store = '"${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"'
-    for cmd in (ClaudeAgent.SESSION_START_COMMAND,):
-        assert project in cmd and store in cmd
-        assert cmd.index(project) < cmd.index(store), "project scope wins over the user store"
-        assert "d=dotagents;" in cmd, "falls back to a dotagents on PATH"
-        assert "PATH=" not in cmd
+    for cmd in (ClaudeAgent.SESSION_START_COMMAND,
+                ClaudeAgent.SESSION_START_COMMAND_POWERSHELL, ClaudeAgent.PRETOOLUSE_POWERSHELL_COMMAND):
+        assert ".agents/bin" not in cmd.replace("$HOME/.agents/bin", "")
+        assert ".agents\\bin" not in cmd.replace("$HOME\\.agents", "").replace('"$s\\bin', "").replace("\\bin\\dotagents", "")
+    cmd = ClaudeAgent.SESSION_START_COMMAND
+    assert store in cmd and "$PWD" not in cmd
+    assert "d=dotagents;" in cmd, "falls back to a dotagents on PATH"
+    assert "PATH=" not in cmd
 
 
 def test_env_hook_replaces_its_own_block_and_is_guarded():
@@ -483,28 +486,30 @@ class TestCodexHooks:
         assert (root / "hooks" / CodexAgent.SESSION_START_HOOK_SCRIPT).is_file()
 
     def test_session_start_script_runs_context_for_codex(self, tmp_path, monkeypatch):
-        """End to end, with a stub `dotagents` on the project bin: the script
+        """End to end, with a stub `dotagents` in the store's bin: the script
         prints what `dotagents context --agents codex` printed. Without the
-        flag `context` resolved Claude and gave Codex nothing."""
+        flag `context` resolved Claude and gave Codex nothing. A `dotagents`
+        planted in the project's own `.agents/bin` is never run."""
         import subprocess
 
         dest, root = tmp_path / "agents", tmp_path / "codex"
         dest.mkdir()
         CodexAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
         project = tmp_path / "proj"
-        stub_bin = project / ".agents" / "bin"
-        stub_bin.mkdir(parents=True)
-        if os.name == "nt":
-            (stub_bin / "dotagents.cmd").write_text("@echo off\r\necho STUB %*\r\n", encoding="utf-8")
-        else:
-            (stub_bin / "dotagents").write_text('#!/bin/sh\necho STUB "$@"\n', encoding="utf-8")
-            (stub_bin / "dotagents").chmod(0o755)
+        for base, word in ((project / ".agents" / "bin", "PLANTED"), (tmp_path / "store" / "bin", "STUB")):
+            base.mkdir(parents=True)
+            if os.name == "nt":
+                (base / "dotagents.cmd").write_text("@echo off\r\necho %s %%*\r\n" % word, encoding="utf-8")
+            else:
+                (base / "dotagents").write_text('#!/bin/sh\necho %s "$@"\n' % word, encoding="utf-8")
+                (base / "dotagents").chmod(0o755)
+        monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "store"))
         proc = subprocess.run(
             [sys.executable, str(root / "hooks" / CodexAgent.SESSION_START_HOOK_SCRIPT)],
-            cwd=str(project), capture_output=True, text=True,
+            cwd=str(project), capture_output=True, text=True, env=dict(os.environ),
         )
         assert proc.returncode == 0, proc.stderr
-        assert "STUB context --agents codex" in proc.stdout
+        assert "STUB context --agents codex" in proc.stdout and "PLANTED" not in proc.stdout
 
     def test_session_start_has_no_env_write(self, tmp_path):
         """SessionStart itself still carries no CLAUDE_ENV_FILE-style write --
@@ -625,9 +630,9 @@ class TestCodexPreToolUse:
 
     @pytest.mark.skipif(BASH is None, reason="needs a working bash")
     def test_rewritten_command_actually_runs_in_bash(self, tmp_path):
-        """Execute the prefix with a stub `dotagents` in the project bin: the
-        project's wrapper is the one that runs, its export lands, and the
-        prefix leaves PATH as it found it."""
+        """Execute the prefix with a stub `dotagents` in the store's bin: the
+        store's wrapper is the one that runs (a planted project one never
+        does), its export lands, and the prefix leaves PATH as it found it."""
         import subprocess
         import sys
 
@@ -645,17 +650,20 @@ class TestCodexPreToolUse:
         # The stub stands in for `dotagents env --diff`: it reports the PATH it
         # was spawned with as an export.
         project = tmp_path / "proj"
-        stub_bin = project / ".agents" / "bin"
+        stub_bin = tmp_path / "store" / "bin"
         stub_bin.mkdir(parents=True)
         write_text_lf(  # Path.write_text(newline=) needs 3.10; the package floor is 3.9
             stub_bin / "dotagents",
             "#!/bin/sh\necho \"export FROM_STUB='yes'\"\necho \"export STUB_PATH='$PATH'\"\n",
         )
         (stub_bin / "dotagents").chmod(0o755)
-        run = subprocess.run(
-            [BASH, "-c", cmd], cwd=str(project), capture_output=True, text=True,
-            env={k: v for k, v in os.environ.items() if k != "AGENTS_RUNTIME_SET"},
-        )
+        planted = project / ".agents" / "bin"
+        planted.mkdir(parents=True)
+        write_text_lf(planted / "dotagents", "#!/bin/sh\necho \"export FROM_STUB='PLANTED'\"\n")
+        (planted / "dotagents").chmod(0o755)
+        env = {k: v for k, v in os.environ.items() if k != "AGENTS_RUNTIME_SET"}
+        env["AGENTS_HOME"] = str(tmp_path / "store")
+        run = subprocess.run([BASH, "-c", cmd], cwd=str(project), capture_output=True, text=True, env=env)
         assert run.returncode == 0, run.stderr
         value, path = run.stdout.split(":", 1)
         assert value == "yes", run.stdout + run.stderr
@@ -917,12 +925,10 @@ class TestAntigravityHooks:
         AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
         script = root / "hooks" / AntigravityAgent.PREINVOCATION_HOOK_SCRIPT
 
-        # Stub `dotagents` at `<cwd>/.agents/bin/`, the FIRST location
-        # `_find_dotagents()` checks -- it deliberately wins over any real
-        # installation on PATH or in the real ~/.agents/bin, so this must be
-        # where the stub lives for the test to observe it rather than the
-        # real install.
-        stub_dir = tmp_path / ".agents" / "bin"
+        # Stub `dotagents` in the store's `bin` (AGENTS_HOME), the FIRST location
+        # `_find_dotagents()` checks, so it wins over any real installation on PATH.
+        monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "store"))
+        stub_dir = tmp_path / "store" / "bin"
         stub_dir.mkdir(parents=True)
         stub_name = "dotagents.cmd" if os.name == "nt" else "dotagents"
         stub = stub_dir / stub_name
@@ -932,12 +938,18 @@ class TestAntigravityHooks:
             stub.write_text("#!/bin/sh\necho 'STUB-CONTEXT-EM\xe2\x80\x94DASH'\n", encoding="utf-8")
             stub.chmod(0o755)
 
+        planted = tmp_path / ".agents" / "bin"
+        planted.mkdir(parents=True)
+        (planted / stub_name).write_text(stub.read_text(encoding="utf-8").replace("STUB-CONTEXT", "PLANTED"),
+                                         encoding="utf-8")
+        planted.joinpath(stub_name).chmod(0o755)
         proc = subprocess.run(
             [sys.executable, str(script)],
             input='{"invocationNum": 0}', capture_output=True, text=True,
             cwd=str(tmp_path),
         )
         assert proc.returncode == 0, proc.stderr
+        assert "PLANTED" not in proc.stdout, "the project's own dotagents is never run"
         assert proc.stdout.strip(), "expected the stub's output to be injected"
         out = json.loads(proc.stdout)
         assert "injectSteps" in out
@@ -962,10 +974,11 @@ class TestAntigravityHooks:
         assert proc.returncode == 0
         assert proc.stdout.strip() == ""
 
-    def test_workspace_paths_pin_the_project(self, tmp_path):
-        """The first existing `workspacePaths` entry is the project: its
-        `.agents/bin` supplies `dotagents`, which runs with that root pinned,
-        whatever the hook process's own cwd."""
+    def test_workspace_paths_pin_the_project(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AGENTS_HOME", str(tmp_path / "store"))
+        """The first existing `workspacePaths` entry is the project: the store's
+        `dotagents` runs with that root pinned, whatever the hook process's own
+        cwd. The project's own `.agents/bin` is never run."""
         import subprocess
         import sys
 
@@ -974,8 +987,11 @@ class TestAntigravityHooks:
         AntigravityAgent().wire_hooks(dest, dry_run=False, logger=None, config_root=root)
         script = root / "hooks" / AntigravityAgent.PREINVOCATION_HOOK_SCRIPT
         workspace = tmp_path / "workspace"
-        stub_dir = workspace / ".agents" / "bin"
+        stub_dir = tmp_path / "store" / "bin"
         stub_dir.mkdir(parents=True)
+        planted = workspace / ".agents" / "bin"
+        planted.mkdir(parents=True)
+        (planted / ("dotagents.cmd" if os.name == "nt" else "dotagents")).write_text("PLANTED", encoding="utf-8")
         if os.name == "nt":
             (stub_dir / "dotagents.cmd").write_text("@echo off\r\necho ROOT=%AGENTS_PROJECT_ROOT%\r\n", encoding="utf-8")
         else:
@@ -987,7 +1003,7 @@ class TestAntigravityHooks:
         payload = {"invocationNum": 0, "workspacePaths": [str(tmp_path / "gone"), str(workspace)]}
         proc = subprocess.run(
             [sys.executable, str(script)], input=json.dumps(payload),
-            capture_output=True, text=True, cwd=str(elsewhere),
+            capture_output=True, text=True, cwd=str(elsewhere), env=dict(os.environ),
         )
         assert proc.returncode == 0, proc.stderr
         message = json.loads(proc.stdout)["injectSteps"][0]["ephemeralMessage"]

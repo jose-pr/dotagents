@@ -8,8 +8,8 @@ that is cmd.exe, which reads a POSIX `PATH="..." dotagents context` as its own
 PATH builtin and runs nothing. `init` wires this script with the absolute
 interpreter that ran it, so no shell syntax is involved anywhere.
 
-`dotagents` is found the way the Antigravity hook finds it: the project's
-`.agents/bin`, then the store's `bin` (`$AGENTS_HOME`, else `~/.agents`), then
+`dotagents` is found the way the Antigravity hook finds it: the store's `bin`
+(`$AGENTS_HOME`, else `~/.agents`; never the project's, which the agent can write), then
 PATH. `--agents codex` matters: without it `context` resolves the agent from
 the hook's environment, lands on Claude, and gives Codex nothing.
 
@@ -26,7 +26,7 @@ from pathlib import Path
 def _find_dotagents() -> "str | None":
     names = ("dotagents.cmd", "dotagents") if os.name == "nt" else ("dotagents",)
     store = Path(os.environ.get("AGENTS_HOME") or (Path.home() / ".agents"))
-    for base in (Path.cwd() / ".agents" / "bin", store / "bin"):
+    for base in (store / "bin",):
         for name in names:
             candidate = base / name
             if candidate.is_file():

@@ -543,8 +543,7 @@ class ClaudeAgent(Agent):
     # `C:/...` AGENTS_HOME split that PATH at the drive colon and the store's
     # bin never got on it (a .pyz install then had no `dotagents` at all).
     _HOOK_DOTAGENTS = (
-        'd="$PWD/.agents/bin/dotagents"; '
-        '[ -f "$d" ] || d="${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"; '
+        'd="${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"; '
         '[ -f "$d" ] || d=dotagents; '
     )
     SESSION_START_COMMAND = (
@@ -614,8 +613,7 @@ class ClaudeAgent(Agent):
     # Falls back to `dotagents` on PATH (a pip install with an older store has
     # no `<store>\bin` wrapper) and does nothing when there is none at all.
     _PS_DOTAGENTS = (
-        r'$d = if (Test-Path ".agents\bin\dotagents.cmd") { ".agents\bin\dotagents.cmd" } '
-        r'elseif (Test-Path "' + _PS_STORE + r'\bin\dotagents.cmd") { "' + _PS_STORE + r'\bin\dotagents.cmd" } '
+        r'$d = if (Test-Path "' + _PS_STORE + r'\bin\dotagents.cmd") { "' + _PS_STORE + r'\bin\dotagents.cmd" } '
         r'else { (Get-Command dotagents -ErrorAction SilentlyContinue).Source }'
     )
     SESSION_START_COMMAND_POWERSHELL = _PS_NO_BASH + _PS_DOTAGENTS + r'; if ($d) { & $d context } }'

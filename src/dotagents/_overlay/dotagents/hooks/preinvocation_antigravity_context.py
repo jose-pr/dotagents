@@ -40,7 +40,7 @@ from pathlib import Path
 
 def _find_dotagents() -> "str | None":
     """Locate the `dotagents` command the same way the Bash/PowerShell hooks
-    do -- prefer the scope's own `.agents/bin`, fall back to PATH.
+    do -- the store's own `bin` (never the project's: the agent can write there), then PATH.
 
     On Windows this MUST prefer `dotagents.cmd` over the bare `dotagents` sh
     script: `subprocess.run([path, ...])` goes through `CreateProcess`, which
@@ -51,7 +51,7 @@ def _find_dotagents() -> "str | None":
 
     names = ("dotagents.cmd", "dotagents") if os.name == "nt" else ("dotagents",)
     store = Path(os.environ.get("AGENTS_HOME") or (Path.home() / ".agents"))
-    for base in (Path(".agents") / "bin", store / "bin"):
+    for base in (store / "bin",):
         for name in names:
             candidate = base / name
             if candidate.is_file():

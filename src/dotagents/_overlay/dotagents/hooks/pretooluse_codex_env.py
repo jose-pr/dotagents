@@ -70,15 +70,14 @@ def main() -> int:
     if not isinstance(original_command, str) or not original_command:
         return 0
 
-    # Finds `dotagents` the way SESSION_START_COMMAND does: the project's
-    # wrapper, else the store's (`$AGENTS_HOME` when set), else PATH -- by
+    # Finds `dotagents` the way SESSION_START_COMMAND does: the store's wrapper
+    # (`$AGENTS_HOME` when set), else PATH, never the project's -- by
     # path, never by splicing the bins onto PATH, which `env --diff` would
     # then report as a change. Inside `"$( ... )"` the command substitution is
     # parsed afresh, so the inner quotes are plain `"`.
     prefix = (
         'if [ -z "$AGENTS_RUNTIME_SET" ]; then export AGENTS_RUNTIME_SET=1; '
-        'd="$PWD/.agents/bin/dotagents"; [ -f "$d" ] || d="${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"; '
-        '[ -f "$d" ] || d=dotagents; '
+        'd="${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"; [ -f "$d" ] || d=dotagents; '
         'eval "$("$d" env --diff --format export --cache 2>/dev/null)"; fi; '
     )
 
