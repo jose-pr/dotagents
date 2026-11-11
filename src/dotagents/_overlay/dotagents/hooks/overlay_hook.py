@@ -34,9 +34,18 @@ NATIVE = {"session-start": "SessionStart", "session-end": "SessionEnd", "prompt"
           "post-tool": "PostToolUse"}
 MAX_STDIN = 8 * 1024 * 1024
 MAX_ANSWER = 512 * 1024
-#: Import dotagents from the recorded place only (argv[1]) and run its fixed hook entry.
-BOOT = ("import sys; sys.path.insert(0, sys.argv[1]); del sys.argv[1]; "
-        "from dotagents import _hook_main; sys.exit(_hook_main.main(sys.argv[1:]))")
+#: Import dotagents from the recorded place only (argv[1]) and run its fixed hook entry. A dotagents
+#: that Python finds anywhere else (site-packages, an editable install) is not the one that was
+#: recorded -- the recorded place is where the user decided the code lives -- so it is not run.
+BOOT = ("import os, sys\n"
+        "root = os.path.normcase(os.path.realpath(sys.argv[1]))\n"
+        "sys.path.insert(0, sys.argv[1]); del sys.argv[1]\n"
+        "import dotagents\n"
+        "here = os.path.normcase(os.path.realpath(dotagents.__file__))\n"
+        "if here != root and not here.startswith(root + os.sep):\n"
+        "    sys.exit(3)\n"
+        "from dotagents import _hook_main\n"
+        "sys.exit(_hook_main.main(sys.argv[1:]))\n")
 TOKEN_FORM = r"^(?:user|project-[0-9a-f]{10})$"
 _BAD = {chr(c) for c in list(range(0, 9)) + [11, 12] + list(range(14, 32)) + list(range(127, 160))}
 _BAD |= set("‪‫‬‭‮⁦⁧⁨⁩  ")

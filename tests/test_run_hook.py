@@ -86,7 +86,7 @@ def test_a_program_that_cannot_start_is_reported():
 @pytest.mark.skipif(os.name == "nt", reason="needs a POSIX shell script")
 def test_arguments_are_a_list_never_parsed(tmp_path):
     script = tmp_path / "echo.sh"
-    script.write_text("#!/bin/sh\nprintf '%s' \"$1\"\n", newline="\n")
+    script.write_bytes(b"#!/bin/sh\nprintf '%s' \"$1\"\n")  # Path.write_text(newline=) needs 3.10
     hostile = "$(touch %s/pwned); `touch %s/pwned2`" % (tmp_path, tmp_path)
     done = _run.run_hook(["/bin/sh", str(script), hostile], cwd=str(tmp_path), env=dict(os.environ),
                          timeout=10, stdin=b"", max_output=1000, max_stderr=100)

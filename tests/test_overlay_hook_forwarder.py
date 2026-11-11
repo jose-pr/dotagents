@@ -259,3 +259,28 @@ def test_a_token_that_is_not_a_store_is_never_a_path(tmp_path, token):
     done = subprocess.run([sys.executable, "-I", str(forwarder), "claude-code", "pre-tool", token], input=b"{}",
                           capture_output=True, cwd=str(tmp_path))
     assert done.returncode == 0 and done.stdout == b""
+
+
+def test_the_entry_runs_only_the_dotagents_at_the_recorded_place(tmp_path):
+    """A dotagents Python finds elsewhere (site-packages of a pip install, an editable install) is
+    not the recorded one and is not run: an empty recorded place gives no answer at all."""
+    import importlib.util
+
+    from dotagents import _resources
+
+    spec = importlib.util.spec_from_file_location(
+        "forwarder_under_test", str(Path(_resources.BASE_ROOT) / "dotagents" / "hooks" / "overlay_hook.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    done = subprocess.run([sys.executable, "-I", "-c", module.BOOT, str(empty), "prompt", "--harness", "claude-code",
+                           "--level", "user", "--agents-dir", str(tmp_path), "--nonce", "n"],
+                          input=b"{}", capture_output=True, timeout=60)
+    assert done.returncode != 0 and done.stdout == b""
+    # And the recorded place is run when it holds dotagents.
+    src = Path(_resources.BASE_ROOT).parent.parent
+    ok = subprocess.run([sys.executable, "-I", "-c", module.BOOT, str(src), "prompt", "--harness", "claude-code",
+                         "--level", "user", "--agents-dir", str(tmp_path), "--nonce", "n"],
+                        input=b"{}", capture_output=True, timeout=60)
+    assert ok.returncode == 0 and json.loads(ok.stdout)["nonce"] == "n"
