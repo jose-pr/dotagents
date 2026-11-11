@@ -214,4 +214,16 @@ has "$(pyz py --help)" "--global, -g"
 pyz pyvenv -g --dry-run >/dev/null
 has_re "$(pyz py -g -- -c 'print(1)')" "^1$"
 
+# OVERLAY.md: its YAML front matter is read inside the archive (the YAML reader is vendored),
+# and its body is the overlay's context.
+omd="$SCRATCH/omd"
+mkdir -p "$omd/notes"
+printf -- '---\nname: notes\ndescription: Notes from the smoke test\npriority: 300\n---\nRead the notes first.\n' \
+    > "$omd/notes/OVERLAY.md"
+pyz overlays add notes --repo "$omd" -g >/dev/null
+o=$(pyz overlays show notes -g)
+has "$o" "Notes from the smoke test"
+has_re "$o" "context: +OVERLAY.md"
+has "$(pyz context -g)" "Read the notes first."
+
 echo "pyz_smoke: PASS"
