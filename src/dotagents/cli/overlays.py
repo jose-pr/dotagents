@@ -1,4 +1,4 @@
-"""`dotagents overlays` -- add / remove / list / sync / show, with skills sync.
+"""`dotagents overlays` -- add / remove / list / sync / show / hooks, with skills sync.
 
 The logic lives in `_scope.py` / `_sources.py` / `_skills.py` / `_overlays.py`;
 `cli/__init__.py` lists the `Overlays` umbrella in `_BUILTIN_COMMANDS`.
@@ -1433,8 +1433,148 @@ class OverlaySync(_RepoArgs):
         return 0
 
 
+def _hooks_overlay(self_, name: str):
+    """``(scope, overlay)`` for the installed overlay ``name`` a session in this scope would use."""
+    (name,) = _validated_names([name], "show hooks of")
+    scope = self_.resolve_scope()
+    found = [o for o in scope.installed_overlays if o.normalized_name == name]
+    if not found:
+        raise SystemExit("error: overlay %r is not installed in this scope" % name)
+    return scope, found[0]
+
+
+def _hooks_lines(overlay, plan) -> "list[str]":
+    """What an overlay's hooks would do: per event, the script and its settings, and for each
+    harness dotagents has hooks for whether the event fires natively, is fired by dotagents
+    itself, or cannot fire."""
+    from dotagents import _overlay_hooks
+
+    lines = ["overlay %s  digest %s" % (overlay.name, plan["digest"] or "(none)")]
+    if not plan["hooks"]:
+        lines.append("  no hooks")
+        return lines
+    lines.append("  hooks are %s" % (
+        "allowed at this digest" if plan["on"]
+        else "off: not allowed at this digest (dotagents overlays allow-hooks %s)" % overlay.name))
+    for entry in plan["hooks"]:
+        how = []
+        for harness in _overlay_hooks.HARNESSES.values():
+            if entry["event"] == "pre-env":
+                how.append("%s: fired by dotagents" % harness.id)
+            elif entry["event"] in harness.native:
+                how.append("%s: fires natively%s" % (
+                    harness.id,
+                    " (some occurrences)" if entry["event"] in _overlay_hooks.partial_events(harness) else ""))
+            else:
+                how.append("%s: cannot fire" % harness.id)
+        lines.append("  %s: %s (%s)%s%s  timeout %ss  on_failure %s  [%s]" % (
+            entry["event"], entry["path"] or "no hook.<ext> can run here", entry["interpreter"] or "-",
+            "  match %s" % ",".join(entry["match"]) if entry["match"] else "",
+            "  sets %s" % ",".join(entry["sets"]) if entry["sets"] else "", entry["timeout"],
+            entry["on_failure"], "; ".join(how)))
+    lines.append("  A hook runs outside the harness's sandbox with your access, and is told what its event "
+                 "gives it (a prompt's text, a tool call's input).")
+    return lines
+
+
+class OverlayHooks(DotAgentsArgs):
+    """List an installed overlay's hooks and whether they are allowed at its digest.
+
+    Per event: the script and its settings, and on each harness whether dotagents fires it
+    through the harness's own hook, fires it itself, or cannot. Without a name, every installed
+    overlay that has hooks."""
+
+    _parsername_ = "hooks"
+
+    name: str = ""
+    "Overlay name (default: every installed overlay with hooks)."
+    ("name",)
+
+    def __call__(self) -> int:
+        from dotagents import _overlay_hooks
+
+        scope = self.resolve_scope()
+        if self.name:
+            overlays = [_hooks_overlay(self, self.name)[1]]
+        else:
+            overlays = scope.installed_overlays
+        out: "list[str]" = []
+        for overlay in overlays:
+            plan = _overlay_hooks.overlay_plan(overlay, _overlay_hooks.ANYWHERE, scope.user_root)
+            if plan["hooks"] or self.name:
+                out += _hooks_lines(overlay, plan)
+        _write_stdout("\n".join(out) + "\n" if out else "no overlay has hooks\n")
+        return 0
+
+
+class OverlayAllowHooks(DotAgentsArgs):
+    """Allow an installed overlay's hooks at its current digest.
+
+    The allowance is the user's own (kept in the user store, never in an overlay or a project);
+    there is one digest per overlay, so any change to the overlay turns its hooks off until this
+    is run again.
+
+    Run it once to see what would be allowed and the digest; run it again with `--digest` set to
+    that digest to allow them."""
+
+    _parsername_ = "allow-hooks"
+
+    name: str = ""
+    "Overlay name."
+    ("name",)
+
+    digest: str = ""
+    "The digest shown by the first run: the one to allow."
+    ("--digest",)
+
+    def __call__(self) -> int:
+        from dotagents import _aos, _overlay_hooks
+
+        if not self.name:
+            return _usage_error("overlays allow-hooks needs an overlay name")
+        scope, overlay = _hooks_overlay(self, self.name)
+        plan = _overlay_hooks.overlay_plan(overlay, _overlay_hooks.ANYWHERE, scope.user_root)
+        _write_stdout("\n".join(_hooks_lines(overlay, plan)) + "\n")
+        if not plan["hooks"]:
+            return 0
+        if plan["digest"] is None:
+            return _usage_error("the overlay's tree has no digest, so its hooks cannot be allowed")
+        if not self.digest:
+            _write_stdout("not allowed yet: run again with --digest %s to allow them\n" % plan["digest"])
+            return 0
+        if not _aos.DIGEST_FORM.match(self.digest) or not _aos.same_digest(self.digest, plan["digest"]):
+            return _usage_error("--digest is not the overlay's current digest %s" % plan["digest"])
+        _overlay_hooks.allow(scope.user_root, overlay.name, plan["digest"])
+        _write_stdout("allowed the hooks of %s at %s\n" % (overlay.name, plan["digest"]))
+        return 0
+
+
+class OverlayRevokeHooks(DotAgentsArgs):
+    """Take back the allowance of an overlay's hooks."""
+
+    _parsername_ = "revoke-hooks"
+
+    name: str = ""
+    "Overlay name."
+    ("name",)
+
+    def __call__(self) -> int:
+        from dotagents import _overlay_hooks
+
+        if not self.name:
+            return _usage_error("overlays revoke-hooks needs an overlay name")
+        (name,) = _validated_names([self.name], "revoke hooks of")
+        scope = self.resolve_scope()
+        if _overlay_hooks.revoke(scope.user_root, name):
+            _write_stdout("revoked the hooks of %s\n" % name)
+        else:
+            _write_stdout("the hooks of %s were not allowed\n" % name)
+        return 0
+
+
 class Overlays(LoggingArgs, Cli):
     """Manage opt-in overlays by name: add / remove / list / sync / show (+ skills sync)."""
 
     _parsername_ = "overlays"
-    _subcommands_ = [OverlayAdd, OverlayRemove, OverlayList, OverlaySync, OverlayShow]
+    _subcommands_ = [OverlayAdd, OverlayRemove, OverlayList, OverlaySync, OverlayShow, OverlayHooks,
+                     OverlayAllowHooks, OverlayRevokeHooks]

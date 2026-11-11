@@ -1212,6 +1212,36 @@ def _same_dir(a: str, b: str) -> bool:
         return a == b
 
 
+def _fire_pre_env(overlays, osenv, own_base, scope, weakenings, apply, logger):
+    """Fire the overlays' ``pre-env`` hooks (allowed ones only) and apply their output to ``osenv``
+    through ``apply``; each hook that is on is a ``hook`` weakening, and the ones that are off or
+    that the harness cannot fire are logged, never silently. Returns the ``(overlay, plan)``
+    list. A guard that fails stops the session with an error."""
+    from dotagents import _overlay_hooks
+
+    harness = _overlay_hooks.harness_of(osenv.get("AGENTS_HARNESS"))
+    plans = _overlay_hooks.planned(overlays, harness, scope.user_root)
+    if not plans:
+        return plans
+    windows = os.name == "nt"
+    session = _aos.Environment(osenv, windows)
+    try:
+        reports, _ = _overlay_hooks.pre_env(plans, session, own_base, harness)
+    except _aos.Refused as refused:
+        raise SystemExit("error: the pre-env hook of overlay %s refused the session (hook-refused): see "
+                         "`dotagents overlays hooks %s`" % (refused.subject, refused.subject))
+    changes = EnvChanges({k: v for k, v in session.values.items() if osenv.get(k) != v},
+                         removed=[k for k in osenv if k not in session.values])
+    apply(changes)
+    for overlay, plan in plans:
+        weakenings.extend((overlay.name, ident, subject) for ident, subject in plan["non_defaults"]
+                          if ident == "hook")
+        reports = reports + _overlay_hooks.unsupported_reports([(overlay, plan)])
+    if logger and reports:
+        logger.warning("overlay hooks: %s", "; ".join(_overlay_hooks.describe(r) for r in reports))
+    return plans
+
+
 def get_environment(
     scope: Scope,
     *,
@@ -1432,6 +1462,9 @@ def get_environment(
     own_base = dict(osenv)
     # Variables an overlay took from a secret reference: no later placeholder reads them.
     secret: "set[str]" = set()
+    # Hooks: the `pre-env` ones fire here, themselves, on every harness; the others fire where
+    # the harness calls them (`dotagents hook`). What cannot fire here is reported.
+    hook_plans = _fire_pre_env(overlays, osenv, own_base, scope, weakenings, _apply, logger)
     for overlay in overlays:
         if not _activate.is_pinned(overlay):
             weakenings.append((overlay.name, "unpinned", ""))

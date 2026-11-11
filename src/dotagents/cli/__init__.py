@@ -50,6 +50,7 @@ from dotagents.cli.about import About
 from dotagents.cli.build_pyz import BuildPyz
 from dotagents.cli.context import Context
 from dotagents.cli.env import Env
+from dotagents.cli.hook import Hook
 from dotagents.cli.init import Init
 from dotagents.cli.mcp import Mcp
 from dotagents.cli.overlays import (  # noqa: F401  (re-exported for tests)
@@ -73,6 +74,7 @@ _BUILTIN_COMMANDS = [
     BuildPyz,
     Context,
     Env,
+    Hook,
     PathCmd,
     Overlays,
     About,

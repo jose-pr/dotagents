@@ -2936,20 +2936,18 @@ def fire_event(event: str, runs: "list[dict[str, Any]]", applies: "Optional[Iter
 def apply_pre_env(env: Environment, identities: "list[str]", runs: "dict[str, dict[str, Any]]",
                   limits: "Optional[dict[str, int]]", report: "list[list[str]]",
                   non_defaults: "list[list[str]]") -> None:
-    """The ``pre-env`` hooks' output, every overlay's in composition order, applied to ``env``
-    after the root variables and before any overlay's declarations. Reports and non-default
-    settings are appended to the lists. Raises :class:`Refused` (``hook-refused``) when an
-    overlay's guard fails."""
-    for identity in identities:
-        if identity not in runs:
-            continue
-        fired = fire_event("pre-env", [dict(runs[identity], source=identity)], None, limits, env.windows)
-        report.extend(fired["reports"])
-        non_defaults.extend(fired["non_defaults"])
-        if fired["decision"] == "refuse":
-            raise Refused("hook-refused", identity)
-        for name, value in fired["env"].items():
-            if value is None:
-                env.unset(name)
-            else:
-                env.set(name, value)
+    """The ``pre-env`` hooks' output, every overlay's in composition order as one event (a run
+    may be given lazily, see :func:`fire_event`), applied to ``env`` after the root variables and
+    before any overlay's declarations. Reports and non-default settings are appended to the
+    lists. Raises :class:`Refused` (``hook-refused``) when an overlay's guard fails."""
+    ordered = [dict(runs[identity], source=identity) for identity in identities if identity in runs]
+    fired = fire_event("pre-env", ordered, None, limits, env.windows)
+    report.extend(fired["reports"])
+    non_defaults.extend(fired["non_defaults"])
+    if fired["decision"] == "refuse":
+        raise Refused("hook-refused", fired["by"])
+    for name, value in fired["env"].items():
+        if value is None:
+            env.unset(name)
+        else:
+            env.set(name, value)

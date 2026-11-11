@@ -111,6 +111,11 @@ def refusal(overlay: Any, *, prepared: bool = True) -> "Optional[str]":
         foreign = _aos.foreign_entries(overlay.path)
         if foreign:
             return "its copy holds %s, which is not part of the overlay" % ", ".join(foreign[:5])
+    from dotagents import _overlay_hooks
+
+    held = _overlay_hooks.refusal(overlay)
+    if held is not None:
+        return held
     try:
         needs = needs_preparation(overlay)
     except _aos.Refused as refused:

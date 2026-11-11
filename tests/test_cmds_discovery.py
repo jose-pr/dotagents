@@ -112,7 +112,7 @@ def test_discover_includes_builtins_only(monkeypatch, tmp_path):
     assert "my-personal-tool" not in names
     assert set(names) == {
         "init", "build-pyz", "context", "env", "path", "overlays", "about", "mcp",
-        "findings", "launch",
+        "findings", "launch", "hook",
     }
     # Built-ins are handed to `duho.app` via `commands=`, never `_subcommands_`.
     assert cli.Dotagents._subcommands_ == []
