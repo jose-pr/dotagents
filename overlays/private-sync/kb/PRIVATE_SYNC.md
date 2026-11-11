@@ -188,10 +188,13 @@ dotagents init -g                                   # wires Claude Code's and Co
 
 Updating the overlay changes its digest and turns the hooks off until you allow the new one.
 `tools/cloud-setup.sh` (below) does these steps itself at container start, since it is your own
-setup script. The hooks take the project from `CLAUDE_PROJECT_DIR` or `AGENTS_PROJECT_ROOT`, else
-the directory holding `.agents` found walking up from the payload's `cwd` (never the `cwd` alone:
-it is wherever the agent was); the payload is read by the user's own Python. Run by hand, the
-scripts use the current directory.
+setup script. The hooks act on the project the harness names, `CLAUDE_PROJECT_DIR` or
+`AGENTS_PROJECT_ROOT` (the latter is set when the session was started by `dotagents launch`); with
+neither they do nothing and say so, because the payload's `cwd` is wherever the agent was and a
+walk up from it could adopt another project. Run by hand, the scripts use the current directory.
+They run the overlay's own `hooks/run_link.py` by path with an isolated Python, not the
+`dotagents` command line, which would load whatever commands and libraries the project's own
+`.agents` holds.
 
 **Fresh cloud containers (first clone).** The `session-start` hook lives in the
 installed overlay under `~/.agents/`, which doesn't exist until `~/.agents` is first cloned — so the

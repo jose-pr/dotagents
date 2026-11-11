@@ -5,56 +5,39 @@
 # is its answer, so what it has to say goes to standard error.
 #
 # Env: AGENTS_HOME (default $HOME/.agents),
-# CLAUDE_PROJECT_DIR when not run as a hook (or PWD),
+# CLAUDE_PROJECT_DIR / AGENTS_PROJECT_ROOT (by hand: PWD),
 # DOTAGENTS_AGENTS_TOKEN (optional PAT; wired as a credential helper for the push).
 
 AGENTS_DIR="${AGENTS_HOME:-$HOME/.agents}"
-# The project: what the harness says it is (CLAUDE_PROJECT_DIR, AGENTS_PROJECT_ROOT), else the
-# directory holding the `.agents` found walking up from the payload's `cwd` (an AOS hook is given
-# one JSON object on standard input and its event in AOS_HOOK_EVENT; the payload is read by the
-# user's own Python, found by path, not by a pattern over the text). Run by hand, the current
-# directory. The payload's `cwd` alone is never the project: it is wherever the agent was.
+# The project is what the harness says it is: CLAUDE_PROJECT_DIR or AGENTS_PROJECT_ROOT. Run by
+# hand (no hook), it is the directory the shell is in. As a hook with neither set, the project is
+# not known, and the payload's `cwd` is no answer (it is wherever the agent was, and a walk up
+# from it could pick another project's private branch): this does nothing.
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${AGENTS_PROJECT_ROOT:-}}"
-if [ -z "$PROJECT_DIR" ] && [ -n "${AOS_HOOK_EVENT:-}" ] && [ -n "${AGENTS_PYTHON:-}" ]; then
-    PROJECT_DIR=$("$AGENTS_PYTHON" -c '
-import json, os, sys
-try:
-    here = os.path.abspath(json.load(sys.stdin)["cwd"])
-except Exception:
-    sys.exit(0)
-while True:
-    found = os.path.join(here, ".agents")
-    store = os.path.realpath(os.environ.get("AGENTS_HOME") or os.path.expanduser("~/.agents"))
-    if os.path.exists(found) and os.path.realpath(found) != store:
-        print(here)
-        break
-    parent = os.path.dirname(here)
-    if parent == here:
-        break
-    here = parent
-' 2>/dev/null) || PROJECT_DIR=""
+if [ -z "$PROJECT_DIR" ] && [ -z "${AOS_HOOK_EVENT:-}" ]; then
+    PROJECT_DIR="$PWD"
 fi
-[ -n "$PROJECT_DIR" ] || PROJECT_DIR="$PWD"
+if [ -z "$PROJECT_DIR" ]; then
+    echo "dotagents: private-sync: the harness did not name the project (CLAUDE_PROJECT_DIR, AGENTS_PROJECT_ROOT); doing nothing" >&2
+    exit 0
+fi
 
-dotagents_cmd() {
-    if command -v dotagents >/dev/null 2>&1; then
-        dotagents "$@"
-    else
-        python -m dotagents "$@"
-    fi
-}
+# `link-project` and `sync-project` are run by this overlay's own file, by path, with an isolated
+# Python: not through the `dotagents` command line, which would load whatever commands and
+# libraries the project's `.agents` holds.
+_DG_HERE="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)"
+_DG_PY="${AGENTS_PYTHON:-python3}"
 
 # Ensure the push can authenticate even if the SessionStart hook didn't run
 # (token credential helper + bypass of a github.com -> proxy rewrite). Sourced
-# so its exports reach the `dotagents sync-project` subprocess below.
+# so its exports reach the sync below.
 _DG_AUTH="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)/_agents-git-auth.sh"
 if [ -f "$_DG_AUTH" ]; then
     . "$_DG_AUTH"
     _dotagents_git_auth
 fi
 
-dotagents_cmd sync-project --agents-dir "$AGENTS_DIR" --project "$PROJECT_DIR" \
-    --message "sync: ${PROJECT_DIR##*/} session" >&2 \
+"$_DG_PY" -I "$_DG_HERE/run_link.py" sync "$PROJECT_DIR" "$AGENTS_DIR" "sync: ${PROJECT_DIR##*/} session" >&2 \
     || echo "dotagents: sync failed" >&2
 
 exit 0
