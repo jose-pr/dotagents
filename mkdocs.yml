@@ -49,6 +49,7 @@ nav:
       - Filesystem: api/fs.md
       - Hooks: api/hooks.md
       - Skills: api/skills.md
+      - Skills from elsewhere: api/skill_sources.md
       - Wrappers: api/wrappers.md
       - Resources: api/resources.md
   - Changelog: changelog.md

@@ -262,7 +262,8 @@ dotagents overlays allow-hooks private-sync --digest sha256:...   # allow them a
   own additions outside `<store>/overlays/` — a `kb/` file of your own, an
   `AGENTS.local.md` — where a sync never touches them.
 - **`remove`** deletes the overlay's directory, unpublishes the skills it published
-  (and their links in Claude's skills dir), and recomposes `AGENTS.md`'s managed block over the overlays that remain, so its
+  (and their links in Claude's skills dir; the skills fetched for it that no remaining overlay
+  names are offered for removal, `--yes` accepting), and recomposes `AGENTS.md`'s managed block over the overlays that remain, so its
   rules and routing leave with it. It refuses an overlay another installed overlay
   requires (and no other store provides) unless `--force`.
 - **`list`** shows the installed overlays per store (in a project, the user store's

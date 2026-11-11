@@ -20,7 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   overlay applied as having no manifest, silently. The two hook cases of the specification that
   give hooks in front matter now run.
 
+- An overlay's `skills` can name skills from elsewhere (a name a catalog resolves, or a table with a
+  `source`, `ref` and `pin`). `overlays add` and `sync` show each with its source and take one yes for
+  the overlay and its skills (`--yes`, or at the terminal), fetch them from Git without the person's
+  credentials, SSH agent or prompts, check them against their pin and front matter, keep what was
+  accepted under `<store>/overlays/.dotagents-skills/`, publish them like bundled skills and offer to
+  remove the ones no overlay names any more. `--skill-catalog LABEL=FILE|URL` supplies catalogs; a
+  name no catalog offers (missing) or two offer (ambiguous) is reported and not guessed. `overlays
+  show` lists them. Before, such an entry made `Overlay.skills()` name a skill with no directory.
+
 ### Changed
+
+- `Overlay.skills()` is the skills an overlay carries; `Overlay.skills_elsewhere()` the ones it names.
 
 - Overlay hooks (their validation, plan, payload, `match`, the checks of a run's output and the
   combining of an event) are `coqui-aos`'s; `dotagents._aos` gives its answers as the dicts the

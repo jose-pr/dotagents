@@ -28,6 +28,7 @@ form its API. Generated from docstrings, organized by module:
 - **[Hooks](hooks.md)** — additive, idempotent merge of dotagents' hooks into an
   agent's own settings/config file.
 - **[Skills](skills.md)** — publishing an overlay's skills into a scope's shared dir.
+- **[Skills from elsewhere](skill_sources.md)** — planning, fetching, keeping and publishing the skills an overlay names.
 - **[Wrappers](wrappers.md)** — the `dotagents` / `dotagents.cmd` wrapper scripts
   `init` writes into a `bin/` dir.
 - **[Resources](resources.md)** — the package's own data: the bundled base overlay

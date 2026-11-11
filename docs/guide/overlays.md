@@ -398,6 +398,44 @@ them out of that harness's own skills dir (the context's skills listing still na
 them). Removing the overlay unpublishes only the skills it published, then sweeps any
 now-broken symlinks.
 
+### Skills from elsewhere
+
+`skills` also names skills the overlay does not carry, like the lines of a `requirements.txt`:
+
+```toml
+skills = [
+  "summarize-docs",                      # bundled: skills/summarize-docs/SKILL.md in the overlay
+  "pdf",                                 # a name a catalog resolves
+  { name = "review", source = "https://github.com/example/skills.git#skills/review", pin = "sha256:..." },
+]
+```
+
+`overlays add` shows each of them first (the overlay naming it, its source, its catalog, pinned or
+`UNPINNED`) and takes **one yes for the overlay and its skills together**: `--yes`, or typed at the
+terminal itself. Until then nothing is fetched and nothing is installed, whether the overlay came
+from a repo, a catalog or a project. Then each skill is fetched from its Git source without your
+credentials, SSH agent or prompts and without following a redirect, read out of Git's object store
+(nothing is checked out and nothing in it runs), refused when its tree digest is not the pin
+(`pin-mismatch`), when it has no `SKILL.md` (`not-a-skill`) or front matter in YAML (`skill-unreadable`)
+or when that names another skill (`skill-name-mismatch`), and kept under
+`<store>/overlays/.dotagents-skills/` with a record of what you accepted (source, pin, digest, catalog,
+the overlays naming it). A refused skill is reported and not delivered; the overlay still installs and the
+command exits 1. Fetched skills are published into the shared skills dir and linked into agents' own
+dirs like bundled ones.
+
+- A name no catalog offers is **missing**, one two catalogs offer **ambiguous**: both are reported with
+  the overlay naming them, never guessed, and the overlay applies without them. Catalogs are given with
+  `--skill-catalog LABEL=FILE|URL` (a document with a `skills` table; repeatable).
+- `sync` keeps what you accepted without fetching it again. A skill new or changed since (another
+  source, pin or catalog resolution) is an update: it is shown and fetched only with a yes, never
+  because a source or a catalog changed.
+- Two overlays naming one skill alike are one skill. A skill from elsewhere never takes a name
+  another skill already holds.
+- Removing or syncing away the last overlay naming a fetched skill **offers** to remove it (`remove
+  --yes`, or at the terminal; otherwise it is kept and said so). A skill you placed in the shared dir
+  yourself is never replaced or removed. Through `dotagents mcp --strict`, `--yes` is not taken.
+- Only Git sources are fetched here; a source that is a plain web URL is reported as not delivered.
+
 ## Python dependencies and the scope venv
 
 Every store has a Python venv, `<store>/.pyvenv/<X.Y.Z>-<os>-<arch>/` (for example
