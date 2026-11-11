@@ -7,7 +7,7 @@ opinionated ships as a named overlay you add explicitly.
 ## The overlay model
 
 An overlay is an [AOS](https://boriken-dev.github.io/agent-overlay-spec/) overlay:
-a directory, optionally carrying an `overlay.cfg` manifest, that installs as a unit
+a directory, optionally carrying an `OVERLAY.md` or `overlay.cfg` manifest, that installs as a unit
 into `<store>/overlays/<name>/` — `~/.agents/overlays/<name>/` for
 the user store, `<project>/.agents/overlays/<name>/` for a project. Its files keep
 their relative paths inside that directory, and content refers to them through the
@@ -246,14 +246,21 @@ warning line -- `unpinned` for an overlay with no pin, `env-sensitive`,
 `env-passthrough`, `secret-read`, `env-script`, ... -- naming variables and paths,
 never values.
 
-## `overlay.cfg`
+## `OVERLAY.md` and `overlay.cfg`
 
-The manifest is AOS's `overlay.cfg`: TOML by default, JSON with a first line `#!json`,
-YAML with `#!yaml` (needs PyYAML, the `yaml` extra). It is static data, read without
-running anything; one that does not validate is ignored whole, with a warning saying
-where it is wrong, and `overlays add` refuses it. `overlay.toml` is not read any more
-(a warning names it): rename it, and move what was inferred into declarations (see
-the [changelog](../changelog.md)). The full grammar is the
+The manifest is AOS's, in one of two forms. **`OVERLAY.md`** is the standard one: the
+manifest is its YAML front matter (between `---` lines; a first line inside the fence
+`#!toml` or `#!json` names another format), and anything after the front matter is the
+overlay's context, in place of `CONTEXT.md`. A `CONTEXT.md` beside a body is ignored,
+whatever names it, and reported (a warning, and `overlays show`). **`overlay.cfg`**
+stays readable: TOML by default, JSON with a first line `#!json`, YAML with `#!yaml`.
+An overlay has one of the two: both is refused. YAML is read without anchors, aliases,
+tags, merge keys or more than one document, and TOML, JSON and YAML read to the same
+data. A manifest is static data, read without running anything; one that does not read
+or validate is ignored whole, with a warning saying where it is wrong, and
+`overlays add` refuses it. `overlay.toml` is not read any more (a warning names it):
+rename it, and move what was inferred into declarations (see the
+[changelog](../changelog.md)). The full grammar is the
 [specification's](https://boriken-dev.github.io/agent-overlay-spec/spec/v0/manifest/).
 Keys dotagents applies:
 
@@ -262,7 +269,7 @@ Keys dotagents applies:
 | `name`, `description`, `priority` | Display name, summary, merge order (lower sorts earlier; default 500). |
 | `requires` | Other overlays this one depends on; `add` installs them first. |
 | `routing`, `rules` | Lines for "Load on demand"; markdown files whose rule bullets join "Always-on rules", after the default `rules/<name>.md`. |
-| `context` | Files added to the agent's context, after the default `CONTEXT.md`. |
+| `context` | Files added to the agent's context, after the default: the body of `OVERLAY.md`, else `CONTEXT.md`. |
 | `skills` | Skills added to the default ones (every `skills/<name>/SKILL.md`). |
 | `[defaults]` | `bin`, `lib`, `env`, `env_scripts`, `setup`, `context`, `skills`, `rules = false` each turn one default off; any other key is refused. |
 | `env`, `env_files`, `paths` | Environment values (text with `${NAME}` placeholders, a path in the overlay, a secret reference), env files (`aos` or `dotenv`), and further path additions (`prepend` / `append`, per OS). |
@@ -282,6 +289,22 @@ routing = ["- Write or revise a plan → $ENGINEERING_OVERLAY_ROOT/flows/PLAN.md
 
 [runtime]
 commands = ["git"]
+```
+
+The same in `OVERLAY.md`, with the context after it:
+
+```markdown
+---
+name: engineering
+requires: []
+rules:
+  - rules/ENGINEERING.md
+routing:
+  - "- Write or revise a plan → $ENGINEERING_OVERLAY_ROOT/flows/PLAN.md"
+runtime:
+  commands: [git]
+---
+What every session of this overlay is told, as Markdown.
 ```
 
 ## Pins, grants and env scripts: the store's own settings

@@ -275,8 +275,8 @@ dotagents overlays allow-hooks private-sync --digest sha256:...   # allow them a
 
 Assembles the effective context an agent should load — each store's `AGENTS.md`, the
 project store's `AGENTS.local.md`, and the project root's own `AGENTS.md` /
-`AGENTS.local.md`, then each overlay's context (its `context` files, by default its
-`CONTEXT.md`, plus `[harness.<id>] context` for the agent; by priority) — minus whatever the harness already loads by itself (for Claude Code, whatever its
+`AGENTS.local.md`, then each overlay's context (its `context` files, by default the body of its
+`OVERLAY.md` or else its `CONTEXT.md`, plus `[harness.<id>] context` for the agent; by priority) — minus whatever the harness already loads by itself (for Claude Code, whatever its
 `CLAUDE.md` files really `@`-include) — and prints it to **stdout** by default
 (POSIX convention); pass a path to write a file, or `--write-agent` to merge it into
 each agent's own instruction file. It ends with the skills on offer and, when there are

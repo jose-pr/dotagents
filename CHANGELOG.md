@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- An overlay's manifest can be `OVERLAY.md`: its front matter (YAML, or `#!toml` / `#!json` as
+  the first line inside the fence) is the manifest, and a body after it is the overlay's context
+  in place of `CONTEXT.md`. A `CONTEXT.md` beside a body is ignored, whatever names it, and
+  reported (a warning; `overlays show` lists it as `context_ignored`). An overlay with both
+  `OVERLAY.md` and `overlay.cfg`, front matter that is not a mapping or is outside the restricted
+  YAML (an anchor, alias, tag, merge key or duplicate key), an unclosed fence, or a body that is
+  context and is not UTF-8 or is too large, is refused whole, and `overlays add` refuses it.
+  `overlay.cfg` stays readable. `tools/audit.py` checks both forms. Before, an `OVERLAY.md`
+  overlay applied as having no manifest, silently. The two hook cases of the specification that
+  give hooks in front matter now run.
+
 ### Changed
+
+- Overlay hooks (their validation, plan, payload, `match`, the checks of a run's output and the
+  combining of an event) are `coqui-aos`'s; `dotagents._aos` gives its answers as the dicts the
+  hook modules use, starts each run when its turn comes, and applies `pre-env` output to its
+  own environment. An overlay's hook tree is read once through `coqui_aos.read_tree`.
 
 - Reading, validating, naming and digesting overlays, front matter, substitution, the defaults an
   overlay's files give and the setup phases come from the `coqui-aos` package, the same reader

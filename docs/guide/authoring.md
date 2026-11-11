@@ -1,11 +1,11 @@
 # Authoring an overlay
 
 An overlay is just a directory with the files you want installed into a scope, plus an
-optional `overlay.cfg` manifest: an
+optional `OVERLAY.md` (or `overlay.cfg`) manifest: an
 [AOS](https://boriken-dev.github.io/agent-overlay-spec/) overlay, readable by any
 consumer of the format. The basics need no manifest: `bin/` goes on `PATH`,
-`lib/python/` on `PYTHONPATH`, `skills/<name>/SKILL.md` are skills, `CONTEXT.md` is
-context, `rules/<name>.md` are always-on rules, an `env` file (dotenv) and one
+`lib/python/` on `PYTHONPATH`, `skills/<name>/SKILL.md` are skills, `CONTEXT.md` (or the
+body of `OVERLAY.md`) is context, `rules/<name>.md` are always-on rules, an `env` file (dotenv) and one
 `env.<ext>` set variables, and one `setup.<ext>` is the setup. Declare only what is
 not a default -- a declaration adds to the defaults, and one naming a default's file
 replaces that default -- and turn a default off in `[defaults]` (`bin`, `lib`, `env`,
@@ -18,7 +18,7 @@ directory of overlays), a registry, or a git repo with `--repo` — see the
 
 ```
 my-overlay/
-  overlay.cfg
+  overlay.cfg          # or OVERLAY.md
   kb/MY_TOPIC.md
 ```
 
@@ -29,6 +29,19 @@ description = "My team's conventions for topic X."
 routing = [
     "- Working on topic X → `$MY_OVERLAY_OVERLAY_ROOT/kb/MY_TOPIC.md`",
 ]
+```
+
+Or as `OVERLAY.md`, whose front matter is the manifest and whose body, if it has one, is
+the context that `CONTEXT.md` would be:
+
+```markdown
+---
+name: my-overlay
+description: My team's conventions for topic X.
+routing:
+  - "- Working on topic X → `$MY_OVERLAY_OVERLAY_ROOT/kb/MY_TOPIC.md`"
+---
+Topic X: read the file above before you start on it.
 ```
 
 Install it:

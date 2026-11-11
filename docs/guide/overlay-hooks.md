@@ -232,4 +232,4 @@ and a change of the entry text is warned about when it is wired.
 ## Not done yet
 
 Hooks declared by your own configuration or a project's (outside overlays), a `pre-tool`
-variable loader, `OVERLAY.md` front matter, and harnesses other than Claude Code and Codex.
+variable loader, and harnesses other than Claude Code and Codex.

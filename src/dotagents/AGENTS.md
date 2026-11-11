@@ -437,9 +437,13 @@ returns the exit code.
 - `DEFAULT_PRIORITY = 500`. `DEFAULT_SETUP_TIMEOUT = 300` — seconds a setup
   variant runs when it declares no `timeout` and `--setup-timeout` is not given;
   `0` means no limit.
-- `load_manifest(path) -> (document, problems)` — `overlay.cfg` read
-  (`coqui_aos.read_document`) and validated (`coqui_aos.validate`); a refused one is `({},
-  [problem, ...])`; memoized on the file's mtime and size.
+- `MANIFEST_NAMES = ("OVERLAY.md", "overlay.cfg")`. `read_manifest_file(directory) ->
+  (document, problems, ignored)` — the overlay's manifest read as `coqui_aos.read_overlay` reads
+  it (`OVERLAY.md`'s front matter, YAML unless its first line names another format, or
+  `overlay.cfg`; both is `two-manifests`) and validated (`coqui_aos.validate`); a refused one is
+  `({}, [problem, ...], [])`; `ignored` is `["CONTEXT.md"]` when the body of `OVERLAY.md` is the
+  context and a `CONTEXT.md` is beside it. No manifest is `({}, [], [])`. Memoized on the files'
+  mtime and size. `load_manifest(directory) -> (document, problems)` is its first two.
 - `class InstallResult` — what `install_to` did: `written`, `unchanged`,
   `replaced` (edited here, replaced by the source's file), `removed`, `backed_up`,
   `lines`; property `skipped` (= unchanged). Unpacks as `(written, skipped, lines)`.
@@ -459,19 +463,23 @@ returns the exit code.
   - `Overlay.root_var_for(name) -> str` — `normalize_name(name)` upper-cased, every
     non-alphanumeric → `_`, plus `_OVERLAY_ROOT`.
   - Properties: `name` (dir name), `normalized_name`, `root_var`, `is_valid`,
-    `manifest_path`, `priority`, `sort_key` (`(priority, manifest name, dir
+    `manifest_path` (`OVERLAY.md` when there is one, else `overlay.cfg`), `manifest_paths`
+    (both, for a cache), `priority`, `sort_key` (`(priority, manifest name, dir
     name)`), `install_record_path` (`<store>/overlays/.dotagents-install/<name>.json`);
     attribute `store`.
   - `Overlay.discover(root, store=None)`, `Overlay.installed(*stores)`,
     `Overlay.sort_by_priority(overlays)` — as before: valid-named dirs under
     `overlays/`, a later store's copy shadowing an earlier one, `sort_key` order.
   - `document() -> dict` — the validated manifest (`{}` when absent or refused;
-    a refused one is warned about once). `manifest_problems() -> list[str]`.
+    a refused one is warned about once, and so is a `CONTEXT.md` the body of `OVERLAY.md`
+    replaces). `manifest_problems() -> list[str]`. `context_ignored() -> list[str]`.
   - `read_manifest() -> dict` — `name`, `description`, `routing` (trimmed, blanks
     dropped), `rules`, `requires` (normalized, de-duplicated), `priority`, `doc`.
   - `member_paths() -> list[str]` (no hashing). `skills()`, `rules()`,
     `context_files(harness_id=None)` — the field with its defaults
-    (`coqui_aos.skills_of`, `rules_of`, `context_of`), then `harness.<id>.context`.
+    (`coqui_aos.skills_of`, `rules_of`, `context_of`: the body of `OVERLAY.md`, named `OVERLAY.md`,
+    else `CONTEXT.md`), then `harness.<id>.context` (`harness_context_of`); no body of a refused
+    manifest.
     `harness_hints(harness_id) -> dict`. `setup_variant(os_name=None)` —
     `_aos.setup_of` here: a declared variant, else the default `setup.<ext>`.
   - `declared_scripts(os_name=None) -> {name: (path, interpreter)}` (its `scripts`

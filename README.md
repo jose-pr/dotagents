@@ -56,7 +56,7 @@ This repo's own working material (decisions, findings, plans) lives **privately*
 its untracked `.agents/` — like every project, `.agents/` is never tracked or pushed.
 
 Overlays follow the [Agent Overlay Specification](https://boriken-dev.github.io/agent-overlay-spec/)
-(AOS): each may carry an `overlay.cfg` manifest (`name`/`description`/`requires`/`routing`,
+(AOS): each may carry an `OVERLAY.md` (front matter and the context as its body) or `overlay.cfg` manifest (`name`/`description`/`requires`/`routing`,
 and what it needs that is not a default: environment, path additions, setup,
 runtime), read by the `dotagents overlays` subcommand, which manages overlays by name
 (`add`/`remove`/`list`/`sync`/`show`) — see [Managing overlays](#managing-overlays) below.
