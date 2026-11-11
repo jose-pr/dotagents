@@ -324,6 +324,17 @@ def test_removal_keeps_a_skill_another_overlay_still_names_and_offers_the_last(w
     assert not _store(scope_root).tree("review").exists()
 
 
+def test_a_name_whose_catalog_is_not_given_this_time_stays_installed(world, remote, fetches, tmp_path):
+    src, scope_root = world
+    catalog = tmp_path / "catalog.toml"
+    catalog.write_text('[skills]\nlint = { source = "%s#skills/lint", pin = "%s" }\n'
+                       % (HOST, remote.pin("lint")), encoding="utf-8")
+    _overlay(src, "team", '"lint"')
+    _add(src, scope_root, "team", skill_catalog=["main=%s" % catalog])
+    assert _sync(src, scope_root, yes=True) == 0  # no catalog this time: the name is unresolved, not dropped
+    assert (scope_root / "skills" / "lint" / "SKILL.md").is_file() and "lint" in _store(scope_root).records()
+
+
 def test_a_skill_the_person_chose_is_never_removed_with_an_overlay(world, remote, fetches):
     src, scope_root = world
     _overlay(src, "one", _entry("review", "review", remote.pin("review")))

@@ -436,8 +436,9 @@ def deliver(store: FetchedSkills, plan: SkillPlan, fetcher: "Optional[GitFetcher
 
 def orphans(store: FetchedSkills, plan: SkillPlan) -> "List[str]":
     """The recorded skills no overlay in ``plan`` names any more that the person did not choose: what
-    removing or syncing an overlay leaves, to be offered for removal."""
-    named = {s.name.lower() for s in plan.skills if s.origin in (PlannedOrigin.SOURCE, PlannedOrigin.CATALOG)}
+    removing or syncing an overlay leaves, to be offered for removal. A name still listed but not resolved
+    now (a catalog not given this time) is still named."""
+    named = {s.name.lower() for s in plan.skills if s.origin is not PlannedOrigin.BUNDLED}
     return sorted(
         record.get("name", lower) for lower, record in store.records().items()
         if lower not in named and not record.get("chosen")
