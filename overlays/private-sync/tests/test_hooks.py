@@ -46,8 +46,25 @@ def _stub(directory: Path, name: str, log: Path) -> None:
 
 def _agents_repo(tmp_path: Path) -> Path:
     agents = tmp_path / "agents-home"
-    (agents / ".git").mkdir(parents=True)
+    (agents / ".git").mkdir(parents=True, exist_ok=True)
     return agents
+
+
+def _run_script(tmp_path, script, payload_cwd, **extra):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    log = tmp_path / "calls.log"
+    for name in ("git", "dotagents"):
+        _stub(bin_dir, name, log)
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PROJECT_DIR", "AGENTS_PROJECT_ROOT")}
+    env.update(PATH=str(bin_dir) + os.pathsep + os.environ["PATH"], AGENTS_HOME=str(_agents_repo(tmp_path)),
+               AOS_HOOK_EVENT="session-start", AGENTS_PYTHON=sys.executable, **extra)
+    payload = json.dumps({"event": "session-start", "harness": "claude-code", "cwd": str(payload_cwd)})
+    done = subprocess.run([SH, str(ROOT / "hooks" / script)], input=payload.encode(), env=env,
+                          capture_output=True, cwd=str(tmp_path))
+    assert done.returncode == 0
+    assert done.stdout == b"", "a hook's standard output is its answer"
+    return log.read_text(encoding="utf-8") if log.exists() else ""
 
 
 @needs_sh
@@ -55,25 +72,41 @@ def _agents_repo(tmp_path: Path) -> Path:
     ("private-sync-start.sh", ["git -C", "link-project"]),
     ("private-sync-stop.sh", ["sync-project"]),
 ])
-def test_the_scripts_take_the_project_from_the_payloads_cwd(tmp_path, script, expect):
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    log = tmp_path / "calls.log"
-    for name in ("git", "dotagents"):
-        _stub(bin_dir, name, log)
+def test_the_project_is_the_directory_holding_agents_above_the_payloads_cwd(tmp_path, script, expect):
     project = tmp_path / "my project"
-    project.mkdir()
-    env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"], AGENTS_HOME=str(_agents_repo(tmp_path)),
-               AOS_HOOK_EVENT="session-start", CLAUDE_PROJECT_DIR=str(tmp_path / "elsewhere"))
-    payload = json.dumps({"event": "session-start", "harness": "claude-code", "cwd": str(project)})
-    done = subprocess.run([SH, str(ROOT / "hooks" / script)], input=payload.encode(), env=env,
-                          capture_output=True, cwd=str(ROOT))
-    assert done.returncode == 0
-    assert done.stdout == b"", "a hook's standard output is its answer"
-    calls = log.read_text(encoding="utf-8")
+    (project / ".agents").mkdir(parents=True)
+    (project / "src" / "deep").mkdir(parents=True)
+    calls = _run_script(tmp_path, script, project / "src" / "deep")
     for fragment in expect:
         assert fragment in calls
+    assert " %s" % project in calls and "deep" not in calls
+
+
+@needs_sh
+def test_the_harnesss_own_project_wins_over_the_payload(tmp_path):
+    project, elsewhere = tmp_path / "proj", tmp_path / "elsewhere"
+    (project / ".agents").mkdir(parents=True)
+    elsewhere.mkdir()
+    calls = _run_script(tmp_path, "private-sync-stop.sh", elsewhere, CLAUDE_PROJECT_DIR=str(project))
     assert str(project) in calls and "elsewhere" not in calls
+    calls = _run_script(tmp_path, "private-sync-stop.sh", elsewhere, AGENTS_PROJECT_ROOT=str(project))
+    assert str(project) in calls.splitlines()[-1]
+
+
+@needs_sh
+def test_a_payload_cwd_with_no_project_above_it_is_not_taken_as_the_project(tmp_path):
+    nowhere = tmp_path / "nowhere" / "x"
+    nowhere.mkdir(parents=True)
+    calls = _run_script(tmp_path, "private-sync-stop.sh", nowhere)
+    assert str(nowhere) not in calls, "the agent's own working directory is not the project"
+
+
+@needs_sh
+def test_the_payload_is_read_by_python_not_by_a_pattern(tmp_path):
+    project = tmp_path / 'a "quoted" \\ proj'
+    (project / ".agents").mkdir(parents=True)
+    calls = _run_script(tmp_path, "private-sync-stop.sh", project)
+    assert str(project) in calls
 
 
 @needs_sh
@@ -108,22 +141,23 @@ def test_dotagents_runs_them_once_allowed_and_not_before(tmp_path, monkeypatch):
     for name in ("git", "dotagents"):
         _stub(bin_dir, name, log)
     project = tmp_path / "proj"
-    project.mkdir()
+    (project / ".agents").mkdir(parents=True)
+    (project / "src").mkdir()
     monkeypatch.setenv("AGENTS_HOME", str(store))
     environ = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"], AGENTS_HOME=str(store))
     scope = Scope("user", store)
     overlay = next(o for o in scope.installed_overlays if o.name == "private-sync")
-    native = json.dumps({"session_id": "s", "cwd": str(project), "source": "startup"}).encode()
+    native = json.dumps({"session_id": "s", "cwd": str(project / "src"), "source": "startup"}).encode()
 
     stdout, stderr = _hook_dispatch.dispatch("claude-code", "session-start", native, scope, "user", environ)
     assert not log.exists(), "off until allowed"
     assert "hook-not-allowed private-sync" in stderr
 
-    _overlay_hooks.allow(store, "private-sync", overlay.tree_digest())
+    _overlay_hooks.allow(store, "private-sync", overlay.tree_digest(), overlay.store)
     _hook_dispatch.dispatch("claude-code", "session-start", native, scope, "user", environ)
     assert "link-project %s" % project in log.read_text(encoding="utf-8")
 
     log.unlink()
-    turn = json.dumps({"session_id": "s", "cwd": str(project)}).encode()
+    turn = json.dumps({"session_id": "s", "cwd": str(project / "src")}).encode()
     _hook_dispatch.dispatch("claude-code", "turn-end", turn, scope, "user", environ)
     assert "sync-project" in log.read_text(encoding="utf-8")

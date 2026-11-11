@@ -9,13 +9,32 @@
 # DOTAGENTS_AGENTS_TOKEN (optional PAT; wired as a credential helper for the push).
 
 AGENTS_DIR="${AGENTS_HOME:-$HOME/.agents}"
-# The project directory is the `cwd` of the hook's payload (an AOS hook is given one JSON object
-# on standard input and its event in AOS_HOOK_EVENT); run by hand it is the project the shell is in.
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
-if [ -n "${AOS_HOOK_EVENT:-}" ]; then
-    _dg_cwd=$(sed -n 's/.*"cwd": *"\([^"]*\)".*/\1/p' | head -n 1)
-    [ -n "$_dg_cwd" ] && PROJECT_DIR="$_dg_cwd"
+# The project: what the harness says it is (CLAUDE_PROJECT_DIR, AGENTS_PROJECT_ROOT), else the
+# directory holding the `.agents` found walking up from the payload's `cwd` (an AOS hook is given
+# one JSON object on standard input and its event in AOS_HOOK_EVENT; the payload is read by the
+# user's own Python, found by path, not by a pattern over the text). Run by hand, the current
+# directory. The payload's `cwd` alone is never the project: it is wherever the agent was.
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${AGENTS_PROJECT_ROOT:-}}"
+if [ -z "$PROJECT_DIR" ] && [ -n "${AOS_HOOK_EVENT:-}" ] && [ -n "${AGENTS_PYTHON:-}" ]; then
+    PROJECT_DIR=$("$AGENTS_PYTHON" -c '
+import json, os, sys
+try:
+    here = os.path.abspath(json.load(sys.stdin)["cwd"])
+except Exception:
+    sys.exit(0)
+while True:
+    found = os.path.join(here, ".agents")
+    store = os.path.realpath(os.environ.get("AGENTS_HOME") or os.path.expanduser("~/.agents"))
+    if os.path.exists(found) and os.path.realpath(found) != store:
+        print(here)
+        break
+    parent = os.path.dirname(here)
+    if parent == here:
+        break
+    here = parent
+' 2>/dev/null) || PROJECT_DIR=""
 fi
+[ -n "$PROJECT_DIR" ] || PROJECT_DIR="$PWD"
 
 dotagents_cmd() {
     if command -v dotagents >/dev/null 2>&1; then
