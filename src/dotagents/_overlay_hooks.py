@@ -5,7 +5,7 @@ allowed them at the overlay's digest, running them, and what of their output app
 gives it a filesystem, the user's allowances, a process and a harness. A hook is the overlay's
 code: it runs outside the harness's sandbox with the user's access, so each step that starts one
 is explicit and bounded -- allowed at one digest, argv as a list, the limits of :data:`LIMITS`,
-nothing of the output trusted before :func:`dotagents._aos.read_hook_output` has read it, and no
+nothing of the output trusted before :func:`coqui_aos.read_hook_output` has read it, and no
 output able to grant anything.
 """
 
@@ -18,6 +18,8 @@ import shutil
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
+
+import coqui_aos
 
 from dotagents import _aos
 from dotagents._overlays import Overlay
@@ -313,16 +315,10 @@ def read_tree(overlay: Any, keep: bool = False) -> "tuple[Optional[str], dict[st
     holds the bytes the digest was computed over, each file read once; otherwise it is empty. A
     tree with no digest (a link, a special file, a refused name) is ``(None, {})``."""
     try:
-        entries = _aos.tree_entries(overlay.path, with_data=keep)
-        digest, _lines = _aos.digest_entries(entries)
-    except (_aos.DigestError, OSError):
+        tree, digest = _aos.read_tree(overlay.path)
+    except (coqui_aos.Error, OSError):
         return None, {}
-    files: "dict[str, bytes]" = {}
-    if keep:
-        for components, kind, data in entries:
-            if kind == "file" and not _aos._excluded(components):
-                files[b"/".join(components).decode("utf-8")] = data
-    return digest, files
+    return digest, ({path: tree.bytes(path) for path in tree.paths} if keep else {})
 
 
 def fresh_digest(overlay: Any) -> "Optional[str]":
@@ -402,7 +398,7 @@ def snapshot(user_store: "str | os.PathLike[str]", overlay: Any, digest: str, fi
             if _aos.same_digest(_aos.tree_digest(target), digest):
                 os.utime(str(holder), None)
                 return target
-        except (_aos.DigestError, OSError, ValueError):
+        except (coqui_aos.Error, OSError, ValueError):
             pass
         shutil.rmtree(str(holder), ignore_errors=True)
     base.mkdir(parents=True, exist_ok=True)
@@ -613,7 +609,7 @@ class Subject(object):
 def execute(subject: Subject, event: str, payload: bytes, env: "dict[str, str]", *,
             limits: "Optional[dict[str, int]]" = None, root: "Optional[str | os.PathLike[str]]" = None,
             deadline: "Optional[float]" = None, base_path: "Optional[str]" = None) -> "dict[str, Any]":
-    """Start the hook and give its run in the model's terms (:func:`dotagents._aos.hook_result`).
+    """Start the hook and give its run in the model's terms (:func:`coqui_aos.hook_result`).
 
     The program is an interpreter followed by the script's absolute path and the event, an argv
     list that no shell reads; its working directory is ``root`` (the overlay's snapshot, else the
@@ -707,7 +703,7 @@ def session_id(harness: str, native_id: str) -> str:
 
 
 def value_for_match(event: str, facts: "dict[str, Any]") -> "Optional[str]":
-    kind = _aos.HOOK_EVENTS[event][4]
+    kind = coqui_aos.HookEvent(event).selects
     if kind == "reason":
         return facts.get("reason")
     if kind == "kind":
@@ -734,7 +730,8 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
     limits = dict(LIMITS, **(limits or {}))
     runs: "list[dict[str, Any]]" = []
     matching = value_for_match(event, facts)
-    payload = json.dumps(_aos.hook_payload(event, facts), ensure_ascii=False).encode("utf-8")
+    model = coqui_aos.HookEvent(event)
+    payload = json.dumps(coqui_aos.hook_payload(model, facts), ensure_ascii=False).encode("utf-8")
     for overlay, plan in plans:
         entries = [entry for entry in plan["hooks"] if entry["event"] == event]
         if not entries:
@@ -744,7 +741,7 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
         if not plan["on"]:
             for entry in entries:
                 if entry["on_failure"] == "refuse" and (
-                        matching is None or _aos.hook_matches(event, entry["match"], matching)):
+                        matching is None or coqui_aos.hook_matches(model, entry["match"], matching)):
                     # A guard that is off is a failed guard, not a missing one.
                     runs.append({"source": overlay.name, "on_failure": "refuse", "sets": [],
                                  "start": lambda: {"not_run": True}})
@@ -753,7 +750,7 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
         snap_overlay = plan.get("snap")
         snap = snap_overlay.path if snap_overlay is not None else None
         for entry in entries:
-            if matching is not None and not _aos.hook_matches(event, entry["match"], matching):
+            if matching is not None and not coqui_aos.hook_matches(model, entry["match"], matching):
                 continue
             subject = Subject(overlay, entry)
 
@@ -971,9 +968,10 @@ def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environmen
     deadline = time.monotonic() + (deadline_for(user_store) if user_store is not None else DEFAULT_DEADLINE) - 5
     base_path = (clean_path(session_base(base).get("PATH"), user_store, project_roots(session_base(base), cwd))
                  if user_store is not None else None)
-    payload = json.dumps(_aos.hook_payload("pre-env", {"harness": harness.id or NO_HARNESS,
-                                                       "cwd": os.path.abspath(cwd or os.getcwd())}),
-                         ensure_ascii=False).encode("utf-8")
+    payload = json.dumps(
+        coqui_aos.hook_payload(coqui_aos.HookEvent.PRE_ENV, {"cwd": os.path.abspath(cwd or os.getcwd()),
+                                                             "harness": harness.id or NO_HARNESS}),
+        ensure_ascii=False).encode("utf-8")
     runs: "dict[str, dict[str, Any]]" = {}
     identities: "list[str]" = []
     for overlay, plan in plans:

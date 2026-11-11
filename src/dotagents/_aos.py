@@ -904,5 +904,146 @@ def insecure_url(url: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# Resolution and composition order.
+# Hooks: ``coqui_aos`` decides, these give its answers as the dicts the hook
+# modules use, start a run only when its turn comes, and apply ``pre-env``
+# to this module's :class:`Environment`.
 # --------------------------------------------------------------------------- #
+
+#: Every hook event, in the order they are fired.
+HOOK_EVENTS = tuple(event.value for event in coqui_aos.HookEvent)
+#: The consumer's bound on one tree it reads to keep (a hook's snapshot).
+MAX_TREE_BYTES = 256 * 1024 * 1024
+_DEFAULTS = coqui_aos.Settings()
+#: The bounds on every hook, by the name the hook modules use; ``max_stderr`` is this consumer's.
+DEFAULT_HOOK_LIMITS = {
+    "timeout": _DEFAULTS.hook_timeout,
+    "event_timeout": _DEFAULTS.hook_event_timeout,
+    "max_output": _DEFAULTS.hook_output_bytes,
+    "max_stderr": _DEFAULTS.hook_output_bytes,
+    "max_payload": _DEFAULTS.hook_payload_bytes,
+}
+_LIMIT_SETTINGS = {
+    "timeout": "hook_timeout",
+    "event_timeout": "hook_event_timeout",
+    "max_output": "hook_output_bytes",
+    "max_payload": "hook_payload_bytes",
+}
+
+
+def hook_settings(limits: "Optional[dict[str, int]]" = None) -> "coqui_aos.Settings":
+    """``coqui_aos`` settings holding the bounds ``limits`` names (:data:`DEFAULT_HOOK_LIMITS`)."""
+    return _DEFAULTS.replace(**{_LIMIT_SETTINGS[key]: value for key, value in (limits or {}).items()
+                                if key in _LIMIT_SETTINGS})
+
+
+def read_tree(root: "str | os.PathLike[str]") -> "tuple[coqui_aos.OverlayTree, str]":
+    """The tree at ``root`` with the bytes of each member, and the digest of those same bytes.
+    Raises :class:`coqui_aos.Error` (a link, a special file, a refused name, more than
+    :data:`MAX_TREE_BYTES`) or ``OSError``."""
+    tree, digest = coqui_aos.read_tree(PathFS(), Path(root), _DEFAULTS.replace(tree_bytes=MAX_TREE_BYTES))
+    return tree, str(digest.digest)
+
+
+def hooks_of(manifest: "dict[str, Any]", files: "Iterable[str]", os_name: str,
+             interpreters: "Iterable[str]" = INTERPRETERS) -> "tuple[list[dict[str, Any]], list[str]]":
+    """Every hook the overlay has, in event order, as dicts (``event``, ``path``, ``interpreter``,
+    ``runs``, ``match``, ``sets``, ``timeout``, ``on_failure``, ``payload``), and the ``hook.<ext>``
+    files reported as ``script-not-run``."""
+    hooks, not_run = coqui_aos.hooks_of(manifest, _tree(files), os_name, list(interpreters))
+    return [coqui_aos.to_data(hook) for hook in hooks], not_run
+
+
+def hook_plan(manifest: "dict[str, Any]", facts: "dict[str, Any]") -> "dict[str, Any]":
+    """:func:`coqui_aos.hook_plan` with its facts and its answer as plain data.
+
+    ``facts``: ``os``, ``interpreters``, ``files``, ``identity``, ``scope``, ``digest``,
+    ``allowed``, ``tree`` (path to text), ``fires``, ``partial`` and ``limits`` (``timeout``)."""
+    tree = facts.get("tree")
+    known = coqui_aos.HookFacts(
+        os=facts["os"], identity=facts.get("identity", ""), interpreters=facts.get("interpreters"),
+        scope=coqui_aos.HookScope(facts.get("scope", "overlay")), digest=facts.get("digest"),
+        tree=None if tree is None else {path: text.encode("utf-8") for path, text in tree.items()},
+        allowed=facts.get("allowed"),
+        fires=None if "fires" not in facts else [coqui_aos.HookEvent(e) for e in facts["fires"]],
+        partial=[coqui_aos.HookEvent(e) for e in facts.get("partial", [])],
+        timeout=facts.get("limits", {}).get("timeout"),
+    )
+    return coqui_aos.to_data(coqui_aos.hook_plan(manifest, _tree(facts.get("files", [])), known))
+
+
+def _run_bytes(run: "dict[str, Any]") -> bytes:
+    if "stdout_base64" in run:
+        import base64
+
+        return base64.b64decode(run["stdout_base64"])
+    if "stdout_parts" in run:
+        return "".join(text * times for text, times in run["stdout_parts"]).encode("utf-8")
+    if "stdout_bytes" in run:
+        return run["stdout_bytes"]
+    return run.get("stdout", "").encode("utf-8")
+
+
+def hook_run(run: "dict[str, Any]", output_bytes: "Optional[int]" = None) -> "coqui_aos.HookRun":
+    """One run as ``coqui_aos`` takes it. A run whose ``too_large`` is set was cut at the bound
+    by the process driver; a byte more is how the model learns it went over."""
+    data = _run_bytes(run)
+    if run.get("too_large") and output_bytes is not None:
+        data = data[:output_bytes] + b"\0"
+    return coqui_aos.HookRun(
+        source=run.get("source", ""), stdout=data,
+        on_failure=coqui_aos.OnFailure.REFUSE if run.get("on_failure") == "refuse" else coqui_aos.OnFailure.REPORT,
+        seconds=run.get("seconds", 0), not_run=run.get("not_run", False),
+        payload_size=run.get("payload_size", 0), timed_out=run.get("timed_out", False),
+        exit=run.get("exit", 0), sets=tuple(run.get("sets", ())),
+    )
+
+
+def _started(runs: "list[dict[str, Any]]", settings: "coqui_aos.Settings") -> "Iterable[coqui_aos.HookRun]":
+    """The runs as ``coqui_aos`` takes them, each made only when its loop turn comes: a run that
+    holds ``start``, a function returning its own keys, is started then, so one after a block or a
+    deny, or after the event's bound, never is. ``fire_event`` reads the event's bound before a
+    run's content; this holds back the start the same way."""
+    spent = 0.0
+    bound = settings.hook_event_timeout
+    for run in runs:
+        if bound is not None and spent >= bound:
+            yield hook_run({"source": run["source"], "on_failure": run.get("on_failure")})
+            continue
+        if "start" in run:
+            run = dict(run, **run["start"]())
+        held = hook_run(run, settings.hook_output_bytes)
+        spent += held.seconds
+        yield held
+
+
+def fire_event(event: str, runs: "list[dict[str, Any]]", applies: "Optional[Iterable[str]]" = None,
+               limits: "Optional[dict[str, int]]" = None, windows: bool = False) -> "dict[str, Any]":
+    """:func:`coqui_aos.fire_event` over ``runs`` (``source``, ``on_failure``, ``seconds``, the
+    run's keys as :func:`hook_run` reads them, optionally ``start``), its result as plain data:
+    ``ran``, ``decision``, ``by``, ``reason``, ``context``, ``env``, ``reports`` (lists of id and
+    what it is about) and ``non_defaults``."""
+    settings = hook_settings(limits)
+    fired = coqui_aos.fire_event(coqui_aos.HookEvent(event), _started(runs, settings), applies, settings, windows)
+    data = coqui_aos.to_data(fired)
+    data["reports"] = [[report["id"], *report["about"]] for report in data["reports"]]
+    return data
+
+
+def apply_pre_env(env: Environment, identities: "list[str]", runs: "dict[str, dict[str, Any]]",
+                  limits: "Optional[dict[str, int]]", report: "list[list[str]]",
+                  non_defaults: "list[list[str]]") -> None:
+    """The ``pre-env`` hooks' output, every overlay's in composition order as one event (a run
+    may be given lazily, see :func:`fire_event`), applied to ``env`` after the root variables and
+    before any overlay's declarations. Reports and non-default settings are appended to the
+    lists. Raises :class:`Refused` (``hook-refused``) when an overlay's guard fails."""
+    ordered = [dict(runs[identity], source=identity) for identity in identities if identity in runs]
+    fired = fire_event("pre-env", ordered, None, limits, env.windows)
+    report.extend(fired["reports"])
+    non_defaults.extend(fired["non_defaults"])
+    if fired["decision"] == "refuse":
+        raise Refused("hook-refused", fired["by"])
+    for name, value in fired["env"].items():
+        if value is None:
+            env.unset(name)
+        else:
+            env.set(name, value)

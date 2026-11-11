@@ -206,6 +206,23 @@ revision in `REVISION`). A refusal from `coqui_aos` is a `coqui_aos.Error` with 
 - Package environments: `asked_versions(runtime, text)`, `environment_key(dependency,
   identity)`, `environments(members, removed=()) -> dict` (`environments`,
   `conflicts`, `blocked`, `left`), `insecure_url(url)`.
+- Hooks: the model is `coqui_aos`'s (`HookEvent`, `hooks_of`, `hook_plan`, `hook_payload`,
+  `hook_matches`, `hook_result`, `read_hook_output`, `fire_event`, `HookRun`, `HookError`;
+  `[hooks]` validates in `coqui_aos.validate`); the hook vectors in
+  `tests/aos_vectors/hooks*.json` run through it. What is dotagents' own here: `HOOK_EVENTS` (the
+  event names), `DEFAULT_HOOK_LIMITS` (60 s a run, 120 s an event, 64 KiB output and error, 1 MiB
+  payload; `max_stderr` is dotagents' alone) and `hook_settings(limits) -> coqui_aos.Settings`;
+  `hooks_of(manifest, files, os_name, interpreters)` and `hook_plan(manifest, facts)` give
+  `coqui_aos`'s answers as dicts, with `files` and `tree` as paths and text instead of a tree;
+  `hook_run(run, output_bytes=None) -> HookRun` takes a run as a dict (`stdout`, `stdout_bytes`,
+  the vectors' `stdout_base64`/`stdout_parts`; `too_large` becomes a byte over the bound);
+  `fire_event(event, runs, applies, limits, windows) -> dict` runs `coqui_aos.fire_event` over
+  runs that hold `start`, a function returning the run's own keys, started only when their turn
+  comes (not after a block or deny or the event's bound), with reports as `[id, *about]` lists;
+  `apply_pre_env(env, identities, runs, limits, reports, non_defaults)` applies `pre-env` output
+  to an `Environment` (raises `Refused("hook-refused")`); `read_tree(root) -> (OverlayTree,
+  digest)`, one walk giving each member's bytes and the digest of those bytes, at most
+  `MAX_TREE_BYTES = 256 MiB`.
 - Setup phases (`setup_phase`, `preparation`), composition order, `resolve` and the
   other readers are `coqui_aos`'s.
 

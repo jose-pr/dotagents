@@ -3,7 +3,7 @@
 The harness gives it its native payload on standard input; it fires the overlays' hooks of that
 event (:mod:`dotagents._overlay_hooks`) and answers the harness in the harness's own words.
 **Nothing a hook printed reaches the harness**: the answer is built here from the output
-:func:`dotagents._aos.read_hook_output` accepted, and the only decisions it can state are
+:func:`coqui_aos.read_hook_output` accepted, and the only decisions it can state are
 ``deny``, ``ask`` and ``block`` -- never an approval, never a rewritten input, never a reply that
 lets a stop or a tool call through that the harness would not have let through.
 """
@@ -16,6 +16,8 @@ import secrets
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+import coqui_aos
 
 from dotagents import _aos, _overlay_hooks
 
@@ -123,7 +125,7 @@ def write_env_block(path: "str | os.PathLike[str]", label: str, changes: "dict[s
             kept.append(line)
     lines: "list[str]" = []
     for name, value in changes.items():
-        if not _aos.valid_variable_name(name):
+        if not coqui_aos.is_variable_name(name):
             continue
         if value is None:
             lines.append("unset %s" % name)

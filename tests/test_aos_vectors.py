@@ -22,6 +22,8 @@ from dotagents._overlays import Overlay
 
 VECTORS = Path(os.environ.get("AGENTS_AOS_VECTORS") or Path(__file__).parent / "aos_vectors")
 FILES = ("compose.json", "effective.json")
+#: The hook vectors, run by test_aos_hook_vectors.py.
+HOOK_FILES = ("hooks.json", "hooks_compose.json", "hooks_validation.json")
 
 
 def cases(name: str) -> "list[dict]":
@@ -42,7 +44,7 @@ def strict(value):
 
 
 def test_every_vector_file_is_run():
-    assert {path.name for path in VECTORS.glob("*.json")} == set(FILES)
+    assert {path.name for path in VECTORS.glob("*.json")} - set(HOOK_FILES) == set(FILES)
 
 
 def test_the_vendored_copy_names_its_revision():
