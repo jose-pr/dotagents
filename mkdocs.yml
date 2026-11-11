@@ -32,6 +32,7 @@ nav:
       - Install: guide/install.md
       - Commands: guide/commands.md
       - Overlays: guide/overlays.md
+      - Overlay hooks: guide/overlay-hooks.md
       - Private sync: guide/private-sync.md
       - Authoring an overlay: guide/authoring.md
   - API Reference:

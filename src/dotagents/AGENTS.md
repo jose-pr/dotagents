@@ -52,6 +52,10 @@ and an error saying a command is required, and exits 2.
 | `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-venv] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it), checked as `add` checks a source: the install is made to hold exactly the overlay's members (new and changed files land, everything else goes, caches and setup output left inside it included); a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`, then prepares each synced overlay in its `sync` phase (`install` when no preparation succeeded here yet), whether its digest changed or not: its environments rebuilt, then its setup. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/` or is refused, or its dependencies or setup fail. |
 | `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` and refused overlays flagged) and what the repos offer. |
 | `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; its declarations, a refused manifest's problems, tree digest, pin, what this machine lacks for it, its weakenings, skills, member count, recorded source and commit. No name: exit 2. |
+| `overlays hooks [NAME] [-g]` | An installed overlay's hooks (every overlay with some, without a name): per event the script and its settings, whether the hooks are allowed at the overlay's current digest, and per harness whether the event fires natively, is fired by dotagents itself (`pre-env`) or cannot fire. |
+| `overlays allow-hooks NAME [--digest D] [-g]` | Show the same, then allow the overlay's hooks at digest `D`, which must be the current one: without `--digest` it prints the digest to pass and allows nothing (exit 0); a wrong digest exits 2. The allowance is kept in the user store (`overlays/.dotagents-state/hooks-allowed.json`), one digest per overlay. |
+| `overlays revoke-hooks NAME [-g]` | Take back the allowance. |
+| `hook EVENT --harness claude-code\|codex [--level user\|project] [--guard]` | Not for typing: what a harness's own hook entry runs (through `overlay_hook.py`). Reads the harness's payload on standard input, fires the overlays' hooks for the event (`user`: the user and system stores' overlays, `project`: the project store's), and answers in the harness's words; a hook's output never reaches the harness and the answer is never an approval. `--guard`: a failure of this program answers with a refusal where the event can be refused. Always exits 0 (2 for a bad argument). Not an MCP tool. |
 | `context [OUT] [-g] [--agents a,b] [--format markdown\|system-reminder\|json] [--write-agent] [--inline]` | Print (or write to `OUT`) the assembled context. `--write-agent` merges it into each agent's `context_target` under the project root (not with `-g`). Exits 2 when `--agents` names no known agent. |
 | `path [-g] [--lib] [--format list\|native\|posix\|json]` | Print the dirs `env` adds to `PATH` -- each store's `bin` and each active overlay's `PATH` additions (`--lib`: the existing agent library dirs, `PYTHONPATH`) -- highest precedence first; runs no env file. `posix` is `:`-joined, MSYS2 form on Windows. |
 | `env [-g] [--format F] [--diff] [--cache] [--into FILE]` | Print the assembled environment (`--diff`: only what differs from the caller's; `--cache`: replay the previous output while `env_cache_key` holds, up to `ENV_CACHE_TTL`; `--into FILE`: write it into FILE as the one block this command owns there) in format `F`: `auto` (default: the calling shell), `export`/`posix`/`sh`/`bash`, `dotenv`/`env`, `powershell`/`pwsh`/`ps`, `cmd`/`bat`/`batch`, `fish`, `json`, `ini`, `yaml`. |
@@ -269,6 +273,22 @@ conformance vectors (`tests/aos_vectors/`, revision in `REVISION`).
   `activates`; a failed sync keeps only the recorded digest active).
 - Resolution: `class ResolveError(Exception)` (`chain`), `resolve(requires_of,
   requested) -> (visiting order, missing)`, `order_key(priority, name, identity)`.
+- Hooks (the hook vectors in `tests/aos_vectors/hooks*.json` pass): `HOOK_EVENTS`
+  (event → class, runs `hook.<ext>` by default, outputs, refusal, what `match` selects),
+  `SESSION_REASONS`, `TOOL_KINDS`; `[hooks]` and `[defaults] hooks` validate in
+  `validate`. `default_hook(files, os_name, interpreters)`, `hooks_of(manifest, files,
+  os_name, interpreters) -> (entries, script-not-run files)`, `hook_plan(manifest, facts)
+  -> {hooks, on, activates, needs, reports, non_defaults}` (`on` only while the digest is
+  the one allowed; `activates` false for a guard that is off), `hook_matches(event, match,
+  value)`, `hook_payload(event, known)` with `PAYLOAD_COMMON`, `PAYLOAD_KEYS`, `TOOL_KEYS`;
+  `read_hook_output(event, data, sets)` / `hook_result(event, run, limits)` raise
+  `HookFailure` (`.cause`: `not-run`, `payload-too-large`, `timeout`, `too-large`, `exit`,
+  `grant`, `output`) with `HOOK_OUTPUT_KEYS`, `MAX_HOOK_REASON`; `fire_event(event, runs,
+  applies, limits, windows) -> dict` combines hooks to the tightest (a run holding `start`, a
+  function, is started only when its turn comes); `apply_pre_env(env, identities, runs,
+  limits, reports, non_defaults)` applies `pre-env` output (raises `Refused("hook-refused")`);
+  `DEFAULT_HOOK_TIMEOUT = 30`, `DEFAULT_HOOK_LIMITS` (60 s a run, 120 s an event, 64 KiB
+  output and error, 1 MiB payload).
 
 ## `dotagents._activate`
 
@@ -342,6 +362,11 @@ started suspended until it is in the job) so nothing it started outlives it.
   `run_step(argv, *, cwd, env, timeout, capture=False, max_output=1 MiB) ->
   (status, stdout)`. `pycache_prefix(user_store) -> str` — where Python run for an
   overlay keeps bytecode (`<user store>/.cache/pycache`), never inside an overlay.
+  `run_hook(argv, *, cwd, env, timeout, stdin, max_output, max_stderr) -> dict` runs a hook
+  bounded: `stdin` written without waiting on the child, stdout kept to `max_output` (a run
+  that writes more is stopped: `too_large`), stderr kept to `max_stderr` and the rest read and
+  dropped, ended at `timeout` (`timed_out`), every process it started ended with it; returns
+  `exit`, `stdout`, `stderr`, `timed_out`, `too_large`, `not_run`, `seconds`.
 
 ## `dotagents._resources`
 
@@ -364,13 +389,14 @@ The package's own data; library code, importing nothing from `dotagents.cli`.
   install. The archive also holds the vendored duho and pathapi; `env`
   exports it as `AGENTS_PYLIB`.
 
-## Commands — `dotagents.cli.init`, `dotagents.cli.overlays`, `dotagents.cli.context`, `dotagents.cli.env`, `dotagents.cli.path`, `dotagents.cli.about`, `dotagents.cli.build_pyz`, `dotagents.cli.mcp`
+## Commands — `dotagents.cli.init`, `dotagents.cli.overlays`, `dotagents.cli.context`, `dotagents.cli.env`, `dotagents.cli.path`, `dotagents.cli.about`, `dotagents.cli.build_pyz`, `dotagents.cli.mcp`, `dotagents.cli.hook`
 
 One `duho` command class per command above; fields are the flags, `__call__()`
 returns the exit code.
 
 - `init.Init`; `overlays.Overlays` (umbrella) with `OverlayAdd`, `OverlayRemove`,
-  `OverlayList`, `OverlaySync`, `OverlayShow`; `context.Context` (`FORMATS =
+  `OverlayList`, `OverlaySync`, `OverlayShow`, `OverlayHooks`, `OverlayAllowHooks`,
+  `OverlayRevokeHooks`; `hook.Hook`; `context.Context` (`FORMATS =
   ("markdown", "system-reminder", "json")`); `env.Env`; `path.PathCmd`
   (`PATH_FORMATS = ("list", "native", "posix", "json")`); `build_pyz.BuildPyz`;
   `about.About`.
@@ -879,6 +905,15 @@ API:
   derivable, for the runtime agent only (`{}` in a plain shell); never replaces a
   value in `environ` unless `explicit` names a known agent. `root` is unused.
 
+- `Agent.wire_overlay_hooks(dest, *, dry_run, logger, config_root=None)` — wire the
+  harness's own hooks to `dotagents hook` for the events the overlays installed in the
+  store `dest` have a hook for, and retract an entry no overlay uses any more; a no-op on
+  the base class. `ClaudeAgent` writes `settings.json` (user) or `settings.local.json`
+  (project) with a bash entry per event and, on Windows, a PowerShell one that selects itself
+  when there is no Git Bash; `CodexAgent` writes the user `hooks.json` (with
+  `commandWindows`). `init -g` and `overlays add/sync/remove` call it; the entries are
+  labelled `dotagents: Overlay hooks: <native event>` and run `overlay_hook.py`.
+
 ## `dotagents._merge`
 
 Marker lines (a marker counts only on a line of its own, outside fenced code):
@@ -911,6 +946,57 @@ Marker lines (a marker counts only on a line of its own, outside fenced code):
 - `timestamped_backup_root(dest) -> Path` — `<dest>/install_backup/<timestamp>`, one
   per store per process.
 
+## `dotagents._overlay_hooks`
+
+Firing overlay hooks (the model is `dotagents._aos`; the user-facing page is
+`docs/guide/overlay-hooks.md`). A hook is the overlay's code: it runs only while its
+overlay's tree digest is the one the user allowed, as an argv list with the overlay root as
+its directory, bounded by `LIMITS`.
+
+- `LIMITS` (`DEFAULT_HOOK_LIMITS`, a copy tests may change), `NO_HARNESS = "dotagents"`,
+  `class Harness` (`id`, `native`: AOS event → native name, `applies`: event → outputs
+  dotagents can apply, `reasons`, `fires`, `event_of`), `CLAUDE`, `CODEX`, `ANYWHERE` (no
+  harness known: nothing reported as unfireable), `HARNESSES`, `harness_of(ident) -> Harness`
+  (an unknown id fires only `pre-env`), `partial_events(harness)`.
+- Allowances, in the user store only: `allowances_path(user_store)`,
+  `read_allowances`, `allowed_digest`, `allow(user_store, identity, digest)`,
+  `revoke(user_store, identity) -> bool`.
+- `fresh_digest(overlay)` (never memoized), `overlay_plan(overlay, harness, user_store) ->
+  plan` (`hook_plan` plus `digest`, `identity`), `declares_guard(overlay)`,
+  `refusal(overlay) -> Optional[str]` (a guard that is off keeps its overlay out of
+  `_activate.active`), `planned(overlays, harness, user_store)`, `has_live_pre_env(scope,
+  harness_id)` (`env --cache` is not replayed for it).
+- `class Subject`, `execute(subject, event, payload, env, *, limits=None) -> run`,
+  `class Fired` (`result`, `reports`, `decision`), `session_id(harness, native_id)` (a hash,
+  never the harness's id), `value_for_match`, `fire(event, facts, plans, harness, *,
+  environment, limits=None) -> Fired`, `unsupported_reports(plans)`, `describe(report)`,
+  `pre_env(plans, session, base, harness, *, cwd=None) -> (reports, non_defaults)`.
+- Wiring: `STATUS_PREFIX`, `ENTRY_TIMEOUT = 240`, `FORWARDER = "overlay_hook.py"`,
+  `wanted_events(store, harness) -> {event: guarded}`, `forwarder_args(harness, event,
+  level, guard)`.
+
+## `dotagents._hook_dispatch`
+
+The program a harness's own hook runs (`dotagents hook`). Nothing a hook printed reaches the
+harness: the answer is built from the output that was accepted, and can only deny, ask or
+block.
+
+- `MAX_NATIVE`, `tool_kind(harness, name) -> kind` (a tool not placed is `other`, which runs
+  every hook of its event), `facts_of(harness, event, native) -> known`, `context_text(parts)`
+  (each part inside a marker with a nonce chosen after the hooks ran),
+  `write_env_block(path, label, changes)` (single-quoted values of validated names into
+  Claude's env file), `answer(harness, event, fired, env_file) -> (stdout, stderr)`,
+  `refusal_answer(harness, event, why)`, `plans_for(scope, harness, level, event=None)`,
+  `has_guard(plans, event)`, `dispatch(harness_id, event, stdin, scope, level, environ) ->
+  (stdout, stderr)`.
+
+## `dotagents.cli.hook`
+
+`Hook` — the `hook` command (see the command table). Packaged beside the harness's hook
+configuration by `init`: `_overlay/dotagents/hooks/overlay_hook.py`, the forwarder that finds
+`dotagents`, runs `dotagents hook` with the payload, and answers a refusal itself when it
+cannot (`--guard`).
+
 ## `dotagents._hooks`
 
 Settings schema (Claude Code and Codex): `hooks.<Event>` is a list of matcher
@@ -919,10 +1005,10 @@ objects `{"matcher"?: str, "hooks": [{"type": "command", "command": str, ...}]}`
 - `STATUS_PREFIX = "dotagents: "` — our hooks' `statusMessage` is
   `STATUS_PREFIX + label`; that label is the hook's identity.
 - `build_hook_entry(command, *, matcher=None, status_message=None, shell=None,
-  command_windows=None) -> dict` — one matcher object; `None` keys omitted;
+  command_windows=None, timeout=None) -> dict` — one matcher object; `None` keys omitted;
   `command_windows` is written as `commandWindows`.
 - `merge_hook(existing, command, *, matcher=None, status_message=None, shell=None,
-  command_windows=None) -> tuple[list, bool]` — `(entries, changed)`. An identical
+  command_windows=None, timeout=None) -> tuple[list, bool]` — `(entries, changed)`. An identical
   entry is kept; ours in another shape (same status label, or the bare label on a
   command running dotagents) is refreshed in place, keeping keys the user added;
   duplicates dropped; foreign and malformed entries kept verbatim; a foreign hook

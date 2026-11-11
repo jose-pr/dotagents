@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Overlay hooks, the AOS "Hooks" extension: an overlay's `hook.<ext>` and `[hooks]` table
+  run at a session's events (`pre-env`, `session-start`, `session-end`, `prompt`,
+  `turn-end`, `cd`, `pre-compact`, `pre-tool`, `post-tool`). dotagents fires `pre-env`
+  itself as it builds the environment, on every harness; `init` and
+  `overlays add/sync/remove` wire Claude Code's and Codex's own hooks to a new
+  `dotagents hook` command for the other events an installed overlay has a hook for (nothing
+  is wired, so no process starts, for a store without them). A hook is off until the user
+  allows it at the overlay's tree digest (`overlays hooks`, `overlays allow-hooks NAME
+  --digest D`, `overlays revoke-hooks`; kept in the user store, one digest per overlay), is
+  bounded (60 s a run, 120 s an event, 64 KiB of output, 1 MiB of payload, arguments as a
+  list, its own process group), and can only tighten: a `decision` other than
+  `block`, `deny` or `ask` is a refused attempt to grant, and the answer to the harness is
+  built by dotagents, never the hook's output. An overlay with a hook that refuses on failure
+  is not activated while its hooks are off. What a harness cannot fire or apply is reported
+  (`hook-unsupported`, `hook-partial`, `hook-not-applied`, `hook-ask-denied`,
+  `hook-not-allowed`, `hook-failed`), never dropped. Passes the specification's hook
+  vectors (the `OVERLAY.md` cases excepted: that form is not read yet). See
+  `docs/guide/overlay-hooks.md`.
+- The sensitive-variable list holds `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, which point a
+  harness at another configuration, with its own permissions and hooks.
+
+### Changed
+
+- `private-sync`'s session start and sync-back are now overlay hooks (`session-start` and
+  `turn-end`) instead of scripts you register in `~/.claude/settings.json`; it no longer ships
+  `hooks/settings.snippet.json`. Allow them once (`dotagents overlays allow-hooks private-sync`)
+  and run `dotagents init -g`; remove the old entries from `settings.json` or they run twice.
+  `tools/cloud-setup.sh` does both steps itself.
+
 ## [0.9.1] - 2026-11-06
 
 ### Fixed

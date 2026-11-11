@@ -125,18 +125,18 @@ _DG_RECOVERY_SCRIPT="$_DG_RECOVERY_DIR/cloud-setup.sh"
 # matching how the private-sync hooks reference "${AGENTS_HOME:-$HOME/.agents}/...".
 _DG_RECOVERY_CMD='sh "$HOME/.dotagents/cloud-setup.sh"'
 
-# Edit ~/.claude/settings.json: optionally merge a private-sync snippet, and add or
-# remove the recovery SessionStart hook. Idempotent; preserves unrelated settings.
-#   _dg_settings <recovery: present|absent> [snippet_path]
+# Edit ~/.claude/settings.json: add or remove the recovery SessionStart hook.
+# Idempotent; preserves unrelated settings.
+#   _dg_settings <recovery: present|absent>
 # A settings.json that does not parse is left untouched (the helper fails);
 # writes go through a temp file and os.replace, into a symlink's target.
 _dg_settings() {
-    _dg_state="$1"; _dg_snip="${2:-}"
+    _dg_state="$1"
     [ -n "$_DG_PY" ] || return 1
     DG_RECOVERY_CMD="$_DG_RECOVERY_CMD" "$_DG_PY" - \
-        "$HOME/.claude/settings.json" "$_dg_state" "$_dg_snip" <<'PYEOF'
+        "$HOME/.claude/settings.json" "$_dg_state" <<'PYEOF'
 import json, os, sys, tempfile
-dst_path, state, snip_path = sys.argv[1], sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 else "")
+dst_path, state = sys.argv[1], sys.argv[2]
 recovery_cmd = os.environ.get("DG_RECOVERY_CMD", "")
 try:
     with open(dst_path, encoding="utf-8-sig") as f:
@@ -154,19 +154,6 @@ changed = False
 
 def cmds(entry):
     return [h.get("command") for h in entry.get("hooks", [])]
-
-# Merge the private-sync snippet when one was given and exists (i.e. after the
-# private-sync overlay was installed into the store, which ships it under
-# $AGENTS_DIR/overlays/private-sync/hooks/settings.snippet.json).
-if snip_path and os.path.isfile(snip_path):
-    with open(snip_path) as f:
-        snip_hooks = json.load(f).get("hooks", {})
-    for event, entries in snip_hooks.items():
-        have = {json.dumps(e, sort_keys=True) for e in hooks.get(event, [])}
-        for entry in entries:
-            if json.dumps(entry, sort_keys=True) not in have:
-                hooks.setdefault(event, []).append(entry)
-                changed = True
 
 # Add or remove the recovery SessionStart hook.
 ss = hooks.setdefault("SessionStart", [])
@@ -358,19 +345,25 @@ if [ -d "$PROJECT_DIR" ]; then
     fi
 fi
 
-# --- 6. Wire the private-sync hooks into ~/.claude/settings.json. --------------
-# The hooks (SessionStart pull/link, Stop sync-back) live in the private repo and
-# do nothing until registered in the USER-level settings file. A fresh container
-# has no ~/.claude/settings.json, and nothing else creates one -- without this
-# step the clone above would go stale and session changes would never push back.
-# Idempotent; unrelated settings are preserved. The snippet ships inside the
-# private-sync overlay, which step 4 installs.
-_snippet="$AGENTS_DIR/overlays/private-sync/hooks/settings.snippet.json"
-if [ -f "$_snippet" ]; then
-    _dg_settings absent "$_snippet" \
-        || echo "dotagents: hook wiring failed; register $_snippet manually"
+# --- 6. Wire and allow the private-sync hooks. --------------------------------
+# The pull/link at session start and the sync-back after each turn are overlay hooks
+# (overlay.cfg `[hooks]`). `init` wires the harness's own hooks to run them, and they run
+# only once allowed at the overlay's digest: this script is the user's own setup, so it
+# allows the digest it has just installed. A fresh container has no ~/.claude/settings.json
+# and nothing else creates one -- without this step the clone above would go stale and
+# session changes would never push back. Idempotent; unrelated settings are preserved.
+if [ -d "$AGENTS_DIR/overlays/private-sync" ]; then
+    _dg_digest="$(AGENTS_HOME="$AGENTS_DIR" dg_cli overlays hooks private-sync -g 2>/dev/null \
+        | sed -n 's/^overlay private-sync  digest \(sha256:[0-9a-f]*\).*/\1/p' | head -n 1)"
+    if [ -n "$_dg_digest" ] \
+        && AGENTS_HOME="$AGENTS_DIR" dg_cli overlays allow-hooks private-sync --digest "$_dg_digest" -g >/dev/null \
+        && AGENTS_HOME="$AGENTS_DIR" dg_cli init -g --agents claude --no-venv >/dev/null; then
+        echo "dotagents: allowed the private-sync hooks at $_dg_digest and wired Claude Code's hooks"
+    else
+        echo "dotagents: hook wiring failed; run: dotagents overlays allow-hooks private-sync, then dotagents init -g"
+    fi
 else
-    echo "dotagents: no private-sync settings.snippet.json in the store; skipping hook wiring"
+    echo "dotagents: the private-sync overlay is not installed; skipping hook wiring"
 fi
 
 echo "dotagents cloud-setup: done"

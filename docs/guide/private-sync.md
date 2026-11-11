@@ -77,12 +77,20 @@ leaves the machine is a perfectly valid setup.
 
 ## Cloud sessions
 
-The `private-sync` overlay ships SessionStart / Stop hook scripts that clone or pull
-the private repo and link/sync the project each session. `overlays add` does not
-register them: add them to your runner's settings yourself (for Claude Code,
-`~/.claude/settings.json`), using the snippet the overlay ships in
-`$PRIVATE_SYNC_OVERLAY_ROOT/hooks/settings.snippet.json`. The bootstrap below does that
-merge for you.
+The `private-sync` overlay declares two [overlay hooks](overlay-hooks.md) that clone or pull
+the private repo and link/sync the project each session: `session-start` pulls and links,
+`turn-end` pushes the session's changes back. They are off until you allow them at the
+overlay's digest, and `dotagents init -g` wires Claude Code's and Codex's own hooks to run
+them:
+
+```bash
+dotagents overlays hooks private-sync            # what runs, on which harness, and whether it is allowed
+dotagents overlays allow-hooks private-sync      # shows the same and the digest to allow
+dotagents overlays allow-hooks private-sync --digest sha256:<the digest shown>
+dotagents init -g
+```
+
+The bootstrap below does all of that for you.
 
 For a **fresh container** with no config yet, point the web environment's setup-script
 field at the self-contained bootstrap shipped in this repo — it fetches the latest each
