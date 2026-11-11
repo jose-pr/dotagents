@@ -345,22 +345,18 @@ if [ -d "$PROJECT_DIR" ]; then
     fi
 fi
 
-# --- 6. Wire and allow the private-sync hooks. --------------------------------
+# --- 6. Wire the private-sync hooks. -------------------------------------------
 # The pull/link at session start and the sync-back after each turn are overlay hooks
-# (overlay.cfg `[hooks]`). `init` wires the harness's own hooks to run them, and they run
-# only once allowed at the overlay's digest: this script is the user's own setup, so it
-# allows the digest it has just installed. A fresh container has no ~/.claude/settings.json
-# and nothing else creates one -- without this step the clone above would go stale and
-# session changes would never push back. Idempotent; unrelated settings are preserved.
+# (overlay.cfg `[hooks]`). Installing the overlay (step 4) allowed them at the digest it
+# installed; `init` wires the harness's own hooks to run them. A fresh container has no
+# ~/.claude/settings.json and nothing else creates one -- without this step the clone above
+# would go stale and session changes would never push back. Idempotent; unrelated settings
+# are preserved.
 if [ -d "$AGENTS_DIR/overlays/private-sync" ]; then
-    _dg_digest="$(AGENTS_HOME="$AGENTS_DIR" dg_cli overlays hooks private-sync -g 2>/dev/null \
-        | sed -n 's/^overlay private-sync  digest \(sha256:[0-9a-f]*\).*/\1/p' | head -n 1)"
-    if [ -n "$_dg_digest" ] \
-        && AGENTS_HOME="$AGENTS_DIR" dg_cli overlays allow-hooks private-sync --digest "$_dg_digest" --no-prompt -g >/dev/null \
-        && AGENTS_HOME="$AGENTS_DIR" dg_cli init -g --agents claude --no-venv >/dev/null; then
-        echo "dotagents: allowed the private-sync hooks at $_dg_digest and wired Claude Code's hooks"
+    if AGENTS_HOME="$AGENTS_DIR" dg_cli init -g --agents claude --no-venv >/dev/null; then
+        echo "dotagents: wired Claude Code's hooks for the private-sync overlay"
     else
-        echo "dotagents: hook wiring failed; run: dotagents overlays allow-hooks private-sync, then dotagents init -g"
+        echo "dotagents: hook wiring failed; run: dotagents init -g"
     fi
 else
     echo "dotagents: the private-sync overlay is not installed; skipping hook wiring"

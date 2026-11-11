@@ -19,7 +19,18 @@ class Mcp(LoggingArgs, Cmd):
     "Name prefix template for forwarded tools; `{name}` is the skill or server name."
     ("--prefix",)
 
+    strict: bool = False
+    "Strict mode: an add or sync through this server installs without allowing the overlay's hooks."
+    ("--strict",)
+
     def __call__(self) -> int:
+        from dotagents import _overlay_hooks
+        from dotagents._scope import resolve_user_store
+
+        # Chosen when the server starts: by the flag, or by the user's own setting in the user store
+        # (never a project's: an agent can write a project's MCP configuration).
+        if self.strict or _overlay_hooks.mcp_strict_setting(resolve_user_store()):
+            _overlay_hooks._MCP_STRICT.append(True)
         if self.prefix is not None:
             try:
                 sample = self.prefix.format(name="server")

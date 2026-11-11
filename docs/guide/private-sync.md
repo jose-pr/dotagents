@@ -85,8 +85,6 @@ them:
 
 ```bash
 dotagents overlays hooks private-sync            # what runs, on which harness, and whether it is allowed
-dotagents overlays allow-hooks private-sync      # shows the same and the digest to allow
-dotagents overlays allow-hooks private-sync --digest sha256:<the digest shown>
 dotagents init -g
 ```
 

@@ -195,12 +195,32 @@ def allowed_digest(user_store: "str | os.PathLike[str]", identity: str,
     return read_allowances(user_store).get(_key(user_store, identity, store))
 
 
-def _write_allowances(user_store: "str | os.PathLike[str]", allowed: "dict[str, str]") -> None:
+def read_revoked(user_store: "str | os.PathLike[str]") -> "set[str]":
+    """The overlays (by store and name) whose hooks the user turned off or declined at install: a
+    later sync does not allow them again; `allow-hooks` or a fresh `overlays add` does."""
+    try:
+        data = json.loads(allowances_path(user_store).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    revoked = data.get("revoked") if isinstance(data, dict) else None
+    return {str(item) for item in revoked} if isinstance(revoked, list) else set()
+
+
+def _write_allowances(user_store: "str | os.PathLike[str]", allowed: "dict[str, str]",
+                      revoked: "Optional[set[str]]" = None) -> None:
     from dotagents._fs import write_text_lf
 
     path = allowances_path(user_store)
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_text_lf(path, json.dumps({"allowed": dict(sorted(allowed.items()))}, indent=2) + "\n", atomic=True)
+    if revoked is None:
+        revoked = read_revoked(user_store)
+    write_text_lf(path, json.dumps({"allowed": dict(sorted(allowed.items())), "revoked": sorted(revoked)},
+                                   indent=2) + "\n", atomic=True)
+
+
+def is_revoked(user_store: "str | os.PathLike[str]", identity: str,
+               store: "Optional[str | os.PathLike[str]]" = None) -> bool:
+    return _key(user_store, identity, store) in read_revoked(user_store)
 
 
 def allow(user_store: "str | os.PathLike[str]", identity: str, digest: str,
@@ -208,17 +228,78 @@ def allow(user_store: "str | os.PathLike[str]", identity: str, digest: str,
     """Allow ``identity``'s hooks (of the overlay installed in ``store``, default the user store) at
     ``digest``, replacing the digest allowed before: there is one."""
     allowed = read_allowances(user_store)
-    allowed[_key(user_store, identity, store)] = digest.lower()
-    _write_allowances(user_store, allowed)
+    key = _key(user_store, identity, store)
+    allowed[key] = digest.lower()
+    _write_allowances(user_store, allowed, read_revoked(user_store) - {key})
 
 
 def revoke(user_store: "str | os.PathLike[str]", identity: str,
            store: "Optional[str | os.PathLike[str]]" = None) -> bool:
+    """Turn the overlay's hooks off and keep them off across syncs. True when that changed anything."""
     allowed = read_allowances(user_store)
-    if allowed.pop(_key(user_store, identity, store), None) is None:
+    key = _key(user_store, identity, store)
+    revoked = read_revoked(user_store)
+    if allowed.pop(key, None) is None and key in revoked:
         return False
-    _write_allowances(user_store, allowed)
+    _write_allowances(user_store, allowed, revoked | {key})
     return True
+
+
+def mcp_settings_path(user_store: "str | os.PathLike[str]") -> Path:
+    return Path(user_store) / "overlays" / ".dotagents-state" / "mcp.json"
+
+
+def mcp_strict_setting(user_store: "str | os.PathLike[str]") -> bool:
+    """The user's own setting ``{"strict": true}`` for the MCP server, read from the user store only
+    (never from a project, whose MCP configuration an agent can write)."""
+    try:
+        data = json.loads(mcp_settings_path(user_store).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("strict") is True
+
+
+#: Set by `dotagents mcp --strict` (or the user's setting): installs through this server allow no hooks.
+_MCP_STRICT: "list[bool]" = []
+
+
+def strict_mcp(user_store: "str | os.PathLike[str]") -> bool:
+    """Whether this process serves MCP tools in strict mode, chosen when the server was started: an
+    add or sync through it installs without allowing hooks, as ``--no-hooks`` does. The default server
+    behaves as the command line does."""
+    return bool(_MCP_STRICT) or (bool(os.environ.get("DOTAGENTS_MCP")) and mcp_strict_setting(user_store))
+
+
+def record_install(user_store: "str | os.PathLike[str]", overlay: Any, *, fresh: bool, no_hooks: bool,
+                   dry_run: bool = False) -> "tuple[str, list[dict[str, Any]]]":
+    """What installing or syncing ``overlay`` (the installed copy) does to its hooks' allowance.
+    Returns ``(outcome, entries)``: ``none`` (it has no hooks), or ``on`` (allowed at the digest it
+    holds, which is the digest installed), ``declined`` (``--no-hooks``: recorded so a later sync
+    does not allow them), ``strict`` (installed through a strict MCP server: nothing is allowed or recorded),
+    ``revoked`` (turned off earlier and kept off by a sync). A fresh add allows, and forgets an
+    earlier revoke. With ``dry_run`` nothing is written."""
+    plan = overlay_plan(overlay, ANYWHERE, user_store)
+    entries = plan["hooks"]
+    if not entries:
+        return "none", []
+    key = _key(user_store, overlay.name, overlay.store)
+    if strict_mcp(user_store) and not no_hooks:
+        # Installs without allowing and writes nothing: what was allowed stays allowed at its own digest.
+        return "strict", entries
+    if no_hooks:
+        if not dry_run and plan["digest"] and key not in read_revoked(user_store):
+            allowed = read_allowances(user_store)
+            allowed.pop(key, None)
+            _write_allowances(user_store, allowed, read_revoked(user_store) | {key})
+        return "declined", entries
+    if not fresh and key in read_revoked(user_store):
+        return "revoked", entries
+    if plan["digest"] is None:
+        return "declined", entries
+    if not dry_run:
+        allow(user_store, overlay.name, plan["digest"], overlay.store)
+    return "on", entries
+
 
 
 # --------------------------------------------------------------------------- #
@@ -355,20 +436,6 @@ def _token() -> str:
     import secrets
 
     return secrets.token_hex(4)
-
-
-def install_notice(overlay: Any, user_store: "str | os.PathLike[str]") -> "Optional[str]":
-    """A line for an install or sync: the overlay has hooks and they are off until the user allows
-    them. None when it has none, or they are allowed at this digest."""
-    from dotagents import _activate
-
-    entries, _ = _aos.hooks_of(overlay.document(), _activate.files(overlay), _aos.current_os(),
-                               sorted(_activate.interpreters()))
-    if not entries or overlay_plan(overlay, ANYWHERE, user_store)["on"]:
-        return None
-    return ("overlay %s has hooks (%s); they are off until you allow them at its digest: "
-            "dotagents overlays hooks %s" % (overlay.name, ", ".join(entry["event"] for entry in entries),
-                                              overlay.name))
 
 
 def declares_guard(overlay: Any) -> bool:

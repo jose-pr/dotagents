@@ -27,25 +27,47 @@ event takes, and answers the harness itself, in the harness's words. A `decision
 fails (`grant`) and nothing of it applies. dotagents never states an approval and never rewrites
 a tool's input.
 
-## Off until you allow them
+## Allowed by installing
 
 A hook is the overlay's code, running at every session with your access, outside the harness's
-sandbox. An overlay's hooks do not run until you allow them at the overlay's digest:
+sandbox. Installing an overlay is choosing to trust it, hooks included: `overlays add` and
+`overlays sync` allow the overlay's hooks at the digest they install and log which are on (event and
+script). A sync that changes the digest allows the new one, since you chose the source.
 
 ```
+dotagents overlays add NAME [--no-hooks]            # installs, and allows the hooks unless --no-hooks
+dotagents overlays sync [NAME] [--no-hooks]
 dotagents overlays hooks NAME                       # what runs, where, and whether it is allowed
-dotagents overlays allow-hooks NAME                 # shows the same and the digest
+dotagents overlays revoke-hooks NAME                # off, and a sync keeps them off
+dotagents overlays allow-hooks NAME                 # shows the same and the digest, then asks at the terminal
 dotagents overlays allow-hooks NAME --digest sha256:...
-dotagents overlays revoke-hooks NAME
 ```
+
+`--no-hooks` installs without allowing them, and a later `sync` leaves them off (it is remembered
+like a revoke). `revoke-hooks` turns them off and a `sync` keeps them off until `allow-hooks` or a
+fresh `overlays add`. An overlay installed by 0.9.2, whose hooks were off, is allowed by its next
+`overlays sync`, unless it was revoked.
+
+Hooks run **outside the agent's sandbox**, with your access. An agent that can write the project's
+`.claude/` (its own `settings.local.json`) or your user store can run code outside its sandbox
+anyway, so a hook is nothing it could not already add: installing an overlay is the trust decision,
+and `dotagents overlays add` and `sync` make it once. The default `dotagents mcp` server behaves as
+the command line does, so an add or sync an agent asks for through it allows hooks too. Start it
+**`dotagents mcp --strict`** (or put `{"strict": true}` in `overlays/.dotagents-state/mcp.json` of
+your user store, which a server started by `DOTAGENTS_MCP` reads) for a stricter server: an add or sync
+through it installs without allowing hooks, says the hooks are off and that `allow-hooks` at a terminal
+turns them on, and records nothing (what you allowed before stays allowed at its digest). The setting
+is read from the user store only; a project's files cannot make a server strict or lax.
 
 The allowance is kept in your user store (`overlays/.dotagents-state/hooks-allowed.json`), never
-in an overlay or a project, per overlay and store. There is one digest per overlay: any change to
-the overlay turns its hooks off until you allow the new one, and going back to an earlier digest
-needs a new yes. `allow-hooks` asks at the terminal itself (`/dev/tty`, `CONIN$`), refuses to run
-inside an agent harness's session and is not an MCP tool; `--no-prompt` is for your own setup
-script. The allowance is only as strong as the agent's lack of write access to your user store:
-an agent that can write there can write an allowance.
+in an overlay or a project, per overlay and store. There is one digest per overlay: a change to the
+overlay that did not come through `overlays sync` or `add` (a hand edit, an update by other means)
+turns its hooks off until you allow the new digest, and going back to an earlier digest needs a new
+yes. `allow-hooks` asks at the terminal itself (`/dev/tty`, `CONIN$`), refuses to run inside an
+agent harness's session and is not an MCP tool; `--no-prompt` is for your own setup script. The
+allowance is only as strong as the agent's lack of write access to your user store: an agent that
+can write there can write an allowance, and one that can run `dotagents overlays add` through a shell
+tool installs and allows as you would.
 
 An overlay with a hook that has `on_failure = "refuse"` (a guard) is **not activated** while its
 hooks are off, and its guards **fail** meanwhile: a prompt is blocked, a tool call denied, as if

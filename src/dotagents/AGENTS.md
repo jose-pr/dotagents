@@ -53,6 +53,7 @@ and an error saying a command is required, and exits 2.
 | `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` and refused overlays flagged) and what the repos offer. |
 | `overlays show NAME [-g] [--repo SPEC]... [--json]` | One overlay: the copy a session would use, else the source's; its declarations, a refused manifest's problems, tree digest, pin, what this machine lacks for it, its weakenings, skills, member count, recorded source and commit. No name: exit 2. |
 | `overlays hooks [NAME] [-g]` | An installed overlay's hooks (every overlay with some, without a name): per event the script and its settings, whether the hooks are allowed at the overlay's current digest, and per harness whether the event fires natively, is fired by dotagents itself (`pre-env`) or cannot fire. |
+| `overlays add` / `overlays sync` `[--no-hooks]` | Besides installing, allow the overlay's hooks at the digest installed and log which are on (event, script); `--no-hooks` installs without allowing and remembers it. A sync that changes the digest allows the new one; hooks `revoke-hooks` turned off stay off across syncs until `allow-hooks` or a fresh `add`; an install made through the MCP tool allows nothing and says so. |
 | `overlays allow-hooks NAME [--digest D] [--no-prompt] [-g]` | Show the same, then allow the overlay's hooks at digest `D`, which must be the current one: without `--digest` it prints the digest to pass and allows nothing (exit 0); a wrong digest exits 2. Then it asks at the terminal itself (`/dev/tty`, `CONIN$`): `allow NAME` to confirm; `--no-prompt` is for the user's own setup script. It refuses (exit 2) inside an agent harness's session and is not an MCP tool. The allowance is kept in the user store (`overlays/.dotagents-state/hooks-allowed.json`), one digest per overlay and store, and is only as strong as an agent's lack of write access to the user store. |
 | `overlays revoke-hooks NAME [-g]` | Take back the allowance. |
 | `hook EVENT --harness claude-code\|codex [--level user\|project] [--guard]` | Not for typing: what a harness's own hook entry runs (through `overlay_hook.py`). Reads the harness's payload on standard input, fires the overlays' hooks for the event (`user`: the user and system stores' overlays, `project`: the project store's), and answers in the harness's words; a hook's output never reaches the harness and the answer is never an approval. `--guard`: a failure of this program answers with a refusal where the event can be refused. Always exits 0 (2 for a bad argument). Not an MCP tool. |
@@ -63,7 +64,7 @@ and an error saying a command is required, and exits 2.
 | `findings add\|list\|show\|done\|reopen\|remove\|index\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding, `done` moves it to `processed/` with a required resolution, `INDEX.md` regenerated on every change. The frontmatter is valid YAML (a value is double-quoted when it must be); `index --requote` fixes values written bare in existing files, touching nothing else. |
 | `about [--json]` | `dotagents-cli <version>`, then `<distribution> <version>` per bundled (`.pyz`) or installed package. |
 | `build-pyz [--out P] [--python SHEBANG] [--duho-version V] [--pathapi-version V] [--extras a,b] [--with-pip]` | Build a zipapp from a source checkout; errors elsewhere. `--with-pip` vendors the pinned pip wheel (`_pipwheel`) as `dotagents/_vendor/`. |
-| `mcp [--prefix TEMPLATE]` | Serve command and active overlay MCP tools over stdio; `{name}` in the template is the skill or server name. |
+| `mcp [--prefix TEMPLATE] [--strict]` | Serve command and active overlay MCP tools over stdio (`--strict`, or the user store's `mcp.json` `{"strict": true}`: an `overlays add`/`sync` through it installs without allowing hooks); `{name}` in the template is the skill or server name. |
 
 **Every command but `env` and `mcp` is also an MCP tool.** `dotagents mcp` (or
 `DOTAGENTS_MCP=stdio dotagents`, the same server) serves the command set — built-in,
@@ -419,7 +420,7 @@ returns the exit code.
   `bundle_manifest() -> Optional[dict]`, `installed_packages() -> dict[str, str]`,
   `packages() -> tuple[dict[str, str], Optional[dict]]` (the bundle's packages, else
   the installed ones; the CLI itself in neither).
-- `mcp.Mcp` — `prefix: Optional[str]`; exits 2 when the template uses a placeholder
+- `mcp.Mcp` — `prefix: Optional[str]`, `strict: bool` (installs through it allow no hooks); exits 2 when the template uses a placeholder
   other than `{name}` or does not format to a tool-name segment.
 - `build_pyz`: `EXTRA_REQUIREMENTS` — `{extra: (requirement, ...)}`, what each
   dotagents-cli extra installs (`uri`, `http`, `mcp-http`, `sftp`, `s3`, `repo`),
@@ -976,8 +977,14 @@ its directory, bounded by `LIMITS`.
 - Allowances, in the user store only, keyed by the overlay's store and name:
   `allowances_path(user_store)`, `read_allowances`, `allowed_digest(user_store, identity,
   store=None)`, `allow(user_store, identity, digest, store=None)`, `revoke(...) -> bool`.
-- `install_notice(overlay, user_store) -> Optional[str]` — the line `overlays add/sync` logs
-  when an overlay has hooks that are off;
+- Installing allows: `record_install(user_store, overlay, *, fresh, no_hooks, dry_run=False) ->
+  (outcome, entries)` is what `overlays add` (`fresh=True`) and `overlays sync` do to the allowance
+  of the installed copy: `on` (allowed at the digest installed; a fresh add also forgets a revoke),
+  `declined` (`--no-hooks`, remembered), `strict` (`strict_mcp(user_store)`: a server started `dotagents mcp --strict`, or by `DOTAGENTS_MCP`
+  with the user's `mcp.json` `{"strict": true}`, installs without allowing and writes nothing; the
+  default server behaves as the command line; `mcp_settings_path`, `mcp_strict_setting` read the user
+  store only; `_MCP_STRICT` is the process flag), `revoked` (kept off across syncs), `none`; `read_revoked`,
+  `is_revoked`; `revoke` also records the revoke (the allowance file holds `allowed` and `revoked`).
 - `read_tree(overlay, keep=False) -> (digest, files)` (the bytes the digest covers when `keep`),
   `snapshot(user_store, overlay, digest, files) -> Path` — the copy a hook runs from, one directory
   per digest under `<user store>/.cache/hook-snapshots/` made from exactly the bytes hashed (what

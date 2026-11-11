@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Installing an overlay allows its hooks: `overlays add` and `overlays sync` allow the overlay's hooks
+  at the digest they install, for that store, and log which are on (event and script). Before, hooks
+  stayed off until `overlays allow-hooks` at a terminal. `--no-hooks` on both installs without
+  allowing, and a sync then leaves them off. A sync that changes the digest allows the new one, so
+  an overlay installed by 0.9.2 with its hooks off is allowed by its next `overlays sync`. A
+  `revoke-hooks` is remembered: syncs keep the hooks off until `allow-hooks` or a fresh `add`. An
+  install through the default `dotagents mcp` server allows like the command line. `allow-hooks` stays
+  (not an MCP tool, asks at the terminal) for overlays installed with `--no-hooks` or revoked.
+  `tools/cloud-setup.sh` no longer has a separate allow step.
+
+### Added
+
+- `dotagents mcp --strict`, and the user-store setting `overlays/.dotagents-state/mcp.json`
+  `{"strict": true}` (read only from the user store, for a server started by `DOTAGENTS_MCP`): an
+  `overlays add` or `sync` through a strict MCP server installs without allowing hooks, says they are
+  off and that `allow-hooks` turns them on, and writes no allowance.
+
 ## [0.9.2] - 2026-11-11
 
 ### Added

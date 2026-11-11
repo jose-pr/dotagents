@@ -217,6 +217,7 @@ dotagents overlays list                    # installed (discovered) + available 
 dotagents overlays sync 'py*'              # refresh installed overlays matching a glob
 dotagents overlays remove python           # delete the overlay dir, unpublish its skills, un-merge its rules
 dotagents overlays show python             # describe one: declarations, digest, pin, weakenings, source (--json)
+dotagents mcp --strict                     # serve MCP tools; an add/sync through it allows no hooks
 dotagents overlays hooks private-sync      # its hooks: what runs where, and whether they are allowed
 dotagents overlays allow-hooks private-sync --digest sha256:...   # allow them at that digest (see overlay-hooks)
 ```

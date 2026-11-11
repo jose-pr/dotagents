@@ -241,12 +241,6 @@ def _prepare(scope, dest_dir: Path, name: str, *, change: str, no_setup=False, d
     except _aos.Refused as refused:
         logger.error("%s: %s %s (hash every requirement or none)", name, refused.code, refused.subject)
         return 1
-    if change != "remove":
-        from dotagents import _overlay_hooks
-
-        note = _overlay_hooks.install_notice(overlay, scope.user_root)
-        if note:
-            logger.warning("%s", note)
     if variant is None and change != "remove":
         # A default setup.<ext> present that this machine cannot run.
         plan = _aos.plan(overlay.document(), _activate.context(overlay), pinned=True)
@@ -543,9 +537,34 @@ def _log_install(logger, verb: str, name: str, result, dry_run: bool) -> None:
         logger.info("overlay %s: backed up %s", name, ", ".join(result.backed_up))
 
 
+def _record_hooks(scope, dest: Path, name: str, *, fresh: bool, no_hooks: bool, dry_run: bool, logger) -> None:
+    """Installing or syncing an overlay allows its hooks at the digest installed (the person chose
+    this source, and the overlay declares them), and says which are on. ``--no-hooks`` installs
+    without allowing and remembers it; an overlay whose hooks were revoked stays off across syncs;
+    a request through the MCP tool allows like any other, unless the server was started `--strict`
+    (or the user's own setting says so), when it installs without allowing."""
+    from dotagents import _overlay_hooks
+    from dotagents._overlays import Overlay
+
+    overlay = Overlay(dest if dest.is_dir() else dest, scope.agents_root)
+    outcome, entries = _overlay_hooks.record_install(scope.user_root, overlay, fresh=fresh, no_hooks=no_hooks,
+                                                     dry_run=dry_run)
+    if outcome == "none":
+        return
+    listed = ", ".join("%s (%s)" % (e["event"], e["path"] or "no hook.<ext> can run here") for e in entries)
+    if outcome == "on":
+        logger.info("overlay %s: %s its hooks, now on: %s (dotagents overlays hooks %s; revoke-hooks turns them off)",
+                    name, "would allow" if dry_run else "allowed", listed, name)
+    else:
+        why = {"declined": "--no-hooks", "revoked": "they were revoked and a sync keeps them off",
+               "strict": "installed through `dotagents mcp --strict`, which allows no hooks"}[outcome]
+        logger.warning("overlay %s: its hooks are off (%s): %s -- allow them with `dotagents overlays "
+                       "allow-hooks %s`", name, why, listed, name)
+
+
 def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: bool,
                  dry_run: bool, logger, setup_timeout: "Optional[int]" = None,
-                 no_venv: bool = False, cache=None) -> "list[str]":
+                 no_venv: bool = False, cache=None, no_hooks: bool = False) -> "list[str]":
     """Install (or re-install) overlay ``name`` from ``src`` into the scope,
     publish its skills, install its Python dependencies into the scope's venv
     and run its setup (``install`` the first time, then ``sync``). Nothing is written for a source
@@ -634,6 +653,8 @@ def _install_one(scope, name: str, src: Path, origin, *, copy: bool, no_setup: b
                 "was last prepared for (fix it and run `overlays sync %s`)", what, name, name,
             )
         raise SystemExit("error: %s for overlay %r failed (exit %d)" % (what, name, rc))
+    _record_hooks(scope, dest if dest.is_dir() else src, name, fresh=True, no_hooks=no_hooks, dry_run=dry_run,
+                  logger=logger)
     return skills
 
 
@@ -737,6 +758,10 @@ class OverlayAdd(_RepoArgs):
     "Skip running an overlay's declared `setup` after install."
     ("--no-setup",)
 
+    no_hooks: bool = False
+    "Do not allow the overlay's hooks (installing allows them at the digest installed; `allow-hooks` does it later)."
+    ("--no-hooks",)
+
     setup_timeout: Optional[int] = None
     "Seconds setup may run (default: the setup variant's timeout, else 300; 0 = no limit)."
     ("--setup-timeout",)
@@ -805,7 +830,7 @@ class OverlayAdd(_RepoArgs):
                         scope, name, src, origin, copy=self.copy, no_setup=self.no_setup,
                         dry_run=self.dry_run, logger=self._logger_,
                         setup_timeout=self.setup_timeout, no_venv=self.no_venv,
-                        cache=source.cache,
+                        cache=source.cache, no_hooks=self.no_hooks,
                     )
                 except (SystemExit, OSError) as exc:
                     why = str(exc.code if isinstance(exc, SystemExit) else exc)
@@ -1273,6 +1298,10 @@ class OverlaySync(_RepoArgs):
     "Skip running each overlay's declared `setup` after sync."
     ("--no-setup",)
 
+    no_hooks: bool = False
+    "Do not allow the overlay's hooks (installing allows them at the digest installed; `allow-hooks` does it later)."
+    ("--no-hooks",)
+
     no_venv: bool = False
     "Do not create or update the scope's Python venv (overlay requirements, duho, the .pth layering)."
     ("--no-venv",)
@@ -1401,6 +1430,9 @@ class OverlaySync(_RepoArgs):
                     self._logger_.error("preparing overlay %s failed (exit %d); it is activated only for the "
                                         "digest it was last prepared for", name, rc)
                     failures.append(name)
+                else:
+                    _record_hooks(scope, dest_dir, name, fresh=False, no_hooks=self.no_hooks,
+                                  dry_run=self.dry_run, logger=self._logger_)
 
             # A `requires` added upstream: install what no store provides yet.
             have = frozenset(o.normalized_name for o in scope.overlays)
@@ -1425,7 +1457,7 @@ class OverlaySync(_RepoArgs):
                     skills += _install_one(
                         scope, dep, src, origin, copy=self.copy, no_setup=self.no_setup,
                         dry_run=self.dry_run, logger=self._logger_, setup_timeout=self.setup_timeout,
-                        no_venv=self.no_venv, cache=chain.cache,
+                        no_venv=self.no_venv, cache=chain.cache, no_hooks=self.no_hooks,
                     )
         finally:
             # Recompose over ALL installed overlays in (priority, name) order
