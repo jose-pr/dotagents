@@ -675,7 +675,10 @@ class Env(DotAgentsArgs):
             output_format = _env.detect_shell_format()
 
         key = None
-        if self.cache:
+        # An allowed `pre-env` hook fires on every build, so none is replayed from the cache.
+        from dotagents import _overlay_hooks
+
+        if self.cache and not _overlay_hooks.has_live_pre_env(scope, base.get("AGENTS_HARNESS")):
             # A hook runs this before EVERY shell call; the assembly (one
             # child process per env file) is skipped while its inputs hold.
             key = _env.env_cache_key(scope, base, output_format, "diff" if self.diff else "full")

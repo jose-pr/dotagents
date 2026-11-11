@@ -48,7 +48,7 @@ _LEGACY_COMMAND = re.compile(
 
 #: The hook keys dotagents manages; any other key a user added (a `timeout`,
 #: say) survives a refresh.
-_MANAGED_KEYS = frozenset({"type", "command", "shell", "commandWindows", "statusMessage"})
+_MANAGED_KEYS = frozenset({"type", "command", "shell", "commandWindows", "statusMessage", "timeout"})
 
 
 def _labels(status_message: "Optional[str]") -> "tuple[str, ...]":
@@ -77,6 +77,7 @@ def build_hook_entry(
     status_message: "Optional[str]" = None,
     shell: "Optional[str]" = None,
     command_windows: "Optional[str]" = None,
+    timeout: "Optional[int]" = None,
 ) -> "dict[str, Any]":
     """One matcher-object wrapping a single ``type: command`` hook.
 
@@ -93,6 +94,8 @@ def build_hook_entry(
         hook["shell"] = shell
     if command_windows:
         hook["commandWindows"] = command_windows
+    if timeout:
+        hook["timeout"] = timeout
     if status_message:
         hook["statusMessage"] = _labels(status_message)[0]
     entry: "dict[str, Any]" = {}
@@ -136,6 +139,7 @@ def merge_hook(
     status_message: "Optional[str]" = None,
     shell: "Optional[str]" = None,
     command_windows: "Optional[str]" = None,
+    timeout: "Optional[int]" = None,
 ) -> "tuple[list, bool]":
     """Fold our hook into `existing`, returning ``(normalized_list, changed)``.
 
@@ -165,7 +169,7 @@ def merge_hook(
     """
     ours = build_hook_entry(
         command, matcher=matcher, status_message=status_message, shell=shell,
-        command_windows=command_windows,
+        command_windows=command_windows, timeout=timeout,
     )
     if not isinstance(existing, list):
         # None/absent is the common case; a non-list is a malformed file we replace.

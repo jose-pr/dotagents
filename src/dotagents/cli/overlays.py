@@ -662,6 +662,7 @@ def _link_agent_skills(scope, logger, skills: "list[str]" = ()) -> None:
             continue
         wired = True
         agent.link_skills(scope.agents_root, dry_run=False, logger=logger)
+        agent.wire_overlay_hooks(scope.agents_root, dry_run=False, logger=logger)
     if not wired:
         _skills_notice(logger, scope, list(skills))
 

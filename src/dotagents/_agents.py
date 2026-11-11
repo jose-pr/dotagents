@@ -282,6 +282,14 @@ class Agent:
         """
         pass
 
+    def wire_overlay_hooks(
+        self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
+    ) -> None:
+        """Wire the harness's own hooks to `dotagents hook` for the overlay hooks the overlays
+        installed in the store ``dest`` declare (and unwire them when none does). A no-op on the
+        base class: only a harness with a verified hook schema overrides it."""
+        pass
+
     def skills_wired(self, dest: Path) -> bool:
         """True when this harness's config dir already carries dotagents'
         wiring for the store ``dest`` -- so ``overlays add``/``sync``/``remove``
@@ -688,6 +696,7 @@ class ClaudeAgent(Agent):
 
         # 1. Skills last mile (`link_skills`; `overlays add/sync/remove` call it too).
         self.link_skills(dest, dry_run=dry_run, logger=logger, config_root=config_root)
+        self.wire_overlay_hooks(dest, dry_run=dry_run, logger=logger, config_root=config_root)
 
         # 2. Hooks. In a project, write `settings.local.json` -- the gitignored
         # personal file. `settings.json` there is checked into source control, and
@@ -788,6 +797,76 @@ class ClaudeAgent(Agent):
         hooks["PreToolUse"] = pretooluse
 
         return pt_hook_changed
+
+
+    def wire_overlay_hooks(
+        self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
+    ) -> None:
+        """One entry per Claude Code event an installed overlay has a hook for, each running
+        the forwarder (`overlay_hook.py`), which runs `dotagents hook`. A user store writes
+        `settings.json`, a project's `settings.local.json`, as :meth:`wire_hooks` does. Entries
+        for events no overlay uses any longer are retracted."""
+        import sys
+
+        from dotagents import _hooks, _overlay_hooks
+
+        is_user_scope = self._user_scope(dest) and not config_root
+        root = Path(config_root) if config_root else self._config_root(dest)
+        settings_path = root / ("settings.json" if is_user_scope else "settings.local.json")
+        harness = _overlay_hooks.CLAUDE
+        wanted = _overlay_hooks.wanted_events(dest, harness)
+        if not wanted and not settings_path.is_file():
+            return
+        settings = _hooks.load_settings(settings_path)
+        hooks = settings.get("hooks")
+        if not isinstance(hooks, dict):
+            hooks = {}
+        script_changed = False
+        if wanted:
+            script_changed = bool(_deploy_hook_script(root, _overlay_hooks.FORWARDER, dry_run=dry_run,
+                                                      logger=logger, harness="Claude Code"))
+        script = (root / "hooks" / _overlay_hooks.FORWARDER).resolve()
+        python = Path(sys.executable)
+        level = "user" if is_user_scope else "project"
+        windows = self._is_windows()
+        changed = False
+        for event, native in harness.native.items():
+            status = _overlay_hooks.STATUS_PREFIX + native
+            existing = hooks.get(native)
+            if event not in wanted:
+                for label in (status, status + " (PowerShell)"):
+                    existing, c = _hooks.remove_hook(existing, label)
+                    changed |= c
+                if existing:
+                    hooks[native] = existing
+                else:
+                    hooks.pop(native, None)
+                continue
+            args = " ".join(_overlay_hooks.forwarder_args(harness, event, level, wanted[event]))
+            bash = '"%s" "%s" %s' % (python.as_posix(), script.as_posix(), args)
+            entries, c = _hooks.merge_hook(existing, bash, status_message=status,
+                                           timeout=_overlay_hooks.ENTRY_TIMEOUT)
+            changed |= c
+            if windows:
+                # Windows without Git Bash: the same program under PowerShell, selecting
+                # itself as the context handlers above do.
+                power = self._PS_NO_BASH + '& "%s" "%s" %s }' % (python, script, args)
+                entries, c = _hooks.merge_hook(entries, power, status_message=status + " (PowerShell)",
+                                               shell="powershell", timeout=_overlay_hooks.ENTRY_TIMEOUT)
+            else:
+                entries, c = _hooks.remove_hook(entries, status + " (PowerShell)")
+            changed |= c
+            hooks[native] = entries
+        if not (changed or script_changed):
+            return
+        if dry_run:
+            if logger:
+                logger.info("would wire overlay hooks (%s): %s", ", ".join(sorted(wanted)) or "none", settings_path)
+            return
+        settings["hooks"] = hooks
+        _hooks.write_settings(settings_path, settings)
+        if logger:
+            logger.info("wired overlay hooks (%s): %s", ", ".join(sorted(wanted)) or "none", settings_path)
 
 
 class GeminiAgent(Agent):
@@ -1025,6 +1104,7 @@ class CodexAgent(Agent):
         root = self._config_root(config_root)
 
         self.remove_env_block(dry_run=dry_run, logger=logger, config_root=root)
+        self.wire_overlay_hooks(dest, dry_run=dry_run, logger=logger, config_root=config_root)
         script_changed = False
         for name in (self.SESSION_START_HOOK_SCRIPT, self.PRETOOLUSE_HOOK_SCRIPT):
             script_changed |= bool(_deploy_hook_script(
@@ -1072,6 +1152,65 @@ class CodexAgent(Agent):
         _hooks.write_settings(hooks_path, data)
         if logger:
             logger.info("wired SessionStart + PreToolUse hooks: %s", hooks_path)
+
+    def wire_overlay_hooks(
+        self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
+    ) -> None:
+        """As :meth:`ClaudeAgent.wire_overlay_hooks`, into `<codex-home>/hooks.json`, for the
+        user store only (Codex's configuration is global). Codex runs the entry through
+        PowerShell on Windows, hence `commandWindows`; it trusts a hook by its hash, which is
+        Codex's own prompt to answer, never written here."""
+        import sys
+
+        from dotagents import _hooks, _overlay_hooks
+
+        if not self._user_scope(dest):
+            return
+        root = self._config_root(config_root)
+        harness = _overlay_hooks.CODEX
+        wanted = _overlay_hooks.wanted_events(dest, harness)
+        hooks_path = root / "hooks.json"
+        if not wanted and not hooks_path.is_file():
+            return
+        data = _hooks.load_settings(hooks_path)
+        hooks = data.get("hooks")
+        if not isinstance(hooks, dict):
+            hooks = {}
+        script_changed = False
+        if wanted:
+            script_changed = bool(_deploy_hook_script(root, _overlay_hooks.FORWARDER, dry_run=dry_run,
+                                                      logger=logger, harness="Codex"))
+        script = (root / "hooks" / _overlay_hooks.FORWARDER).resolve()
+        python = Path(sys.executable)
+        changed = False
+        for event, native in harness.native.items():
+            status = _overlay_hooks.STATUS_PREFIX + native
+            existing = hooks.get(native)
+            if event not in wanted:
+                existing, c = _hooks.remove_hook(existing, status)
+                changed |= c
+                if existing:
+                    hooks[native] = existing
+                else:
+                    hooks.pop(native, None)
+                continue
+            args = " ".join(_overlay_hooks.forwarder_args(harness, event, "user", wanted[event]))
+            command = '"%s" "%s" %s' % (python.as_posix(), script.as_posix(), args)
+            windows = '& "%s" "%s" %s; exit $LASTEXITCODE' % (python, script, args)
+            entries, c = _hooks.merge_hook(existing, command, status_message=status, command_windows=windows,
+                                           timeout=_overlay_hooks.ENTRY_TIMEOUT)
+            changed |= c
+            hooks[native] = entries
+        if not (changed or script_changed):
+            return
+        if dry_run:
+            if logger:
+                logger.info("would wire overlay hooks (%s): %s", ", ".join(sorted(wanted)) or "none", hooks_path)
+            return
+        data["hooks"] = hooks
+        _hooks.write_settings(hooks_path, data)
+        if logger:
+            logger.info("wired overlay hooks (%s): %s", ", ".join(sorted(wanted)) or "none", hooks_path)
 
     @staticmethod
     def hook_commands(root: Path, script_name: str) -> "tuple[str, str]":

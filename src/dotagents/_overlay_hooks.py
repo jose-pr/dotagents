@@ -219,6 +219,44 @@ def refusal(overlay: Any) -> "Optional[str]":
 
 
 # --------------------------------------------------------------------------- #
+# Wiring a harness's own hooks.
+# --------------------------------------------------------------------------- #
+
+#: The label that identifies the entries dotagents wrote for overlay hooks (the native event follows).
+STATUS_PREFIX = "Overlay hooks: "
+#: The harness's own timeout for the entry, in seconds: above the event's bound (120 s) and the
+#: forwarder's (230 s), so the harness never stops the program between a hook and its answer.
+ENTRY_TIMEOUT = 240
+#: The script a harness's hook runs; it finds `dotagents` and runs `dotagents hook`.
+FORWARDER = "overlay_hook.py"
+
+
+def wanted_events(store: "str | os.PathLike[str]", harness: Harness) -> "dict[str, bool]":
+    """The events of ``harness`` to wire for the overlays installed in ``store``, each with whether
+    a hook of it refuses on failure (a guard). An event is wired when an installed overlay has a
+    hook for it; ``session-start`` is wired for any overlay with hooks, since it is where an
+    activation is reported. Nothing is wired for an overlay with none, so no process starts for them."""
+    from dotagents import _activate
+    from dotagents._overlays import Overlay
+
+    wanted: "dict[str, bool]" = {}
+    interpreters = sorted(_activate.interpreters())
+    for overlay in Overlay.discover(Path(store) / "overlays", store):
+        entries, _ = _aos.hooks_of(overlay.document(), _activate.files(overlay), _aos.current_os(), interpreters)
+        for entry in entries:
+            if entry["event"] in harness.native:
+                wanted[entry["event"]] = wanted.get(entry["event"], False) or entry["on_failure"] == "refuse"
+        if entries and "session-start" in harness.native:
+            wanted.setdefault("session-start", False)
+    return wanted
+
+
+def forwarder_args(harness: Harness, event: str, level: str, guard: bool) -> "list[str]":
+    """The arguments after the forwarder script's path."""
+    return [harness.id, event, level] + (["--guard"] if guard else [])
+
+
+# --------------------------------------------------------------------------- #
 # Reports.
 # --------------------------------------------------------------------------- #
 
@@ -437,3 +475,11 @@ def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environmen
     non_defaults: "list[list[str]]" = []
     _aos.apply_pre_env(session, identities, runs, LIMITS, reports, non_defaults)
     return reports, non_defaults
+
+
+def has_live_pre_env(scope: Any, harness_id: "Optional[str]") -> bool:
+    """Whether an allowed overlay has a ``pre-env`` hook: it fires each time the environment is
+    built, so a cached rendering of an earlier build cannot stand in for the build."""
+    harness = harness_of(harness_id)
+    return any(plan["on"] and any(entry["event"] == "pre-env" for entry in plan["hooks"])
+               for _overlay, plan in planned(scope.overlays, harness, scope.user_root))

@@ -104,3 +104,17 @@ def test_a_hook_that_is_on_is_a_weakening_each_time(tmp_path):
     plan = _overlay_hooks.overlay_plan(rig.overlay, _overlay_hooks.CLAUDE, rig.store)
     assert ["hook", "cd"] in plan["non_defaults"] and plan["on"]
     assert _aos.hook_plan  # the model decides; the plan above is its answer on this machine
+
+
+def test_a_cached_environment_is_not_replayed_for_a_pre_env_hook(tmp_path, monkeypatch, capsys):
+    from _helpers import run_cmd
+    from dotagents.cli import Env
+
+    rig = Rig(tmp_path, "[hooks]\npre-env = {}\n")
+    rig.allow()
+    monkeypatch.setenv("HOOK_LOG", str(rig.log))
+    monkeypatch.setenv("HOOK_OUT", json.dumps({"FIRST": "one"}))
+    for _ in range(2):
+        assert run_cmd(Env, global_scope=True, agents_dir=rig.store, cache=True, format="dotenv") == 0
+    assert len(rig.calls()) == 2
+    assert "FIRST=one" in capsys.readouterr().out
