@@ -310,6 +310,7 @@ def harness_excluded(store: Path, harness_id: str) -> "set[str]":
     for overlay in Overlay.discover(Path(store) / "overlays", store):
         if overlay.harness_hints(harness_id).get("skills") is False:
             out.update(overlay.skills())
+            out.update(e.name for e in overlay.skills_elsewhere())
     return out
 
 

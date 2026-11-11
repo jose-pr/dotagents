@@ -469,10 +469,21 @@ class Overlay:
         """The member files, without hashing: what decides the defaults."""
         return _aos.member_paths(self.path)
 
+    def skill_entries(self) -> "list[Any]":
+        """Every skill the overlay offers, bundled, from a source or named for a catalog
+        (:func:`coqui_aos.skill_entries`)."""
+        return coqui_aos.skill_entries(self.document(), coqui_aos.OverlayTree(self.member_paths()))
+
     def skills(self) -> "list[str]":
-        """The overlay's skills: every ``skills/<name>/SKILL.md`` (unless
-        ``[defaults] skills = false``) and those ``skills`` lists."""
-        return coqui_aos.skills_of(self.document(), coqui_aos.OverlayTree(self.member_paths()))
+        """The skills the overlay carries: every ``skills/<name>/SKILL.md`` (unless
+        ``[defaults] skills = false``) and those ``skills`` lists that are in its tree. A skill
+        from elsewhere comes with the person's yes (:mod:`dotagents._skill_sources`), not with the
+        overlay."""
+        return [e.name for e in self.skill_entries() if e.origin is coqui_aos.SkillOrigin.BUNDLED]
+
+    def skills_elsewhere(self) -> "list[Any]":
+        """The skills the overlay names that are not in its tree."""
+        return [e for e in self.skill_entries() if e.origin is not coqui_aos.SkillOrigin.BUNDLED]
 
     def rules(self) -> "list[str]":
         """Its rules files: every ``rules/<name>.md`` (unless ``[defaults]
