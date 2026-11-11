@@ -95,9 +95,9 @@ def test_session_start_persists_env_via_claude_env_file(tmp_path):
 def test_hook_finds_dotagents_by_path_not_by_splicing_path():
     """The hook must find `dotagents` without a global install.
 
-    `init` populates `<scope>/bin/`; the hook runs the store's wrapper, else
-    whatever `dotagents` is on PATH, never the project's (the agent can write
-    there, and what it plants would run with the user's access). It invokes it by path:
+    `init` populates `<scope>/bin/`; the hook runs the store's wrapper or
+    nothing: never one on PATH (PATH may lead with the project's own bin, which
+    the agent can write, and what it plants would run with the user's access). It invokes it by path:
     splicing both bins onto PATH made `env --diff` see them as a change and
     persist them into the session, so a later `cd` kept the first project's
     bin ahead of everything.
@@ -109,7 +109,8 @@ def test_hook_finds_dotagents_by_path_not_by_splicing_path():
         assert ".agents\\bin" not in cmd.replace("$HOME\\.agents", "").replace('"$s\\bin', "").replace("\\bin\\dotagents", "")
     cmd = ClaudeAgent.SESSION_START_COMMAND
     assert store in cmd and "$PWD" not in cmd
-    assert "d=dotagents;" in cmd, "falls back to a dotagents on PATH"
+    assert "d=dotagents" not in cmd.replace('bin/dotagents"', ""), "no dotagents found on PATH: PATH may lead with the project's bin"
+    assert "|| exit 0" in cmd, "no wrapper in the store: nothing runs"
     assert "PATH=" not in cmd
 
 

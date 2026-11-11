@@ -9,8 +9,11 @@ in `overlay_hook.<TOKEN>.json` next to it, written by the same step: the interpr
 `dotagents` was imported from, the user store, the deadline, and the events that have a guard.
 It never looks in the working directory or the project: what is there is the agent's to write.
 
-It runs `dotagents hook` as a child (the interpreter recorded, isolated from the working directory
-and the environment's `PYTHON*`), kills the child's whole process tree at the deadline, and
+It runs a fixed entry of dotagents (`dotagents._hook_main`, which discovers no command and adds no
+library, so nothing a project holds runs) as a child: the interpreter recorded, isolated from the
+working directory and the environment's `PYTHON*`. It gives the child a fresh nonce and accepts
+only an answer that carries it back, so a program that merely exits 0 with no output is not "no
+objection" but a failure. It kills the child's whole process tree at the deadline, and
 **relays only what it recognizes**: a refusal (`deny`, `ask`, `block`, `continue: false`), context
 and a message, in the harness's own shape. An `allow`, a rewritten input, `continue: true` or
 anything else is not relayed: for an event with a guard that is a failure, and the answer is a
@@ -20,6 +23,7 @@ what it says.
 
 import json
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -30,9 +34,10 @@ NATIVE = {"session-start": "SessionStart", "session-end": "SessionEnd", "prompt"
           "post-tool": "PostToolUse"}
 MAX_STDIN = 8 * 1024 * 1024
 MAX_ANSWER = 512 * 1024
-#: Import dotagents from the recorded place only; argv[1] is that place.
-BOOT = ("import sys, runpy; sys.path.insert(0, sys.argv[1]); del sys.argv[1]; "
-        "runpy.run_module('dotagents', run_name='__main__', alter_sys=True)")
+#: Import dotagents from the recorded place only (argv[1]) and run its fixed hook entry.
+BOOT = ("import sys; sys.path.insert(0, sys.argv[1]); del sys.argv[1]; "
+        "from dotagents import _hook_main; sys.exit(_hook_main.main(sys.argv[1:]))")
+TOKEN_FORM = r"^(?:user|project-[0-9a-f]{10})$"
 _BAD = {chr(c) for c in list(range(0, 9)) + [11, 12] + list(range(14, 32)) + list(range(127, 160))}
 _BAD |= set("‪‫‬‭‮⁦⁧⁨⁩  ")
 
@@ -121,7 +126,23 @@ def sanitize(harness, event, raw):
     return json.dumps(out) + "\n" if out else ""
 
 
+def unwrap(raw, nonce):
+    """The answer text inside the child's output, if it carries our nonce; else None bytes that
+    ``sanitize`` refuses."""
+    try:
+        value = json.loads(raw.decode("utf-8"))
+        if isinstance(value, dict) and value.get("nonce") == nonce and isinstance(value.get("answer"), str):
+            return value["answer"].encode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        pass
+    return b"\xff"
+
+
 def read_record(token):
+    import re
+
+    if re.match(TOKEN_FORM, token) is None:
+        return None
     try:
         with open(str(Path(__file__).resolve().parent / ("overlay_hook.%s.json" % token)), encoding="utf-8") as fh:
             data = json.load(fh)
@@ -233,13 +254,14 @@ def main(argv):
             raise ValueError("interpreter")
         deadline = float(record.get("deadline", 150))
         level = "user" if token == "user" else "project"
-        command = [python, "-I", "-c", BOOT, root, "hook", event, "--harness", harness, "--level", level,
-                   "--agents-dir", store]
+        nonce = secrets.token_hex(16)
+        command = [python, "-I", "-c", BOOT, root, event, "--harness", harness, "--level", level,
+                   "--agents-dir", store, "--nonce", nonce]
         env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")}
         env["AGENTS_HOME"] = store
         done = run_tree(command, payload, max(1.0, deadline - (time.monotonic() - started)), env)
         if done is not None and done[0] == 0:
-            answer = sanitize(harness, event, done[1])
+            answer = sanitize(harness, event, unwrap(done[1], nonce))
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         answer = None
     if answer is None and guarded:

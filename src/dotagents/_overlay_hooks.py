@@ -113,13 +113,21 @@ def partial_events(harness: Harness) -> "list[str]":
 
 #: The settings a user may change, with their bounds (low, high): read from the user's own
 #: configuration only, never from an overlay or a project.
-SETTING_BOUNDS = {"timeout": (1, 3600), "event_timeout": (1, 3600), "deadline": (10, 580),
+SETTING_BOUNDS = {"timeout": (1, 580), "event_timeout": (1, 580), "deadline": (10, 580),
                   "max_output": (1024, 16 * 1024 * 1024), "max_payload": (1024, 8 * 1024 * 1024)}
 #: One deadline for everything a harness's hook entry does, from the process's start: scope
 #: building, hashing, env scripts and hooks.
 DEFAULT_DEADLINE = 150
-#: Never above what a harness's own hook limit allows.
+#: Never above what a harness's own hook limit allows; no setting of a run or an event is above it.
 ENTRY_TIMEOUT_CAP = 600
+#: Names a store in a hook entry: the user's, or a project's by hash. Checked before it is a path.
+TOKEN_FORM = r"^(?:user|project-[0-9a-f]{10})$"
+
+
+def valid_token(token: str) -> bool:
+    import re
+
+    return isinstance(token, str) and re.match(TOKEN_FORM, token) is not None
 
 
 def settings_path(user_store: "str | os.PathLike[str]") -> Path:
@@ -400,6 +408,8 @@ def code_root() -> str:
 
 
 def record_path(config_dir: "str | os.PathLike[str]", token: str) -> Path:
+    if not valid_token(token):
+        raise ValueError("not a store token: %r" % (token,))
     return Path(config_dir) / "hooks" / ("overlay_hook.%s.json" % token)
 
 
@@ -481,7 +491,7 @@ class Subject(object):
 
 def execute(subject: Subject, event: str, payload: bytes, env: "dict[str, str]", *,
             limits: "Optional[dict[str, int]]" = None, root: "Optional[str | os.PathLike[str]]" = None,
-            deadline: "Optional[float]" = None) -> "dict[str, Any]":
+            deadline: "Optional[float]" = None, base_path: "Optional[str]" = None) -> "dict[str, Any]":
     """Start the hook and give its run in the model's terms (:func:`dotagents._aos.hook_result`).
 
     The program is an interpreter followed by the script's absolute path and the event, an argv
@@ -509,7 +519,7 @@ def execute(subject: Subject, event: str, payload: bytes, env: "dict[str, str]",
         return run
     try:
         argv = _run.interpreter_command(entry["interpreter"], python=env.get("AGENTS_PYTHON") or _python(),
-                                        base_path=os.environ.get("PATH"))
+                                        base_path=os.environ.get("PATH") if base_path is None else base_path)
     except _run.InterpreterError:
         run["not_run"] = True
         return run
@@ -580,7 +590,8 @@ def value_for_match(event: str, facts: "dict[str, Any]") -> "Optional[str]":
 
 def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, Any]]]", harness: Harness, *,
          environment: "Callable[[Any], Optional[dict[str, str]]]", limits: "Optional[dict[str, int]]" = None,
-         user_store: "Optional[str | os.PathLike[str]]" = None, deadline: "Optional[float]" = None) -> Fired:
+         user_store: "Optional[str | os.PathLike[str]]" = None, deadline: "Optional[float]" = None,
+         base_path: "Optional[str]" = None) -> Fired:
     """Fire ``event`` for ``plans``, ``(overlay, plan)`` in composition order.
 
     Only an overlay whose hooks are on runs, and it runs from the snapshot of the bytes whose digest
@@ -626,7 +637,8 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
                 if snap is not None:
                     env = dict(env, AOS_OVERLAY_ROOT=str(snap))
                     env[subject.overlay.root_var] = str(snap)
-                done = execute(subject, event, payload, env, limits=limits, root=snap, deadline=deadline)
+                done = execute(subject, event, payload, env, limits=limits, root=snap, deadline=deadline,
+                               base_path=base_path)
                 text = done.pop("stderr", b"")
                 if text:
                     errors.append((subject.overlay.name, event, printable(text)))
@@ -642,6 +654,51 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
 #: Names the harness sets for itself (its env file, its credentials): not for an overlay's code.
 _HARNESS_INTERNAL = ("CLAUDE_ENV_FILE",)
 _HARNESS_INTERNAL_PREFIXES = ("CLAUDE_CODE_", "CODEX_")
+
+
+#: The project's name for itself stays in a hook's environment: a hook that acts on the project
+#: (private-sync) takes it from there and not from a working directory the agent chose.
+KEEP_PROJECT = ("AGENTS_PROJECT_ROOT", "CLAUDE_PROJECT_DIR")
+
+
+def clean_path(path: "Optional[str]", user_store: "str | os.PathLike[str]") -> str:
+    """``path`` with the entries removed that the agent can put an interpreter in: relative ones
+    (the working directory), any store's ``bin`` (``<project>/.agents/bin`` included), an
+    overlay's ``bin`` and a venv's. Interpreters of hooks and env scripts (``pwsh``, ``node``) are
+    found on this, never on the PATH a project's ``.agents/bin`` leads."""
+    drop = os.path.normcase(os.path.abspath(str(Path(user_store) / "bin"))).replace("\\", "/")
+    keep = []
+    for entry in (path or "").split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        shown = os.path.normcase(entry).replace("\\", "/").rstrip("/")
+        if (shown == drop or shown.endswith("/.agents/bin") or "/.pyvenv/" in shown + "/"
+                or ("/overlays/" in shown and shown.endswith("/bin"))):
+            continue
+        keep.append(entry)
+    return os.pathsep.join(keep)
+
+
+def shadowed_with_hooks(scope: Any) -> "list[Any]":
+    """Overlays of the user and system stores that have a hook and are hidden by a same-named
+    overlay of a nearer store (a project's): the hook is the user's, and a project folder of the
+    same name must not take it away."""
+    from dotagents import _activate
+    from dotagents._overlays import Overlay
+
+    shown = {overlay.path for overlay in scope.installed_overlays}
+    interpreters = sorted(_activate.interpreters())
+    hidden = []
+    for store in scope.stores:
+        if scope.project_store is not None and os.path.normcase(str(store)) == os.path.normcase(str(scope.project_store)):
+            continue
+        for overlay in Overlay.discover(Path(store) / "overlays", store):
+            if overlay.path in shown:
+                continue
+            entries, _ = _aos.hooks_of(overlay.document(), _activate.files(overlay), _aos.current_os(), interpreters)
+            if entries:
+                hidden.append(overlay)
+    return hidden
 
 
 def session_base(environ: "dict[str, str]") -> "dict[str, str]":
@@ -663,6 +720,8 @@ def session_base(environ: "dict[str, str]") -> "dict[str, str]":
         if isinstance(data, dict):
             changed = {str(k): v for k, v in data.items() if v is None or isinstance(v, str)}
     for name, before in changed.items():
+        if name.upper() in KEEP_PROJECT:
+            continue
         for key in [k for k in env if (k.upper() == name.upper() if windows else k == name)]:
             del env[key]
         if before is not None:
@@ -748,6 +807,8 @@ def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environmen
     (``hook-refused``) when a guard fails."""
     from dotagents import _activate
 
+    deadline = time.monotonic() + (deadline_for(user_store) if user_store is not None else DEFAULT_DEADLINE) - 5
+    base_path = clean_path(session_base(base).get("PATH"), user_store) if user_store is not None else None
     payload = json.dumps(_aos.hook_payload("pre-env", {"harness": harness.id or NO_HARNESS,
                                                        "cwd": os.path.abspath(cwd or os.getcwd())}),
                          ensure_ascii=False).encode("utf-8")
@@ -772,7 +833,7 @@ def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environmen
         subject = Subject(overlay, entry)
 
         def start(subject=subject, env=env, snap=snap) -> "dict[str, Any]":
-            return execute(subject, "pre-env", payload, env, root=snap,
+            return execute(subject, "pre-env", payload, env, root=snap, deadline=deadline, base_path=base_path,
                            limits=limits_for(user_store) if user_store is not None else None)
 
         identities.append(overlay.name)

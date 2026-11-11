@@ -77,8 +77,8 @@ def main() -> int:
     # parsed afresh, so the inner quotes are plain `"`.
     prefix = (
         'if [ -z "$AGENTS_RUNTIME_SET" ]; then export AGENTS_RUNTIME_SET=1; '
-        'd="${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"; [ -f "$d" ] || d=dotagents; '
-        'eval "$("$d" env --diff --format export --cache 2>/dev/null)"; fi; '
+        'd="${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"; '
+        '[ -f "$d" ] && eval "$("$d" env --diff --format export --cache 2>/dev/null)"; fi; '
     )
 
     updated_input = dict(tool_input)

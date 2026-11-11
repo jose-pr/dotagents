@@ -56,7 +56,7 @@ def _find_dotagents() -> "str | None":
             candidate = base / name
             if candidate.is_file():
                 return str(candidate)
-    return shutil.which("dotagents")
+    return None
 
 
 def _workspace_root(hook_input) -> "str | None":

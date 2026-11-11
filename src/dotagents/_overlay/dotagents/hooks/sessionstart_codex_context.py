@@ -9,8 +9,8 @@ PATH builtin and runs nothing. `init` wires this script with the absolute
 interpreter that ran it, so no shell syntax is involved anywhere.
 
 `dotagents` is found the way the Antigravity hook finds it: the store's `bin`
-(`$AGENTS_HOME`, else `~/.agents`; never the project's, which the agent can write), then
-PATH. `--agents codex` matters: without it `context` resolves the agent from
+(`$AGENTS_HOME`, else `~/.agents`), and nowhere else (not the project's, nor PATH's: both
+can lead with what the agent wrote). `--agents codex` matters: without it `context` resolves the agent from
 the hook's environment, lands on Claude, and gives Codex nothing.
 
 Fails safe: any error prints nothing and exits 0, never blocking the session.
@@ -31,7 +31,7 @@ def _find_dotagents() -> "str | None":
             candidate = base / name
             if candidate.is_file():
                 return str(candidate)
-    return shutil.which("dotagents")
+    return None
 
 
 def main() -> int:

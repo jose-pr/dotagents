@@ -120,18 +120,44 @@ harness.
   from those same bytes; the hook runs from the snapshot. A file swapped after hashing, a
   `node_modules` or `__pycache__` (not part of a digest) planted beside the overlay, do not run.
   The hook's `AOS_OVERLAY_ROOT` and its overlay's `<NAME>_OVERLAY_ROOT` name the snapshot.
-- **The project's `dotagents`.** The hook entries run an absolute interpreter, isolated (`-I`),
-  a forwarder script in your user config directory, and the `dotagents` that `init` recorded
-  there. They never look in the working directory or the project's `.agents/bin`, and the
-  forwarder passes the harness only a refusal, context and a message in the harness's own shape:
-  an `allow`, a rewritten input or anything else it does not recognize is not passed on (for a
-  guard that is a refusal). The session-start, PowerShell, Codex and Antigravity entries that
-  dotagents wrote before also run the store's `dotagents` or PATH's, not the project's.
-- **A project's Python.** A hook runs with the user store's Python, never a project's venv.
+- **Anything the project holds.** The hook entries run an absolute interpreter, isolated (`-I`),
+  a forwarder script in your user config directory, and a fixed entry of the `dotagents` that
+  `init` recorded there (`dotagents._hook_main`). That entry is not the `dotagents` command line:
+  it discovers no command and adds no library, so `<project>/.agents/dotagents/cmds/`, a
+  project overlay's `cmds/` and `lib/` and the project's own `_link.py`-like modules never load
+  in it. For a user-level hook its scope has no project store at all, so a project folder cannot
+  shadow a hook of yours (a same-named one is reported, `hook-shadowed`, and your hook still
+  runs), cannot add anything to it, and cannot choose its Python.
+- **A stand-in for dotagents.** The forwarder gives the entry a fresh nonce and accepts only an
+  answer that carries it back. A program that exits 0 with no output, or answers without the
+  nonce, is a failed guard (a refusal) and nothing at all for an event with no guard; an
+  "everything is fine" is never inferred from silence. The forwarder passes the harness only a
+  refusal, context and a message, in the harness's own shape: an `allow`, a rewritten input or
+  anything else it does not recognize is not passed on.
+- **The project's `dotagents` and PATH.** Nothing looks in the working directory or the
+  project's `.agents/bin`. The session-start, PowerShell, Codex and Antigravity entries that
+  dotagents wrote before run the store's `dotagents` (`$AGENTS_HOME/bin`) or nothing: not one found
+  on PATH, which `dotagents launch` starts with the project's own `.agents/bin`.
+- **A project's interpreters.** `pwsh`, `node`, `bash` and the like, for a hook and for the env
+  scripts that build its environment, are found on the `PATH` the session was started from, with
+  every store's `bin`, overlay `bin`, venv and relative entry removed.
+- **A project's Python.** A hook, and the env scripts that build its environment, run with the
+  user store's Python chosen before any declaration runs, never a project's venv, and never the
+  session's `AGENTS_PYTHON`.
 - **Other overlays' secrets.** `dotagents launch` records what it changed in
   `AGENTS_SESSION_BASE`; a hook starts from the environment the session was started from, so a
   secret another overlay was granted does not reach it. The harness's own variables
   (`CLAUDE_ENV_FILE`, `CLAUDE_CODE_*`, `CODEX_*`) are dropped too.
+
+The place `dotagents` is imported from is recorded when the entry is wired (`code_root`: an
+installed package, or a `.pyz`). If that is inside a checkout the agent works in (a `dist/` of a
+repository, say), the agent can write it, and what it writes runs with your access: install
+dotagents where the agent cannot write, then run `dotagents init -g`.
+
+`--no-prompt` and the harness-session check of `allow-hooks` stop accidents, not an agent: an
+agent can clear its environment (`env -i`) and run the command. What keeps an agent from allowing
+its own hooks is that `allow-hooks` is not an MCP tool and that the allowance is in a store it
+cannot write; where an agent can write your user store, it can allow anything.
 
 Limits of this: a hook that detaches into a new session (`setsid`) can outlive the tree kill on
 POSIX; an overlay whose manifest is refused cannot show its guards; a hook can still read what

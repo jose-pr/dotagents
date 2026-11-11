@@ -1036,7 +1036,7 @@ def declared_paths(overlay, variable: str) -> "list[Path]":
 
 
 def _run_env_script(overlay, script: "dict", own: "_aos.Environment", ctx: "_aos.Context", *, python: str,
-                    logger) -> "Optional[list[tuple[str, Optional[str]]]]":
+                    logger, base_path: "Optional[str]" = None) -> "Optional[list[tuple[str, Optional[str]]]]":
     """One env script's changes, or None (reported) when it failed: it runs
     as a setup step does, with the environment built so far for its overlay."""
     from dotagents import _run
@@ -1050,7 +1050,7 @@ def _run_env_script(overlay, script: "dict", own: "_aos.Environment", ctx: "_aos
         env["AOS_OVERLAY_STATE"] = str(state)
     try:
         argv = _run.interpreter_command(script["interpreter"], python=python,
-                                        base_path=os.environ.get("PATH"))
+                                        base_path=os.environ.get("PATH") if base_path is None else base_path)
         status, out = _run.run_step(
             argv + [_aos.resolve_path(ctx.root, script["path"], ctx.windows)] + script["args"],
             cwd=ctx.root, env=_spawn_env(env), timeout=script["timeout"], capture=True,
@@ -1066,7 +1066,7 @@ def _run_env_script(overlay, script: "dict", own: "_aos.Environment", ctx: "_aos
 
 
 def _apply_declarations(overlay, osenv: "dict[str, str]", own_base: "dict[str, str]", *, python: str,
-                        logger, host_env: "Optional[dict[str, str]]" = None,
+                        logger, base_path: "Optional[str]" = None, host_env: "Optional[dict[str, str]]" = None,
                         secret: "Optional[set[str]]" = None,
                         ) -> "Optional[tuple[EnvChanges, list[tuple[str, str]]]]":
     """``overlay``'s declarations applied over ``osenv``: the change set and
@@ -1103,7 +1103,7 @@ def _apply_declarations(overlay, osenv: "dict[str, str]", own_base: "dict[str, s
                 own.set(key, session.values[key])
         _aos.apply_paths(own, paths, ctx, [])
     for script in scripts:
-        changes = _run_env_script(overlay, script, own, ctx, python=python, logger=logger)
+        changes = _run_env_script(overlay, script, own, ctx, python=python, logger=logger, base_path=base_path)
         for name, value in changes or ():
             if value is None:
                 session.unset(name)
@@ -1124,20 +1124,29 @@ def _apply_declarations(overlay, osenv: "dict[str, str]", own_base: "dict[str, s
 
 
 def overlay_process_env(scope: Scope, overlay, *, base_env: "Optional[dict[str, str]]" = None,
+                        python_scope: "Optional[Scope]" = None, base_path: "Optional[str]" = None,
                         logger=None) -> "Optional[dict[str, str]]":
     """The environment of a process ``overlay`` runs (its setup, an MCP
     server): the base environment, dotagents' own variables, every active
     overlay's root variable, the path additions of the overlays it requires,
     this overlay's declarations, and the ``AOS_OVERLAY_*`` variables. No
     other overlay's ``env``, env files or secrets. None (reported) when its
-    declarations cannot be applied."""
+    declarations cannot be applied.
+
+    ``python_scope`` names the scope whose venv supplies ``AGENTS_PYTHON`` (the one every env
+    script runs under): a caller that must not run a project's Python gives the user scope, and
+    the base environment's own ``AGENTS_PYTHON`` is then not trusted. ``base_path`` is the
+    ``PATH`` the interpreters of scripts are found on (default: this process's)."""
     from dotagents import _pyvenv
     from dotagents._run import pycache_prefix
 
     scope = _absolute_scope(scope)
     env = dict(os.environ if base_env is None else base_env)
     env["AGENTS_HOME"] = str(scope.user_root)
-    venv = _pyvenv.active_venv(scope, env)
+    if python_scope is not None:
+        env.pop("AGENTS_PYTHON", None)
+        env.pop("AGENTS_PYVENV", None)
+    venv = _pyvenv.active_venv(_absolute_scope(python_scope) if python_scope is not None else scope, env)
     if venv is not None:
         env["AGENTS_PYTHON"] = str(_pyvenv.venv_python(venv))
     env.setdefault("AGENTS_PYTHON", sys.executable)
@@ -1169,7 +1178,7 @@ def overlay_process_env(scope: Scope, overlay, *, base_env: "Optional[dict[str, 
         ctx = _activate.context(other)
         _aos.apply_paths(built, _aos.paths_of(other.document(), ctx.files), ctx, [])
         env = built.values
-    found = _apply_declarations(overlay, env, env, python=interpreter(env), logger=logger,
+    found = _apply_declarations(overlay, env, env, python=interpreter(env), logger=logger, base_path=base_path,
                                 host_env=dict(os.environ if base_env is None else base_env))
     if found is None:
         return None
@@ -1223,7 +1232,10 @@ def _fire_pre_env(overlays, osenv, own_base, scope, weakenings, apply, logger, c
     from dotagents import _overlay_hooks
 
     harness = _overlay_hooks.harness_of(osenv.get("AGENTS_HARNESS"))
-    plans = _overlay_hooks.planned(overlays, harness, scope.user_root, keep_tree=True)
+    hidden = _overlay_hooks.shadowed_with_hooks(scope)
+    plans = _overlay_hooks.planned(_ordered(list(overlays) + hidden), harness, scope.user_root, keep_tree=True)
+    if hidden and logger:
+        logger.warning("overlay hooks: %s", "; ".join("hook-shadowed %s" % o.name for o in hidden))
     if not plans:
         return plans
     windows = os.name == "nt"

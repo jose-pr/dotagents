@@ -544,7 +544,7 @@ class ClaudeAgent(Agent):
     # bin never got on it (a .pyz install then had no `dotagents` at all).
     _HOOK_DOTAGENTS = (
         'd="${AGENTS_HOME:-$HOME/.agents}/bin/dotagents"; '
-        '[ -f "$d" ] || d=dotagents; '
+        '[ -f "$d" ] || exit 0; '
     )
     SESSION_START_COMMAND = (
         _HOOK_DOTAGENTS
@@ -610,11 +610,11 @@ class ClaudeAgent(Agent):
         r'if (-not $gb) { '
     )
     _PS_STORE = r'$(if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { "$HOME\.agents" })'
-    # Falls back to `dotagents` on PATH (a pip install with an older store has
-    # no `<store>\bin` wrapper) and does nothing when there is none at all.
+    # The store's wrapper, never one found on PATH (PATH may lead with the project's own
+    # `.agents\bin`), and nothing when the store has none.
     _PS_DOTAGENTS = (
         r'$d = if (Test-Path "' + _PS_STORE + r'\bin\dotagents.cmd") { "' + _PS_STORE + r'\bin\dotagents.cmd" } '
-        r'else { (Get-Command dotagents -ErrorAction SilentlyContinue).Source }'
+        r'else { $null }'
     )
     SESSION_START_COMMAND_POWERSHELL = _PS_NO_BASH + _PS_DOTAGENTS + r'; if ($d) { & $d context } }'
     CWD_CHANGED_COMMAND_POWERSHELL = (

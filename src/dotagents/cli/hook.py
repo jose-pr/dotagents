@@ -13,11 +13,13 @@ from dotagents.cli._common import DotAgentsArgs, _write_stdout
 class Hook(DotAgentsArgs):
     """Fire the overlay hooks of one event for a harness and answer it in its own words.
 
-    Not for typing: `init` writes it into a harness's hook configuration, and the harness runs it
-    with its payload on standard input. A hook's output never reaches the harness; the answer is
-    built here from the output that was accepted, and it can deny, ask or block, never approve.
-    With `--guard`, a failure of this program itself answers with a refusal where the event can
-    be refused, since a hook of the event is a guard. Exit status is 0."""
+    A manual tool, for trying an event by hand. The harness's hook entries do not run this: they
+    run a forwarder that runs a fixed entry (`dotagents._hook_main`) which discovers no command,
+    because discovery loads what the project's `.agents` holds. A hook's output never reaches the
+    harness; the answer is built from the output that was accepted, and it can deny, ask or block,
+    never approve. With `--guard`, a failure of this program itself (an exception while it runs)
+    answers with a refusal where the event can be refused; it cannot answer for the program having
+    been replaced, which is what the forwarder's nonce is for. Exit status is 0."""
 
     _parsername_ = "hook"
     # A harness's hook entry point, not a tool for an agent to call.

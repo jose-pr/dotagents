@@ -996,11 +996,25 @@ its directory, bounded by `LIMITS`.
   recorded interpreter or dotagents is gone). The forwarder and its record live in the user's
   harness config directory only; the entry runs `<python> -I <forwarder> <harness> <event>
   <token>`.
-- Sessions: `session_base(environ)` — the environment a hook starts from: what `dotagents
+- `TOKEN_FORM` / `valid_token(token)` — a store token is `user` or `project-` and ten hex digits,
+  checked before it is part of a path; `clean_path(path, user_store)` — a `PATH` without relative
+  entries, any store's or overlay's `bin` or a venv, which is where hook and env-script
+  interpreters (`pwsh`, `node`) are found; `shadowed_with_hooks(scope)` — the user's overlays
+  with a hook that a nearer store's same-named folder hides (they still fire at `pre-env`).
+- Sessions: `KEEP_PROJECT` (the project's own names, `AGENTS_PROJECT_ROOT` and
+  `CLAUDE_PROJECT_DIR`, that `session_base` leaves alone), `session_base(environ)` — the environment a hook starts from: what `dotagents
   launch` recorded in `AGENTS_SESSION_BASE` (each changed name's earlier value, null if unset)
   undone, and the harness's own variables (`CLAUDE_ENV_FILE`, `CLAUDE_CODE_*`, `CODEX_*`)
   dropped; `log_path`, `log_errors(user_store, errors)` and `LOG_LIMIT` — a hook's standard
   error goes to `<user store>/.cache/hooks.log`, never to the harness.
+
+## `dotagents._hook_main`
+
+The fixed entry the hook forwarder runs, in place of the `dotagents` command line: it discovers
+no command and adds no library (discovery reads what the project's `.agents` holds). `main(argv)`
+takes `EVENT --harness H --level user|project --agents-dir DIR --nonce N`, builds the scope
+(:func:`dotagents._hook_dispatch.scope_for`) and prints one JSON object, `{"nonce": N,
+"answer": <text for the harness>}`; the forwarder accepts nothing that does not carry its nonce.
 
 ## `dotagents._hook_dispatch`
 
@@ -1008,6 +1022,10 @@ The program a harness's own hook runs (`dotagents hook`). Nothing a hook printed
 harness: the answer is built from the output that was accepted, and can only deny, ask or
 block.
 
+- `scope_for(level, user_store)` — the scope a hook of `level` is looked for in: `user` has no
+  project store in it (nothing a project holds can shadow a user hook, add commands or
+  libraries, or choose the Python); `dispatch(..., shadow_scope=None)` reports, at session start,
+  the user hooks a project folder of the same name hides (`hook-shadowed`).
 - `MAX_NATIVE`, `tool_kind(harness, name) -> kind` (a tool not placed is `other`, which runs
   every hook of its event), `facts_of(harness, event, native) -> known`, `context_text(parts)`
   (each part inside a marker with a nonce chosen after the hooks ran),

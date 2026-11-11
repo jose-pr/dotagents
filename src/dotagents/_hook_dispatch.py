@@ -225,14 +225,13 @@ def hook_environment(scope: Any, overlay: Any, environ: "dict[str, str]") -> "Op
     from dotagents import _env, _pyvenv
     from dotagents._scope import Scope
 
-    env = _env.overlay_process_env(scope, overlay, base_env=_overlay_hooks.session_base(environ))
-    if env is None:
-        return None
+    base = _overlay_hooks.session_base(environ)
     user_scope = Scope.of(agents_dir=scope.user_root, global_scope=True)
-    venv = _pyvenv.active_venv(user_scope, env)
-    env.pop("AGENTS_PYVENV", None)
-    env["AGENTS_PYTHON"] = str(_pyvenv.venv_python(venv)) if venv is not None else _python()
-    return env
+    # The venv is chosen from the user store before any declaration or env script runs, and the
+    # interpreters those scripts need are found on a PATH with no store's bin in it.
+    return _env.overlay_process_env(
+        scope, overlay, base_env=base, python_scope=user_scope,
+        base_path=_overlay_hooks.clean_path(base.get("PATH"), scope.user_root))
 
 
 def _python() -> str:
@@ -241,8 +240,20 @@ def _python() -> str:
     return sys.executable
 
 
+def scope_for(level: str, user_store: "str | os.PathLike[str]") -> Any:
+    """The scope a hook of ``level`` is looked for in. A user-level hook comes from the user and
+    system stores only: no project store is in the scope, so nothing a project holds can shadow
+    it, add commands or libraries to it, or choose its Python."""
+    from dotagents import _scope
+
+    if level == "user":
+        return _scope.Scope.of(agents_dir=user_store, global_scope=True)
+    return _scope.Scope.of(agents_dir=user_store, project_root=_scope.project_root_default())
+
+
 def dispatch(harness_id: str, event: str, stdin: bytes, scope: Any, level: str,
-             environ: "Optional[dict[str, str]]" = None, started: "Optional[float]" = None) -> "tuple[str, str]":
+             environ: "Optional[dict[str, str]]" = None, started: "Optional[float]" = None,
+             shadow_scope: Any = None) -> "tuple[str, str]":
     """Fire ``event`` of ``harness_id`` for the overlays of ``level``; ``(stdout, stderr)``.
 
     ``started`` is the :func:`time.monotonic` time the process started: everything from there on,
@@ -280,9 +291,13 @@ def dispatch(harness_id: str, event: str, stdin: bytes, scope: Any, level: str,
             cache[overlay.path] = hook_environment(scope, overlay, dict(environ))
         return cache[overlay.path]
 
+    base_path = _overlay_hooks.clean_path(_overlay_hooks.session_base(environ).get("PATH"), user_store)
     fired = _overlay_hooks.fire(event, facts, plans, harness, environment=environment, limits=limits,
-                                user_store=user_store, deadline=deadline)
+                                user_store=user_store, deadline=deadline, base_path=base_path)
     _overlay_hooks.log_errors(user_store, fired.errors)
     if event == "session-start":
         fired.reports.extend(_overlay_hooks.unsupported_reports(plans))
+        if shadow_scope is not None:
+            fired.reports.extend(["hook-shadowed", overlay.name]
+                                 for overlay in _overlay_hooks.shadowed_with_hooks(shadow_scope))
     return answer(harness, event, fired, environ.get("CLAUDE_ENV_FILE"))
