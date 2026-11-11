@@ -136,3 +136,20 @@ def test_repo_gitignore_has_what_the_template_check_requires():
     text = (REPO / ".gitignore").read_text(encoding="utf-8")
     for needle in ("\n.agents\n", "*.local.*", "CLAUDE*", ".claude"):
         assert needle in text, needle
+
+
+def test_an_overlay_md_overlay_is_found_and_its_manifest_checked(tmp_path):
+    """An overlays dir may hold only OVERLAY.md overlays; the check reads their front matter."""
+    ov = tmp_path / "overlays"
+    good = ov / "good"
+    good.mkdir(parents=True)
+    (good / "OVERLAY.md").write_text("---\nrules:\n  - rules/OK.md\n---\nContext.\n", encoding="utf-8")
+    (good / "rules").mkdir()
+    (good / "rules" / "OK.md").write_text("- **Rule**: text\n", encoding="utf-8")
+    bad = ov / "bad"
+    bad.mkdir()
+    (bad / "OVERLAY.md").write_text("---\nname: &keep bad\n---\n", encoding="utf-8")
+    proc = _audit("--root", str(REPO), "--overlays", str(ov))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "manifests of 2 overlays" in proc.stdout
+    assert "overlays/bad: OVERLAY.md:" in proc.stdout and "overlays/good" not in proc.stdout

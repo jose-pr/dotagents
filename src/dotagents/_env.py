@@ -1658,7 +1658,8 @@ def env_cache_key(scope: Scope, base_env: "dict[str, str]", *parts: str) -> str:
 
     items += ["registry %s %s" % (path, _stat_sig(path)) for path in registry_files(*scope.stores)]
     for overlay in scope.installed_overlays:
-        items.append("manifest %s %s" % (overlay.manifest_path, _stat_sig(overlay.manifest_path)))
+        for manifest in overlay.manifest_paths:
+            items.append("manifest %s %s" % (manifest, _stat_sig(manifest)))
         for rel in ("bin", "lib"):
             items.append("default %s %s" % (overlay.path / rel, _stat_sig(overlay.path / rel)))
         items.append("record %s %s" % (overlay.install_record_path, _stat_sig(overlay.install_record_path)))

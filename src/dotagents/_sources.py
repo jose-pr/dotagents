@@ -714,7 +714,7 @@ class RegistryRepo(object):
         target = locate(spec, self.cache)
         if not target.is_dir():
             raise SourceError("error: registry %s: %r resolves to %s, not a directory" % (self.origin, key, spec.display()))
-        if not (target / Overlay.MANIFEST_NAME).is_file():
+        if not any((target / name).is_file() for name in Overlay.MANIFEST_NAMES):
             # A directory of overlays named as an entry: the one called `name`
             # (any spelling that normalizes to it, as a DirRepo would find it).
             found = DirRepo(target)._lookup(name)

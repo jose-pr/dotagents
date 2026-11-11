@@ -73,39 +73,71 @@ DEFAULT_SETUP_TIMEOUT = 300
 
 
 # --------------------------------------------------------------------------- #
-# Reading the manifest: ``overlay.cfg`` through :mod:`dotagents._aos`.
+# Reading the manifest: ``OVERLAY.md``'s front matter or ``overlay.cfg``,
+# through :mod:`coqui_aos`.
 # --------------------------------------------------------------------------- #
 
-#: ``str(path) -> (stat signature, document, problems)``: a manifest is read
-#: once per change, however often a command asks for it.
-_MANIFESTS: "dict[str, tuple[tuple[int, int], dict[str, Any], list[str]]]" = {}
+#: The overlay's manifest files: the standard form, then the one tools write.
+MANIFEST_NAMES = ("OVERLAY.md", "overlay.cfg")
+
+#: ``str(directory) -> (stat signature, document, problems, ignored)``: a
+#: manifest is read once per change, however often a command asks for it.
+_MANIFESTS: "dict[str, tuple[tuple, dict[str, Any], list[str], list[str]]]" = {}
 
 
-def load_manifest(path: Path) -> "tuple[dict[str, Any], list[str]]":
-    """``(document, problems)`` of the manifest at ``path``: the validated
-    data model, or ``{}`` with the reasons it was refused. An absent file is
-    ``({}, [])``: an overlay need not have a manifest."""
-    try:
-        st = os.stat(str(path))
-    except OSError:
-        return {}, []
-    key = str(path)
-    sig = (st.st_mtime_ns, st.st_size)
+def _stat_signature(directory: Path, names: "Iterable[str]") -> "tuple":
+    out = []
+    for name in names:
+        try:
+            st = os.stat(str(directory / name))
+            out.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+def read_manifest_file(directory: Path) -> "tuple[dict[str, Any], list[str], list[str]]":
+    """``(document, problems, ignored)`` of the overlay at ``directory``: its
+    manifest as ``coqui_aos.read_overlay`` reads it (``OVERLAY.md``'s front
+    matter or ``overlay.cfg``; both, a manifest that does not read and an
+    ``OVERLAY.md`` whose body is context but is too large or not UTF-8 are
+    refused), the validated data model or ``{}`` with the reasons it was
+    refused, and the files not used because the body of ``OVERLAY.md`` is the
+    context (``CONTEXT.md``). No manifest is ``({}, [], [])``: an overlay need
+    not have one."""
+    names = MANIFEST_NAMES + ("CONTEXT.md",)
+    sig = _stat_signature(directory, names)
+    key = str(directory)
     cached = _MANIFESTS.get(key)
     if cached is not None and cached[0] == sig:
-        return cached[1], cached[2]
-    try:
-        with open(key, "rb") as fh:
-            data = fh.read()
-        doc = coqui_aos.read_document(data)
-        problems = ["%s at %s" % (code, at or "/") for code, at in coqui_aos.validate(doc)]
-    except coqui_aos.Error as exc:
-        doc, problems = {}, ["cannot be read (%s)" % exc]
-    except OSError as exc:
-        doc, problems = {}, ["cannot be read (%s)" % exc]
+        return cached[1], cached[2], cached[3]
+    doc: "dict[str, Any]" = {}
+    ignored: "list[str]" = []
+    present = [name for name, found in zip(names, sig) if found is not None]
+    problems: "list[str]" = []
+    if any(name in present for name in MANIFEST_NAMES):
+        tree = coqui_aos.OverlayTree(present)
+        try:
+            for name in present:
+                if name != "CONTEXT.md":
+                    tree.with_bytes(name, (directory / name).read_bytes())
+            read = coqui_aos.read_overlay(tree)
+            doc = read.manifest
+            problems = ["%s at %s" % (issue.code, issue.at or "/") for issue in coqui_aos.validate(doc)]
+            ignored = list(read.context_ignored)
+        except coqui_aos.Error as exc:
+            problems = ["cannot be read (%s)" % exc]
+        except OSError as exc:
+            problems = ["cannot be read (%s)" % exc]
     if problems:
-        doc = {}
-    _MANIFESTS[key] = (sig, doc, problems)
+        doc, ignored = {}, []
+    _MANIFESTS[key] = (sig, doc, problems, ignored)
+    return doc, problems, ignored
+
+
+def load_manifest(directory: Path) -> "tuple[dict[str, Any], list[str]]":
+    """``(document, problems)`` of the overlay at ``directory`` (:func:`read_manifest_file`)."""
+    doc, problems, _ignored = read_manifest_file(directory)
     return doc, problems
 
 
@@ -197,8 +229,9 @@ class Overlay:
         + ["lpt%d" % i for i in range(1, 10)]
     )
 
-    #: The optional manifest an overlay may carry at its root.
+    #: The manifest tools write; ``OVERLAY.md`` is the standard form (:data:`MANIFEST_NAMES`).
     MANIFEST_NAME = "overlay.cfg"
+    MANIFEST_NAMES = MANIFEST_NAMES
     #: Not a manifest: an overlay that has only this gets a warning naming it.
     OLD_MANIFEST_NAME = "overlay.toml"
 
@@ -305,7 +338,16 @@ class Overlay:
 
     @property
     def manifest_path(self) -> Path:
-        return self.path / self.MANIFEST_NAME
+        """``OVERLAY.md`` when the overlay has one, else where ``overlay.cfg``
+        is or would be."""
+        standard = self.path / self.MANIFEST_NAMES[0]
+        return standard if standard.is_file() else self.path / self.MANIFEST_NAME
+
+    @property
+    def manifest_paths(self) -> "list[Path]":
+        """Every file a manifest can be in, present or not: what a cache of the
+        manifest depends on."""
+        return [self.path / name for name in self.MANIFEST_NAMES]
 
     # -- discovery ------------------------------------------------------------
 
@@ -375,18 +417,27 @@ class Overlay:
         """The manifest's data model, validated (``{}`` when there is none, or
         when it cannot be read or validated: :meth:`manifest_problems` says why,
         and a warning names it once)."""
-        doc, problems = load_manifest(self.manifest_path)
+        doc, problems, ignored = read_manifest_file(self.path)
         if problems:
-            _warn_once("overlay %s: %s is ignored, none of its declarations apply: %s",
-                       self.name, self.manifest_path, "; ".join(problems))
-        elif not doc and not self.manifest_path.exists() and (self.path / self.OLD_MANIFEST_NAME).is_file():
-            _warn_once("overlay %s: %s is not read; its manifest is %s (AOS)",
+            _warn_once("overlay %s: its manifest is ignored, none of its declarations apply: %s",
+                       self.name, "; ".join(problems))
+        elif ignored:
+            _warn_once("overlay %s: %s is ignored: the body of OVERLAY.md is its context",
+                       self.name, ", ".join(ignored))
+        elif not doc and not any(path.exists() for path in self.manifest_paths) and (
+                self.path / self.OLD_MANIFEST_NAME).is_file():
+            _warn_once("overlay %s: %s is not read; its manifest is OVERLAY.md or %s (AOS)",
                        self.name, self.OLD_MANIFEST_NAME, self.MANIFEST_NAME)
         return doc
 
     def manifest_problems(self) -> "list[str]":
         """Why the manifest was refused; empty when it is valid or absent."""
-        return load_manifest(self.manifest_path)[1]
+        return load_manifest(self.path)[1]
+
+    def context_ignored(self) -> "list[str]":
+        """The files its context does not use because the body of
+        ``OVERLAY.md`` is the context: ``CONTEXT.md`` beside such a body."""
+        return list(read_manifest_file(self.path)[2])
 
     def read_manifest(self) -> "dict[str, Any]":
         """The manifest's core fields as dotagents uses them: name (the
@@ -430,13 +481,24 @@ class Overlay:
         return coqui_aos.rules_of(self.document(), coqui_aos.OverlayTree(self.member_paths()))
 
     def context_files(self, harness_id: "Optional[str]" = None) -> "list[str]":
-        """The files the overlay adds to an agent's initial context: the root
-        ``CONTEXT.md`` (unless ``[defaults] context = false``), then
-        ``context``, then ``harness.<harness_id>.context``."""
+        """The files the overlay adds to an agent's initial context: the body
+        of ``OVERLAY.md`` if it has one (named ``OVERLAY.md``; its front matter
+        is not context), else the root ``CONTEXT.md`` (unless ``[defaults]
+        context = false``), then ``context``, then
+        ``harness.<harness_id>.context``. While a body is context, a
+        ``CONTEXT.md`` is none, wherever it is named. A refused manifest gives
+        no body: what could not be read is not delivered."""
         doc = self.document()
-        out = coqui_aos.context_of(doc, coqui_aos.OverlayTree(self.member_paths()))
+        tree = coqui_aos.OverlayTree(self.member_paths())
+        standard = self.path / self.MANIFEST_NAMES[0]
+        if not self.manifest_problems() and "OVERLAY.md" in tree:
+            try:
+                tree.with_bytes("OVERLAY.md", standard.read_bytes())
+            except OSError:
+                pass
+        out = coqui_aos.context_of(doc, tree)
         if harness_id:
-            out += list(doc.get("harness", {}).get(harness_id, {}).get("context", []))
+            out += coqui_aos.harness_context_of(doc, harness_id, tree)
         return out
 
     def harness_hints(self, harness_id: str) -> "dict[str, Any]":

@@ -38,7 +38,7 @@ def _signature(overlay: Any) -> "tuple":
     install) and the manifest. A copy edited by hand within one process is
     caught by the next process."""
     out = []
-    for path in (overlay.install_record_path, overlay.manifest_path):
+    for path in (overlay.install_record_path, *overlay.manifest_paths):
         try:
             st = os.stat(str(path))
             out.append((st.st_mtime_ns, st.st_size))

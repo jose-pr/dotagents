@@ -402,7 +402,7 @@ def _check_source(scope, name: str, src: Path, cache, logger) -> "tuple[Optional
     if not problems:
         problems = ["%s at %s" % (code, at) for code, at in coqui_aos.validate(overlay.document(), coqui_aos.OverlayTree(members))]
     if problems:
-        raise SystemExit("error: overlay %s: %s is invalid: %s" % (name, Overlay.MANIFEST_NAME, "; ".join(problems)))
+        raise SystemExit("error: overlay %s: its manifest is invalid: %s" % (name, "; ".join(problems)))
     commit = None
     checkout = _git_checkout(src, cache)
     if checkout is not None:
@@ -1197,6 +1197,7 @@ class OverlayShow(_RepoArgs):
             "routing": manifest["routing"],
             "rules": overlay.rules(),
             "context": overlay.context_files(),
+            "context_ignored": overlay.context_ignored(),
             "env": sorted(doc.get("env", {})),
             "env_files": [e if isinstance(e, str) else e["path"] for e in doc.get("env_files", [])],
             "paths": ["%s %s %s" % (e["variable"], e.get("position", "prepend"), e["path"])
@@ -1234,7 +1235,9 @@ class OverlayShow(_RepoArgs):
             ),
             "  rules files: %s" % listed(info["rules"]),
             "  routing:     %d line(s)" % len(info["routing"]),
-            "  context:     %s" % listed(info["context"]),
+            "  context:     %s%s" % (listed(info["context"]),
+                                      "  (%s ignored: the body of OVERLAY.md is the context)"
+                                      % ", ".join(info["context_ignored"]) if info["context_ignored"] else ""),
             "  env:         %s" % listed(info["env"]),
             "  env files:   %s" % listed(info["env_files"]),
             "  paths:       %s" % listed(info["paths"]),
