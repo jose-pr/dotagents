@@ -204,3 +204,54 @@ def test_dotagents_runs_them_once_allowed_and_not_before(tmp_path, monkeypatch):
     turn = json.dumps({"session_id": "s", "cwd": str(project / "src")}).encode()
     _hook_dispatch.dispatch("claude-code", "turn-end", turn, scope, "user", environ)
     assert "sync-project %s" % project in log.read_text(encoding="utf-8")
+
+
+@needs_sh
+def test_under_codex_with_an_agent_chosen_cwd_nothing_is_synced_end_to_end(tmp_path):
+    """The real forwarder and entry, the Codex harness, no project named by the environment, and a
+    working directory inside another project that has its own .agents: it does nothing."""
+    pytest.importorskip("dotagents")
+    from dotagents import _overlay_hooks
+    from dotagents._agents import CodexAgent
+    from dotagents._overlays import Overlay
+
+    store = tmp_path / "store"
+    shutil.copytree(str(ROOT), str(store / "overlays" / "private-sync"),
+                    ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    (store / "overlays" / "private-sync" / "lib" / "python" / "_link.py").write_text(LINK_STUB, encoding="utf-8")
+    (store / "AGENTS.md").write_text("<!-- dotagents:begin -->\n# BASE\n<!-- dotagents:end -->\n", encoding="utf-8")
+    (store / ".git").mkdir()
+    live = Overlay(store / "overlays" / "private-sync", store)
+    _overlay_hooks.allow(store, "private-sync", live.tree_digest(), store)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls.log"
+    _stub(bin_dir, "git", log)
+    other = tmp_path / "somebody-elses-project"
+    (other / ".agents").mkdir(parents=True)
+    (other / "src").mkdir()
+    agent = CodexAgent()
+    agent.scope_level = "user"
+    codex_home = tmp_path / "codex"
+    os.environ["AGENTS_HOME"] = str(store)
+    try:
+        agent.wire_overlay_hooks(store, dry_run=False, logger=None, config_root=codex_home)
+    finally:
+        del os.environ["AGENTS_HOME"]
+    forwarder = codex_home / "hooks" / "overlay_hook.py"
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PROJECT_DIR", "AGENTS_PROJECT_ROOT")}
+    env.update(PATH=str(bin_dir) + os.pathsep + os.environ["PATH"], AGENTS_HOME=str(store), LINK_LOG=str(log))
+    payload = json.dumps({"session_id": "s", "cwd": str(other / "src")}).encode()
+
+    def stop(**extra):
+        done = subprocess.run([sys.executable, "-I", str(forwarder), "codex", "turn-end", "user"], input=payload,
+                              env=dict(env, **extra), capture_output=True, cwd=str(other / "src"), timeout=120)
+        assert done.returncode == 0, done.stderr
+        return log.read_text(encoding="utf-8") if log.exists() else ""
+
+    assert "sync-project" not in stop(), "synced a project nobody named"
+    assert str(other) not in (log.read_text(encoding="utf-8") if log.exists() else "")
+    # The control: told the project, the same entry syncs it.
+    project = tmp_path / "named-project"
+    project.mkdir()
+    assert "sync-project %s" % project in stop(AGENTS_PROJECT_ROOT=str(project))
