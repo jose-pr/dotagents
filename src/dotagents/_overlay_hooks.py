@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from dotagents import _aos
+from dotagents._overlays import Overlay
 
 #: The consumer's bounds on every hook (:data:`dotagents._aos.DEFAULT_HOOK_LIMITS`).
 LIMITS = dict(_aos.DEFAULT_HOOK_LIMITS)
@@ -252,54 +253,101 @@ def overlay_plan(overlay: Any, harness: Harness, user_store: "str | os.PathLike[
     """The :func:`dotagents._aos.hook_plan` of ``overlay`` here, on ``harness``, plus its digest.
 
     Hooks are on only while the overlay's tree digest is the one the user allowed; an overlay
-    whose tree has no digest has none, so none is allowed. With ``keep_tree`` the plan holds
-    ``tree``, the bytes the digest covers, for :func:`snapshot`."""
+    whose tree has no digest has none, so none is allowed. With ``keep_tree`` the bytes the digest
+    covers are written to a snapshot first (:func:`snapshot`) and the plan is made from the
+    snapshot's manifest, not from a second reading of the live one: ``plan["snap"]`` is the
+    :class:`SnapshotOverlay` everything that runs (env scripts, paths, hooks) is resolved against."""
     from dotagents import _activate
 
     digest, files = read_tree(overlay, keep_tree)
-    plan = _aos.hook_plan(overlay.document(), {
+    doc, members, snap = None, None, None
+    if keep_tree and digest is not None:
+        snap = SnapshotOverlay(snapshot(user_store, overlay, digest, files), overlay)
+        doc, members = snap.document(), _activate.files(snap)
+    plan = _aos.hook_plan(overlay.document() if doc is None else doc, {
         "os": _aos.current_os(), "interpreters": sorted(_activate.interpreters()),
-        "files": _activate.files(overlay), "identity": overlay.name, "digest": digest,
-        "allowed": allowed_digest(user_store, overlay.name, overlay.store),
+        "files": _activate.files(overlay) if members is None else members, "identity": overlay.name,
+        "digest": digest, "allowed": allowed_digest(user_store, overlay.name, overlay.store),
         "fires": harness.fires, "partial": partial_events(harness),
         "limits": {"timeout": limits_for(user_store)["timeout"]},
     })
     plan["digest"] = digest
     plan["identity"] = overlay.name
-    if keep_tree:
-        plan["tree"] = files
+    if snap is not None:
+        plan["snap"] = snap
     return plan
 
 
+class SnapshotOverlay(Overlay):
+    """An overlay read from its snapshot: its manifest, files, paths and scripts are the hashed
+    bytes. Only what must outlive a snapshot -- its state directory, its install and preparation
+    records -- is the live overlay's."""
+
+    __slots__ = ("live",)
+
+    def __init__(self, path: "str | os.PathLike[str]", live: Any):
+        super().__init__(path, live.store)
+        self.live = live
+
+    def state_dir(self, os_name: "Optional[str]" = None) -> Path:
+        return self.live.state_dir(os_name)
+
+    def preparation_path(self, os_name: "Optional[str]" = None) -> Path:
+        return self.live.preparation_path(os_name)
+
+    @property
+    def install_record_path(self) -> Path:
+        return self.live.install_record_path
+
+
+#: A snapshot nobody has used for this long is removed; one of another digest may still be in use
+#: by a session that started before an update, so nothing is removed because it is not the latest.
+SNAPSHOT_MAX_AGE = 7 * 24 * 3600
+
+
 def snapshot(user_store: "str | os.PathLike[str]", overlay: Any, digest: str, files: "dict[str, bytes]") -> Path:
-    """The copy of an overlay a hook runs from: the bytes whose digest the user allowed, in the user
-    store (outside every project), made once per digest and never changed. What runs is what was
-    hashed, whatever happens to the overlay's own files afterwards. An older digest of the same
-    overlay is dropped."""
+    """The copy of an overlay a hook runs from: exactly the bytes whose digest was computed, in the
+    user store (outside every project), one directory per digest. An existing copy is used only
+    after its own contents are hashed again and found to be that digest; otherwise it is made
+    again. What runs is what was hashed, whatever happens to the overlay's own files afterwards.
+    Copies of other digests are left for the age-based sweep: a session started before an update
+    still runs from its own."""
     where = hashlib.sha256(os.path.normcase(os.path.abspath(str(overlay.store or user_store))).encode()).hexdigest()[:8]
-    parent = Path(user_store) / ".cache" / "hook-snapshots" / ("%s-%s" % (overlay.normalized_name, where))
-    target = parent / digest.split(":", 1)[-1][:32]
+    base = Path(user_store) / ".cache" / "hook-snapshots" / ("%s-%s" % (where, overlay.normalized_name))
+    holder = base / digest.split(":", 1)[-1][:32]
+    target = holder / overlay.path.name
     if target.is_dir():
-        return target
-    parent.mkdir(parents=True, exist_ok=True)
-    staging = parent / (".new-%d-%s" % (os.getpid(), _token()))
+        try:
+            if _aos.same_digest(_aos.tree_digest(target), digest):
+                os.utime(str(holder), None)
+                return target
+        except (_aos.DigestError, OSError, ValueError):
+            pass
+        shutil.rmtree(str(holder), ignore_errors=True)
+    base.mkdir(parents=True, exist_ok=True)
+    staging = base / (".new-%d-%s" % (os.getpid(), _token()))
     try:
+        root = staging / overlay.path.name
+        root.mkdir(parents=True)
         for rel, data in files.items():
-            path = staging.joinpath(*rel.split("/"))
+            path = root.joinpath(*rel.split("/"))
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(str(path), "wb") as fh:
                 fh.write(data)
-        staging.mkdir(parents=True, exist_ok=True)
         try:
-            os.replace(str(staging), str(target))
+            os.replace(str(staging), str(holder))
         except OSError:
             if not target.is_dir():
                 raise
     finally:
         shutil.rmtree(str(staging), ignore_errors=True)
-    for other in parent.iterdir():
-        if other != target and not other.name.startswith(".new-"):
-            shutil.rmtree(str(other), ignore_errors=True)
+    now = time.time()
+    for other in base.iterdir():
+        try:
+            if other != holder and now - other.stat().st_mtime > SNAPSHOT_MAX_AGE:
+                shutil.rmtree(str(other), ignore_errors=True)
+        except OSError:
+            pass
     return target
 
 
@@ -481,6 +529,12 @@ def describe(report: "Iterable[str]") -> str:
 # --------------------------------------------------------------------------- #
 
 
+#: Runs a Python hook as a script would run, under ``-I``: argv is ``[libs, script, event]``.
+PYTHON_BOOT = ("import os, runpy, sys; libs, script = sys.argv[1], sys.argv[2]; sys.argv = sys.argv[2:]; "
+               "sys.path[:0] = [os.path.dirname(script)] + [p for p in libs.split(os.pathsep) if p]; "
+               "runpy.run_path(script, run_name='__main__')")
+
+
 class Subject(object):
     """The overlay and entry one hook run is for."""
 
@@ -519,7 +573,8 @@ def execute(subject: Subject, event: str, payload: bytes, env: "dict[str, str]",
         return run
     try:
         argv = _run.interpreter_command(entry["interpreter"], python=env.get("AGENTS_PYTHON") or _python(),
-                                        base_path=os.environ.get("PATH") if base_path is None else base_path)
+                                        base_path=os.environ.get("PATH") if base_path is None else base_path,
+                                        trusted=base_path is not None)
     except _run.InterpreterError:
         run["not_run"] = True
         return run
@@ -534,7 +589,13 @@ def execute(subject: Subject, event: str, payload: bytes, env: "dict[str, str]",
             run["timed_out"] = True
             return run
         timeout = min(timeout, remaining)
-    done = _run.run_hook(argv + [script, event], cwd=root, env=child, timeout=timeout, stdin=payload,
+    if entry["interpreter"] == "python":
+        # Isolated (no user site, no PYTHON* variables, no working directory on the path), with the
+        # script's directory and the libraries the environment names put on the path explicitly.
+        command = argv + ["-I", "-c", PYTHON_BOOT, child.get("PYTHONPATH", ""), script, event]
+    else:
+        command = argv + [script, event]
+    done = _run.run_hook(command, cwd=root, env=child, timeout=timeout, stdin=payload,
                          max_output=limits["max_output"], max_stderr=limits["max_stderr"])
     run.update(stdout_bytes=done["stdout"], timed_out=done["timed_out"], too_large=done["too_large"],
                seconds=done["seconds"], **{"exit": done["exit"]})
@@ -622,21 +683,17 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
                                  "start": lambda: {"not_run": True}})
                     reports.append(["hook-not-allowed", overlay.name])
             continue
-        snap = None
-        if user_store is not None and plan.get("tree") is not None and plan["digest"]:
-            snap = snapshot(user_store, overlay, plan["digest"], plan["tree"])
+        snap_overlay = plan.get("snap")
+        snap = snap_overlay.path if snap_overlay is not None else None
         for entry in entries:
             if matching is not None and not _aos.hook_matches(event, entry["match"], matching):
                 continue
             subject = Subject(overlay, entry)
 
-            def start(subject=subject, snap=snap) -> "dict[str, Any]":
-                env = environment(subject.overlay)
+            def start(subject=subject, snap=snap, snap_overlay=snap_overlay) -> "dict[str, Any]":
+                env = environment(snap_overlay if snap_overlay is not None else subject.overlay)
                 if env is None:
                     return {"not_run": True}
-                if snap is not None:
-                    env = dict(env, AOS_OVERLAY_ROOT=str(snap))
-                    env[subject.overlay.root_var] = str(snap)
                 done = execute(subject, event, payload, env, limits=limits, root=snap, deadline=deadline,
                                base_path=base_path)
                 text = done.pop("stderr", b"")
@@ -661,19 +718,56 @@ _HARNESS_INTERNAL_PREFIXES = ("CLAUDE_CODE_", "CODEX_")
 KEEP_PROJECT = ("AGENTS_PROJECT_ROOT", "CLAUDE_PROJECT_DIR")
 
 
-def clean_path(path: "Optional[str]", user_store: "str | os.PathLike[str]") -> str:
+def _shown(path: "str | os.PathLike[str]") -> str:
+    return os.path.normcase(os.path.abspath(str(path))).replace("\\", "/").rstrip("/")
+
+
+def project_roots(environ: "dict[str, str]", cwd: "Optional[str]" = None) -> "list[str]":
+    """Where the agent works: what the harness calls the project, the directory holding the
+    `.agents` or `.git` found walking up from ``cwd`` (default: the working directory), and ``cwd``
+    itself. Anything below these is the agent's to write."""
+    roots = [environ[name] for name in KEEP_PROJECT if environ.get(name)]
+    here = os.path.abspath(cwd or os.getcwd())
+    roots.append(here)
+    walk = here
+    while True:
+        if os.path.exists(os.path.join(walk, ".agents")) or os.path.exists(os.path.join(walk, ".git")):
+            roots.append(walk)
+            break
+        parent = os.path.dirname(walk)
+        if parent == walk:
+            break
+        walk = parent
+    return roots
+
+
+def clean_path(path: "Optional[str]", user_store: "str | os.PathLike[str]",
+               roots: "Iterable[str]" = ()) -> str:
     """``path`` with the entries removed that the agent can put an interpreter in: relative ones
-    (the working directory), any store's ``bin`` (``<project>/.agents/bin`` included), an
-    overlay's ``bin`` and a venv's. Interpreters of hooks and env scripts (``pwsh``, ``node``) are
-    found on this, never on the PATH a project's ``.agents/bin`` leads."""
-    drop = os.path.normcase(os.path.abspath(str(Path(user_store) / "bin"))).replace("\\", "/")
+    (the working directory), anything below the user store or a project root (``roots``: its
+    ``.venv/Scripts``, ``node_modules/.bin``, ``.agents/bin``), any store's or overlay's ``bin``
+    and a venv's. A root that is the home directory, a drive's root or holds the user store is not
+    used (it holds the user's own tools). Interpreters of hooks and env scripts (``pwsh``, ``node``) are found on
+    this, never on the PATH a project's ``.agents/bin`` leads."""
+    home = _shown(Path.home())
+    store = _shown(user_store)
+    barred = [store]
+    for root in roots:
+        shown = _shown(root)
+        # Not the home directory, a drive's root, or anything holding the user store: those hold the
+        # user's own tools, and the store is barred by itself.
+        if (shown and shown != home and shown.count("/") >= 2 and not shown.endswith(":")
+                and not (store + "/").startswith(shown + "/")):
+            barred.append(shown)
     keep = []
     for entry in (path or "").split(os.pathsep):
         if not entry or not os.path.isabs(entry):
             continue
-        shown = os.path.normcase(entry).replace("\\", "/").rstrip("/")
-        if (shown == drop or shown.endswith("/.agents/bin") or "/.pyvenv/" in shown + "/"
-                or ("/overlays/" in shown and shown.endswith("/bin"))):
+        shown = _shown(entry)
+        if any(shown == bar or shown.startswith(bar + "/") for bar in barred):
+            continue
+        if shown.endswith("/.agents/bin") or "/.pyvenv/" in shown + "/" or (
+                "/overlays/" in shown and shown.endswith("/bin")):
             continue
         keep.append(entry)
     return os.pathsep.join(keep)
@@ -808,7 +902,8 @@ def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environmen
     from dotagents import _activate
 
     deadline = time.monotonic() + (deadline_for(user_store) if user_store is not None else DEFAULT_DEADLINE) - 5
-    base_path = clean_path(session_base(base).get("PATH"), user_store) if user_store is not None else None
+    base_path = (clean_path(session_base(base).get("PATH"), user_store, project_roots(session_base(base), cwd))
+                 if user_store is not None else None)
     payload = json.dumps(_aos.hook_payload("pre-env", {"harness": harness.id or NO_HARNESS,
                                                        "cwd": os.path.abspath(cwd or os.getcwd())}),
                          ensure_ascii=False).encode("utf-8")
@@ -820,9 +915,8 @@ def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environmen
             continue
         entry = entries[0]
         env = session_base(base)
-        snap = None
-        if user_store is not None and plan.get("tree") is not None and plan["digest"]:
-            snap = snapshot(user_store, overlay, plan["digest"], plan["tree"])
+        snap = plan["snap"].path if plan.get("snap") is not None else None
+        if snap is not None:
             env[overlay.root_var] = str(snap)
         env["AOS_OVERLAY_ROOT"] = str(snap) if snap is not None else os.path.abspath(str(overlay.path))
         env["AOS_OVERLAY_NAME"] = overlay.normalized_name

@@ -243,23 +243,21 @@ def test_empty_context_adds_no_flag(launch_mod, monkeypatch, tmp_path):
     assert "AGENTS_CONTEXT_FILE" not in env
 
 
-def test_program_is_resolved_on_the_exported_path(launch_mod, monkeypatch, tmp_path):
-    """A harness an overlay's / a scope's bin/ provides is found even when the
-    caller's PATH does not have it: the lookup runs AFTER the env is applied."""
+def test_a_program_only_the_scopes_bin_provides_is_not_found(launch_mod, monkeypatch, tmp_path):
+    """The lookup used to run after the env was applied, on a PATH that leads with the project's
+    `.agents/bin`: a harness the project planted there ran with the user's access. It is now found
+    on the PATH the shell had, less every place the agent can write."""
     project_bin = tmp_path / "project" / ".agents" / "bin"
     project_bin.mkdir(parents=True)
-    program = _program(project_bin.parent, name="scoped-harness")
+    _program(project_bin.parent, name="scoped-harness")
     empty = tmp_path / "empty"
     empty.mkdir()
     monkeypatch.setenv("PATH", str(empty))
     _context_is(monkeypatch, "")
     calls = _capture_spawn(monkeypatch, launch_mod)
-
-    _run(launch_mod, agent="claude", command="scoped-harness")
-
-    (argv, env), = calls
-    assert Path(argv[0]).resolve() == program.resolve()
-    assert str(project_bin) in env["PATH"].split(os.pathsep)
+    with pytest.raises(SystemExit, match="not found on PATH"):
+        _run(launch_mod, agent="claude", command="scoped-harness")
+    assert calls == []
 
 
 def test_default_agent_is_the_active_one(launch_mod, monkeypatch, tmp_path):
@@ -397,3 +395,29 @@ def test_launch_records_what_the_session_changed_so_a_hook_can_start_from_the_ba
     started_from = _overlay_hooks.session_base(env)
     assert "SECRET_TOKEN" not in started_from and started_from["KEEP"] == "user"
     assert "AGENTS_SESSION_BASE" not in started_from
+
+
+def test_the_harness_is_not_resolved_on_a_path_that_leads_with_the_projects_bin(launch_mod, monkeypatch, tmp_path):
+    planted = tmp_path / "project" / ".agents" / "bin"
+    planted.mkdir(parents=True)
+    name = "fake-harness-planted"
+    if os.name == "nt":
+        (planted / (name + ".cmd")).write_text("@echo off\r\n")
+        (planted / (name + ".exe")).write_text("x")
+    else:
+        (planted / name).write_text("#!/bin/sh\n")
+        (planted / name).chmod(0o755)
+    _context_is(monkeypatch, "")
+    calls = _capture_spawn(monkeypatch, launch_mod)
+    with pytest.raises(SystemExit, match="not found on PATH"):
+        _run(launch_mod, agent="claude", command=name)
+    assert calls == [], "the program the project planted was started"
+
+
+def test_a_harness_on_the_users_own_path_is_still_found(launch_mod, monkeypatch, tmp_path):
+    program = _program(tmp_path, name="fake-harness-real")
+    monkeypatch.setenv("PATH", str(program.parent) + os.pathsep + os.environ["PATH"])
+    _context_is(monkeypatch, "")
+    calls = _capture_spawn(monkeypatch, launch_mod)
+    _run(launch_mod, agent="claude", command="fake-harness-real")
+    assert len(calls) == 1

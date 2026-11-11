@@ -22,19 +22,40 @@ class InterpreterError(Exception):
     """An interpreter dotagents does not support, or cannot find."""
 
 
+def which_in(name: str, path: "Optional[str]") -> "Optional[str]":
+    """``name`` as a program on the absolute directories of ``path`` (default: this process's), in
+    order. Unlike :func:`shutil.which` it never looks in the current directory, which Windows
+    searches first and an agent can write, and it skips relative entries of ``path``."""
+    search = os.environ.get("PATH", "") if path is None else path
+    suffixes = [""]
+    if os.name == "nt" and not os.path.splitext(name)[1]:
+        suffixes = [s for s in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";") if s]
+    for directory in search.split(os.pathsep):
+        if not directory or not os.path.isabs(directory):
+            continue
+        for suffix in suffixes:
+            candidate = os.path.join(directory, name + suffix)
+            if os.path.isfile(candidate) and (os.name == "nt" or os.access(candidate, os.X_OK)):
+                return candidate
+    return None
+
+
 def _which(name: str, path: "Optional[str]") -> "Optional[str]":
-    found = shutil.which(name, path=path)
+    found = which_in(name, path)
     if found and os.name == "nt" and os.path.splitext(found)[1].lower() in (".cmd", ".bat"):
         # cmd.exe would parse the arguments again.
         return None
     return found
 
 
-def interpreter_command(name: str, *, python: str, base_path: "Optional[str]") -> "list[str]":
+def interpreter_command(name: str, *, python: str, base_path: "Optional[str]",
+                        trusted: bool = False) -> "list[str]":
     """The argv that comes before ``<script> <args>`` for interpreter ``name``.
     ``python`` is the Python runtime's interpreter; the others are found on
     ``base_path`` (the base environment's ``PATH``, never an overlay's
-    additions). Raises :class:`InterpreterError`."""
+    additions). With ``trusted``, ``base_path`` has had every place an agent can write removed
+    (:func:`dotagents._overlay_hooks.clean_path`), and a Windows bash is looked for only there and in
+    the standard install directories. Raises :class:`InterpreterError`."""
     if name == "python":
         return [python]
     if name == "powershell":
@@ -43,18 +64,18 @@ def interpreter_command(name: str, *, python: str, base_path: "Optional[str]") -
             return [found] + _POWERSHELL_ARGS
     elif name == "bash":
         if os.name == "nt":
-            from dotagents._env import find_bash
+            from dotagents._env import find_bash, find_bash_on
 
-            found = find_bash()
+            found = find_bash_on(base_path) if trusted else find_bash()
         else:
             found = _which("bash", base_path)
         if found:
             return [found]
     elif name == "sh":
         if os.name == "nt":
-            from dotagents._env import find_bash
+            from dotagents._env import find_bash, find_bash_on
 
-            bash = find_bash()
+            bash = find_bash_on(base_path) if trusted else find_bash()
             found = str(Path(bash).with_name("sh.exe")) if bash else None
             found = found if found and os.path.isfile(found) else None
         else:

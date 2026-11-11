@@ -256,7 +256,7 @@ def main(argv):
         level = "user" if token == "user" else "project"
         nonce = secrets.token_hex(16)
         command = [python, "-I", "-c", BOOT, root, event, "--harness", harness, "--level", level,
-                   "--agents-dir", store, "--nonce", nonce]
+                   "--agents-dir", store, "--nonce", nonce] + (["--guarded"] if guarded else [])
         env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")}
         env["AGENTS_HOME"] = store
         done = run_tree(command, payload, max(1.0, deadline - (time.monotonic() - started)), env)

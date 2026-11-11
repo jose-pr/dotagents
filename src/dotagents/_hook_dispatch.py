@@ -231,7 +231,8 @@ def hook_environment(scope: Any, overlay: Any, environ: "dict[str, str]") -> "Op
     # interpreters those scripts need are found on a PATH with no store's bin in it.
     return _env.overlay_process_env(
         scope, overlay, base_env=base, python_scope=user_scope,
-        base_path=_overlay_hooks.clean_path(base.get("PATH"), scope.user_root))
+        base_path=_overlay_hooks.clean_path(base.get("PATH"), scope.user_root,
+                                            _overlay_hooks.project_roots(base)))
 
 
 def _python() -> str:
@@ -253,7 +254,7 @@ def scope_for(level: str, user_store: "str | os.PathLike[str]") -> Any:
 
 def dispatch(harness_id: str, event: str, stdin: bytes, scope: Any, level: str,
              environ: "Optional[dict[str, str]]" = None, started: "Optional[float]" = None,
-             shadow_scope: Any = None) -> "tuple[str, str]":
+             shadow_scope: Any = None, expect_guard: bool = False) -> "tuple[str, str]":
     """Fire ``event`` of ``harness_id`` for the overlays of ``level``; ``(stdout, stderr)``.
 
     ``started`` is the :func:`time.monotonic` time the process started: everything from there on,
@@ -283,6 +284,12 @@ def dispatch(harness_id: str, event: str, stdin: bytes, scope: Any, level: str,
         guarded = any(entry["event"] == event and entry["on_failure"] == "refuse"
                       for _overlay, plan in plans for entry in plan["hooks"])
         return (refusal_answer(harness, event, "an overlay hook guard could not read the event") if guarded else ""), report
+    if expect_guard and not any(entry["event"] == event and entry["on_failure"] == "refuse"
+                                for _overlay, plan in plans for entry in plan["hooks"]):
+        # The forwarder's record says this event has a guard and none was found (the overlay's
+        # hooks were taken out, or the entry is stale): a guard that has gone missing is a failed one.
+        return (refusal_answer(harness, event, "an overlay hook guard is missing"),
+                "hook-failed %s guard-missing" % event)
     facts = facts_of(harness, event, native)
     cache: "dict[str, Optional[dict[str, str]]]" = {}
 
@@ -291,13 +298,18 @@ def dispatch(harness_id: str, event: str, stdin: bytes, scope: Any, level: str,
             cache[overlay.path] = hook_environment(scope, overlay, dict(environ))
         return cache[overlay.path]
 
-    base_path = _overlay_hooks.clean_path(_overlay_hooks.session_base(environ).get("PATH"), user_store)
+    base = _overlay_hooks.session_base(environ)
+    base_path = _overlay_hooks.clean_path(base.get("PATH"), user_store,
+                                          _overlay_hooks.project_roots(base, facts["cwd"]))
     fired = _overlay_hooks.fire(event, facts, plans, harness, environment=environment, limits=limits,
                                 user_store=user_store, deadline=deadline, base_path=base_path)
     _overlay_hooks.log_errors(user_store, fired.errors)
     if event == "session-start":
         fired.reports.extend(_overlay_hooks.unsupported_reports(plans))
         if shadow_scope is not None:
-            fired.reports.extend(["hook-shadowed", overlay.name]
-                                 for overlay in _overlay_hooks.shadowed_with_hooks(shadow_scope))
+            try:
+                fired.reports.extend(["hook-shadowed", overlay.name]
+                                     for overlay in _overlay_hooks.shadowed_with_hooks(shadow_scope))
+            except Exception as exc:  # noqa: BLE001 - the hooks have run; say so and carry on
+                fired.reports.append(["hook-failed", "shadow-check", type(exc).__name__])
     return answer(harness, event, fired, environ.get("CLAUDE_ENV_FILE"))

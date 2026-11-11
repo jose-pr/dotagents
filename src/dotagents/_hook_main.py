@@ -29,8 +29,9 @@ def _option(argv: "list[str]", name: str) -> "Optional[str]":
 
 
 def main(argv: "list[str]") -> int:
-    """``EVENT --harness H --level user|project --agents-dir DIR --nonce N``; exit status 0 only with
-    an answer."""
+    """``EVENT --harness H --level user|project --agents-dir DIR --nonce N [--guarded]``; exit status 0
+    only with an answer. ``--guarded``: the forwarder's record says the event has a guard, and finding
+    none is a failure."""
     started = time.monotonic()
     if not argv:
         return 2
@@ -45,7 +46,8 @@ def main(argv: "list[str]") -> int:
     stdin = sys.stdin.buffer.read(_hook_dispatch.MAX_NATIVE + 1)
     scope = _hook_dispatch.scope_for(level, store)
     shadow = _hook_dispatch.scope_for("project", store) if level == "user" else None
-    out, err = _hook_dispatch.dispatch(harness, event, stdin, scope, level, started=started, shadow_scope=shadow)
+    out, err = _hook_dispatch.dispatch(harness, event, stdin, scope, level, started=started, shadow_scope=shadow,
+                                       expect_guard="--guarded" in argv)
     if err:
         sys.stderr.write(err if err.endswith("\n") else err + "\n")
     sys.stdout.write(json.dumps({"nonce": nonce, "answer": out}))

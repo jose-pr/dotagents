@@ -265,7 +265,16 @@ class Launch(DotAgentsArgs):
                 "error: %s has no command-line harness dotagents knows how to start; "
                 "pass --command <program>" % agent.name
             )
-        exe = _which(program, env.get("PATH"), env.get("PATHEXT"))
+        # A bare name is looked for on the PATH the shell had, less every place the agent can write
+        # (the session's own PATH starts with the project's `.agents/bin`): the harness is the one
+        # program here that must not be one the project planted.
+        search = env.get("PATH")
+        if not os.path.dirname(program):
+            from dotagents import _overlay_hooks
+
+            search = _overlay_hooks.clean_path(before.get("PATH"), scope.user_root,
+                                               _overlay_hooks.project_roots(before))
+        exe = _which(program, search, env.get("PATHEXT"))
         if exe is None:
             if not self.dry_run:
                 raise SystemExit(

@@ -707,6 +707,36 @@ def _is_windows_posix_bash(candidate: str) -> bool:
     return proc.returncode == 0 and ostype.startswith(("msys", "cygwin"))
 
 
+def find_bash_on(path: "Optional[str]") -> "Optional[str]":
+    """A bash that runs POSIX shell on Windows, looked for only beside a ``git`` found on ``path``
+    (which has had every place an agent can write removed), in the standard install directories and
+    as a ``bash`` on ``path`` -- never the working directory, never ``os.environ["PATH"]`` -- and
+    proved MSYS2 / Cygwin before it is used. Not cached: ``path`` is the caller's."""
+    from dotagents import _run
+
+    candidates: "list[str]" = []
+    found = _run.which_in("git", path)
+    if found:
+        here = Path(found).resolve().parent
+        for root in (here.parent, here.parent.parent, here.parent.parent.parent):
+            candidates += [str(root / "bin" / "bash.exe"), str(root / "usr" / "bin" / "bash.exe")]
+    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432")):
+        if base:
+            candidates += [os.path.join(base, "Git", "bin", "bash.exe"), os.path.join(base, "Git", "usr", "bin", "bash.exe")]
+    found = _run.which_in("bash", path)
+    if found:
+        candidates.append(found)
+    seen: "set[str]" = set()
+    for cand in candidates:
+        key = os.path.normcase(cand)
+        if key in seen or not os.path.isfile(cand):
+            continue
+        seen.add(key)
+        if _is_windows_posix_bash(cand):
+            return cand
+    return None
+
+
 def find_bash(logger=None) -> "Optional[str]":
     """The absolute path of a bash that can source a plain env file, or
     ``None``. Resolved once per process against the REAL environment (not the
@@ -1049,7 +1079,7 @@ def _run_env_script(overlay, script: "dict", own: "_aos.Environment", ctx: "_aos
         state.mkdir(parents=True, exist_ok=True)
         env["AOS_OVERLAY_STATE"] = str(state)
     try:
-        argv = _run.interpreter_command(script["interpreter"], python=python,
+        argv = _run.interpreter_command(script["interpreter"], python=python, trusted=base_path is not None,
                                         base_path=os.environ.get("PATH") if base_path is None else base_path)
         status, out = _run.run_step(
             argv + [_aos.resolve_path(ctx.root, script["path"], ctx.windows)] + script["args"],
@@ -1152,6 +1182,9 @@ def overlay_process_env(scope: Scope, overlay, *, base_env: "Optional[dict[str, 
     env.setdefault("AGENTS_PYTHON", sys.executable)
     env.setdefault("PYTHONPYCACHEPREFIX", pycache_prefix(scope.user_root))
     active = {other.normalized_name: other for other in scope.overlays}
+    # The overlay whose process this is stands as it was given -- a caller may give a copy (a hook's
+    # snapshot), and then no variable names its live directory.
+    active[overlay.normalized_name] = overlay
     for other in active.values():
         env[other.root_var] = os.path.abspath(str(other.path))
         state = _activate.state_dir(other)
@@ -1232,7 +1265,12 @@ def _fire_pre_env(overlays, osenv, own_base, scope, weakenings, apply, logger, c
     from dotagents import _overlay_hooks
 
     harness = _overlay_hooks.harness_of(osenv.get("AGENTS_HARNESS"))
-    hidden = _overlay_hooks.shadowed_with_hooks(scope)
+    try:
+        hidden = _overlay_hooks.shadowed_with_hooks(scope)
+    except Exception as exc:  # noqa: BLE001 - reported; the hooks that can be found still fire
+        hidden = []
+        if logger:
+            logger.warning("overlay hooks: hook-failed shadow-check %s", type(exc).__name__)
     plans = _overlay_hooks.planned(_ordered(list(overlays) + hidden), harness, scope.user_root, keep_tree=True)
     if hidden and logger:
         logger.warning("overlay hooks: %s", "; ".join("hook-shadowed %s" % o.name for o in hidden))

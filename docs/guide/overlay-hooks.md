@@ -115,57 +115,97 @@ harness.
 
 ## What a hook cannot reach
 
+This is about the **overlay-hook path**: a hook of an installed overlay, fired through the
+forwarder (or by `pre-env`). It is the hardened path. It is not the whole of dotagents: see
+"Where project code does run" below.
+
 - **Bytes that were not hashed.** At each event the overlay's tree is read once, hashed, compared
   with the allowed digest, and written to a snapshot under `<user store>/.cache/hook-snapshots/`
-  from those same bytes; the hook runs from the snapshot. A file swapped after hashing, a
-  `node_modules` or `__pycache__` (not part of a digest) planted beside the overlay, do not run.
-  The hook's `AOS_OVERLAY_ROOT` and its overlay's `<NAME>_OVERLAY_ROOT` name the snapshot.
+  from those same bytes. The manifest the event is planned from, the env scripts that build the
+  hook's environment, the `lib/` and `bin/` paths they declare, the hook, and its working
+  directory are all the snapshot's; Python hooks run under `-I` with the snapshot's libraries on
+  the path explicitly. A file swapped after hashing, or a `node_modules`, `__pycache__` or
+  `.venv` (not part of a digest) planted beside the overlay, do not run. An existing snapshot is
+  hashed again before it is used, and copies of other digests are removed only when unused for a
+  week (a session started before an update still runs from its own). The overlay's state
+  directory is the live one, so a hook keeps what it wrote.
 - **Anything the project holds.** The hook entries run an absolute interpreter, isolated (`-I`),
   a forwarder script in your user config directory, and a fixed entry of the `dotagents` that
   `init` recorded there (`dotagents._hook_main`). That entry is not the `dotagents` command line:
   it discovers no command and adds no library, so `<project>/.agents/dotagents/cmds/`, a
-  project overlay's `cmds/` and `lib/` and the project's own `_link.py`-like modules never load
-  in it. For a user-level hook its scope has no project store at all, so a project folder cannot
-  shadow a hook of yours (a same-named one is reported, `hook-shadowed`, and your hook still
-  runs), cannot add anything to it, and cannot choose its Python.
+  project overlay's `cmds/` and `lib/` and the project's own modules never load in it. For a
+  user-level hook its scope has no project store at all, so a project folder cannot shadow a hook
+  of yours (a same-named one is reported, `hook-shadowed`, and your hook still runs), cannot add
+  anything to it, and cannot choose its Python.
 - **A stand-in for dotagents.** The forwarder gives the entry a fresh nonce and accepts only an
   answer that carries it back. A program that exits 0 with no output, or answers without the
   nonce, is a failed guard (a refusal) and nothing at all for an event with no guard; an
-  "everything is fine" is never inferred from silence. The forwarder passes the harness only a
-  refusal, context and a message, in the harness's own shape: an `allow`, a rewritten input or
-  anything else it does not recognize is not passed on.
-- **The project's `dotagents` and PATH.** Nothing looks in the working directory or the
-  project's `.agents/bin`. The session-start, PowerShell, Codex and Antigravity entries that
-  dotagents wrote before run the store's `dotagents` (`$AGENTS_HOME/bin`) or nothing: not one found
-  on PATH, which `dotagents launch` starts with the project's own `.agents/bin`.
+  "everything is fine" is never inferred from silence. When the forwarder's record lists a guard
+  for an event and the entry finds none, that is a refusal too. The forwarder passes the harness
+  only a refusal, context and a message, in the harness's own shape.
 - **A project's interpreters.** `pwsh`, `node`, `bash` and the like, for a hook and for the env
-  scripts that build its environment, are found on the `PATH` the session was started from, with
-  every store's `bin`, overlay `bin`, venv and relative entry removed.
+  scripts that build its environment, are found by dotagents itself (never the current
+  directory, which Windows searches first) on the `PATH` the session was started from, less every
+  relative entry, store or overlay `bin`, venv, and anything below the project or the user store
+  (`.venv/Scripts`, `node_modules/.bin`, `.agents/bin`). A Windows bash is looked for only beside
+  a `git` on that PATH and in the standard install directories.
 - **A project's Python.** A hook, and the env scripts that build its environment, run with the
   user store's Python chosen before any declaration runs, never a project's venv, and never the
   session's `AGENTS_PYTHON`.
 - **Other overlays' secrets.** `dotagents launch` records what it changed in
   `AGENTS_SESSION_BASE`; a hook starts from the environment the session was started from, so a
   secret another overlay was granted does not reach it. The harness's own variables
-  (`CLAUDE_ENV_FILE`, `CLAUDE_CODE_*`, `CODEX_*`) are dropped too.
+  (`CLAUDE_ENV_FILE`, `CLAUDE_CODE_*`, `CODEX_*`) are dropped too. The project's own name for
+  itself (`AGENTS_PROJECT_ROOT`, `CLAUDE_PROJECT_DIR`) is kept.
+- **The harness itself.** `dotagents launch` looks for a bare program name (`claude`) on the PATH
+  the shell had, less the same places, not on the session's PATH that starts with the project's
+  `.agents/bin`.
 
-The place `dotagents` is imported from is recorded when the entry is wired (`code_root`: an
-installed package, or a `.pyz`). If that is inside a checkout the agent works in (a `dist/` of a
-repository, say), the agent can write it, and what it writes runs with your access: install
-dotagents where the agent cannot write, then run `dotagents init -g`.
+## Where project code does run
+
+Not everything dotagents does is hardened this way, by design (the owner's decision, recorded in
+dotagents' decisions):
+
+- The session-start, Codex and Antigravity entries that `init` wrote before overlay hooks existed
+  run `dotagents env` and `dotagents context` **in the project**. Those are the full command line:
+  they load `<project>/.agents/dotagents/cmds/`, and `env` runs the env scripts of the overlays
+  active there, outside the harness's sandbox. They run the store's `dotagents` (never one found in
+  the project or on PATH), but what that program loads from the project, it runs.
+- A project overlay's own `env`/env scripts run whenever the environment is built for a session
+  there (`env`, `launch`, `setup`), as any active overlay's do.
+- **Project-level guards are advisory.** A project-level hook entry lives in
+  `<project>/.claude/settings.local.json`, which the agent can write: it can remove the entry. The
+  forwarder and the user-level entries in your own config are not affected, but a guard that only
+  a project overlay declares is only as strong as that file. Put a guard you rely on in an overlay
+  of your user store.
+
+An agent that can write the project's `.agents`, or your user store, can run code through those
+paths; the overlay-hook path is the one that does not depend on either being safe from the agent.
+
+## The limit, generally
+
+All of this assumes the places dotagents runs code *from* are not the agent's to write. A
+deployment gets no barrier where:
+
+- the recorded `code_root` is inside a checkout the agent works in (a `dist/dotagents.pyz` of a
+  repository, a source tree on `PYTHONPATH`), or a venv's `.pth` points dotagents into such a
+  place: what the agent writes there runs with your access. Install dotagents where the agent
+  cannot write, then run `dotagents init -g`;
+- the agent can write your user store (`~/.agents`): it holds the allowances, the snapshots, the
+  settings and the wrappers, so it can allow and run anything.
 
 `--no-prompt` and the harness-session check of `allow-hooks` stop accidents, not an agent: an
 agent can clear its environment (`env -i`) and run the command. What keeps an agent from allowing
 its own hooks is that `allow-hooks` is not an MCP tool and that the allowance is in a store it
-cannot write; where an agent can write your user store, it can allow anything.
+cannot write.
 
-Limits of this: a hook that detaches into a new session (`setsid`) can outlive the tree kill on
+Smaller limits: a hook that detaches into a new session (`setsid`) can outlive the tree kill on
 POSIX; an overlay whose manifest is refused cannot show its guards; a hook can still read what
-its overlay `requires` puts on its paths, live; an entry whose interpreter has been uninstalled
-cannot run to say so (`dotagents overlays hooks` and every `init` check the recorded one); and
-Codex asks you to trust an entry by its hash, which dotagents cannot read: `overlays hooks` says
-the event fires natively once you have trusted it, and a change of the entry text is warned
-about when it is wired.
+its overlay `requires` puts on its paths, live, and the packages an overlay's setup installed; an
+entry whose interpreter has been uninstalled cannot run to say so (`dotagents overlays hooks` and
+every `init` check the recorded one); and Codex asks you to trust an entry by its hash, which
+dotagents cannot read: `overlays hooks` says the event fires natively once you have trusted it,
+and a change of the entry text is warned about when it is wired.
 
 ## Not done yet
 

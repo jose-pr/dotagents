@@ -364,6 +364,9 @@ started suspended until it is in the job) so nothing it started outlives it.
   `run_step(argv, *, cwd, env, timeout, capture=False, max_output=1 MiB) ->
   (status, stdout)`. `pycache_prefix(user_store) -> str` — where Python run for an
   overlay keeps bytecode (`<user store>/.cache/pycache`), never inside an overlay.
+  `which_in(name, path) -> Optional[str]` finds a program on the absolute directories of `path`,
+  never the current directory (Windows searches it first with `shutil.which`); `interpreter_command(...,
+  trusted=False)` with `trusted` looks for a Windows bash only via `find_bash_on`.
   `run_hook(argv, *, cwd, env, timeout, stdin, max_output, max_stderr) -> dict` runs a hook
   bounded: `stdin` written without waiting on the child, stdout kept to `max_output` (a run
   that writes more is stopped: `too_large`), stderr kept to `max_stderr` and the rest read and
@@ -752,6 +755,9 @@ API:
   included, from before/after snapshots taken in one bash process (MSYS2 `*PATH`
   values converted back to Windows form). No bash, a failed `source` or an `exit`
   in the file → empty, with a warning.
+- `find_bash_on(path) -> Optional[str]` — a Windows bash for a hook, looked for only beside a `git` on `path`,
+  in the standard install dirs and as a `bash` on `path` (never `os.environ["PATH"]`, never the
+  working directory), proved MSYS2/Cygwin, not cached.
 - `find_bash(logger=None) -> Optional[str]` — the bash for plain env files, resolved
   once per process: `bash` on `PATH` on POSIX; on Windows Git's bash (beside `git`
   on `PATH`, then the standard install dirs, then `PATH`), accepted only if it is
@@ -973,10 +979,16 @@ its directory, bounded by `LIMITS`.
 - `install_notice(overlay, user_store) -> Optional[str]` — the line `overlays add/sync` logs
   when an overlay has hooks that are off;
 - `read_tree(overlay, keep=False) -> (digest, files)` (the bytes the digest covers when `keep`),
-  `snapshot(user_store, overlay, digest, files) -> Path` — the copy a hook runs from, made once
-  per digest under `<user store>/.cache/hook-snapshots/` from exactly the bytes hashed (what
-  `AOS` excludes from a digest, `node_modules` and `__pycache__` included, is not in it), so a
-  file swapped after hashing, or a planted module, does not run; `fresh_digest(overlay)` (never memoized),
+  `snapshot(user_store, overlay, digest, files) -> Path` — the copy a hook runs from, one directory
+  per digest under `<user store>/.cache/hook-snapshots/` made from exactly the bytes hashed (what
+  `AOS` excludes from a digest, `node_modules` and `__pycache__` included, is not in it) and
+  hashed again before an existing one is reused; others go after `SNAPSHOT_MAX_AGE` (7 days) unused;
+  `SnapshotOverlay(path, live)` — an overlay read from its snapshot (manifest, files, paths,
+  scripts), whose `state_dir`, `preparation_path` and `install_record_path` are the live overlay's;
+  `overlay_plan(..., keep_tree=True)` makes the snapshot and plans from its manifest
+  (`plan["snap"]`), so env scripts, paths and the cwd are the hashed bytes; `PYTHON_BOOT` runs a
+  Python hook under `-I` with the libraries explicit; `project_roots(environ, cwd)` — where the agent
+  works, for `clean_path(path, user_store, roots)`; `fresh_digest(overlay)` (never memoized),
   `overlay_plan(overlay, harness, user_store) ->
   plan` (`hook_plan` plus `digest`, `identity`), `declares_guard(overlay)`,
   `refusal(overlay) -> Optional[str]` (a guard that is off keeps its overlay out of

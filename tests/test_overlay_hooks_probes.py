@@ -101,7 +101,7 @@ def test_a_hook_interpreter_is_found_on_the_clean_path_not_the_session_path(tmp_
     rig.allow()
     seen = []
 
-    def fake(name, *, python, base_path):
+    def fake(name, *, python, base_path, **kw):
         seen.append((name, base_path))
         raise _run.InterpreterError("none")
 
@@ -119,7 +119,7 @@ def test_an_env_script_finds_its_interpreter_on_the_clean_path_too(tmp_path, mon
     rig = Rig(tmp_path, "[[env_scripts]]\ninterpreter = \"node\"\npath = \"env.js\"\n", extra={"env.js": "//"})
     seen = []
 
-    def fake(name, *, python, base_path):
+    def fake(name, *, python, base_path, **kw):
         seen.append(base_path)
         raise _run.InterpreterError("none")
 
