@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   remove the ones no overlay names any more. `--skill-catalog LABEL=FILE|URL` supplies catalogs; a
   name no catalog offers (missing) or two offer (ambiguous) is reported and not guessed. `overlays
   show` lists them. Before, such an entry made `Overlay.skills()` name a skill with no directory.
+  A fetched skill with front matter keys beyond the inert ones (`allowed-tools`) is delivered only with
+  `--allow-skill-keys NAME` or the person's allowance at the terminal; only a plan's winner is published, apart from
+  the bundled skills' digest record; a fetch is bounded (256 MiB; 1024 files, 16 MiB a skill); a name that is a
+  Unicode case-fold collision refuses the skill; SSH is given an empty file; a pin in the store's
+  `dotagents.toml` (`[skills.NAME]`) must match; `overlays add-skill` / `remove-skill` install a skill by choice.
 
 ### Changed
 

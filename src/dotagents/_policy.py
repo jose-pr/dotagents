@@ -14,6 +14,9 @@ remote registry -- in its ``overlays`` form, where an entry may be a table::
     env_scripts = true                 # or false: its env scripts, declared or default
     grants = { env = ["DOCS_TOKEN"], secret = ["release-signing"], file = ["docs/token"] }
 
+    [skills.review]                    # a skill an overlay names from elsewhere: the tree digest it must have
+    pin = "sha256:<64 hex>"            # it anchors a catalog-named or unpinned skill, and must match the overlay's own pin
+
     [secrets.release-signing]          # a named secret: a provider and its key
     provider = "env"
     key = "RELEASE_SIGNING_KEY"
@@ -73,13 +76,22 @@ class StorePolicy(object):
             if found:
                 self.origin = str(found[0])
                 doc = _document(found[0])
-        self.form = isinstance(doc.get("overlays"), dict)
+        self.form = isinstance(doc.get("overlays"), dict) or isinstance(doc.get("skills"), dict)
         top = doc if self.form else {}
         self.entries: "dict[str, dict[str, Any]]" = {}
-        if self.form:
+        if isinstance(doc.get("overlays"), dict):
             for name, entry in doc["overlays"].items():
                 if isinstance(entry, dict):
                     self.entries[_aos.normalize_name(str(name))] = entry
+        self.skill_pins: "dict[str, str]" = {}
+        raw_skills = top.get("skills", {})
+        if not isinstance(raw_skills, dict):
+            raise PolicyError("error: skills in %s must be a table of skills" % self.origin)
+        for name, entry in raw_skills.items():
+            pin = entry.get("pin") if isinstance(entry, dict) else entry
+            if not (isinstance(pin, str) and _aos.DIGEST_FORM.match(pin)):
+                raise PolicyError("error: pin of skill %s in %s is not sha256:<64 hex digits>" % (name, self.origin))
+            self.skill_pins[str(name).lower()] = pin.lower()
         self.env_scripts_default = self._bool(top.get("env_scripts", True), "env_scripts")
         self.secrets_dir = None
         raw_dir = top.get("secrets_dir")

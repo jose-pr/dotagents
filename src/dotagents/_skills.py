@@ -144,15 +144,16 @@ def _save_record(shared_skills: Path, record: "dict[str, str]", name: str = PUBL
     write_text_lf(path, json.dumps(record, indent=1, sort_keys=True) + "\n")
 
 
-def _note_published(shared_skills: Path, name: str, result: "SyncResult") -> None:
+def _note_published(shared_skills: Path, name: str, result: "SyncResult",
+                    record_name: str = PUBLISHED_RECORD) -> None:
     """Record a copy's digest (a symlink needs none: it is always current)."""
-    record = _load_record(shared_skills)
+    record = _load_record(shared_skills, record_name)
     target = shared_skills / name
     if result.mode == "copy" and target.is_dir() and not _is_link(target):
         record[name] = _tree_digest(target)
     else:
         record.pop(name, None)
-    _save_record(shared_skills, record)
+    _save_record(shared_skills, record, record_name)
 
 
 def _resolves_to(target: Path, source: Path) -> bool:

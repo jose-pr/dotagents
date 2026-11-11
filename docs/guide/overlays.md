@@ -435,6 +435,18 @@ dirs like bundled ones.
   --yes`, or at the terminal; otherwise it is kept and said so). A skill you placed in the shared dir
   yourself is never replaced or removed. Through `dotagents mcp --strict`, `--yes` is not taken.
 - Only Git sources are fetched here; a source that is a plain web URL is reported as not delivered.
+- **Front matter keys.** A skill's file list and any front matter key beyond `name`, `description`,
+  `license`, `compatibility` and `metadata` are shown once it is fetched, before it is delivered. A harness may
+  take such a key as a grant (`allowed-tools` pre-approves tools), so a skill with one is delivered only when you
+  allow it: `--allow-skill-keys NAME`, or typing `allow NAME` at the terminal. `--yes` is the fetch, not this.
+- **Limits.** A skill holds at most 1024 files and 16 MiB (a file too), the same as canoa's app; a fetch is ended
+  at 256 MiB; a skill is refused when two of its paths are equal once Unicode case-folded.
+- **Names win once.** A fetched skill is published only when the plan gives it the name: it never displaces another
+  overlay's bundled skill, and a copy of it is taken down when one arrives.
+- **Your pin.** `[skills.NAME]` with `pin = "sha256:..."` in the store's `dotagents.toml` must match the fetched
+  tree digest, as the overlay's own pin must; it anchors a skill a catalog names or one with no pin.
+- **By your own choice.** `overlays add-skill NAME --source SRC [--pin DIGEST]` (or by name with `--skill-catalog`)
+  installs a skill the same way and marks it yours: removing overlays never takes it; `overlays remove-skill NAME` does.
 
 ## Python dependencies and the scope venv
 

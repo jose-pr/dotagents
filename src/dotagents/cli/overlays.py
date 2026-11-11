@@ -749,10 +749,8 @@ class _Skills(object):
     """What an `overlays` command does about the skills its overlays name from elsewhere: the plan, the
     review, the one yes, the fetch, what is kept and what is offered for removal."""
 
-    def __init__(self, scope, catalogs, yes: bool, logger, cache=None):
-        from dotagents import _skill_sources
-
-        from dotagents import _overlay_hooks
+    def __init__(self, scope, catalogs, yes: bool, logger, cache=None, allow_keys=()):
+        from dotagents import _overlay_hooks, _policy, _skill_sources
 
         self.scope = scope
         self.catalogs = _skill_sources.load_catalogs(catalogs) if catalogs else []
@@ -762,6 +760,8 @@ class _Skills(object):
             logger.warning("--yes is not taken through `dotagents mcp --strict`: the skills are accepted at the terminal")
         self.logger = logger
         self.cache = cache
+        self.allow_keys = {str(n).lower() for n in allow_keys}
+        self.pins = dict(_policy.for_store(scope.agents_root).skill_pins)
         self.store = _skill_sources.FetchedSkills(scope.overlay_root)
 
     def plan(self, incoming: "Optional[dict[str, Path]]" = None, without: "frozenset[str]" = frozenset()):
@@ -790,7 +790,8 @@ class _Skills(object):
         out = []
         for fetch in plan.to_fetch:
             record = records.get(fetch.name.lower())
-            if not (_skill_sources.entry_matches(record, fetch, catalog_of.get((fetch.name, fetch.overlay)))
+            if not (_skill_sources.entry_matches(record, fetch, catalog_of.get((fetch.name, fetch.overlay)),
+                                                 self.pins.get(fetch.name.lower()))
                     and self.store.intact(fetch.name, record)):
                 out.append(fetch)
         return out
@@ -800,7 +801,7 @@ class _Skills(object):
         given; nothing is fetched before this answers."""
         from dotagents import _skill_sources
 
-        lines = _skill_sources.review_lines(plan)
+        lines = _skill_sources.review_lines(plan, self.pins, self.store)
         for line in lines:
             self.logger.info("%s", line)
         for name, overlay in plan.missing:
@@ -820,12 +821,22 @@ class _Skills(object):
         if dry_run or plan is None:
             return []
         fetcher = _skill_fetcher(self.scope, self.cache) if accepted else None
-        out = _skill_sources.deliver(self.store, plan, fetcher, accepted=accepted, logger=self.logger)
-        _skill_sources.publish(self.store, self.scope.shared_skills_dir, copy=copy, logger=self.logger)
+        out = _skill_sources.deliver(self.store, plan, fetcher, accepted=accepted, logger=self.logger,
+                                     pins=self.pins, allow_keys=self.allows_keys)
+        _skill_sources.publish(self.store, self.scope.shared_skills_dir, plan, copy=copy, logger=self.logger)
         for name in out.waiting:
             self.logger.warning("skill %s is not fetched: it is new or changed since you accepted it; run again "
                                 "with --yes after reading the review", name)
         return ["%s (named by overlay %s): %s" % item for item in out.refused]
+
+    def allows_keys(self, name: str, keys: "list[str]", files: "list[str]") -> bool:
+        """Whether the person allows a skill's front matter keys beyond the inert ones (a harness may take one as a
+        grant): named with ``--allow-skill-keys NAME``, or typed for that skill at the terminal. ``--yes`` is not it."""
+        if name.lower() in self.allow_keys:
+            return True
+        typed = _read_tty("skill %s has front matter keys %s; type 'allow %s' to deliver it with them: "
+                          % (name, ", ".join(keys), name))
+        return typed is not None and typed.strip() == "allow %s" % name
 
     def offer_removal(self, plan, *, dry_run: bool, yes_question: bool = True) -> None:
         """Offers to remove the fetched skills no installed overlay names any more, never one the person chose."""
@@ -856,6 +867,12 @@ class _SkillArgs(_RepoArgs):
      "document with a `skills` table. A name no catalog offers is reported missing, one two offer ambiguous; "
      "neither is guessed.")
     ("--skill-catalog",)
+
+    allow_skill_keys: "list[str]" = []
+    ("A fetched skill whose front matter has keys beyond name, description, license, compatibility and "
+     "metadata (`allowed-tools` pre-approves tools) is delivered only when you allow it: name it here "
+     "(repeatable), or type the allowance at the terminal. --yes does not allow it.")
+    ("--allow-skill-keys",)
 
     yes: bool = False
     ("Say yes to the review of the skills an overlay names from elsewhere, for the overlay and its skills "
@@ -953,7 +970,7 @@ class OverlayAdd(_SkillArgs):
         # The skills these overlays name from elsewhere are shown, with their sources, and the person's one yes
         # covers the overlays and the skills together: until it is given nothing is fetched or installed.
         try:
-            skills_run = _Skills(scope, self.skill_catalog, self.yes, self._logger_, source.cache)
+            skills_run = _Skills(scope, self.skill_catalog, self.yes, self._logger_, source.cache, self.allow_skill_keys)
         except ValueError as exc:
             raise SystemExit("error: %s" % exc)
         reviewed = skills_run.plan({name: located[name][0] for name in order})
@@ -1650,7 +1667,7 @@ class OverlaySync(_SkillArgs):
             _recompose(scope, self._logger_, dry_run=self.dry_run)
         refused_skills: "list[str]" = []
         try:
-            skills_run = _Skills(scope, self.skill_catalog, self.yes, self._logger_, chain.cache)
+            skills_run = _Skills(scope, self.skill_catalog, self.yes, self._logger_, chain.cache, self.allow_skill_keys)
         except ValueError as exc:
             raise SystemExit("error: %s" % exc)
         after = skills_run.plan()
@@ -1869,9 +1886,92 @@ class OverlayRevokeHooks(DotAgentsArgs):
         return 0
 
 
+class OverlayAddSkill(_SkillArgs):
+    """Install a skill by your own choice: from ``--source`` (with ``--pin``), or by name through
+    ``--skill-catalog``. It is shown with its source, takes your yes (``--yes`` or the terminal) and is fetched like
+    one an overlay names, but it is yours: removing every overlay never takes it, only ``remove-skill`` does."""
+
+    _parsername_ = "add-skill"
+
+    skill: str = ""
+    "The skill's name."
+    ("skill",)
+
+    source: str = ""
+    "Where to fetch it from (a Git source, with `#path` to its directory); else the catalogs resolve the name."
+    ("--source",)
+
+    pin: str = ""
+    "The skill directory's tree digest, sha256:<64 hex>."
+    ("--pin",)
+
+    copy: bool = False
+    "Copy the skill into the shared dir instead of symlinking."
+    ("--copy",)
+
+    def __call__(self) -> int:
+        from dotagents import _skill_sources
+
+        if not _skill_sources.valid_skill_name(self.skill):
+            return _usage_error("overlays add-skill needs a valid skill name")
+        scope = self.resolve_scope()
+        try:
+            run = _Skills(scope, self.skill_catalog, self.yes, self._logger_, None, self.allow_skill_keys)
+        except ValueError as exc:
+            raise SystemExit("error: %s" % exc)
+        entry = {"name": self.skill, "source": self.source} if self.source else self.skill
+        if self.source and self.pin:
+            entry["pin"] = self.pin  # type: ignore[index]
+        plan = _skill_sources.plan_chosen(entry, run.catalogs)
+        if not run.review(plan, question="fetch %s?" % self.skill, dry_run=False):
+            raise SystemExit("error: not installed: the skill was not accepted")
+        refused = run.deliver(plan, accepted=True, copy=self.copy, dry_run=False)
+        records = run.store.records()
+        record = records.get(self.skill.lower())
+        if record is not None:
+            record["chosen"] = True
+            record["overlays"] = [o for o in record["overlays"] if o != _skill_sources.CHOSEN]
+            run.store.save(records)
+            _skill_sources.publish(run.store, scope.shared_skills_dir, None, copy=self.copy, logger=self._logger_)
+        _link_agent_skills(scope, self._logger_, [self.skill])
+        if refused or record is None:
+            raise SystemExit("error: the skill was not installed: %s" % ("; ".join(refused) or "it is unresolved"))
+        return 0
+
+
+class OverlayRemoveSkill(DotAgentsArgs):
+    """Remove a skill fetched from elsewhere, one an overlay named or one you chose, and unpublish it."""
+
+    _parsername_ = "remove-skill"
+
+    skill: str = ""
+    "The skill's name."
+    ("skill",)
+
+    yes: bool = False
+    "Say yes to removing it (asked at the terminal otherwise)."
+    ("--yes",)
+
+    def __call__(self) -> int:
+        from dotagents import _skill_sources
+
+        if not _skill_sources.valid_skill_name(self.skill):
+            return _usage_error("overlays remove-skill needs a valid skill name")
+        scope = self.resolve_scope()
+        run = _Skills(scope, [], self.yes, self._logger_)
+        if self.skill.lower() not in run.store.records():
+            self._logger_.warning("no fetched skill %s", self.skill)
+            return 0
+        if not _confirm(self._logger_, "remove the fetched skill %s?" % self.skill, run.yes):
+            raise SystemExit("error: not removed")
+        _skill_sources.forget(run.store, scope.shared_skills_dir, [self.skill], logger=self._logger_)
+        _link_agent_skills(scope, self._logger_)
+        return 0
+
+
 class Overlays(LoggingArgs, Cli):
     """Manage opt-in overlays by name: add / remove / list / sync / show (+ skills sync)."""
 
     _parsername_ = "overlays"
     _subcommands_ = [OverlayAdd, OverlayRemove, OverlayList, OverlaySync, OverlayShow, OverlayHooks,
-                     OverlayAllowHooks, OverlayRevokeHooks]
+                     OverlayAllowHooks, OverlayRevokeHooks, OverlayAddSkill, OverlayRemoveSkill]

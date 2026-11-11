@@ -47,7 +47,7 @@ and an error saying a command is required, and exits 2.
 | Command | Contract |
 | --- | --- |
 | `init [-g] [--dest D] [--from SRC] [--bin-dir D] [--agents a,b] [--no-hooks] [--powershell-env-hook] [--no-venv] [--force] [--dry-run]` | Merge the base block into `<store>/AGENTS.md`, write `<store>/bin/dotagents[.cmd]`, and per active agent (`--agents`, else detected + `claude`) write its include and hooks. Then bring the scope's Python venvs up to date (`_pyvenv.sync_venvs`; a failure is a warning; not with `--dest` or `--no-venv`). `--force` replaces `AGENTS.md`'s content, backed up under `<store>/install_backup/<timestamp>/`. `--from` records its base in `<store>/dotagents/config.toml`. |
-| `overlays add NAME\|GLOB... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--no-venv] [--skill-catalog LABEL=FILE\|URL]... [--yes] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does), publish its skills, bring the scope venv up to date (`_pyvenv`; not with `--no-venv`), prepare it -- its dependency files built into their environments (`_deps`), then its `setup`, in the phase `install` the first time a preparation succeeds here and `sync` after that (`--no-setup`: neither) -- and recompose the managed block. Before anything of an overlay is written it is refused when its `overlay.cfg` does not validate (named files included), its tree has no digest (a link, a refused name), its git commit holds a link or submodule, this machine lacks what its `runtime`, setup or scripts need, or its store pins another digest. A glob (`'*'`, `'py*'`) stands for every name the repos offer that matches it; one matching nothing is an error. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused. An overlay whose copy, venv or preparation fails is logged and skipped, along with what requires it; the others still install, and the command exits 1 naming each failure. One this run was installing for the first time is removed again (its environments rebuilt without it); one already installed stays, activated only for the digest it was last prepared for. No name: exit 2. |
+| `overlays add NAME\|GLOB... [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-requires] [--no-venv] [--skill-catalog LABEL=FILE\|URL]... [--allow-skill-keys NAME]... [--yes] [--dry-run]` | Install each overlay and its `requires` into `<store>/overlays/<name>/` (an installed one is made to match its source again, as `sync` does), publish its skills, bring the scope venv up to date (`_pyvenv`; not with `--no-venv`), prepare it -- its dependency files built into their environments (`_deps`), then its `setup`, in the phase `install` the first time a preparation succeeds here and `sync` after that (`--no-setup`: neither) -- and recompose the managed block. Before anything of an overlay is written it is refused when its `overlay.cfg` does not validate (named files included), its tree has no digest (a link, a refused name), its git commit holds a link or submodule, this machine lacks what its `runtime`, setup or scripts need, or its store pins another digest. A glob (`'*'`, `'py*'`) stands for every name the repos offer that matches it; one matching nothing is an error. Every name is resolved before anything is written; a source inside `<store>/overlays/` is refused. An overlay whose copy, venv or preparation fails is logged and skipped, along with what requires it; the others still install, and the command exits 1 naming each failure. One this run was installing for the first time is removed again (its environments rebuilt without it); one already installed stays, activated only for the digest it was last prepared for. No name: exit 2. |
 | `overlays remove NAME... [-g] [--force] [--no-setup] [--setup-timeout S] [--no-venv] [--yes] [--dry-run]` | Run each overlay's setup in its `remove` phase when a preparation succeeded here (a failure is reported and the removal goes ahead), delete the overlay dirs, their state and preparation records, rebuild the environments they were in without them (an isolated one, or one left empty, deleted), unpublish the skills they published, recompose the block, rewrite the venv layering (installed requirements stay). Refuses an overlay another installed overlay requires unless `--force`. No name: exit 2. |
 | `overlays sync [GLOB] [-g] [--repo SPEC]... [--copy] [--no-setup] [--setup-timeout S] [--no-venv] [--skill-catalog LABEL=FILE\|URL]... [--yes] [--dry-run]` | Refresh installed overlays from the repo recorded at install (`--repo` replaces it), checked as `add` checks a source: the install is made to hold exactly the overlay's members (new and changed files land, everything else goes, caches and setup output left inside it included); a file edited here is backed up first under `<store>/install_backup/<timestamp>/overlays/<name>/`. Installs new `requires`, then prepares each synced overlay in its `sync` phase (`install` when no preparation succeeded here yet), whether its digest changed or not: its environments rebuilt, then its setup. Exits 1 when an overlay's repo cannot be loaded, its source lies inside `<store>/overlays/` or is refused, or its dependencies or setup fail. |
 | `overlays list [-g] [--repo SPEC]... [--json]` | Installed overlays per store (shadowed copies marked, unmet `requires` and refused overlays flagged) and what the repos offer. |
@@ -336,7 +336,7 @@ returns the exit code.
 
 - `init.Init`; `overlays.Overlays` (umbrella) with `OverlayAdd`, `OverlayRemove`,
   `OverlayList`, `OverlaySync`, `OverlayShow`, `OverlayHooks`, `OverlayAllowHooks`,
-  `OverlayRevokeHooks`; `hook.Hook`; `context.Context` (`FORMATS =
+  `OverlayRevokeHooks`; `OverlayAddSkill`, `OverlayRemoveSkill` (`overlays add-skill` / `remove-skill`: a skill installed or removed by the person's own choice); `hook.Hook`; `context.Context` (`FORMATS =
   ("markdown", "system-reminder", "json")`); `env.Env`; `path.PathCmd`
   (`PATH_FORMATS = ("list", "native", "posix", "json")`); `build_pyz.BuildPyz`;
   `about.About`.
@@ -1080,6 +1080,9 @@ The skills an overlay's `skills` names that its tree does not hold (`Overlay.ski
 Nothing in a skill runs; a skill is read out of Git's object store, fetched without the person's
 credentials, SSH agent or prompts.
 
+- `SKILL_LIMITS`, `MAX_FETCH_BYTES`, `MAX_CATALOG_BYTES`, `PUBLISHED_FETCHED_RECORD`, `INERT_KEYS`, `CHOSEN` — the limits (1024 files, 16 MiB; 256 MiB a fetch; 4 MiB a catalog), the fetched skills' published-copy record, the keys with no grant, the identity a chosen skill is planned under.
+- `valid_skill_name(name)`, `fold_collisions(paths)`, `plan_chosen(entry, catalogs=())` — a safe skill name; the path another equals once Unicode case-folded; the plan for one skill the person chose.
+- `keys_allowed(record)` — whether the person allowed every non-inert front matter key.
 - `STORE_DIR = ".dotagents-skills"`, `RECORD_FILE = "record.json"` — under `<store>/overlays/`:
   `<lowercase name>/` holds a fetched skill's files (the ones its tree digest covers) and the record
   what was accepted for each (`name`, `source`, `pin`, `catalog`, `digest`, `keys`, `overlays`, `chosen`).
@@ -1099,16 +1102,16 @@ credentials, SSH agent or prompts.
 - `class FetchedSkills(overlay_root)` — the store: `tree(name)` a skill's directory, `records()` and
   `save(records)` the record, `intact(name, record)` whether the files are the accepted digest, `write(name,
   files, digest)` puts them in place whole and checked as written, `forget(name)` deletes one.
-- `entry_matches(record, fetch, catalog) -> bool` — whether what was accepted is what the plan asks for.
+- `entry_matches(record, fetch, catalog, configured=None) -> bool` — whether what was accepted is what the plan asks for, and the pin in the person's configuration.
 - `class Delivery` — `kept`, `fetched`, `waiting` (new or changed, no yes), `refused` (name, overlay, class).
-- `deliver(store, plan, fetcher, *, accepted, logger=None) -> Delivery` — an accepted entry with intact
-  files is kept without a fetch; any other is fetched only when `accepted`, checked against its pin and
+- `deliver(store, plan, fetcher, *, accepted, logger=None, pins=None, allow_keys=None) -> Delivery` — an accepted entry with intact
+  files is kept without a fetch; a skill with front matter keys beyond the inert ones is delivered only when `allow_keys(name, keys, files)` says so; `pins` (lowercase name to digest) must match; any other is fetched only when `accepted`, checked against its pin and
   front matter (`coqui_aos.read_fetched_skill`) and recorded with the overlays naming it. One skill's
   refusal stops no other.
 - `orphans(store, plan) -> list[str]` — recorded skills no overlay of `plan` names, not chosen.
 - `forget(store, shared, names, logger=None) -> int` — delete them and unpublish what is this store's.
-- `publish(store, shared, *, copy=False, logger=None) -> int` — each recorded skill into the shared
-  skills dir as a bundled one is; an earlier copy is replaced while it is what was published, a
+- `publish(store, shared, plan=None, *, copy=False, logger=None) -> int` — each recorded skill the plan delivers into the shared
+  skills dir as a bundled one is (a name another overlay's bundled skill holds is left to it); an earlier copy is replaced while it is what was published, a
   skill placed by hand is kept.
 
 ## `dotagents._wrappers`
