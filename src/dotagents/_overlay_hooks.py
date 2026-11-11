@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-import coqui_aos
+from dotagents._vendor import coqui_aos
 
 from dotagents import _aos
 from dotagents._overlays import Overlay

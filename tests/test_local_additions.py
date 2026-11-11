@@ -55,7 +55,7 @@ def test_additions_are_matched_by_relative_path_in_every_store(tmp_path):
 def test_an_unreadable_overlay_file_does_not_stop_context(tmp_path, monkeypatch):
     """Listing the additions reads no overlay file: one this user cannot read
     (a system store's, say) leaves `context` working and the listing whole."""
-    import coqui_aos
+    from dotagents._vendor import coqui_aos
 
     user, project = _world(tmp_path)
 

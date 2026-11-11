@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-import coqui_aos
+from dotagents._vendor import coqui_aos
 
 from dotagents import _aos, _overlay_hooks
 

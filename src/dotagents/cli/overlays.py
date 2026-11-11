@@ -19,7 +19,7 @@ from typing import Optional
 
 from duho import Cli, LoggingArgs
 
-import coqui_aos
+from dotagents._vendor import coqui_aos
 
 from dotagents._resources import base_agents_text
 from dotagents.cli._common import DotAgentsArgs, _write_stdout, store_base

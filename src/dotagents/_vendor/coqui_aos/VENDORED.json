@@ -1,0 +1,32 @@
+{
+  "repository": "https://github.com/Boriken-Dev/coqui-aos",
+  "commit": "6c476c4553c9b195502cb505a89d50e27cb85afd",
+  "path": "python/src/coqui_aos",
+  "version": "0.0.0a0",
+  "files": {
+    "__init__.py": "sha256:9e7b2e221a18d4fd1483b990176dd7dc10a0dd40b1e7ffe382e317d0ea5382ca",
+    "_catalog.py": "sha256:538123716e2d62927cd91e0ae970be6cb4147c0f5937837feaf1c3372f4cc6db",
+    "_compose.py": "sha256:b7dca90da7c7c9cea414a3df5ce8274720b1659f361d95c5437970d30ebe1570",
+    "_data.py": "sha256:e6bbe6c107ca4ec96ce48613f600bdd94e9f57188a7e512ce4753d2497d51dd3",
+    "_defaults.py": "sha256:1e9a045059c19d57961e3d6726c3061fc1e70ccd3179b26d041c57aa7af63a79",
+    "_delivery.py": "sha256:5ce95c5161494f768f709a73cc497b116f94e4ad1ef2ac4709b698049b66feb3",
+    "_digest.py": "sha256:d439231344072710afbe34db67613ad85f17635557acf65e4b65d9ffc8828bf2",
+    "_document.py": "sha256:ddc51568a22b4c2c1dca98248d28c2eae4b0afacb1a3b27b6bbd273ac7d12af7",
+    "_dotenv.py": "sha256:1a2299056e8e41e046531e456f7bae13b9e4dbe206b7b3de12540261f4aaebcb",
+    "_effective.py": "sha256:86c1b9b1452f5bda0dcb5b5d25045a30093f0648097bbb9b0690a5962786c8d5",
+    "_env.py": "sha256:b525ece96cc4fd6bdc4db616ddd4bf58b6cb010fd3cef10c6e73ed9889b74e1c",
+    "_errors.py": "sha256:38c7a1db799706b59899910632acd58de6dbc925c7f90c2ce9a14952a70ba356",
+    "_front_matter.py": "sha256:b6cbd9eee30f1589192ecc7738722f32ddd36e044efa34704053d99569358bb5",
+    "_fs.py": "sha256:5a7bc9d8d1baec5cf4daab7424b8073040dd8c42e823d99ee662830ee24dc4f2",
+    "_hooks.py": "sha256:e08b1989dd8bd976b3db1729ebaa479636e2e1975dcd4493e09c5c8e5f861f87",
+    "_icon.py": "sha256:2ca4cea955cc546d0090f1a08a1ffbc4a3427b64e53e5ccfe47cb91a3fa3b8ff",
+    "_names.py": "sha256:baebde8555d32ad509a8df4a32f49a4e29dab3b42efe50b2d887c465555d9aec",
+    "_settings.py": "sha256:09add9988f476c100c981960ea76958712ba32076d5bfc407cda41ea798daa47",
+    "_skills.py": "sha256:dc2e3124b72b5a9d2bba7f4a43084f64c631e29ff4e0bb53059abc00b009d794",
+    "_source.py": "sha256:ea18454992c0009d27c2783abe0798d04dcd756b671f5c99073d126a3054608c",
+    "_subst.py": "sha256:e31be68cf6813884bccda1c667470a611f51808cb52d7c37d63b5be63aa3b617",
+    "_tree.py": "sha256:a18b1a89d625ba0daf4db72cf2742a13d74b9d73c6fe1e31a897f412f2638a0a",
+    "_validate.py": "sha256:c292c3126c8652f8023d8349be9e5db771702e07c12e5937e0286d41b3d7a41b",
+    "LICENSE": "sha256:3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+  }
+}

@@ -46,7 +46,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-import coqui_aos
+from dotagents._vendor import coqui_aos
 
 from dotagents import _aos
 

@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Optional
 
-import coqui_aos
+from dotagents._vendor import coqui_aos
 
 from dotagents import _activate
 from dotagents import _agents

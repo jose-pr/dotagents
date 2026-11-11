@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-import coqui_aos
+from dotagents._vendor import coqui_aos
 
 from dotagents import _aos
 

@@ -28,11 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   own environment. An overlay's hook tree is read once through `coqui_aos.read_tree`.
 
 - Reading, validating, naming and digesting overlays, front matter, substitution, the defaults an
-  overlay's files give and the setup phases come from the `coqui-aos` package, the same reader
-  every other implementation of the Agent Overlay Specification is held to. New dependency:
-  `coqui-aos>=0.0.0a0,<0.1`, vendored in the `.pyz`. A refusal is a `coqui_aos.Error` with a
-  class; `dotagents._aos` keeps what is dotagents' own (applying one overlay for this machine,
-  its secrets and the package environments overlays share).
+  overlay's files give and the setup phases come from `coqui_aos`, the same reader every other
+  implementation of the Agent Overlay Specification is held to. dotagents carries it: a copy of the
+  package's modules and its MPL-2.0 licence is in `src/dotagents/_vendor/coqui_aos/`, unedited, at the
+  commit `VENDORED.json` records (`tools/vendor_coqui_aos.py` copies another). It is not a PyPI
+  dependency; its YAML reader is, as `ruamel.yaml>=0.18.0,<0.20` (vendored in the `.pyz` at 0.18.0).
+  A refusal is a `coqui_aos.Error` with a class; `dotagents._aos` keeps what is dotagents' own
+  (applying one overlay for this machine, its secrets and the package environments overlays share).
 
 ## [0.9.3] - 2026-11-11
 

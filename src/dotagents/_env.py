@@ -106,7 +106,7 @@ import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
-import coqui_aos
+from dotagents._vendor import coqui_aos
 
 from dotagents import _activate, _aos
 from dotagents._scope import Scope, project_root_default

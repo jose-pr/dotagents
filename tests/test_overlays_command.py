@@ -11,7 +11,7 @@ import logging
 import os
 from pathlib import Path
 
-import coqui_aos
+from dotagents._vendor import coqui_aos
 import pytest
 
 from dotagents import _overlays, _scope, _skills

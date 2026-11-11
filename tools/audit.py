@@ -149,7 +149,7 @@ def check_overlay_manifests(overlays_dir: Path) -> List[str]:
     an always-on rule from every install. Read with the CLI's own manifest
     reader, validator and rules extractor, so this check sees exactly what
     `overlays add` would merge."""
-    import coqui_aos
+    from dotagents._vendor import coqui_aos
     from dotagents._overlays import Overlay
 
     failures: List[str] = []

@@ -22,8 +22,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-import coqui_aos
-from coqui_aos import (
+from dotagents._vendor import coqui_aos
+from dotagents._vendor.coqui_aos import (
     EXCLUDED_COMPONENTS,
     Class,
     Error,
@@ -36,8 +36,8 @@ from coqui_aos import (
     state_variable,
     substitute,
 )
-from coqui_aos import is_sensitive_variable as is_sensitive
-from coqui_aos import valid_relative_path as valid_relpath
+from dotagents._vendor.coqui_aos import is_sensitive_variable as is_sensitive
+from dotagents._vendor.coqui_aos import valid_relative_path as valid_relpath
 
 #: The AOS edition this module implements.
 EDITION = "0.1.0-draft"

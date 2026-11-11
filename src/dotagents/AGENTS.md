@@ -155,8 +155,9 @@ are skipped.
 
 ## `dotagents._aos`
 
-What dotagents adds to `coqui_aos` (the Agent Overlay Specification's reader, a
-dependency: reading, validation, names, digests, substitution, the defaults an
+What dotagents adds to `coqui_aos` (the Agent Overlay Specification's reader, vendored
+unedited in `dotagents/_vendor/coqui_aos/` and imported `from dotagents._vendor import
+coqui_aos`: reading, validation, names, digests, substitution, the defaults an
 overlay's files give, setup phases; its own vectors are its tests). This module is
 applying one overlay for this machine and nothing else, passing the vectors for
 that (`tests/aos_vectors/`: `compose.json`'s environments and `effective.json`,

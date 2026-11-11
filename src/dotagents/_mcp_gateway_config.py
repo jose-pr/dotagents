@@ -14,7 +14,7 @@ import re
 import urllib.parse
 from pathlib import Path
 
-import coqui_aos
+from dotagents._vendor import coqui_aos
 
 from dotagents import _aos
 
