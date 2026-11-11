@@ -356,7 +356,7 @@ if [ -d "$AGENTS_DIR/overlays/private-sync" ]; then
     _dg_digest="$(AGENTS_HOME="$AGENTS_DIR" dg_cli overlays hooks private-sync -g 2>/dev/null \
         | sed -n 's/^overlay private-sync  digest \(sha256:[0-9a-f]*\).*/\1/p' | head -n 1)"
     if [ -n "$_dg_digest" ] \
-        && AGENTS_HOME="$AGENTS_DIR" dg_cli overlays allow-hooks private-sync --digest "$_dg_digest" -g >/dev/null \
+        && AGENTS_HOME="$AGENTS_DIR" dg_cli overlays allow-hooks private-sync --digest "$_dg_digest" --no-prompt -g >/dev/null \
         && AGENTS_HOME="$AGENTS_DIR" dg_cli init -g --agents claude --no-venv >/dev/null; then
         echo "dotagents: allowed the private-sync hooks at $_dg_digest and wired Claude Code's hooks"
     else

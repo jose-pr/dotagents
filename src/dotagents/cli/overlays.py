@@ -1469,9 +1469,11 @@ def _hooks_lines(overlay, plan) -> "list[str]":
             if entry["event"] == "pre-env":
                 how.append("%s: fired by dotagents" % harness.id)
             elif entry["event"] in harness.native:
-                how.append("%s: fires natively%s" % (
+                how.append("%s: fires natively%s%s" % (
                     harness.id,
-                    " (some occurrences)" if entry["event"] in _overlay_hooks.partial_events(harness) else ""))
+                    " (some occurrences)" if entry["event"] in _overlay_hooks.partial_events(harness) else "",
+                    " once you trust the entry in Codex (dotagents cannot read Codex's trust state)"
+                    if harness.id == "codex" else ""))
             else:
                 how.append("%s: cannot fire" % harness.id)
         lines.append("  %s: %s (%s)%s%s  timeout %ss  on_failure %s  [%s]" % (
@@ -1479,6 +1481,13 @@ def _hooks_lines(overlay, plan) -> "list[str]":
             "  match %s" % ",".join(entry["match"]) if entry["match"] else "",
             "  sets %s" % ",".join(entry["sets"]) if entry["sets"] else "", entry["timeout"],
             entry["on_failure"], "; ".join(how)))
+    from dotagents import _agents
+
+    for harness, config in ((_overlay_hooks.CLAUDE, _agents.ClaudeAgent._user_config_dir()),
+                            (_overlay_hooks.CODEX, _agents.CodexAgent()._config_root())):
+        problem = _overlay_hooks.interpreter_problem(config, "user")
+        if problem:
+            lines.append("  %s: the hook entry will not run: %s (run dotagents init -g)" % (harness.id, problem))
     lines.append("  A hook runs outside the harness's sandbox with your access, and is told what its event "
                  "gives it (a prompt's text, a tool call's input).")
     return lines
@@ -1514,6 +1523,38 @@ class OverlayHooks(DotAgentsArgs):
         return 0
 
 
+def _read_tty(prompt: str) -> "Optional[str]":
+    """A line typed at the terminal itself (``/dev/tty``, ``CONIN$``), not standard input: a program
+    that drives this one's input cannot answer for the user. None when there is no terminal."""
+    try:
+        if os.name == "nt":
+            out, source = open("CONOUT$", "w"), open("CONIN$", "r")
+        else:
+            out, source = open("/dev/tty", "w"), open("/dev/tty", "r")
+    except OSError:
+        return None
+    try:
+        out.write(prompt)
+        out.flush()
+        return source.readline().strip()
+    except (OSError, ValueError):
+        return None
+    finally:
+        out.close()
+        source.close()
+
+
+def _harness_marker() -> "Optional[str]":
+    """The name of the harness whose environment this process runs in, or None: an agent's own
+    shell is not where the user gives an allowance."""
+    from dotagents import _agents
+
+    agent = _agents.detect_runtime_agent(dict(os.environ))
+    if agent is not None:
+        return agent.harness_id or agent.name
+    return os.environ.get("AGENTS_HARNESS") or None
+
+
 class OverlayAllowHooks(DotAgentsArgs):
     """Allow an installed overlay's hooks at its current digest.
 
@@ -1522,9 +1563,17 @@ class OverlayAllowHooks(DotAgentsArgs):
     is run again.
 
     Run it once to see what would be allowed and the digest; run it again with `--digest` set to
-    that digest to allow them."""
+    that digest, and confirm at the terminal, to allow them. It refuses to run inside an agent
+    harness's session. The allowance is only as strong as the agent's lack of write access to the
+    user store: an agent that can write there can write an allowance."""
 
     _parsername_ = "allow-hooks"
+    # An allowance is never an agent's to give.
+    _mcp_ = False
+
+    no_prompt: bool = False
+    "Do not ask at the terminal (for the user's own setup script, outside any harness)."
+    ("--no-prompt",)
 
     name: str = ""
     "Overlay name."
@@ -1551,7 +1600,17 @@ class OverlayAllowHooks(DotAgentsArgs):
             return 0
         if not _aos.DIGEST_FORM.match(self.digest) or not _aos.same_digest(self.digest, plan["digest"]):
             return _usage_error("--digest is not the overlay's current digest %s" % plan["digest"])
-        _overlay_hooks.allow(scope.user_root, overlay.name, plan["digest"])
+        marker = _harness_marker()
+        if marker is not None:
+            return _usage_error("this runs inside a %s session; an allowance is the user's to give, from "
+                                "their own terminal" % marker)
+        if not self.no_prompt:
+            typed = _read_tty("type 'allow %s' to allow these hooks: " % overlay.name)
+            if typed is None:
+                return _usage_error("no terminal to confirm at (use --no-prompt in your own setup script)")
+            if typed != "allow %s" % overlay.name:
+                return _usage_error("not confirmed")
+        _overlay_hooks.allow(scope.user_root, overlay.name, plan["digest"], overlay.store)
         _write_stdout("allowed the hooks of %s at %s\n" % (overlay.name, plan["digest"]))
         return 0
 
@@ -1570,9 +1629,9 @@ class OverlayRevokeHooks(DotAgentsArgs):
 
         if not self.name:
             return _usage_error("overlays revoke-hooks needs an overlay name")
-        (name,) = _validated_names([self.name], "revoke hooks of")
-        scope = self.resolve_scope()
-        if _overlay_hooks.revoke(scope.user_root, name):
+        scope, overlay = _hooks_overlay(self, self.name)
+        name = overlay.name
+        if _overlay_hooks.revoke(scope.user_root, name, overlay.store):
             _write_stdout("revoked the hooks of %s\n" % name)
         else:
             _write_stdout("the hooks of %s were not allowed\n" % name)

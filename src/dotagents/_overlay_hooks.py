@@ -14,6 +14,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
@@ -109,6 +111,50 @@ def partial_events(harness: Harness) -> "list[str]":
 # --------------------------------------------------------------------------- #
 
 
+#: The settings a user may change, with their bounds (low, high): read from the user's own
+#: configuration only, never from an overlay or a project.
+SETTING_BOUNDS = {"timeout": (1, 3600), "event_timeout": (1, 3600), "deadline": (10, 580),
+                  "max_output": (1024, 16 * 1024 * 1024), "max_payload": (1024, 8 * 1024 * 1024)}
+#: One deadline for everything a harness's hook entry does, from the process's start: scope
+#: building, hashing, env scripts and hooks.
+DEFAULT_DEADLINE = 150
+#: Never above what a harness's own hook limit allows.
+ENTRY_TIMEOUT_CAP = 600
+
+
+def settings_path(user_store: "str | os.PathLike[str]") -> Path:
+    return Path(user_store) / "overlays" / ".dotagents-state" / "hooks-settings.json"
+
+
+def read_settings(user_store: "str | os.PathLike[str]") -> "dict[str, int]":
+    """The user's hook settings (:data:`SETTING_BOUNDS`) that are valid integers in bounds; the rest
+    is ignored. Absent file: no settings."""
+    try:
+        data = json.loads(settings_path(user_store).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {key: value for key, value in data.items() if key in SETTING_BOUNDS
+            and isinstance(value, int) and not isinstance(value, bool)
+            and SETTING_BOUNDS[key][0] <= value <= SETTING_BOUNDS[key][1]}
+
+
+def limits_for(user_store: "str | os.PathLike[str]") -> "dict[str, int]":
+    """:data:`LIMITS` with the user's settings over them; a hook is stopped by these, and the
+    report of the stop names the setting."""
+    return dict(LIMITS, **{k: v for k, v in read_settings(user_store).items() if k != "deadline"})
+
+
+def deadline_for(user_store: "str | os.PathLike[str]") -> int:
+    return read_settings(user_store).get("deadline", DEFAULT_DEADLINE)
+
+
+def entry_timeout(user_store: "str | os.PathLike[str]") -> int:
+    """The harness's own timeout for a hook entry: the deadline and a margin, below the cap."""
+    return min(deadline_for(user_store) + 20, ENTRY_TIMEOUT_CAP)
+
+
 def allowances_path(user_store: "str | os.PathLike[str]") -> Path:
     """Where the digest each overlay's hooks were allowed at is kept: the user's own store,
     never an overlay and never a project."""
@@ -116,7 +162,7 @@ def allowances_path(user_store: "str | os.PathLike[str]") -> Path:
 
 
 def read_allowances(user_store: "str | os.PathLike[str]") -> "dict[str, str]":
-    """``{overlay name: digest}``; nothing is allowed when the file is absent or unreadable."""
+    """``{store|name: digest}``; nothing is allowed when the file is absent or unreadable."""
     try:
         data = json.loads(allowances_path(user_store).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -128,8 +174,16 @@ def read_allowances(user_store: "str | os.PathLike[str]") -> "dict[str, str]":
             if isinstance(digest, str) and _aos.DIGEST_FORM.match(digest)}
 
 
-def allowed_digest(user_store: "str | os.PathLike[str]", identity: str) -> "Optional[str]":
-    return read_allowances(user_store).get(_aos.normalize_name(identity))
+def _key(user_store: "str | os.PathLike[str]", identity: str, store: "Optional[str | os.PathLike[str]]") -> str:
+    """An allowance belongs to an overlay of one store: a project's overlay of the same name is
+    another overlay."""
+    where = os.path.normcase(os.path.abspath(str(store if store is not None else user_store)))
+    return "%s|%s" % (where, _aos.normalize_name(identity))
+
+
+def allowed_digest(user_store: "str | os.PathLike[str]", identity: str,
+                   store: "Optional[str | os.PathLike[str]]" = None) -> "Optional[str]":
+    return read_allowances(user_store).get(_key(user_store, identity, store))
 
 
 def _write_allowances(user_store: "str | os.PathLike[str]", allowed: "dict[str, str]") -> None:
@@ -140,16 +194,19 @@ def _write_allowances(user_store: "str | os.PathLike[str]", allowed: "dict[str, 
     write_text_lf(path, json.dumps({"allowed": dict(sorted(allowed.items()))}, indent=2) + "\n", atomic=True)
 
 
-def allow(user_store: "str | os.PathLike[str]", identity: str, digest: str) -> None:
-    """Allow ``identity``'s hooks at ``digest``, replacing the digest allowed before: there is one."""
+def allow(user_store: "str | os.PathLike[str]", identity: str, digest: str,
+          store: "Optional[str | os.PathLike[str]]" = None) -> None:
+    """Allow ``identity``'s hooks (of the overlay installed in ``store``, default the user store) at
+    ``digest``, replacing the digest allowed before: there is one."""
     allowed = read_allowances(user_store)
-    allowed[_aos.normalize_name(identity)] = digest.lower()
+    allowed[_key(user_store, identity, store)] = digest.lower()
     _write_allowances(user_store, allowed)
 
 
-def revoke(user_store: "str | os.PathLike[str]", identity: str) -> bool:
+def revoke(user_store: "str | os.PathLike[str]", identity: str,
+           store: "Optional[str | os.PathLike[str]]" = None) -> bool:
     allowed = read_allowances(user_store)
-    if allowed.pop(_aos.normalize_name(identity), None) is None:
+    if allowed.pop(_key(user_store, identity, store), None) is None:
         return False
     _write_allowances(user_store, allowed)
     return True
@@ -160,32 +217,88 @@ def revoke(user_store: "str | os.PathLike[str]", identity: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def fresh_digest(overlay: Any) -> "Optional[str]":
-    """The overlay's tree digest, read from its files now: an allowance is checked each time, and
-    a process that lives on (a server, a test) must not trust an earlier reading."""
+def read_tree(overlay: Any, keep: bool = False) -> "tuple[Optional[str], dict[str, bytes]]":
+    """``(digest, files)`` of the overlay, read from its files now: an allowance is checked each
+    time, and a process that lives on must not trust an earlier reading. With ``keep``, ``files``
+    holds the bytes the digest was computed over, each file read once; otherwise it is empty. A
+    tree with no digest (a link, a special file, a refused name) is ``(None, {})``."""
     try:
-        return overlay.tree_digest()
+        entries = _aos.tree_entries(overlay.path, with_data=keep)
+        digest, _lines = _aos.digest_entries(entries)
     except (_aos.DigestError, OSError):
-        return None
+        return None, {}
+    files: "dict[str, bytes]" = {}
+    if keep:
+        for components, kind, data in entries:
+            if kind == "file" and not _aos._excluded(components):
+                files[b"/".join(components).decode("utf-8")] = data
+    return digest, files
 
 
-def overlay_plan(overlay: Any, harness: Harness, user_store: "str | os.PathLike[str]") -> "dict[str, Any]":
+def fresh_digest(overlay: Any) -> "Optional[str]":
+    return read_tree(overlay)[0]
+
+
+def overlay_plan(overlay: Any, harness: Harness, user_store: "str | os.PathLike[str]",
+                 keep_tree: bool = False) -> "dict[str, Any]":
     """The :func:`dotagents._aos.hook_plan` of ``overlay`` here, on ``harness``, plus its digest.
 
     Hooks are on only while the overlay's tree digest is the one the user allowed; an overlay
-    whose tree has no digest has none, so none is allowed."""
+    whose tree has no digest has none, so none is allowed. With ``keep_tree`` the plan holds
+    ``tree``, the bytes the digest covers, for :func:`snapshot`."""
     from dotagents import _activate
 
-    digest = fresh_digest(overlay)
+    digest, files = read_tree(overlay, keep_tree)
     plan = _aos.hook_plan(overlay.document(), {
         "os": _aos.current_os(), "interpreters": sorted(_activate.interpreters()),
         "files": _activate.files(overlay), "identity": overlay.name, "digest": digest,
-        "allowed": allowed_digest(user_store, overlay.name), "fires": harness.fires,
-        "partial": partial_events(harness), "limits": {"timeout": LIMITS["timeout"]},
+        "allowed": allowed_digest(user_store, overlay.name, overlay.store),
+        "fires": harness.fires, "partial": partial_events(harness),
+        "limits": {"timeout": limits_for(user_store)["timeout"]},
     })
     plan["digest"] = digest
     plan["identity"] = overlay.name
+    if keep_tree:
+        plan["tree"] = files
     return plan
+
+
+def snapshot(user_store: "str | os.PathLike[str]", overlay: Any, digest: str, files: "dict[str, bytes]") -> Path:
+    """The copy of an overlay a hook runs from: the bytes whose digest the user allowed, in the user
+    store (outside every project), made once per digest and never changed. What runs is what was
+    hashed, whatever happens to the overlay's own files afterwards. An older digest of the same
+    overlay is dropped."""
+    where = hashlib.sha256(os.path.normcase(os.path.abspath(str(overlay.store or user_store))).encode()).hexdigest()[:8]
+    parent = Path(user_store) / ".cache" / "hook-snapshots" / ("%s-%s" % (overlay.normalized_name, where))
+    target = parent / digest.split(":", 1)[-1][:32]
+    if target.is_dir():
+        return target
+    parent.mkdir(parents=True, exist_ok=True)
+    staging = parent / (".new-%d-%s" % (os.getpid(), _token()))
+    try:
+        for rel, data in files.items():
+            path = staging.joinpath(*rel.split("/"))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(str(path), "wb") as fh:
+                fh.write(data)
+        staging.mkdir(parents=True, exist_ok=True)
+        try:
+            os.replace(str(staging), str(target))
+        except OSError:
+            if not target.is_dir():
+                raise
+    finally:
+        shutil.rmtree(str(staging), ignore_errors=True)
+    for other in parent.iterdir():
+        if other != target and not other.name.startswith(".new-"):
+            shutil.rmtree(str(other), ignore_errors=True)
+    return target
+
+
+def _token() -> str:
+    import secrets
+
+    return secrets.token_hex(4)
 
 
 def install_notice(overlay: Any, user_store: "str | os.PathLike[str]") -> "Optional[str]":
@@ -232,14 +345,11 @@ def refusal(overlay: Any) -> "Optional[str]":
 
 #: The label that identifies the entries dotagents wrote for overlay hooks (the native event follows).
 STATUS_PREFIX = "Overlay hooks: "
-#: The harness's own timeout for the entry, in seconds: above the event's bound (120 s) and the
-#: forwarder's (230 s), so the harness never stops the program between a hook and its answer.
-ENTRY_TIMEOUT = 240
 #: The script a harness's hook runs; it finds `dotagents` and runs `dotagents hook`.
 FORWARDER = "overlay_hook.py"
 
 
-def wanted_events(store: "str | os.PathLike[str]", harness: Harness) -> "dict[str, bool]":
+def wanted_events(store: "str | os.PathLike[str]", harness: Harness) -> "dict[str, bool]":  # noqa: D401
     """The events of ``harness`` to wire for the overlays installed in ``store``, each with whether
     a hook of it refuses on failure (a guard). An event is wired when an installed overlay has a
     hook for it; ``session-start`` is wired for any overlay with hooks, since it is where an
@@ -259,9 +369,91 @@ def wanted_events(store: "str | os.PathLike[str]", harness: Harness) -> "dict[st
     return wanted
 
 
-def forwarder_args(harness: Harness, event: str, level: str, guard: bool) -> "list[str]":
-    """The arguments after the forwarder script's path."""
-    return [harness.id, event, level] + (["--guard"] if guard else [])
+def sh_quote(text: str) -> str:
+    """``text`` as one word for a POSIX shell: single quotes, so nothing in it is expanded."""
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
+def ps_quote(text: str) -> str:
+    """``text`` as one string for PowerShell: single quotes, so nothing in it is expanded."""
+    return "'" + text.replace("'", "''") + "'"
+
+
+def level_token(dest: "str | os.PathLike[str]", user_store: "str | os.PathLike[str]") -> str:
+    """Names the store a hook entry is for: ``user``, or ``project-`` and a hash of the project's
+    store. The entry text holds it and nothing else that changes (a guard is read from the
+    forwarder's record, so the text stays the same when one comes or goes)."""
+    def norm(path: "str | os.PathLike[str]") -> str:
+        return os.path.normcase(os.path.abspath(str(path)))
+
+    if norm(dest) == norm(user_store):
+        return "user"
+    return "project-" + hashlib.sha1(norm(dest).encode("utf-8", "replace")).hexdigest()[:10]
+
+
+def code_root() -> str:
+    """Where `dotagents` is imported from, recorded for the forwarder: the `.pyz`, or the directory
+    holding the package."""
+    from dotagents._resources import pyz_archive
+
+    return pyz_archive() or str(Path(__file__).resolve().parent.parent)
+
+
+def record_path(config_dir: "str | os.PathLike[str]", token: str) -> Path:
+    return Path(config_dir) / "hooks" / ("overlay_hook.%s.json" % token)
+
+
+def forwarder_record(user_store: "str | os.PathLike[str]", guards: "Iterable[str]") -> "dict[str, Any]":
+    """What the forwarder needs, recorded when the entry is wired: the interpreter that runs it,
+    the place `dotagents` is imported from, the user store, the deadline, and the events that have a
+    guard (it fails closed for those)."""
+    import sys
+
+    return {"python": os.path.abspath(sys.executable), "code_root": code_root(), "store": str(user_store),
+            "deadline": deadline_for(user_store), "guards": sorted(guards)}
+
+
+def write_record(config_dir: "str | os.PathLike[str]", token: str, record: "dict[str, Any]") -> bool:
+    """Write the forwarder's record; True when it changed."""
+    from dotagents._fs import write_text_lf
+
+    path = record_path(config_dir, token)
+    text = json.dumps(record, indent=2) + "\n"
+    try:
+        if path.read_text(encoding="utf-8") == text:
+            return False
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_text_lf(path, text, atomic=True)
+    return True
+
+
+def remove_record(config_dir: "str | os.PathLike[str]", token: str) -> bool:
+    try:
+        record_path(config_dir, token).unlink()
+    except OSError:
+        return False
+    return True
+
+
+def interpreter_problem(config_dir: "str | os.PathLike[str]", token: str) -> "Optional[str]":
+    """Why the entry for ``token`` would not run: its record is unreadable, or the interpreter or the
+    place `dotagents` is imported from is gone (None when nothing was wired). The entry cannot say
+    so itself when the interpreter is gone, so `overlays hooks` looks for it, and every wiring
+    writes the record again."""
+    if not record_path(config_dir, token).is_file():
+        return None
+    try:
+        record = json.loads(record_path(config_dir, token).read_text(encoding="utf-8"))
+        python, root = record["python"], record["code_root"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return "its record is unreadable"
+    if not os.path.isfile(python):
+        return "its interpreter %s is gone" % python
+    if not os.path.exists(root):
+        return "dotagents is no longer at %s" % root
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -288,19 +480,22 @@ class Subject(object):
 
 
 def execute(subject: Subject, event: str, payload: bytes, env: "dict[str, str]", *,
-            limits: "Optional[dict[str, int]]" = None) -> "dict[str, Any]":
+            limits: "Optional[dict[str, int]]" = None, root: "Optional[str | os.PathLike[str]]" = None,
+            deadline: "Optional[float]" = None) -> "dict[str, Any]":
     """Start the hook and give its run in the model's terms (:func:`dotagents._aos.hook_result`).
 
     The program is an interpreter followed by the script's absolute path and the event, an argv
-    list that no shell reads; its working directory is the overlay's root; ``env`` is exactly its
-    environment, plus ``AOS_HOOK_EVENT``. The script must be a regular file inside the root."""
+    list that no shell reads; its working directory is ``root`` (the overlay's snapshot, else the
+    overlay's own directory); ``env`` is exactly its environment, plus ``AOS_HOOK_EVENT``. The
+    script must be a regular file inside the root. ``deadline`` is a :func:`time.monotonic` time
+    the run may not pass: a hook that would start past it, or run past it, is stopped."""
     from dotagents import _run
     from dotagents._env import _spawn_env
 
     limits = dict(LIMITS, **(limits or {}))
     entry = subject.entry
     run: "dict[str, Any]" = {"payload_size": len(payload), "sets": list(entry["sets"])}
-    root = os.path.abspath(str(subject.overlay.path))
+    root = os.path.abspath(str(root if root is not None else subject.overlay.path))
     windows = os.name == "nt"
     if entry["path"] is None or entry["interpreter"] is None or not entry["runs"]:
         run["not_run"] = True
@@ -322,7 +517,14 @@ def execute(subject: Subject, event: str, payload: bytes, env: "dict[str, str]",
         return run
     child = _spawn_env(dict(env))
     child["AOS_HOOK_EVENT"] = event
-    done = _run.run_hook(argv + [script, event], cwd=root, env=child, timeout=entry["timeout"], stdin=payload,
+    timeout = entry["timeout"]
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            run["timed_out"] = True
+            return run
+        timeout = min(timeout, remaining)
+    done = _run.run_hook(argv + [script, event], cwd=root, env=child, timeout=timeout, stdin=payload,
                          max_output=limits["max_output"], max_stderr=limits["max_stderr"])
     run.update(stdout_bytes=done["stdout"], timed_out=done["timed_out"], too_large=done["too_large"],
                seconds=done["seconds"], **{"exit": done["exit"]})
@@ -378,13 +580,16 @@ def value_for_match(event: str, facts: "dict[str, Any]") -> "Optional[str]":
 
 def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, Any]]]", harness: Harness, *,
          environment: "Callable[[Any], Optional[dict[str, str]]]", limits: "Optional[dict[str, int]]" = None,
-         ) -> Fired:
+         user_store: "Optional[str | os.PathLike[str]]" = None, deadline: "Optional[float]" = None) -> Fired:
     """Fire ``event`` for ``plans``, ``(overlay, plan)`` in composition order.
 
-    Only an overlay whose hooks are on runs. Each hook is started when its turn comes, and not
-    after an earlier one denied, blocked or used up the event's time. ``environment(overlay)`` is
-    the environment of that overlay's own processes (None: it cannot be built, the hook fails
-    as ``not-run``)."""
+    Only an overlay whose hooks are on runs, and it runs from the snapshot of the bytes whose digest
+    was allowed (the plan must have been made with ``keep_tree``; ``user_store`` says where the
+    snapshots are kept). A guard (``on_failure = "refuse"``) whose hooks are off is a failed guard:
+    the event is refused as a failure of it would refuse it, and ``hook-not-allowed`` is reported.
+    Each hook is started when its turn comes, and not after an earlier one denied, blocked or used up
+    the event's time. ``environment(overlay)`` is the environment of that overlay's own processes
+    (None: it cannot be built, the hook fails as ``not-run``)."""
     reports: "list[list[str]]" = []
     errors: "list[tuple[str, str, str]]" = []
     limits = dict(LIMITS, **(limits or {}))
@@ -398,17 +603,30 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
         if event not in harness.fires:
             continue
         if not plan["on"]:
+            for entry in entries:
+                if entry["on_failure"] == "refuse" and (
+                        matching is None or _aos.hook_matches(event, entry["match"], matching)):
+                    # A guard that is off is a failed guard, not a missing one.
+                    runs.append({"source": overlay.name, "on_failure": "refuse", "sets": [],
+                                 "start": lambda: {"not_run": True}})
+                    reports.append(["hook-not-allowed", overlay.name])
             continue
+        snap = None
+        if user_store is not None and plan.get("tree") is not None and plan["digest"]:
+            snap = snapshot(user_store, overlay, plan["digest"], plan["tree"])
         for entry in entries:
             if matching is not None and not _aos.hook_matches(event, entry["match"], matching):
                 continue
             subject = Subject(overlay, entry)
 
-            def start(subject=subject) -> "dict[str, Any]":
+            def start(subject=subject, snap=snap) -> "dict[str, Any]":
                 env = environment(subject.overlay)
                 if env is None:
                     return {"not_run": True}
-                done = execute(subject, event, payload, env, limits=limits)
+                if snap is not None:
+                    env = dict(env, AOS_OVERLAY_ROOT=str(snap))
+                    env[subject.overlay.root_var] = str(snap)
+                done = execute(subject, event, payload, env, limits=limits, root=snap, deadline=deadline)
                 text = done.pop("stderr", b"")
                 if text:
                     errors.append((subject.overlay.name, event, printable(text)))
@@ -419,6 +637,68 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
     applies = harness.applies.get(event, frozenset())
     result = _aos.fire_event(event, runs, applies, dict(LIMITS, **(limits or {})), os.name == "nt")
     return Fired(result, reports, errors)
+
+
+#: Names the harness sets for itself (its env file, its credentials): not for an overlay's code.
+_HARNESS_INTERNAL = ("CLAUDE_ENV_FILE",)
+_HARNESS_INTERNAL_PREFIXES = ("CLAUDE_CODE_", "CODEX_")
+
+
+def session_base(environ: "dict[str, str]") -> "dict[str, str]":
+    """The environment a hook starts from: the one the session was started from, not the session's.
+
+    ``dotagents launch`` records, in ``AGENTS_SESSION_BASE``, what each variable it changed held
+    before (null: it was not set), so another overlay's secret, which that session carries to every
+    process in it, is not handed to this overlay's hook. The names a harness keeps for itself
+    (``CLAUDE_ENV_FILE``, ``CLAUDE_CODE_*``, ``CODEX_*``) are dropped as well."""
+    env = dict(environ)
+    windows = os.name == "nt"
+    raw = env.pop("AGENTS_SESSION_BASE", None)
+    changed = {}
+    if raw:
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = {}
+        if isinstance(data, dict):
+            changed = {str(k): v for k, v in data.items() if v is None or isinstance(v, str)}
+    for name, before in changed.items():
+        for key in [k for k in env if (k.upper() == name.upper() if windows else k == name)]:
+            del env[key]
+        if before is not None:
+            env[name] = before
+    for key in list(env):
+        upper = key.upper()
+        if upper in _HARNESS_INTERNAL or upper.startswith(_HARNESS_INTERNAL_PREFIXES):
+            del env[key]
+    return env
+
+
+def log_path(user_store: "str | os.PathLike[str]") -> Path:
+    return Path(user_store) / ".cache" / "hooks.log"
+
+
+#: The log is cut to its last half when it passes this.
+LOG_LIMIT = 256 * 1024
+
+
+def log_errors(user_store: "str | os.PathLike[str]", errors: "Iterable[tuple[str, str, str]]") -> None:
+    """Append what hooks wrote to standard error to the user's log (never to the harness, where it
+    could reach the agent), bounded. Best effort: a log that cannot be written is not a failure."""
+    lines = ["%s %s %s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%S"), overlay, event, text.strip().replace("\n", " | "))
+             for overlay, event, text in errors if text.strip()]
+    if not lines:
+        return
+    path = log_path(user_store)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file() and path.stat().st_size > LOG_LIMIT:
+            keep = path.read_bytes()[-LOG_LIMIT // 2:]
+            path.write_bytes(keep[keep.find(b"\n") + 1:])
+        with open(str(path), "a", encoding="utf-8", newline="\n") as fh:
+            fh.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
 
 
 def printable(data: bytes, bound: int = 4096) -> str:
@@ -445,7 +725,7 @@ def unsupported_reports(plans: "list[tuple[Any, dict[str, Any]]]") -> "list[list
 
 
 def planned(overlays: "Iterable[Any]", harness: Harness, user_store: "str | os.PathLike[str]",
-            ) -> "list[tuple[Any, dict[str, Any]]]":
+            keep_tree: bool = False) -> "list[tuple[Any, dict[str, Any]]]":
     """``(overlay, plan)`` for each overlay that has a hook of any event, in the order given."""
     from dotagents import _activate
 
@@ -454,12 +734,13 @@ def planned(overlays: "Iterable[Any]", harness: Harness, user_store: "str | os.P
     for overlay in overlays:
         entries, _ = _aos.hooks_of(overlay.document(), _activate.files(overlay), _aos.current_os(), interpreters)
         if entries:
-            out.append((overlay, overlay_plan(overlay, harness, user_store)))
+            out.append((overlay, overlay_plan(overlay, harness, user_store, keep_tree)))
     return out
 
 
 def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environment", base: "dict[str, str]",
-            harness: Harness, *, cwd: "Optional[str]" = None) -> "tuple[list[list[str]], list[list[str]]]":
+            harness: Harness, *, cwd: "Optional[str]" = None, user_store: "Optional[str | os.PathLike[str]]" = None,
+            ) -> "tuple[list[list[str]], list[list[str]]]":
     """Fire ``pre-env`` for the overlays in ``plans`` (composition order) and apply their output to
     ``session``, after the root variables and before any overlay's declarations. Each hook runs in
     ``base`` (the base environment and the root variables) plus its own overlay's ``AOS_OVERLAY_*``.
@@ -477,8 +758,12 @@ def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environmen
         if not entries or not plan["on"]:
             continue
         entry = entries[0]
-        env = dict(base)
-        env["AOS_OVERLAY_ROOT"] = os.path.abspath(str(overlay.path))
+        env = session_base(base)
+        snap = None
+        if user_store is not None and plan.get("tree") is not None and plan["digest"]:
+            snap = snapshot(user_store, overlay, plan["digest"], plan["tree"])
+            env[overlay.root_var] = str(snap)
+        env["AOS_OVERLAY_ROOT"] = str(snap) if snap is not None else os.path.abspath(str(overlay.path))
         env["AOS_OVERLAY_NAME"] = overlay.normalized_name
         state = _activate.state_dir(overlay)
         if state is not None:
@@ -486,14 +771,16 @@ def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environmen
             env["AOS_OVERLAY_STATE"] = str(state)
         subject = Subject(overlay, entry)
 
-        def start(subject=subject, env=env) -> "dict[str, Any]":
-            return execute(subject, "pre-env", payload, env)
+        def start(subject=subject, env=env, snap=snap) -> "dict[str, Any]":
+            return execute(subject, "pre-env", payload, env, root=snap,
+                           limits=limits_for(user_store) if user_store is not None else None)
 
         identities.append(overlay.name)
         runs[overlay.name] = {"on_failure": entry["on_failure"], "start": start, "sets": []}
     reports: "list[list[str]]" = []
     non_defaults: "list[list[str]]" = []
-    _aos.apply_pre_env(session, identities, runs, LIMITS, reports, non_defaults)
+    _aos.apply_pre_env(session, identities, runs, limits_for(user_store) if user_store is not None else LIMITS,
+                       reports, non_defaults)
     return reports, non_defaults
 
 

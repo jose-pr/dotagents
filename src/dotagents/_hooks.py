@@ -182,8 +182,8 @@ def merge_hook(
 
     def _refreshed(entry: dict) -> dict:
         old = next(h for h in entry["hooks"] if _mine(h))
-        hook = {k: v for k, v in old.items() if k not in _MANAGED_KEYS}
-        hook.update(ours["hooks"][0])
+        hook = dict(ours["hooks"][0])
+        hook.update({k: v for k, v in old.items() if k not in _MANAGED_KEYS and k not in hook})
         new = {k: v for k, v in entry.items() if k not in ("matcher", "hooks")}
         if "matcher" in ours:
             new["matcher"] = ours["matcher"]

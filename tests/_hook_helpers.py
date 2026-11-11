@@ -20,7 +20,7 @@ if log:
     with open(log, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"argv": sys.argv[1:], "event": os.environ.get("AOS_HOOK_EVENT"),
                              "payload": payload, "cwd": os.getcwd(),
-                             "saw": sorted(k for k in os.environ if k.startswith("SECRET_") or k == "SEEN")}) + "\\n")
+                             "saw": sorted(k for k in os.environ if k.startswith(("SECRET_", "CLAUDE_", "CODEX_")) or k in ("SEEN", "AGENTS_SESSION_BASE"))}) + "\\n")
 if os.environ.get("HOOK_ERR"):
     sys.stderr.write(os.environ["HOOK_ERR"])
 if os.environ.get("HOOK_SLEEP"):

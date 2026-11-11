@@ -1212,24 +1212,32 @@ def _same_dir(a: str, b: str) -> bool:
         return a == b
 
 
-def _fire_pre_env(overlays, osenv, own_base, scope, weakenings, apply, logger):
+def _fire_pre_env(overlays, osenv, own_base, scope, weakenings, apply, logger, can_refuse=False):
     """Fire the overlays' ``pre-env`` hooks (allowed ones only) and apply their output to ``osenv``
     through ``apply``; each hook that is on is a ``hook`` weakening, and the ones that are off or
     that the harness cannot fire are logged, never silently. Returns the ``(overlay, plan)``
-    list. A guard that fails stops the session with an error."""
+    list. A guard that fails stops the session with an error where this build can stop one
+    (``can_refuse``: `dotagents launch`, before the harness exists); anywhere else the harness is
+    already running, so the refusal is reported as ``hook-not-applied`` and nothing of the
+    hook applies."""
     from dotagents import _overlay_hooks
 
     harness = _overlay_hooks.harness_of(osenv.get("AGENTS_HARNESS"))
-    plans = _overlay_hooks.planned(overlays, harness, scope.user_root)
+    plans = _overlay_hooks.planned(overlays, harness, scope.user_root, keep_tree=True)
     if not plans:
         return plans
     windows = os.name == "nt"
     session = _aos.Environment(osenv, windows)
     try:
-        reports, _ = _overlay_hooks.pre_env(plans, session, own_base, harness)
+        reports, _ = _overlay_hooks.pre_env(plans, session, own_base, harness, user_store=scope.user_root)
     except _aos.Refused as refused:
-        raise SystemExit("error: the pre-env hook of overlay %s refused the session (hook-refused): see "
-                         "`dotagents overlays hooks %s`" % (refused.subject, refused.subject))
+        if can_refuse:
+            raise SystemExit("error: the pre-env hook of overlay %s refused the session (hook-refused): see "
+                             "`dotagents overlays hooks %s`" % (refused.subject, refused.subject))
+        reports = [["hook-not-applied", refused.subject, "pre-env", "refuse"]]
+        if logger:
+            logger.warning("overlay hooks: %s", _overlay_hooks.describe(reports[0]))
+        return plans
     changes = EnvChanges({k: v for k, v in session.values.items() if osenv.get(k) != v},
                          removed=[k for k in osenv if k not in session.values])
     apply(changes)
@@ -1248,6 +1256,7 @@ def get_environment(
     base_env: "Optional[dict[str, str]]" = None,
     explicit: "Optional[str]" = None,
     logger=None,
+    can_refuse_session: bool = False,
 ) -> EnvChanges:
     """Assemble the env CHANGES (vars this adds/overrides vs ``base_env``) for a
     :class:`Scope`.
@@ -1464,7 +1473,8 @@ def get_environment(
     secret: "set[str]" = set()
     # Hooks: the `pre-env` ones fire here, themselves, on every harness; the others fire where
     # the harness calls them (`dotagents hook`). What cannot fire here is reported.
-    hook_plans = _fire_pre_env(overlays, osenv, own_base, scope, weakenings, _apply, logger)
+    hook_plans = _fire_pre_env(overlays, osenv, own_base, scope, weakenings, _apply, logger,
+                               can_refuse_session)
     for overlay in overlays:
         if not _activate.is_pinned(overlay):
             weakenings.append((overlay.name, "unpinned", ""))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -46,14 +47,15 @@ class Hook(DotAgentsArgs):
             sys.stderr.write("error: hook needs --harness claude-code|codex, an event that harness has, "
                              "and --level user|project\n")
             return 2
+        started = time.monotonic()
         try:
             stdin = sys.stdin.buffer.read(_hook_dispatch.MAX_NATIVE + 1)
         except (OSError, ValueError):
-            stdin = b""
+            stdin = b"\xff"  # unreadable: a failure of the event, not an empty payload
         try:
             scope = _scope.Scope.of(agents_dir=_scope.resolve_user_store(self.agents_dir),
                                     project_root=_scope.project_root_default())
-            out, err = _hook_dispatch.dispatch(self.harness, self.event, stdin, scope, self.level)
+            out, err = _hook_dispatch.dispatch(self.harness, self.event, stdin, scope, self.level, started=started)
         except (Exception, SystemExit) as exc:  # noqa: BLE001 - a guard fails closed
             err = "dotagents hook: %s failed (%s)\n" % (self.event, type(exc).__name__)
             out = ""

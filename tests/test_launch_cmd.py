@@ -374,3 +374,26 @@ def test_a_missing_harness_writes_nothing(launch_mod, monkeypatch, tmp_path):
     with pytest.raises(SystemExit, match="not found"):
         _run(launch_mod, agent="gemini", command="no-such-harness-xyz")
     assert not (tmp_path / "project" / "GEMINI.md").exists()
+
+
+def test_launch_records_what_the_session_changed_so_a_hook_can_start_from_the_base(
+        launch_mod, monkeypatch, tmp_path):
+    import json
+
+    from dotagents import _overlay_hooks
+
+    overlay = tmp_path / "store" / "overlays" / "sec"
+    overlay.mkdir(parents=True)
+    (overlay / "overlay.cfg").write_text('[env]\nSECRET_TOKEN = "hunter2"\nKEEP = "overlay"\n', encoding="utf-8")
+    monkeypatch.setenv("KEEP", "user")
+    program = _program(tmp_path)
+    _context_is(monkeypatch, CONTEXT)
+    calls = _capture_spawn(monkeypatch, launch_mod)
+    _run(launch_mod, agent="claude", command=str(program))
+    (_argv, env), = calls
+    assert env["SECRET_TOKEN"] == "hunter2" and env["KEEP"] == "overlay"
+    base = json.loads(env["AGENTS_SESSION_BASE"])
+    assert base["SECRET_TOKEN"] is None and base["KEEP"] == "user"
+    started_from = _overlay_hooks.session_base(env)
+    assert "SECRET_TOKEN" not in started_from and started_from["KEEP"] == "user"
+    assert "AGENTS_SESSION_BASE" not in started_from

@@ -800,19 +800,29 @@ class ClaudeAgent(Agent):
     def wire_overlay_hooks(
         self, dest: Path, *, dry_run: bool, logger, config_root: "Optional[Path]" = None
     ) -> None:
-        """One entry per Claude Code event an installed overlay has a hook for, each running
-        the forwarder (`overlay_hook.py`), which runs `dotagents hook`. A user store writes
-        `settings.json`, a project's `settings.local.json`, as :meth:`wire_hooks` does. Entries
-        for events no overlay uses any longer are retracted."""
+        """One entry per Claude Code event an installed overlay has a hook for, each running the
+        forwarder (`overlay_hook.py`), which runs `dotagents hook`. A user store writes
+        `settings.json`, a project's `settings.local.json`, as :meth:`wire_hooks` does. Entries for
+        events no overlay uses any longer are retracted.
+
+        The forwarder and its record live in the **user's** Claude config directory only, whatever
+        the store: a project's own files are the agent's to write, and what an entry runs must not
+        be among them. The entry text names the interpreter that ran this step, runs it isolated
+        (`-I`: no working directory, no `PYTHON*` variables) and holds nothing that changes with the
+        overlays (a guard is in the record)."""
         import sys
 
         from dotagents import _hooks, _overlay_hooks
+        from dotagents._scope import resolve_user_store
 
         is_user_scope = self._user_scope(dest) and not config_root
         root = Path(config_root) if config_root else self._config_root(dest)
         settings_path = root / ("settings.json" if is_user_scope else "settings.local.json")
+        forwarder_dir = Path(config_root) if config_root else self._user_config_dir()
+        user_store = Path(dest) if self._user_scope(dest) else resolve_user_store()
         harness = _overlay_hooks.CLAUDE
         wanted = _overlay_hooks.wanted_events(dest, harness)
+        token = _overlay_hooks.level_token(dest, user_store)
         if not wanted and not settings_path.is_file():
             return
         settings = _hooks.load_settings(settings_path)
@@ -821,11 +831,16 @@ class ClaudeAgent(Agent):
             hooks = {}
         script_changed = False
         if wanted:
-            script_changed = bool(_deploy_hook_script(root, _overlay_hooks.FORWARDER, dry_run=dry_run,
+            script_changed = bool(_deploy_hook_script(forwarder_dir, _overlay_hooks.FORWARDER, dry_run=dry_run,
                                                       logger=logger, harness="Claude Code"))
-        script = (root / "hooks" / _overlay_hooks.FORWARDER).resolve()
-        python = Path(sys.executable)
-        level = "user" if is_user_scope else "project"
+            record = _overlay_hooks.forwarder_record(user_store, [e for e, guard in wanted.items() if guard])
+            if not dry_run:
+                script_changed |= _overlay_hooks.write_record(forwarder_dir, token, record)
+        elif not dry_run:
+            _overlay_hooks.remove_record(forwarder_dir, token)
+        script = (forwarder_dir / "hooks" / _overlay_hooks.FORWARDER).resolve()
+        python = Path(os.path.abspath(sys.executable))
+        timeout = _overlay_hooks.entry_timeout(user_store)
         windows = self._is_windows()
         changed = False
         for event, native in harness.native.items():
@@ -840,17 +855,18 @@ class ClaudeAgent(Agent):
                 else:
                     hooks.pop(native, None)
                 continue
-            args = " ".join(_overlay_hooks.forwarder_args(harness, event, level, wanted[event]))
-            bash = '"%s" "%s" %s' % (python.as_posix(), script.as_posix(), args)
-            entries, c = _hooks.merge_hook(existing, bash, status_message=status,
-                                           timeout=_overlay_hooks.ENTRY_TIMEOUT)
+            args = " ".join([harness.id, event, token])
+            bash = "%s -I %s %s" % (_overlay_hooks.sh_quote(python.as_posix()),
+                                    _overlay_hooks.sh_quote(script.as_posix()), args)
+            entries, c = _hooks.merge_hook(existing, bash, status_message=status, timeout=timeout)
             changed |= c
             if windows:
                 # Windows without Git Bash: the same program under PowerShell, selecting
                 # itself as the context handlers above do.
-                power = self._PS_NO_BASH + '& "%s" "%s" %s }' % (python, script, args)
+                power = self._PS_NO_BASH + "& %s -I %s %s }" % (_overlay_hooks.ps_quote(str(python)),
+                                                              _overlay_hooks.ps_quote(str(script)), args)
                 entries, c = _hooks.merge_hook(entries, power, status_message=status + " (PowerShell)",
-                                               shell="powershell", timeout=_overlay_hooks.ENTRY_TIMEOUT)
+                                               shell="powershell", timeout=timeout)
             else:
                 entries, c = _hooks.remove_hook(entries, status + " (PowerShell)")
             changed |= c
@@ -1156,8 +1172,10 @@ class CodexAgent(Agent):
     ) -> None:
         """As :meth:`ClaudeAgent.wire_overlay_hooks`, into `<codex-home>/hooks.json`, for the
         user store only (Codex's configuration is global). Codex runs the entry through
-        PowerShell on Windows, hence `commandWindows`; it trusts a hook by its hash, which is
-        Codex's own prompt to answer, never written here."""
+        PowerShell on Windows, hence `commandWindows`. Codex trusts a hook by a hash of its entry,
+        which is Codex's own prompt to answer and is never written here: the entry text is
+        therefore kept the same (no guard flag, no overlay names), and when it has to change a
+        warning says that Codex will ask for trust again."""
         import sys
 
         from dotagents import _hooks, _overlay_hooks
@@ -1174,12 +1192,19 @@ class CodexAgent(Agent):
         hooks = data.get("hooks")
         if not isinstance(hooks, dict):
             hooks = {}
+        token = "user"
         script_changed = False
         if wanted:
             script_changed = bool(_deploy_hook_script(root, _overlay_hooks.FORWARDER, dry_run=dry_run,
                                                       logger=logger, harness="Codex"))
+            record = _overlay_hooks.forwarder_record(dest, [e for e, guard in wanted.items() if guard])
+            if not dry_run:
+                script_changed |= _overlay_hooks.write_record(root, token, record)
+        elif not dry_run:
+            _overlay_hooks.remove_record(root, token)
         script = (root / "hooks" / _overlay_hooks.FORWARDER).resolve()
-        python = Path(sys.executable)
+        python = Path(os.path.abspath(sys.executable))
+        timeout = _overlay_hooks.entry_timeout(dest)
         changed = False
         for event, native in harness.native.items():
             status = _overlay_hooks.STATUS_PREFIX + native
@@ -1192,11 +1217,20 @@ class CodexAgent(Agent):
                 else:
                     hooks.pop(native, None)
                 continue
-            args = " ".join(_overlay_hooks.forwarder_args(harness, event, "user", wanted[event]))
-            command = '"%s" "%s" %s' % (python.as_posix(), script.as_posix(), args)
-            windows = '& "%s" "%s" %s; exit $LASTEXITCODE' % (python, script, args)
+            args = " ".join([harness.id, event, token])
+            command = "%s -I %s %s" % (_overlay_hooks.sh_quote(python.as_posix()),
+                                       _overlay_hooks.sh_quote(script.as_posix()), args)
+            windows = "& %s -I %s %s; exit $LASTEXITCODE" % (_overlay_hooks.ps_quote(str(python)),
+                                                            _overlay_hooks.ps_quote(str(script)), args)
+            before = [h for e in (existing if isinstance(existing, list) else []) if isinstance(e, dict)
+                      for h in (e.get("hooks") or []) if isinstance(h, dict)
+                      and h.get("statusMessage") == _hooks.STATUS_PREFIX + status]
             entries, c = _hooks.merge_hook(existing, command, status_message=status, command_windows=windows,
-                                           timeout=_overlay_hooks.ENTRY_TIMEOUT)
+                                           timeout=timeout)
+            if c and before and logger and not dry_run:
+                logger.warning("the Codex %s hook entry for overlay hooks changed: Codex will ask you to trust "
+                               "it again (review it in Codex before answering) -- until then it does not run",
+                               native)
             changed |= c
             hooks[native] = entries
         if not (changed or script_changed):

@@ -130,7 +130,9 @@ def test_session_start_on_claude_adds_context_and_variables(rig, tmp_path):
     assert call["payload"]["session"].startswith("dotagents-") and "s" != call["payload"]["session"]
     block = env_file.read_text(encoding="utf-8")
     assert "export GREETING='it'\\''s $(touch pwned) `x`'" in block and "unset TWO" in block
-    assert call["cwd"] == str(rig.root)
+    # A hook runs from a snapshot of the bytes whose digest was allowed, not from the overlay's directory.
+    assert os.path.realpath(call["cwd"]).startswith(os.path.realpath(str(rig.store / ".cache" / "hook-snapshots")))
+    assert os.path.exists(os.path.join(call["cwd"], "hook.py"))
 
 
 def test_context_markers_are_not_imitable(rig, tmp_path):
@@ -450,5 +452,6 @@ def test_standard_error_goes_to_the_users_log_made_printable_and_never_to_the_ag
     noisy = "note" + chr(27) + "[31m red" + chr(7)
     stdout, stderr = rig.fire("claude-code", "prompt", {"session_id": "s", "cwd": "/", "prompt": "x"},
                               HOOK_ERR=noisy, HOOK_OUT=out(context="fine"))
-    assert "hook guard prompt wrote: note?[31m red?" in stderr
-    assert chr(27) not in stderr and "note" not in stdout
+    log = (rig.store / ".cache" / "hooks.log").read_text(encoding="utf-8")
+    assert "guard prompt: note?[31m red?" in log and chr(27) not in log
+    assert "note" not in stdout and "note" not in stderr

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -88,16 +89,29 @@ def _reason(fired: "_overlay_hooks.Fired") -> str:
     return "the hook of overlay %s failed%s" % (result["by"], " (%s)" % failure[3] if failure else "")
 
 
+#: Characters that end a line for some reader (a shell, Python's ``splitlines``, a terminal), or end
+#: a string: a value holding one is not written into an env file.
+LINE_SEPARATORS = "\0\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
+
+
+def env_file_safe(changes: "dict[str, Optional[str]]") -> bool:
+    return all(value is None or not any(c in LINE_SEPARATORS for c in value) for value in changes.values())
+
+
 def write_env_block(path: "str | os.PathLike[str]", label: str, changes: "dict[str, Optional[str]]") -> None:
     """Put ``changes`` into a Claude Code env file as the one block ``label`` owns: names are
-    validated identifiers and every value is single-quoted, so no value is read as shell syntax."""
+    validated identifiers and every value is single-quoted, so no value is read as shell syntax.
+    The file is split at line feeds only, and a value holding any line separator is refused
+    (:func:`env_file_safe`), so a value cannot close its own block or start another."""
+    if not env_file_safe(changes):
+        raise ValueError("a value holds a line separator")
     from dotagents._fs import write_text_lf
 
     begin, end = ": dotagents-hook-env-begin %s" % label, ": dotagents-hook-env-end %s" % label
     kept: "list[str]" = []
     skipping = False
     try:
-        existing = Path(path).read_text(encoding="utf-8").splitlines()
+        existing = Path(path).read_text(encoding="utf-8").split("\n")
     except OSError:
         existing = []
     for line in existing:
@@ -126,8 +140,8 @@ def answer(harness: "_overlay_hooks.Harness", event: str, fired: "_overlay_hooks
     result = fired.result
     notes = [_overlay_hooks.describe(r) for r in fired.reports
              if event == "session-start" or r[0] != "hook-not-allowed"]
-    logged = ["hook %s %s wrote: %s" % (overlay, name, text.strip()) for overlay, name, text in fired.errors]
-    message = "dotagents: " + "; ".join(notes) if notes else None
+    notes += ["env-sensitive %s" % name[1] if isinstance(name, list) else str(name)
+              for name in result["non_defaults"]]
     decision = result["decision"]
     context = context_text(result["context"]) if result["context"] else ""
     out: "dict[str, Any]" = {}
@@ -147,10 +161,14 @@ def answer(harness: "_overlay_hooks.Harness", event: str, fired: "_overlay_hooks
     elif context:
         out["hookSpecificOutput"] = {"hookEventName": native, "additionalContext": context}
     if event in ("session-start", "cd") and env_file and result["env"] and harness.id == "claude-code":
-        write_env_block(env_file, event, result["env"])
+        if env_file_safe(result["env"]):
+            write_env_block(env_file, event, result["env"])
+        else:
+            notes.append("hook-not-applied env (a value holds a line separator)")
+    message = "dotagents: " + "; ".join(notes) if notes else None
     if message and not plain:
         out["systemMessage"] = message
-    stderr = "\n".join(notes + logged)
+    stderr = "\n".join(notes)
     if plain:
         return plain, stderr
     return (json.dumps(out) + "\n" if out else ""), stderr
@@ -175,15 +193,19 @@ def refusal_answer(harness: "_overlay_hooks.Harness", event: str, why: str) -> s
 
 
 def plans_for(scope: Any, harness: "_overlay_hooks.Harness", level: str,
-              event: "Optional[str]" = None) -> "list[tuple[Any, dict[str, Any]]]":
-    """``(overlay, plan)`` of the active overlays at ``level`` (``user``: the user and system
-    stores, ``project``: the project's), in composition order. With ``event``, only overlays that
-    have a hook for it are planned, so no tree is hashed for the rest."""
+              event: "Optional[str]" = None, keep_tree: bool = False) -> "list[tuple[Any, dict[str, Any]]]":
+    """``(overlay, plan)`` of the overlays at ``level`` (``user``: the user and system stores,
+    ``project``: the project's) that have a hook, in composition order. With ``event``, only
+    overlays that have a hook for it are planned, so no tree is hashed for the rest.
+
+    Every installed overlay counts, not only the active ones: an overlay that is refused (a guard
+    whose hooks are not allowed at its digest, say) still has its guards, and they fail instead of
+    vanishing."""
     from dotagents import _activate
     from dotagents._env import _ordered
 
     chosen = []
-    for overlay in _ordered(scope.overlays):
+    for overlay in _ordered(scope.installed_overlays):
         where = "user" if overlay.store is None else scope.store_level(overlay.store)
         if (where == "project") != (level == "project"):
             continue
@@ -192,34 +214,75 @@ def plans_for(scope: Any, harness: "_overlay_hooks.Harness", level: str,
         if not any(event is None or entry["event"] == event for entry in entries):
             continue
         chosen.append(overlay)
-    return [(overlay, _overlay_hooks.overlay_plan(overlay, harness, scope.user_root)) for overlay in chosen]
+    return [(overlay, _overlay_hooks.overlay_plan(overlay, harness, scope.user_root, keep_tree))
+            for overlay in chosen]
+
+
+def hook_environment(scope: Any, overlay: Any, environ: "dict[str, str]") -> "Optional[dict[str, str]]":
+    """The environment of ``overlay``'s own processes for a hook: the base the session was started
+    from (:func:`dotagents._overlay_hooks.session_base`), the roots, this overlay's declarations --
+    and the user store's Python, never a project's venv."""
+    from dotagents import _env, _pyvenv
+    from dotagents._scope import Scope
+
+    env = _env.overlay_process_env(scope, overlay, base_env=_overlay_hooks.session_base(environ))
+    if env is None:
+        return None
+    user_scope = Scope.of(agents_dir=scope.user_root, global_scope=True)
+    venv = _pyvenv.active_venv(user_scope, env)
+    env.pop("AGENTS_PYVENV", None)
+    env["AGENTS_PYTHON"] = str(_pyvenv.venv_python(venv)) if venv is not None else _python()
+    return env
+
+
+def _python() -> str:
+    import sys
+
+    return sys.executable
 
 
 def dispatch(harness_id: str, event: str, stdin: bytes, scope: Any, level: str,
-             environ: "Optional[dict[str, str]]" = None) -> "tuple[str, str]":
-    """Fire ``event`` of ``harness_id`` for the overlays of ``level``; ``(stdout, stderr)``."""
+             environ: "Optional[dict[str, str]]" = None, started: "Optional[float]" = None) -> "tuple[str, str]":
+    """Fire ``event`` of ``harness_id`` for the overlays of ``level``; ``(stdout, stderr)``.
+
+    ``started`` is the :func:`time.monotonic` time the process started: everything from there on,
+    scope building and hashing included, is inside one deadline (the user's ``deadline`` setting)."""
     environ = os.environ if environ is None else environ
+    started = time.monotonic() if started is None else started
     harness = _overlay_hooks.HARNESSES.get(harness_id)
     if harness is None or event not in harness.native:
         return "", "dotagents: no hook %s on harness %r\n" % (event, harness_id)
-    try:
-        native = json.loads(stdin[:MAX_NATIVE].decode("utf-8")) if stdin else {}
-    except ValueError:
-        native = {}
-    if not isinstance(native, dict):
-        native = {}
+    user_store = scope.user_root
+    deadline = started + _overlay_hooks.deadline_for(user_store) - 5
+    limits = _overlay_hooks.limits_for(user_store)
+    native = None
+    if len(stdin) <= MAX_NATIVE:
+        try:
+            native = json.loads(stdin.decode("utf-8")) if stdin else {}
+        except ValueError:
+            native = None
+        if not isinstance(native, dict):
+            native = None
+    plans = plans_for(scope, harness, level, event=None if event == "session-start" else event,
+                      keep_tree=native is not None)
+    if native is None:
+        # An oversize or unreadable payload is a failure of every hook of the event, and a guard
+        # refuses.
+        report = "hook-failed %s payload" % event
+        guarded = any(entry["event"] == event and entry["on_failure"] == "refuse"
+                      for _overlay, plan in plans for entry in plan["hooks"])
+        return (refusal_answer(harness, event, "an overlay hook guard could not read the event") if guarded else ""), report
     facts = facts_of(harness, event, native)
-    plans = plans_for(scope, harness, level, event=None if event == "session-start" else event)
     cache: "dict[str, Optional[dict[str, str]]]" = {}
 
     def environment(overlay: Any) -> "Optional[dict[str, str]]":
-        from dotagents import _env
-
         if overlay.path not in cache:
-            cache[overlay.path] = _env.overlay_process_env(scope, overlay, base_env=dict(environ))
+            cache[overlay.path] = hook_environment(scope, overlay, dict(environ))
         return cache[overlay.path]
 
-    fired = _overlay_hooks.fire(event, facts, plans, harness, environment=environment)
+    fired = _overlay_hooks.fire(event, facts, plans, harness, environment=environment, limits=limits,
+                                user_store=user_store, deadline=deadline)
+    _overlay_hooks.log_errors(user_store, fired.errors)
     if event == "session-start":
         fired.reports.extend(_overlay_hooks.unsupported_reports(plans))
     return answer(harness, event, fired, environ.get("CLAUDE_ENV_FILE"))

@@ -17,9 +17,10 @@ def _user_store(tmp_path, monkeypatch):
     store_env(tmp_path, monkeypatch)
 
 
-def build(rig, base=None, **environ):
+def build(rig, base=None, can_refuse=False, **environ):
     env = dict(base or {"PATH": ""}, HOOK_LOG=str(rig.log), **environ)
-    return _env.get_environment(rig.scope, base_env=env, logger=logging.getLogger("pre-env-test"))
+    return _env.get_environment(rig.scope, base_env=env, logger=logging.getLogger("pre-env-test"),
+                                can_refuse_session=can_refuse)
 
 
 def test_pre_env_output_is_an_env_scripts_and_applies_before_the_overlays_declarations(tmp_path):
@@ -30,7 +31,7 @@ def test_pre_env_output_is_an_env_scripts_and_applies_before_the_overlays_declar
     call = rig.calls()[0]
     assert call["event"] == "pre-env" and call["argv"] == ["pre-env"]
     assert call["payload"].keys() == {"event", "harness", "cwd"}
-    assert call["cwd"] == str(rig.root)
+    assert call["cwd"].startswith(str(rig.store / ".cache" / "hook-snapshots"))
 
 
 def test_pre_env_runs_on_a_harness_with_no_native_hooks(tmp_path):
@@ -55,12 +56,21 @@ def test_pre_env_does_not_see_another_overlays_declarations(tmp_path):
     assert rig.calls()[0]["saw"] == []
 
 
-def test_a_guard_that_fails_stops_the_session(tmp_path):
+def test_a_guard_that_fails_stops_the_session_dotagents_launches(tmp_path):
     rig = Rig(tmp_path, "[hooks]\npre-env = { on_failure = \"refuse\" }\n")
     rig.allow()
     with pytest.raises(SystemExit) as stopped:
-        build(rig, HOOK_EXIT="1")
+        build(rig, can_refuse=True, HOOK_EXIT="1")
     assert "guard refused the session" in str(stopped.value)
+
+
+def test_a_guard_cannot_stop_a_session_that_is_already_running_and_says_so(tmp_path, caplog):
+    rig = Rig(tmp_path, "[hooks]\npre-env = { on_failure = \"refuse\" }\n\n[env]\nKEPT = \"yes\"\n")
+    rig.allow()
+    with caplog.at_level(logging.WARNING):
+        env = build(rig, HOOK_EXIT="1", HOOK_OUT=json.dumps({"FIRST": "one"}))
+    assert "hook-not-applied guard pre-env refuse" in caplog.text
+    assert "FIRST" not in env and env["KEPT"] == "yes"
 
 
 def test_a_report_only_pre_env_that_fails_applies_nothing_and_the_rest_goes_on(tmp_path, caplog):

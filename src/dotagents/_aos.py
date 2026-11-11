@@ -1411,10 +1411,18 @@ def _is_reparse(info: os.stat_result) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & _REPARSE_POINT)
 
 
-def tree_entries(root: "str | os.PathLike[str]") -> "list[tuple[tuple[bytes, ...], str, Any]]":
+MAX_TREE_BYTES = 256 * 1024 * 1024
+
+
+def tree_entries(root: "str | os.PathLike[str]", *, with_data: bool = False,
+                 ) -> "list[tuple[tuple[bytes, ...], str, Any]]":
     """A directory's entries for :func:`digest_entries`, read without
-    following any link inside it; a file's data is its digest."""
+    following any link inside it; a file's data is its digest, or with
+    ``with_data`` its bytes -- each file read once, so the digest of the
+    entries is the digest of exactly the bytes handed back (at most
+    :data:`MAX_TREE_BYTES` of them, else :class:`DigestError` ``too-large``)."""
     out: "list[tuple[tuple[bytes, ...], str, Any]]" = []
+    total = [0]
 
     def walk(directory: str, prefix: "tuple[bytes, ...]") -> None:
         with os.scandir(directory) as it:
@@ -1431,7 +1439,15 @@ def tree_entries(root: "str | os.PathLike[str]") -> "list[tuple[tuple[bytes, ...
                 out.append((components, "dir", ""))
                 walk(entry.path, components)
             elif stat.S_ISREG(info.st_mode):
-                out.append((components, "file", file_digest(entry.path)))
+                if with_data:
+                    with open(entry.path, "rb") as fh:
+                        data = fh.read()
+                    total[0] += len(data)
+                    if total[0] > MAX_TREE_BYTES:
+                        raise DigestError("too-large", os.fsdecode(b"/".join(components)))
+                    out.append((components, "file", data))
+                else:
+                    out.append((components, "file", file_digest(entry.path)))
             else:
                 out.append((components, "special", ""))
 
