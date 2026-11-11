@@ -241,6 +241,12 @@ def _prepare(scope, dest_dir: Path, name: str, *, change: str, no_setup=False, d
     except _aos.Refused as refused:
         logger.error("%s: %s %s (hash every requirement or none)", name, refused.code, refused.subject)
         return 1
+    if change != "remove":
+        from dotagents import _overlay_hooks
+
+        note = _overlay_hooks.install_notice(overlay, scope.user_root)
+        if note:
+            logger.warning("%s", note)
     if variant is None and change != "remove":
         # A default setup.<ext> present that this machine cannot run.
         plan = _aos.plan(overlay.document(), _activate.context(overlay), pinned=True)

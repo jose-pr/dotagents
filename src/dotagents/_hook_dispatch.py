@@ -126,6 +126,7 @@ def answer(harness: "_overlay_hooks.Harness", event: str, fired: "_overlay_hooks
     result = fired.result
     notes = [_overlay_hooks.describe(r) for r in fired.reports
              if event == "session-start" or r[0] != "hook-not-allowed"]
+    logged = ["hook %s %s wrote: %s" % (overlay, name, text.strip()) for overlay, name, text in fired.errors]
     message = "dotagents: " + "; ".join(notes) if notes else None
     decision = result["decision"]
     context = context_text(result["context"]) if result["context"] else ""
@@ -149,7 +150,7 @@ def answer(harness: "_overlay_hooks.Harness", event: str, fired: "_overlay_hooks
         write_env_block(env_file, event, result["env"])
     if message and not plain:
         out["systemMessage"] = message
-    stderr = "\n".join(notes)
+    stderr = "\n".join(notes + logged)
     if plain:
         return plain, stderr
     return (json.dumps(out) + "\n" if out else ""), stderr
@@ -186,18 +187,12 @@ def plans_for(scope: Any, harness: "_overlay_hooks.Harness", level: str,
         where = "user" if overlay.store is None else scope.store_level(overlay.store)
         if (where == "project") != (level == "project"):
             continue
-        if event is not None:
-            entries, _ = _aos.hooks_of(overlay.document(), _activate.files(overlay), _aos.current_os(),
-                                       sorted(_activate.interpreters()))
-            if not any(entry["event"] == event for entry in entries):
-                continue
+        entries, _ = _aos.hooks_of(overlay.document(), _activate.files(overlay), _aos.current_os(),
+                                   sorted(_activate.interpreters()))
+        if not any(event is None or entry["event"] == event for entry in entries):
+            continue
         chosen.append(overlay)
     return [(overlay, _overlay_hooks.overlay_plan(overlay, harness, scope.user_root)) for overlay in chosen]
-
-
-def has_guard(plans: "list[tuple[Any, dict[str, Any]]]", event: str) -> bool:
-    return any(entry["event"] == event and entry["on_failure"] == "refuse"
-               for _overlay, plan in plans for entry in plan["hooks"])
 
 
 def dispatch(harness_id: str, event: str, stdin: bytes, scope: Any, level: str,

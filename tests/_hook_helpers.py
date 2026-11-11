@@ -21,6 +21,8 @@ if log:
         fh.write(json.dumps({"argv": sys.argv[1:], "event": os.environ.get("AOS_HOOK_EVENT"),
                              "payload": payload, "cwd": os.getcwd(),
                              "saw": sorted(k for k in os.environ if k.startswith("SECRET_") or k == "SEEN")}) + "\\n")
+if os.environ.get("HOOK_ERR"):
+    sys.stderr.write(os.environ["HOOK_ERR"])
 if os.environ.get("HOOK_SLEEP"):
     time.sleep(float(os.environ["HOOK_SLEEP"]))
 if os.environ.get("HOOK_BIG"):

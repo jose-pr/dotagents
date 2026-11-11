@@ -955,19 +955,21 @@ its directory, bounded by `LIMITS`.
 
 - `LIMITS` (`DEFAULT_HOOK_LIMITS`, a copy tests may change), `NO_HARNESS = "dotagents"`,
   `class Harness` (`id`, `native`: AOS event → native name, `applies`: event → outputs
-  dotagents can apply, `reasons`, `fires`, `event_of`), `CLAUDE`, `CODEX`, `ANYWHERE` (no
+  dotagents can apply, `reasons`, `fires`), `CLAUDE`, `CODEX`, `ANYWHERE` (no
   harness known: nothing reported as unfireable), `HARNESSES`, `harness_of(ident) -> Harness`
   (an unknown id fires only `pre-env`), `partial_events(harness)`.
 - Allowances, in the user store only: `allowances_path(user_store)`,
   `read_allowances`, `allowed_digest`, `allow(user_store, identity, digest)`,
   `revoke(user_store, identity) -> bool`.
-- `fresh_digest(overlay)` (never memoized), `overlay_plan(overlay, harness, user_store) ->
+- `install_notice(overlay, user_store) -> Optional[str]` — the line `overlays add/sync` logs
+  when an overlay has hooks that are off; `fresh_digest(overlay)` (never memoized), `overlay_plan(overlay, harness, user_store) ->
   plan` (`hook_plan` plus `digest`, `identity`), `declares_guard(overlay)`,
   `refusal(overlay) -> Optional[str]` (a guard that is off keeps its overlay out of
   `_activate.active`), `planned(overlays, harness, user_store)`, `has_live_pre_env(scope,
   harness_id)` (`env --cache` is not replayed for it).
 - `class Subject`, `execute(subject, event, payload, env, *, limits=None) -> run`,
-  `class Fired` (`result`, `reports`, `decision`), `session_id(harness, native_id)` (a hash,
+  `printable(data, bound=4096)` (stderr made fit for a log), `class Fired` (`result`, `reports`,
+  `errors`: what each hook wrote to standard error, for the log, `decision`), `session_id(harness, native_id)` (a hash,
   never the harness's id), `value_for_match`, `fire(event, facts, plans, harness, *,
   environment, limits=None) -> Fired`, `unsupported_reports(plans)`, `describe(report)`,
   `pre_env(plans, session, base, harness, *, cwd=None) -> (reports, non_defaults)`.
@@ -987,7 +989,7 @@ block.
   `write_env_block(path, label, changes)` (single-quoted values of validated names into
   Claude's env file), `answer(harness, event, fired, env_file) -> (stdout, stderr)`,
   `refusal_answer(harness, event, why)`, `plans_for(scope, harness, level, event=None)`,
-  `has_guard(plans, event)`, `dispatch(harness_id, event, stdin, scope, level, environ) ->
+  `dispatch(harness_id, event, stdin, scope, level, environ) ->
   (stdout, stderr)`.
 
 ## `dotagents.cli.hook`

@@ -73,3 +73,19 @@ def test_hooks_without_a_name_lists_only_overlays_that_have_some(tmp_path, capsy
     (rig.root / "hook.py").unlink()
     assert run_cmd(OverlayHooks, **fields(rig)) == 0
     assert capsys.readouterr().out == "no overlay has hooks\n"
+
+
+def test_installing_an_overlay_with_hooks_says_they_are_off(tmp_path, caplog):
+    import logging
+
+    from dotagents.cli import OverlayAdd
+
+    source = tmp_path / "source"
+    write(source / "withhooks" / "overlay.cfg", "[hooks]\nprompt = {}\n")
+    write(source / "withhooks" / "hook.py", "")
+    store = tmp_path / "store"
+    write(store / "AGENTS.md", "<!-- dotagents:begin -->\n# BASE\n<!-- dotagents:end -->\n")
+    with caplog.at_level(logging.WARNING):
+        assert run_cmd(OverlayAdd, name=["withhooks"], repo=[str(source)], global_scope=True, agents_dir=store,
+                       copy=True, dry_run=False) == 0
+    assert "overlay withhooks has hooks (" in caplog.text and "off until you allow them" in caplog.text

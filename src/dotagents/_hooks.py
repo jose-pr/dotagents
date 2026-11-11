@@ -48,7 +48,7 @@ _LEGACY_COMMAND = re.compile(
 
 #: The hook keys dotagents manages; any other key a user added (a `timeout`,
 #: say) survives a refresh.
-_MANAGED_KEYS = frozenset({"type", "command", "shell", "commandWindows", "statusMessage", "timeout"})
+_MANAGED_KEYS = frozenset({"type", "command", "shell", "commandWindows", "statusMessage"})
 
 
 def _labels(status_message: "Optional[str]") -> "tuple[str, ...]":

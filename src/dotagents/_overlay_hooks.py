@@ -53,12 +53,6 @@ class Harness(object):
             return list(_aos.HOOK_EVENTS)
         return [event for event in _aos.HOOK_EVENTS if event == "pre-env" or event in self.native]
 
-    def event_of(self, native: str) -> "Optional[str]":
-        for event, name in self.native.items():
-            if name == native:
-                return event
-        return None
-
 
 #: Claude Code: every event has a native hook (measured, Claude Code 2.1.318). A session start
 #: cannot be refused; variables reach only Bash, through the env file; a call's variables would
@@ -194,6 +188,20 @@ def overlay_plan(overlay: Any, harness: Harness, user_store: "str | os.PathLike[
     return plan
 
 
+def install_notice(overlay: Any, user_store: "str | os.PathLike[str]") -> "Optional[str]":
+    """A line for an install or sync: the overlay has hooks and they are off until the user allows
+    them. None when it has none, or they are allowed at this digest."""
+    from dotagents import _activate
+
+    entries, _ = _aos.hooks_of(overlay.document(), _activate.files(overlay), _aos.current_os(),
+                               sorted(_activate.interpreters()))
+    if not entries or overlay_plan(overlay, ANYWHERE, user_store)["on"]:
+        return None
+    return ("overlay %s has hooks (%s); they are off until you allow them at its digest: "
+            "dotagents overlays hooks %s" % (overlay.name, ", ".join(entry["event"] for entry in entries),
+                                              overlay.name))
+
+
 def declares_guard(overlay: Any) -> bool:
     """Whether the overlay has a hook with ``on_failure = "refuse"``."""
     from dotagents import _activate
@@ -278,10 +286,6 @@ class Subject(object):
         self.overlay = overlay
         self.entry = entry
 
-    @property
-    def name(self) -> str:
-        return self.overlay.name
-
 
 def execute(subject: Subject, event: str, payload: bytes, env: "dict[str, str]", *,
             limits: "Optional[dict[str, int]]" = None) -> "dict[str, Any]":
@@ -343,9 +347,12 @@ class Fired(object):
     """The result of an event: the model's :func:`dotagents._aos.fire_event` result, plus the
     reports of the hooks that were not on or not fired."""
 
-    def __init__(self, result: "dict[str, Any]", reports: "list[list[str]]"):
+    def __init__(self, result: "dict[str, Any]", reports: "list[list[str]]",
+                 errors: "Optional[list[tuple[str, str, str]]]" = None):
         self.result = result
         self.reports = reports + [list(r) for r in result["reports"]]
+        #: ``(overlay, event, text)``: what each hook wrote to standard error, for the user's log.
+        self.errors = errors or []
 
     @property
     def decision(self) -> "Optional[str]":
@@ -379,6 +386,7 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
     the environment of that overlay's own processes (None: it cannot be built, the hook fails
     as ``not-run``)."""
     reports: "list[list[str]]" = []
+    errors: "list[tuple[str, str, str]]" = []
     limits = dict(LIMITS, **(limits or {}))
     runs: "list[dict[str, Any]]" = []
     matching = value_for_match(event, facts)
@@ -400,13 +408,25 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
                 env = environment(subject.overlay)
                 if env is None:
                     return {"not_run": True}
-                return execute(subject, event, payload, env, limits=limits)
+                done = execute(subject, event, payload, env, limits=limits)
+                text = done.pop("stderr", b"")
+                if text:
+                    errors.append((subject.overlay.name, event, printable(text)))
+                return done
 
             runs.append({"source": overlay.name, "on_failure": entry["on_failure"], "start": start,
                          "sets": entry["sets"]})
     applies = harness.applies.get(event, frozenset())
     result = _aos.fire_event(event, runs, applies, dict(LIMITS, **(limits or {})), os.name == "nt")
-    return Fired(result, reports)
+    return Fired(result, reports, errors)
+
+
+def printable(data: bytes, bound: int = 4096) -> str:
+    """A hook's standard error as text fit for a person's log: no control character but the line end
+    and the tab (a terminal escape would be run by the terminal), and no more than ``bound``."""
+    text = data[:bound].decode("utf-8", "replace")
+    return "".join(c if c in "\n\t" or (c.isprintable() and c not in "\u202a\u202b\u202c\u202d\u202e"
+                                         "\u2066\u2067\u2068\u2069") else "?" for c in text)
 
 
 def unsupported_reports(plans: "list[tuple[Any, dict[str, Any]]]") -> "list[list[str]]":
