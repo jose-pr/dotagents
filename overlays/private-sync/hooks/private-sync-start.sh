@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
-# SessionStart hook: make the private ~/.agents repo present, then link this
-# project's .agents to its per-project store. Safe to run every session; never
-# fails the session (always exits 0).
+# `session-start` hook (declared in overlay.cfg): make the private ~/.agents repo present, then
+# link this project's .agents to its per-project store. Safe to run every session; never fails
+# the session (always exits 0). A hook's standard output is its answer, so what it has to say
+# goes to standard error.
 #
 # Env:
 #   AGENTS_REMOTE            git URL of your private .agents repo. Prefer a
@@ -14,10 +15,16 @@
 #                            helper that reads it from the environment at auth
 #                            time, so it is never written to .git/config or disk.
 #   AGENTS_HOME              where the private repo lives (default: $HOME/.agents)
-#   CLAUDE_PROJECT_DIR       project checkout (set by the harness; falls back to PWD)
+#   CLAUDE_PROJECT_DIR       project checkout when not run as a hook (falls back to PWD)
 
 AGENTS_DIR="${AGENTS_HOME:-$HOME/.agents}"
+# The project directory is the `cwd` of the hook's payload (an AOS hook is given one JSON object
+# on standard input and its event in AOS_HOOK_EVENT); run by hand it is the project the shell is in.
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+if [ -n "${AOS_HOOK_EVENT:-}" ]; then
+    _dg_cwd=$(sed -n 's/.*"cwd": *"\([^"]*\)".*/\1/p' | head -n 1)
+    [ -n "$_dg_cwd" ] && PROJECT_DIR="$_dg_cwd"
+fi
 
 dotagents_cmd() {
     if command -v dotagents >/dev/null 2>&1; then
@@ -39,18 +46,18 @@ fi
 # 1. Ensure the private repo is present and current.
 if [ -d "$AGENTS_DIR/.git" ]; then
     git -C "$AGENTS_DIR" pull --rebase --autostash --quiet \
-        || echo "dotagents: pull failed (offline?), using local copy"
+        || echo "dotagents: pull failed (offline?), using local copy" >&2
 elif [ -n "${AGENTS_REMOTE:-}" ]; then
-    echo "dotagents: cloning private agents repo into $AGENTS_DIR"
+    echo "dotagents: cloning private agents repo into $AGENTS_DIR" >&2
     git clone --quiet "$AGENTS_REMOTE" "$AGENTS_DIR" \
-        || { echo "dotagents: clone failed"; exit 0; }
+        || { echo "dotagents: clone failed" >&2; exit 0; }
 else
-    echo "dotagents: no $AGENTS_DIR/.git and no AGENTS_REMOTE set; skipping link"
+    echo "dotagents: no $AGENTS_DIR/.git and no AGENTS_REMOTE set; skipping link" >&2
     exit 0
 fi
 
 # 2. Link this project's .agents to its per-project store.
-dotagents_cmd link-project "$PROJECT_DIR" --agents-dir "$AGENTS_DIR" \
-    || echo "dotagents: link failed"
+dotagents_cmd link-project "$PROJECT_DIR" --agents-dir "$AGENTS_DIR" >&2 \
+    || echo "dotagents: link failed" >&2
 
 exit 0

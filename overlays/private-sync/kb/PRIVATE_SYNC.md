@@ -166,27 +166,37 @@ On a second machine: `git clone git@github.com:<you>/.agents.git ~/.agents`,
 
 ## Cloud sessions
 
-Cloud containers start from a fresh clone with no `~/.agents`. Two hooks (shipped in
-this overlay's `hooks/`, i.e. `$PRIVATE_SYNC_OVERLAY_ROOT/hooks/` once installed) make
-a cloud session identical to local:
+Cloud containers start from a fresh clone with no `~/.agents`. Two overlay hooks (declared
+in this overlay's `overlay.cfg`, scripts in its `hooks/`) make a cloud session identical to local:
 
-- `private-sync-start.sh` (SessionStart): clones the private repo to `~/.agents` on
-  first run (or `git pull --rebase` if present), then `dotagents link-project`s the project.
-- `private-sync-stop.sh` (Stop): `dotagents sync-project --project` to push the session's
-  changes back.
+- `session-start` runs `private-sync-start.sh`: clones the private repo to `~/.agents` on first
+  run (or `git pull --rebase` if present), then `dotagents link-project`s the project.
+- `turn-end` runs `private-sync-stop.sh`: `dotagents sync-project --project` to push the
+  session's changes back.
 
-Wire them into your runner. For Claude Code, register them in **`~/.claude/settings.json`**
-(NOT the project's `.claude/`, which is git-ignored) — see
-`$PRIVATE_SYNC_OVERLAY_ROOT/hooks/settings.snippet.json` for the exact block. On a hosted runner
-`tools/cloud-setup.sh` (below) merges that snippet into `~/.claude/settings.json`
-automatically at container start; on a local machine merge it in once by hand.
+They are AOS hooks, so they are **off until you allow them at the overlay's digest**, and
+`dotagents init -g` wires the harness's own hooks to run them (Claude Code's `SessionStart` and
+`Stop`, Codex's the same; a harness without native hooks cannot fire them, and `dotagents overlays
+hooks private-sync` says so per harness):
 
-**Fresh cloud containers (first clone).** The SessionStart hook lives in the
+```
+dotagents overlays hooks private-sync               # what runs, where, and whether it is allowed
+dotagents overlays allow-hooks private-sync         # shows the same and the digest to allow
+dotagents overlays allow-hooks private-sync --digest sha256:<the digest shown>
+dotagents init -g                                   # wires Claude Code's and Codex's own hooks
+```
+
+Updating the overlay changes its digest and turns the hooks off until you allow the new one.
+`tools/cloud-setup.sh` (below) does these steps itself at container start, since it is your own
+setup script. The hooks take the project from the hook's payload, so no
+`CLAUDE_PROJECT_DIR` is needed; run by hand, the scripts still use it or the current directory.
+
+**Fresh cloud containers (first clone).** The `session-start` hook lives in the
 installed overlay under `~/.agents/`, which doesn't exist until `~/.agents` is first cloned — so the
 initial clone can't come from the hook. Use `tools/cloud-setup.sh` from the **public**
 dotagents repo: a self-contained bootstrap (inlines its own token auth + rewrite bypass,
 so it runs before `~/.agents` exists) that clones-or-pulls the repo, installs the CLI,
-links the project, and wires the hooks into `~/.claude/settings.json`. Put a one-line
+links the project, and wires and allows the hooks. Put a one-line
 fetch-and-run in your web environment's **setup-script** field so it stays current
 without re-pasting:
 
