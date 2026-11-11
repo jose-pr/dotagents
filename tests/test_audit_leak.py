@@ -77,7 +77,7 @@ def test_no_personal_tooling_is_in_the_repo():
     `tools/` is exactly the repo-tooling files, and the CLI package ships
     only its known modules."""
     assert sorted(p.name for p in (REPO / "tools").iterdir()) == [
-        "audit.py", "cloud-setup.sh", "pyz_smoke.sh",
+        "audit.py", "cloud-setup.sh", "pyz_smoke.sh", "vendor_coqui_aos.py",
     ]
     cli_modules = sorted(p.name for p in (SRC / "dotagents" / "cli").glob("*.py"))
     assert cli_modules == [
