@@ -685,6 +685,11 @@ def publish(store: FetchedSkills, shared: Path, plan: Optional[SkillPlan] = None
     bundled_by = {}
     if plan is not None:
         bundled_by = {(s.name.lower(), s.overlay) for s in plan.skills if s.origin is PlannedOrigin.BUNDLED}
+    # A name still listed but not resolved this time (a catalog not given) keeps what was accepted for it.
+    unresolved = set()
+    if plan is not None:
+        unresolved = {(s.name.lower(), _aos.normalize_name(s.overlay)) for s in plan.skills
+                      if s.origin in (PlannedOrigin.MISSING, PlannedOrigin.AMBIGUOUS)}
     published = 0
     for lower, record in sorted(store.records().items()):
         name = record["name"]
@@ -692,7 +697,8 @@ def publish(store: FetchedSkills, shared: Path, plan: Optional[SkillPlan] = None
         holder = delivered.get(lower) if delivered is not None else None
         wins = (
             store.tree(lower).is_dir() and keys_allowed(record)
-            and (delivered is None or (holder is None and record.get("chosen"))
+            and (delivered is None or (holder is None and (record.get("chosen") or any(
+                     (lower, o) in unresolved for o in record.get("overlays", []))))
                  or (holder is not None and _aos.normalize_name(holder) in record.get("overlays", [])))
         )
         if not wins:

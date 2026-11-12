@@ -1887,8 +1887,9 @@ class OverlayRevokeHooks(DotAgentsArgs):
 
 
 class OverlayAddSkill(_SkillArgs):
-    """Install a skill by your own choice: from ``--source`` (with ``--pin``), or by name through
-    ``--skill-catalog``. It is shown with its source, takes your yes (``--yes`` or the terminal) and is fetched like
+    """Install a skill by your own choice, from --source or by name through --skill-catalog.
+
+    It is shown with its source, takes your yes (``--yes`` or the terminal) and is fetched like
     one an overlay names, but it is yours: removing every overlay never takes it, only ``remove-skill`` does."""
 
     _parsername_ = "add-skill"

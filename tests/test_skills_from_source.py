@@ -409,7 +409,7 @@ def test_a_fetch_is_given_none_of_the_persons_credentials(monkeypatch, tmp_path)
     fetcher = _skill_sources.GitFetcher(tmp_path)
     env = fetcher.environment()
     assert not {"SSH_AUTH_SOCK", "GIT_ASKPASS", "SSH_ASKPASS", "GH_TOKEN", "GIT_CONFIG_COUNT"} & set(env)
-    assert env["GIT_TERMINAL_PROMPT"] == "0" and env["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert env["GIT_TERMINAL_PROMPT"] == "0" and env["GIT_CONFIG_GLOBAL"] == (tmp_path / "empty").as_posix()
     assert "IdentityAgent=none" in env["GIT_SSH_COMMAND"] and "BatchMode=yes" in env["GIT_SSH_COMMAND"]
     assert env["HTTPS_PROXY"] == "http://proxy.example.test:3128"
     args = fetcher.arguments(["fetch"])
