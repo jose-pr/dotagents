@@ -13,6 +13,7 @@ remote registry -- in its ``overlays`` form, where an entry may be a table::
     pin = "sha256:<64 hex>"            # its tree digest; anything else is refused
     env_scripts = true                 # or false: its env scripts, declared or default
     grants = { env = ["DOCS_TOKEN"], secret = ["release-signing"], file = ["docs/token"] }
+    options = { depth = "deep" }       # values for the options its manifest declares, read as ${depth} in its context
 
     [skills.review]                    # a skill an overlay names from elsewhere: the tree digest it must have
     pin = "sha256:<64 hex>"            # it anchors a catalog-named or unpinned skill, and must match the overlay's own pin
@@ -138,6 +139,16 @@ class StorePolicy(object):
             raise PolicyError("error: grants of overlay %s in %s must map a provider to a list of keys"
                               % (identity, self.origin))
         return {str(k): list(v) for k, v in raw.items()}
+
+    def options(self, identity: str) -> "dict[str, Any]":
+        """The values the user configured for the overlay's declared options: a
+        string, an integer or a boolean each, by name."""
+        raw = self.entry(identity).get("options", {})
+        if not isinstance(raw, dict) or any(
+                not isinstance(v, (str, int, bool)) for v in raw.values()):
+            raise PolicyError("error: options of overlay %s in %s must map a name to a string, an integer or a boolean"
+                              % (identity, self.origin))
+        return {str(k): v for k, v in raw.items()}
 
     def named_secret(self, name: str, host_env: "dict[str, str]") -> "Optional[str]":
         """A named secret's value, read through its own provider."""

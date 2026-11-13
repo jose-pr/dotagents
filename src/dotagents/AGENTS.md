@@ -274,13 +274,15 @@ source = "<repo>@<commit>#overlays/docs"   # optional: a table without one offer
 pin = "sha256:<64 hex>"
 env_scripts = true
 grants = { env = ["DOCS_TOKEN"], secret = ["signing"], file = ["docs/token"] }
+options = { depth = "deep" }   # values for the options the overlay declares
 [secrets.signing]
 provider = "env"
 key = "RELEASE_SIGNING_KEY"
 ```
 
 - `class PolicyError(SystemExit)`. `class StorePolicy(store)` — `pin(identity)`,
-  `env_scripts(identity)`, `grants(identity)`, `named_secret(name, host_env)`,
+  `env_scripts(identity)`, `grants(identity)`, `options(identity) -> dict` (a name to a string, an integer or a
+  boolean; anything else is a `PolicyError`), `named_secret(name, host_env)`,
   `read_secret_file(key)`, `secrets_for(identity, host_env=None) -> _aos.Secrets`,
   `entry(identity)`. `for_store(store)`, `for_overlay(overlay)` — memoized on the
   registry file.
@@ -750,6 +752,15 @@ API:
   a "Local additions to overlay files" section when `local_additions` finds any,
   then, with `expand_vars`, the line ``Python for skills (`$AGENTS_PYTHON`): `<path>` ``
   (`skills_python`).
+  An overlay's context file (not a store's `AGENTS.md`) is also templated, as the specification's
+  Templating section says: `${AOS_OVERLAY_ROOT}`, `${AOS_OVERLAY_STATE}` (when it has a state
+  directory), `${AOS_OVERLAY_NAME}`, `${AOS_OVERLAY_SCOPE}` (`system`, `user` or `project`, the store
+  it is installed in), `${AOS_PROJECT_ROOT}` and the overlay's non-sensitive `options` (the store's
+  configured value, else the default) are replaced, `$${` is `${`, and any other text, a sensitive
+  option and a name with no value stay as written. A configured value of the wrong type is a
+  `PolicyError`. With `expand_vars=False` (text that may be written to a file) the root, state,
+  project and option values are left as written. dotagents serves no skill body: skills are
+  published as files, so nothing templates a `SKILL.md`.
   `<PROJECT_ROOT>` and `<NAME_OVERLAY_ROOT>` placeholders expand; with
   `expand_vars` so do `$NAME_OVERLAY_ROOT` / `${NAME_OVERLAY_ROOT}`. `inline`
   appends the on-demand `.md` files the sources reference, each resolved against

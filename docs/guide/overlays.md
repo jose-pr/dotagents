@@ -322,6 +322,7 @@ source = "https://example.org/agents.git@<commit>#overlays/docs-tools"
 pin = "sha256:<64 hex digits>"        # its tree digest (`overlays show` prints it)
 env_scripts = true
 grants = { env = ["DOCS_TOKEN"], secret = ["release-signing"], file = ["docs/token"] }
+options = { depth = "deep" }          # values for the options its manifest declares
 
 [secrets.release-signing]
 provider = "env"
@@ -340,6 +341,10 @@ key = "RELEASE_SIGNING_KEY"
   grant too.
 - **`env_scripts = false`** stops the overlay's env scripts (its `env.<ext>` and
   the ones it declares) from running; they run by default, each run reported.
+- **`options`** gives the values of the settings the overlay's manifest declares (`[options.<name>]`
+  with a `type` of `string`, `integer` or `boolean`, a `default` and `sensitive`). The overlay's
+  context reads them as `${name}`; a value of the wrong type is refused, and a sensitive option is
+  never put in context (see [Authoring → Context](authoring.md#names-in-the-context)).
 
 ## MCP servers
 

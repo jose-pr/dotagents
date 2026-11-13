@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Iterable, Optional
@@ -12,6 +13,7 @@ from dotagents import _activate
 from dotagents import _agents
 from dotagents import _env
 from dotagents import _overlays
+from dotagents import _policy
 from dotagents import _scope
 
 
@@ -43,6 +45,49 @@ def _expand_placeholders(
             lambda m: roots.get(m.group(1) or m.group(2), m.group(0)), text
         )
     return text
+
+
+#: Stands for the `${` of a `$${` escape while the rest of the assembly (which expands
+#: ``${<NAME>_OVERLAY_ROOT}``) runs, so an escaped literal is never expanded; put back at the end.
+_ESCAPED_BRACE = "\ue000{"
+
+
+def _overlay_values(overlay: "_overlays.Overlay", scope: _scope.Scope, project_root: Path,
+                    machine: bool) -> "dict[str, str]":
+    """The names a context file of ``overlay`` may read as ``${NAME}``
+    (``coqui_aos.template_values``): its root, state directory, name, the scope
+    it is installed in, the project, and the options it declares with the values
+    the store's configuration gives them. A sensitive option never has a value.
+
+    ``machine=False`` (text that may be written to a file) leaves what is a
+    machine path or the user's own, the root, state, project and option values,
+    as written, like ``$<NAME>_OVERLAY_ROOT`` stays."""
+    try:
+        scope_label: "Optional[str]" = scope.store_level(overlay.path.parent.parent)
+    except ValueError:
+        scope_label = None
+    state = _activate.state_dir(overlay) if machine else None
+    store = overlay.store if overlay.store is not None else overlay.path.parent.parent
+    facts = coqui_aos.TemplateFacts(
+        root=os.path.abspath(str(overlay.path)) if machine else None,
+        state=str(state) if state is not None else None,
+        name=overlay.normalized_name,
+        scope=scope_label,
+        project=str(project_root) if machine else None,
+        options=_policy.for_store(store).options(overlay.name) if machine else {},
+    )
+    try:
+        values = coqui_aos.template_values(overlay.document(), facts)
+    except coqui_aos.Error as exc:
+        raise _policy.PolicyError("error: option %s of overlay %s is not of the type its manifest declares"
+                                  % (exc.subject, overlay.name))
+    return {name: value.replace("${", _ESCAPED_BRACE) for name, value in values.items()}
+
+
+def _template(content: str, values: "dict[str, str]") -> str:
+    """``content`` with its ``${NAME}`` placeholders replaced (``coqui_aos.template``);
+    a ``$${`` becomes the stand-in for ``${``."""
+    return coqui_aos.template(content.replace("$${", _ESCAPED_BRACE), values)
 
 
 # A relative path token ending in .md: one or more path segments, no spaces,
@@ -433,6 +478,10 @@ def _assemble(
         source_paths.append(str(path))
         emitted.append(path)
         ref_sources.append((level, content, _source_search_roots(scope, level, path, root)))
+        if root is not None:
+            # An overlay's context reads its own names; no other text does.
+            content = _template(content, _overlay_values(_overlays.Overlay(root), scope, project_root,
+                                                         expand_vars))
         assembled_parts.append(f"<!-- Source: {path} -->\n{content.strip()}\n")
 
     text = "\n\n".join(assembled_parts)
@@ -448,7 +497,7 @@ def _assemble(
     # Placeholders last, so ones inside inlined files expand too; every
     # installed overlay gets a root, matching `dotagents env`.
     text = _expand_placeholders(text, project_root, overlay_roots, env_vars=expand_vars)
-    return text, source_paths
+    return text.replace(_ESCAPED_BRACE, "${"), source_paths
 
 
 def assemble_context(

@@ -186,6 +186,39 @@ No overlay sets `AOS_*`, `*_OVERLAY_ROOT` or `*_OVERLAY_STATE`. A secret is neve
 value in the overlay: reference it, and the user grants it (see
 [Overlays → Pins, grants and env scripts](overlays.md#pins-grants-and-env-scripts-the-stores-own-settings)).
 
+## Names in the context
+
+An overlay's context files (and the body of `OVERLAY.md`) can name the overlay's own location and
+settings. When `dotagents context` assembles the context it replaces `${NAME}` for these names, and
+for no others:
+
+| Name | Value |
+| --- | --- |
+| `AOS_OVERLAY_ROOT` | the overlay's installed directory |
+| `AOS_OVERLAY_STATE` | its state directory, when it has a setup or an env script |
+| `AOS_OVERLAY_NAME` | its normalized name |
+| `AOS_OVERLAY_SCOPE` | `system`, `user` or `project`: the store it is installed in |
+| `AOS_PROJECT_ROOT` | the project the session works in |
+| an option's name | the value the store configures, else its `default` |
+
+```toml
+[options.depth]
+type = "string"
+default = "normal"
+
+[options.service_token]
+type = "string"
+sensitive = true      # never put in context; a manifest holds no default for it
+```
+
+Any other text is left as written: an unknown name, `${HOME}`, another overlay's
+`${OTHER_OVERLAY_ROOT}` (which `dotagents` expands itself), a name with an operator, `$NAME` and a
+sensitive option. `$${` is a literal `${`, and a value is never read again. The installed file is
+never changed, so digests and pins hold. Text written to a file (`context --write-agent`) keeps the
+root, state, project and option values as written, as it keeps `$<NAME>_OVERLAY_ROOT`. A file the
+agent opens itself is not templated: refer to the overlay there by `$<NAME>_OVERLAY_ROOT`, and
+dotagents publishes skills as files, so a `SKILL.md` is not templated either.
+
 ## Setup
 
 A `setup.py` (or `.js`, `.mjs`, `.cjs`, `.ps1` on Windows, `.bash`, `.sh` elsewhere) at the root is your setup -- taken to need the network unless a `[[setup]]` entry naming it says `network = false` -- or declare

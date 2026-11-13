@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- An overlay's context reads its own names. `dotagents context` replaces `${AOS_OVERLAY_ROOT}`,
+  `${AOS_OVERLAY_STATE}`, `${AOS_OVERLAY_NAME}`, `${AOS_OVERLAY_SCOPE}`, `${AOS_PROJECT_ROOT}` and the
+  overlay's declared `options` in each overlay context file, per the specification's Templating
+  section; anything else is left as written, and `$${` is a literal `${`. An option's value is the
+  store's `options = { ... }` in the overlay's entry, else its default; a sensitive option is never put
+  in context, and a value of the wrong type is refused. Text for a file (`--write-agent`) keeps the
+  root, state, project and option values as written. The vendored `coqui_aos` moves to coqui-aos
+  424edcc, which reads `options` and does the replacing.
+
 - An overlay's manifest can be `OVERLAY.md`: its front matter (YAML, or `#!toml` / `#!json` as
   the first line inside the fence) is the manifest, and a body after it is the overlay's context
   in place of `CONTEXT.md`. A `CONTEXT.md` beside a body is ignored, whatever names it, and
