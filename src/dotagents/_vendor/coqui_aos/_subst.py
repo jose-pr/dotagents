@@ -38,11 +38,11 @@ class _Run:
     def step(self, cost: int) -> None:
         self.steps += cost
         if not self.limits.allows("substitution_steps", self.steps):
-            raise Error(Class.TOO_COMPLEX, "a pattern")
+            raise Error(Class.TOO_COMPLEX, "a pattern").over("substitution_steps")
 
     def fits(self, size: int) -> None:
         if not self.limits.allows("substitution_bytes", size):
-            raise Error(Class.TOO_LARGE, "a substituted value")
+            raise Error(Class.TOO_LARGE, "a substituted value").over("substitution_bytes")
 
 
 def substitute(text: str, lookup: Lookup) -> str:
@@ -62,12 +62,12 @@ def substitute_with(text: str, lookup: Lookup, settings: Settings) -> str:
     try:
         return _substitute(text, _Run(lookup, settings))
     except RecursionError:
-        raise Error(Class.TOO_DEEP, "an expression") from None
+        raise Error(Class.TOO_DEEP, "an expression").over("substitution_depth") from None
 
 
 def _substitute(text: str, run: _Run) -> str:
     if not run.limits.allows("substitution_depth", run.depth):
-        raise Error(Class.TOO_DEEP, "an expression")
+        raise Error(Class.TOO_DEEP, "an expression").over("substitution_depth")
     run.depth += 1
     try:
         return _substitute_inner(text, run)

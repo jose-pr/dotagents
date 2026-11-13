@@ -382,6 +382,8 @@ class _Check:
             elif key == "skills":
                 self.each(value, at, self.skill_entry)
                 self.unique(value, at)
+            elif key == "options":
+                self.options(value, at)
             elif key == "env":
                 self.env_map(value, at)
             elif key == "env_files":
@@ -484,6 +486,39 @@ class _Check:
         for index, item in enumerate(value):
             self.string(item, _join(at, index), ok)
         self.unique(value, at)
+
+    def options(self, value: Any, at: str) -> None:
+        """A mapping from a variable name that is not reserved to a table of ``type`` and
+        optionally ``default``, ``sensitive`` and ``description``."""
+        if not isinstance(value, dict):
+            self.fail(Class.SCHEMA, at)
+            return
+        for name, declared in value.items():
+            here = _join(at, name)
+            self.variable(name, here)
+            table = self.object(declared, here, ("type", "default", "sensitive", "description"))
+            if table is None:
+                continue
+            self.required(table, here, ("type",))
+            if "type" in table:
+                self.require(table["type"] in ("string", "integer", "boolean"), _join(here, "type"))
+            if "sensitive" in table:
+                self.boolean(table["sensitive"], _join(here, "sensitive"))
+            if "description" in table:
+                self.string(table["description"], _join(here, "description"))
+            if "default" in table:
+                there = _join(here, "default")
+                default = table["default"]
+                if not isinstance(default, (str, int, float, bool)):
+                    self.fail(Class.SCHEMA, there)
+                elif table.get("sensitive") is True:
+                    self.fail(Class.OPTION_SENSITIVE_DEFAULT, there)
+                elif not (
+                    (table.get("type") == "string" and isinstance(default, str))
+                    or (table.get("type") == "integer" and _is_int(default))
+                    or (table.get("type") == "boolean" and isinstance(default, bool))
+                ):
+                    self.fail(Class.OPTION_DEFAULT_TYPE, there)
 
     def env_map(self, value: Any, at: str) -> None:
         if not isinstance(value, dict):

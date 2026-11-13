@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from ._data import Document
 from ._defaults import context_of, rules_of, skill_entries
 from ._delivery import Delivery, bundled_held, elsewhere_held
 from ._env import Environment, Facts, NonDefaultSetting, apply_overlay
 from ._errors import Class, Error
-from ._hooks import Decision, HookEvent, HookReport, HookRun, fire_event
+from ._hooks import Decision, HookEvent, HookReport, HookRun, HookScope, fire_event
 from ._names import normalize_name, root_variable, state_variable
 from ._tree import OverlayTree
 
@@ -21,6 +21,8 @@ __all__ = [
     "compose",
     "composed_environment",
     "composition_order",
+    "hook_environment",
+    "hook_order",
     "resolve",
     "ComposedEnvironment",
 ]
@@ -232,3 +234,104 @@ def composed_environment(
             return composed
     composed.env = env
     return composed
+
+
+def hook_order(
+    overlays: "Mapping[str, Document]",
+    requested: "Sequence[str]",
+    has: "Iterable[str]",
+    scopes: "Iterable[Union[str, HookScope]]" = (),
+) -> "List[Tuple[HookScope, str]]":
+    """The order the hooks of one event run in, as ``(scope, source)`` pairs.
+
+    Every active overlay that has a hook (``has``) in composition order, then the user's own, then
+    the project's, whichever order ``scopes`` (the scopes that have one) names them in; a scope's
+    own hook has the source ``""``. Raises ``Cycle``.
+    """
+    present = set(has)
+    wanted = {HookScope(scope) for scope in scopes}
+    order = [
+        (HookScope.OVERLAY, identity)
+        for identity in composition_order(overlays, resolve(overlays, requested).install_order)
+        if identity in present
+    ]
+    return order + [(scope, "") for scope in (HookScope.USER, HookScope.PROJECT) if scope in wanted]
+
+
+def _replay(owned: Environment, writes: "List[Tuple[str, str, bool, Any]]") -> None:
+    for name, value, secret, join in writes:
+        if join is None:
+            owned.set(name, value, secret)
+            continue
+        separator, prepend, seen, append = join
+        kept = [part for part in (owned.get(name) or "").split(separator) if part and part not in seen]
+        owned.set(name, separator.join(prepend + kept + append))
+
+
+def hook_environment(
+    event: HookEvent,
+    active: "Sequence[Tuple[Document, Facts]]",
+    base: Environment,
+    pre_env: "Mapping[str, HookRun]",
+    identity: "Optional[str]" = None,
+) -> Environment:
+    """The environment a hook of ``event`` runs with.
+
+    ``active`` and ``base`` are as ``composed_environment`` takes them. The hook of overlay
+    ``identity`` gets what that overlay's own processes get: the base, every overlay's root (and
+    state) variable, that overlay's own ``pre-env`` output and declarations with the values they had
+    in the session's order of application, and ``AOS_OVERLAY_ROOT``, ``AOS_OVERLAY_NAME``,
+    ``AOS_OVERLAY_STATE`` (when it has one) and ``AOS_HOOK_EVENT``; nothing another overlay's
+    declarations or ``pre-env`` output set. A ``pre-env`` hook gets the base, the root and the
+    state variables only. With ``identity`` ``None``, a user's or a project's own hook, it gets the
+    base and ``AOS_HOOK_EVENT``. Raises what ``apply_overlay`` raises.
+    """
+
+    def with_roots() -> Environment:
+        env = base.copy()
+        for _manifest, facts in active:
+            env.set(root_variable(facts.identity), facts.root)
+            if facts.state is not None:
+                env.set(state_variable(facts.identity), facts.state)
+        return env
+
+    if identity is None:
+        own = base.copy()
+        own.set("AOS_HOOK_EVENT", event.value)
+        return own
+    chosen = next(facts for _manifest, facts in active if facts.identity == identity)
+    own = with_roots()
+    if event is not HookEvent.PRE_ENV:
+        session = with_roots()
+        owned = {facts.identity: with_roots() for _manifest, facts in active}
+        for _manifest, facts in active:
+            run = pre_env.get(facts.identity)
+            if run is None:
+                continue
+            fired = fire_event(
+                HookEvent.PRE_ENV,
+                [dataclasses.replace(run, source=facts.identity)],
+                None,
+                facts.settings,
+                session.windows,
+            )
+            for name, value in fired.env.items():
+                for target in (session, owned[facts.identity]):
+                    if value is None:
+                        target.unset(name)
+                    else:
+                        target.set(name, value)
+        for manifest, facts in active:
+            session._log = []
+            try:
+                apply_overlay(session, manifest, facts, [])
+                _replay(owned[facts.identity], session._log)
+            finally:
+                session._log = None
+        own = owned[identity]
+    own.set("AOS_OVERLAY_ROOT", chosen.root)
+    own.set("AOS_OVERLAY_NAME", normalize_name(chosen.identity))
+    if chosen.state is not None:
+        own.set("AOS_OVERLAY_STATE", chosen.state)
+    own.set("AOS_HOOK_EVENT", event.value)
+    return own

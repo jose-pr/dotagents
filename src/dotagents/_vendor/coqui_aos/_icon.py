@@ -79,7 +79,7 @@ def read_icon(data: bytes, name: str, settings: "Optional[Settings]" = None) -> 
     if extension not in ("png", "webp"):
         raise Error(Class.ICON_FORMAT)
     if not settings.allows("icon_bytes", len(data)):
-        raise Error(Class.ICON_TOO_LARGE)
+        raise Error(Class.ICON_TOO_LARGE).over("icon_bytes")
     if data.startswith(_PNG_SIGNATURE):
         found = IconFormat.PNG
     elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
@@ -91,6 +91,8 @@ def read_icon(data: bytes, name: str, settings: "Optional[Settings]" = None) -> 
     width, height = _png_size(data) if found is IconFormat.PNG else _webp_size(data)
     if not width or not height:
         raise Error(Class.ICON_UNREADABLE)
-    if not settings.allows("icon_width", width) or not settings.allows("icon_height", height):
-        raise Error(Class.ICON_DIMENSIONS)
+    if not settings.allows("icon_width", width):
+        raise Error(Class.ICON_DIMENSIONS).over("icon_width")
+    if not settings.allows("icon_height", height):
+        raise Error(Class.ICON_DIMENSIONS).over("icon_height")
     return Icon(found, width, height)

@@ -42,6 +42,7 @@ class Class(str, enum.Enum):
     INVALID_ENV_FILE = "invalid-env-file"
     INVALID_LABEL = "invalid-label"
     INVALID_NAME = "invalid-name"
+    INVALID_OPTION = "invalid-option"
     INVALID_PATTERN = "invalid-pattern"
     INVALID_REFERENCE = "invalid-reference"
     INVALID_REQUIREMENTS = "invalid-requirements"
@@ -69,6 +70,8 @@ class Class(str, enum.Enum):
     NOT_A_SKILL = "not-a-skill"
     NOT_FOUND = "not-found"
     NULL_VALUE = "null-value"
+    OPTION_DEFAULT_TYPE = "option-default-type"
+    OPTION_SENSITIVE_DEFAULT = "option-sensitive-default"
     PARSE_ERROR = "parse-error"
     PARTIAL_LOCK = "partial-lock"
     PIN_MISMATCH = "pin-mismatch"
@@ -134,7 +137,10 @@ class Error(Exception):
     ``class_`` is the contract; ``subject`` names what it is about (a variable, a path, a
     pointer) for a person, never text from a document, so do not match on it. ``line`` and
     ``column`` are one-based, ``column`` counts Unicode scalar values, and a line counts from
-    the first line of the file, a format line included.
+    the first line of the file, a format line included. For a refusal of a limit (``too-large``,
+    ``too-deep``, ``too-complex``, ``icon-too-large``, ``icon-dimensions``) ``setting`` is the
+    name of the ``Settings`` field that was passed, such as ``"tree_files"``: stable, unlike
+    ``subject``'s wording. It is ``None`` for any other refusal.
     """
 
     def __init__(
@@ -143,6 +149,7 @@ class Error(Exception):
         subject: str = "",
         line: "Optional[int]" = None,
         column: "Optional[int]" = None,
+        setting: "Optional[str]" = None,
     ) -> None:
         subject = _safe(subject)
         super().__init__(class_, subject, line, column)
@@ -150,6 +157,12 @@ class Error(Exception):
         self.subject = subject
         self.line = line
         self.column = column
+        self.setting = setting
+
+    def over(self, setting: str) -> "Error":
+        """The same error naming the ``Settings`` field whose limit was passed."""
+        self.setting = setting
+        return self
 
     def at(self, line: int, column: int) -> "Error":
         """The same error with a position."""

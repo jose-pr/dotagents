@@ -84,7 +84,7 @@ def read_document(data: bytes, settings: "Optional[Settings]" = None) -> Documen
     """
     settings = settings or Settings()
     if settings.manifest_bytes is not None and len(data) > settings.manifest_bytes:
-        raise Error(Class.TOO_LARGE)
+        raise Error(Class.TOO_LARGE).over("manifest_bytes")
     if data.startswith(_BYTE_ORDER_MARK):
         data = data[3:]
     word, payload = split_format_line(data, "toml")
@@ -117,7 +117,7 @@ def read_text(kind: Format, payload: bytes, settings: "Optional[Settings]" = Non
         else:
             value = _read_yaml(text, max_depth)
     except RecursionError:
-        raise Error(Class.TOO_DEEP) from None
+        raise Error(Class.TOO_DEEP).over("manifest_depth") from None
     except (ValueError, OverflowError) as error:
         # What a parser cannot convert: an integer too long to read, an escape past Unicode.
         raise Error(
@@ -261,7 +261,7 @@ def _read_yaml(text: str, max_depth: "Optional[int]") -> Any:
                 add(scalar, event)
             elif isinstance(event, (ev.SequenceStartEvent, ev.MappingStartEvent)):
                 if max_depth is not None and len(stack) + 1 > max_depth:
-                    raise refuse(Class.TOO_DEEP, event)
+                    raise refuse(Class.TOO_DEEP, event).over("manifest_depth")
                 value: Any = [] if isinstance(event, ev.SequenceStartEvent) else {}
                 add(value, event)
                 stack.append(value)
@@ -287,7 +287,7 @@ def _check_model(root: Any, max_depth: "Optional[int]") -> None:
     while pending:
         value, depth = pending.pop()
         if isinstance(value, (list, dict)) and max_depth is not None and depth > max_depth:
-            raise Error(Class.TOO_DEEP)
+            raise Error(Class.TOO_DEEP).over("manifest_depth")
         if value is None:
             raise Error(Class.NULL_VALUE)
         if isinstance(value, bool):

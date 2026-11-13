@@ -269,12 +269,12 @@ def _entries(
     total = 0
     for path, data in files:
         if not settings.allows("tree_files", len(entries) + 1):
-            raise Error(Class.TOO_LARGE, "too many files")
+            raise Error(Class.TOO_LARGE, "too many files").over("tree_files")
         if not settings.allows("file_bytes", len(data)):
-            raise Error(Class.TOO_LARGE, "a file past the limit")
+            raise Error(Class.TOO_LARGE, "a file past the limit").over("file_bytes")
         total += len(data)
         if not settings.allows("tree_bytes", total):
-            raise Error(Class.TOO_LARGE, "more bytes than the limit")
+            raise Error(Class.TOO_LARGE, "more bytes than the limit").over("tree_bytes")
         try:
             parts = tuple(part.encode("utf-8") for part in path.split("/"))
         except UnicodeEncodeError:

@@ -147,6 +147,24 @@ class SetupRecord:
     digest: str
     phase: Phase
 
+    def to_dict(self) -> "Dict[str, str]":
+        """The record as a consumer keeps it: ``{"digest": ..., "phase": ...}``, the phase as its name."""
+        return {"digest": self.digest, "phase": self.phase.value}
+
+    @classmethod
+    def from_dict(cls, data: object) -> "SetupRecord":
+        """What ``to_dict`` wrote. Raises ``ValueError`` for anything else: not an object, no
+        ``digest`` string, or a ``phase`` that is not exactly ``install``, ``sync`` or ``remove``."""
+        if not isinstance(data, dict):
+            raise ValueError("a setup record is an object")
+        digest, name = data.get("digest"), data.get("phase")
+        if not isinstance(digest, str) or not isinstance(name, str):
+            raise ValueError("a setup record has a digest and a phase, both text")
+        phase = Phase.named(name)
+        if phase is None:
+            raise ValueError("not a setup phase: %r" % name)
+        return cls(digest, phase)
+
 
 class Needs(NamedTuple):
     """What a target must have for an overlay on its OS: interpreters and commands, each sorted."""
@@ -175,6 +193,8 @@ class Effective:
     dependencies: List[Dependency]
     needs: Needs
     non_defaults: List[NonDefaultSetting]
+    #: ``(id, subject)`` reports, sorted: ``env-script-not-allowed``.
+    reports: List[Tuple[str, str]] = dataclasses.field(default_factory=list)
 
 
 def _variant(runtime: Any, name: str, os: str) -> "Optional[Document]":
@@ -206,7 +226,8 @@ def effective(manifest: Document, facts: Facts) -> Effective:
     env.set(root_variable(facts.identity), facts.root)
     if facts.state is not None:
         env.set(state_variable(facts.identity), facts.state)
-    scripts = apply_overlay(env, manifest, facts, non_defaults)
+    reports: "List[Tuple[str, str]]" = []
+    scripts = apply_overlay(env, manifest, facts, non_defaults, reports)
     choice = default_script(manifest, "setup", "setup", facts.tree, os, facts.known_interpreters())
     # Declared variants come first; the default setup is the last one.
     network = False
@@ -315,6 +336,7 @@ def effective(manifest: Document, facts: Facts) -> Effective:
         dependencies=dependencies,
         needs=Needs(sorted(interpreters), sorted(commands)),
         non_defaults=sorted(set(non_defaults)),
+        reports=sorted(set(reports)),
     )
 
 

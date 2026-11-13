@@ -225,7 +225,9 @@ def read_front_matter(data: bytes, settings: "Optional[Settings]" = None) -> Fro
     if found.case is SplitCase.UNTERMINATED:
         return FrontMatter(Case.UNTERMINATED, error=Error(Class.UNTERMINATED_FRONT_MATTER, "", 1), **shown)
     if found.case is SplitCase.TOO_LARGE:
-        return FrontMatter(Case.TOO_LARGE, error=Error(Class.TOO_LARGE, "", 1), **shown)
+        return FrontMatter(
+            Case.TOO_LARGE, error=Error(Class.TOO_LARGE, "", 1).over("manifest_bytes"), **shown
+        )
     metadata = found.metadata or b""
     first_line = found.metadata_line or 2
     named = metadata.startswith(b"#!")
@@ -280,7 +282,7 @@ def read_overlay(tree: OverlayTree, settings: "Optional[Settings]" = None) -> Ov
         data = _manifest_bytes(tree, "OVERLAY.md")
         found = read_front_matter(data, settings)
         if found.error is not None:
-            raise Error(found.error.class_, "OVERLAY.md", found.error.line)
+            raise Error(found.error.class_, "OVERLAY.md", found.error.line, setting=found.error.setting)
         manifest = found.data or {}
         body = data[found.body_offset or 0 :]
         body_line = found.body_line or 1
@@ -292,7 +294,7 @@ def read_overlay(tree: OverlayTree, settings: "Optional[Settings]" = None) -> Ov
             named += harness_context_of(manifest, harness_id, tree)
     if "OVERLAY.md" in named and body.strip(_WHITE_SPACE):
         if settings.context_bytes is not None and len(body) > settings.context_bytes:
-            raise Error(Class.TOO_LARGE, "the body of OVERLAY.md", body_line)
+            raise Error(Class.TOO_LARGE, "the body of OVERLAY.md", body_line).over("context_bytes")
         try:
             body.decode("utf-8")
         except UnicodeDecodeError:
@@ -319,5 +321,5 @@ def context_file_text(data: bytes, settings: "Optional[Settings]" = None) -> byt
     rest kept. A head past ``manifest_bytes`` is ``too-large``."""
     found = split_front_matter(data, settings)
     if found.case is SplitCase.TOO_LARGE:
-        raise Error(Class.TOO_LARGE, "front matter", 1)
+        raise Error(Class.TOO_LARGE, "front matter", 1).over("manifest_bytes")
     return found.body(data)

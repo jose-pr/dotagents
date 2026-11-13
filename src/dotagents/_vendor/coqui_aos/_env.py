@@ -80,8 +80,14 @@ class NonDefaultSetting(NamedTuple):
     file or reference it is about; empty for ``unpinned``), never a value. Sorts by identifier word,
     then subject."""
 
-    id: NonDefaultId
+    id: "Union[NonDefaultId, str]"
     subject: str
+
+    @classmethod
+    def host(cls, id: str, subject: str = "") -> "NonDefaultSetting":
+        """A setting a host defines by its own ``id`` (``"read-only-not-enforced"``): the id as
+        given, or the ``NonDefaultId`` when AOS defines the word."""
+        return cls(NonDefaultId.named(id) or id, subject)
 
 
 class Environment:
@@ -103,6 +109,7 @@ class Environment:
         self._folded: "Dict[str, str]" = {}
         self._secret: "Set[str]" = set()
         self._extra: "Dict[str, str]" = {}
+        self._log: "Optional[List[Tuple[str, str, bool, Any]]]" = None
         items = base.items() if isinstance(base, Mapping) else (base or ())
         for name, value in items:
             self.set(name, value)
@@ -132,6 +139,13 @@ class Environment:
     def set(self, name: str, value: str, secret: bool = False) -> None:
         """Set ``name``, keeping the name already there under another case on Windows. A secret is
         never read by a placeholder."""
+        self._put(name, value, secret, None)
+
+    def _put(self, name: str, value: str, secret: bool, join: Any) -> None:
+        # ``join`` is a path addition's (separator, prepended, covered, appended), kept in the log
+        # so the same addition can be made onto another environment.
+        if self._log is not None:
+            self._log.append((name, value, secret, join))
         key = self._key(name)
         if key is None:
             key = name
@@ -216,6 +230,13 @@ class Facts:
     enforces_network: Optional[bool] = dataclasses.field(default=None, repr=False)
     #: Whether env scripts run; ``None`` is yes.
     env_scripts_enabled: Optional[bool] = dataclasses.field(default=None, repr=False)
+    #: Whether env scripts run only while ``digest`` is the ``allowed`` one, the allowance of the
+    #: overlay's hooks; off, none is held back.
+    gate_env_scripts: bool = False
+    #: The overlay's tree digest, when the consumer has computed it.
+    digest: Optional[str] = None
+    #: The one digest at which the user allowed this overlay's hooks and env scripts.
+    allowed: Optional[str] = None
     #: The interpreters the consumer can run; ``None`` is every one AOS names.
     interpreters: Optional[List[str]] = dataclasses.field(default=None, repr=False)
     #: Each runtime's installed packages directory, by runtime.
@@ -380,7 +401,12 @@ def _apply_paths(
             (append if entry.get("position") == "append" else prepend).append(resolved)
         current = env.get(variable) or ""
         kept = [part for part in current.split(separator) if part and part not in seen]
-        env.set(variable, separator.join(prepend + kept + append), env.is_secret(variable))
+        env._put(
+            variable,
+            separator.join(prepend + kept + append),
+            env.is_secret(variable),
+            (separator, prepend, seen, append),
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -394,10 +420,16 @@ class ScriptRun:
 
 
 def apply_overlay(
-    env: Environment, manifest: Document, facts: Facts, non_defaults: "List[NonDefaultSetting]"
+    env: Environment,
+    manifest: Document,
+    facts: Facts,
+    non_defaults: "List[NonDefaultSetting]",
+    reports: "Optional[List[Tuple[str, str]]]" = None,
 ) -> "List[ScriptRun]":
     """Apply one overlay's ``env``, env files and path additions to ``env`` and return the env scripts
-    that run, in order. What is reported is appended to ``non_defaults``.
+    that run, in order. What is reported is appended to ``non_defaults``. With ``facts.gate_env_scripts``
+    and an overlay whose digest is not the allowed one, none runs, and ``(env-script-not-allowed,
+    identity)`` is appended to ``reports`` when the overlay has an env script for this OS.
 
     While it runs, placeholders also see ``AOS_OVERLAY_ROOT``, ``AOS_OVERLAY_NAME`` and, when
     ``facts.state`` is set, ``AOS_OVERLAY_STATE``. Raises ``Error`` for a declaration the consumer
@@ -410,7 +442,7 @@ def apply_overlay(
     if facts.state is not None:
         env._extra["AOS_OVERLAY_STATE"] = facts.state
     try:
-        return _apply_overlay(env, manifest, facts, non_defaults)
+        return _apply_overlay(env, manifest, facts, non_defaults, reports)
     finally:
         env._extra = {}
 
@@ -446,8 +478,14 @@ def require_valid(manifest: Document) -> None:
 
 
 def _apply_overlay(
-    env: Environment, manifest: Document, facts: Facts, non_defaults: "List[NonDefaultSetting]"
+    env: Environment,
+    manifest: Document,
+    facts: Facts,
+    non_defaults: "List[NonDefaultSetting]",
+    reports: "Optional[List[Tuple[str, str]]]",
 ) -> "List[ScriptRun]":
+    from ._hooks import _same_digest
+
     from ._document import read_document
     from ._validate import validate
 
@@ -507,6 +545,18 @@ def _apply_overlay(
     scripts: "List[ScriptRun]" = []
     if facts.env_scripts_enabled is not False:
         choice = default_script(manifest, "env_scripts", "env", tree, os, facts.known_interpreters())
+        if facts.gate_env_scripts and not (
+            facts.digest is not None
+            and facts.allowed is not None
+            and _same_digest(facts.digest, facts.allowed)
+        ):
+            if reports is not None and (
+                choice.chosen is not None
+                or choice.present
+                or any(entry_on(script, os) for script in choice.others)
+            ):
+                reports.append(("env-script-not-allowed", facts.identity))
+            return scripts
         if choice.chosen is None:
             non_defaults.extend(
                 NonDefaultSetting(NonDefaultId.SCRIPT_NOT_RUN, path) for path in choice.present

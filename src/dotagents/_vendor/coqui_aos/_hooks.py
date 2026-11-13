@@ -37,6 +37,7 @@ __all__ = [
     "hook_payload",
     "hook_plan",
     "hook_result",
+    "hooks_declared",
     "hooks_of",
     "read_hook_output",
 ]
@@ -348,6 +349,20 @@ def hooks_of(
     return entries, (present if needs_default else [])
 
 
+def hooks_declared(manifest: Document, tree: OverlayTree) -> bool:
+    """Whether the overlay declares a hook on any OS with any interpreter: ``hooks_of`` finds an
+    entry or a ``hook.<ext>`` that cannot run, for some OS, were every interpreter AOS names
+    present. Entries an overlay switches off (``false``, or ``defaults.hooks = false``) are not
+    declared. For a consumer that runs no hooks and refuses an overlay that asks for any, whatever
+    it runs on.
+    """
+    for os in ("windows", "linux"):
+        hooks, not_run = hooks_of(manifest, tree, os, INTERPRETERS)
+        if hooks or not_run:
+            return True
+    return False
+
+
 @dataclasses.dataclass
 class HookFacts:
     """What a consumer knows when it plans an overlay's hooks on one harness."""
@@ -532,7 +547,7 @@ def _read_json_object(text: str, depth: "Optional[int]") -> "Dict[str, Any]":
             elif char in "[{":
                 level += 1
                 if level > depth:
-                    raise Error(Class.TOO_DEEP)
+                    raise Error(Class.TOO_DEEP).over("manifest_depth")
             elif char in "]}":
                 level -= 1
 
@@ -737,6 +752,7 @@ def fire_event(
     applies: "Optional[Iterable[str]]" = None,
     settings: Optional[Settings] = None,
     windows: bool = False,
+    context_used: int = 0,
 ) -> FiredEvent:
     """Every hook of one event, in the order given, combined to the tightest result.
 
@@ -744,7 +760,9 @@ def fire_event(
     ``block``, ``deny``, ``ask``, ``refuse``); ``None`` is all the event takes, and refuse. A
     hook that would start after the event's own bound has passed fails as ``event-timeout``.
     ``windows`` makes a variable's name compare without case, keeping the spelling it was
-    first given.
+    first given. ``context_used`` is what the session's context already holds, in bytes: a part
+    of a hook's context that would take the total past ``settings.context_bytes`` is not added,
+    whole, and is reported as ``hook-not-applied``; a later part that fits still is.
     """
     from ._names import is_sensitive_variable
 
@@ -782,7 +800,11 @@ def fire_event(
             fired.env.clear()
             break
         if out.context:
-            if "context" in can:
+            size = len(out.context.encode("utf-8"))
+            if "context" in can and not settings.allows("context_bytes", context_used + size):
+                fired.reports.append(HookReport("hook-not-applied", (source, event.value, "context")))
+            elif "context" in can:
+                context_used += size
                 fired.context.append((source, out.context))
             else:
                 fired.reports.append(HookReport("hook-not-applied", (source, event.value, "context")))

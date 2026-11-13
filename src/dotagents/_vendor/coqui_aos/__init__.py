@@ -26,5 +26,6 @@ from ._settings import *  # noqa: F403
 from ._skills import *  # noqa: F403
 from ._source import *  # noqa: F403
 from ._subst import *  # noqa: F403
+from ._template import *  # noqa: F403
 from ._tree import *  # noqa: F403
 from ._validate import *  # noqa: F403

@@ -116,13 +116,13 @@ def _constant(name: str) -> Any:
 
 def _json(text: str, settings: Settings) -> Any:
     if not _depth_within(text, settings.manifest_depth):
-        raise Error(Class.TOO_DEEP)
+        raise Error(Class.TOO_DEEP).over("manifest_depth")
     try:
         return json.loads(text, object_pairs_hook=_pairs, parse_constant=_constant)
     except json.JSONDecodeError as error:
         raise Error(Class.PARSE_ERROR, "JSON that does not parse", error.lineno, error.colno) from None
     except RecursionError:
-        raise Error(Class.TOO_DEEP) from None
+        raise Error(Class.TOO_DEEP).over("manifest_depth") from None
     except ValueError:
         # An integer too long to convert, which no variable holds.
         raise Error(Class.PARSE_ERROR, "a number that does not read") from None
@@ -138,7 +138,7 @@ def read_env_script_output(data: bytes, settings: "Optional[Settings]" = None) -
     """
     settings = settings or Settings()
     if not settings.allows("manifest_bytes", len(data)):
-        raise Error(Class.TOO_LARGE, "an env script's output")
+        raise Error(Class.TOO_LARGE, "an env script's output").over("manifest_bytes")
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:

@@ -192,7 +192,9 @@ def _walk(
 
     def listing(path: PurePath, depth: int) -> "List[Tuple[bytes, str]]":
         if not settings.allows("tree_depth", depth):
-            raise Error(Class.TOO_LARGE, "directories nested deeper than %s" % settings.tree_depth)
+            raise Error(Class.TOO_LARGE, "directories nested deeper than %s" % settings.tree_depth).over(
+                "tree_depth"
+            )
         try:
             names = files.list(path)
         except OSError as error:
@@ -225,7 +227,9 @@ def _walk(
             continue
         if info.kind is FileKind.SYMLINK:
             raise Error(Class.SYMLINK, _shown(components))
-        too_many = Error(Class.TOO_LARGE, "more than %s files and directories" % settings.tree_files)
+        too_many = Error(Class.TOO_LARGE, "more than %s files and directories" % settings.tree_files).over(
+            "tree_files"
+        )
         if directory:
             entries += 1
             if not settings.allows("tree_files", entries):
@@ -244,10 +248,12 @@ def _walk(
         except OSError as error:
             raise _io(error, member) from None
         if not settings.allows("file_bytes", len(data)):
-            raise Error(Class.TOO_LARGE, "%s is larger than %s bytes" % (member, settings.file_bytes))
+            raise Error(Class.TOO_LARGE, "%s is larger than %s bytes" % (member, settings.file_bytes)).over(
+                "file_bytes"
+            )
         total += len(data)
         if not settings.allows("tree_bytes", total):
-            raise Error(Class.TOO_LARGE, "more than %s bytes" % settings.tree_bytes)
+            raise Error(Class.TOO_LARGE, "more than %s bytes" % settings.tree_bytes).over("tree_bytes")
         found[member] = Digest.of(data)
         if keep:
             contents[member] = data

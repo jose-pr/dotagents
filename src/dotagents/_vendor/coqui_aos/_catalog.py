@@ -173,9 +173,14 @@ def read_catalog_document(data: bytes, name: str, settings: "Optional[Settings]"
     bounded = settings.replace(manifest_bytes=settings.catalog_bytes)
     kind = catalog_format(name)
     if kind is None:
-        return read_document(data, bounded)
+        try:
+            return read_document(data, bounded)
+        except Error as error:
+            if error.setting == "manifest_bytes":
+                error.setting = "catalog_bytes"
+            raise
     if not bounded.allows("manifest_bytes", len(data)):
-        raise Error(Class.TOO_LARGE, "a catalog")
+        raise Error(Class.TOO_LARGE, "a catalog").over("catalog_bytes")
     if data.startswith(b"\xef\xbb\xbf"):
         data = data[3:]
     return read_text(Format(kind), data, bounded)
