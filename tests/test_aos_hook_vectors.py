@@ -78,9 +78,12 @@ def test_hooks(case):
             got = {"failed": failure.failure.value}
     elif kind == "match":
         got = {"runs": coqui_aos.hook_matches(coqui_aos.HookEvent(case["event"]), case["match"], case["value"])}
+    elif kind in ("order", "environment", "process"):
+        pytest.skip("coqui_aos runs the order and environment vectors; dotagents builds its own environments")
     else:
         got = _aos.fire_event(case["event"], case["runs"], case.get("applies"), case.get("limits"),
-                              case.get("os") == "windows")
+                              case.get("os") == "windows", tool_input=case.get("input"),
+                              context_used=case.get("context_used", 0))
     assert strict(json.loads(json.dumps(got))) == strict(case["expect"])
 
 

@@ -109,7 +109,6 @@ class Environment:
         self._folded: "Dict[str, str]" = {}
         self._secret: "Set[str]" = set()
         self._extra: "Dict[str, str]" = {}
-        self._log: "Optional[List[Tuple[str, str, bool, Any]]]" = None
         items = base.items() if isinstance(base, Mapping) else (base or ())
         for name, value in items:
             self.set(name, value)
@@ -139,13 +138,9 @@ class Environment:
     def set(self, name: str, value: str, secret: bool = False) -> None:
         """Set ``name``, keeping the name already there under another case on Windows. A secret is
         never read by a placeholder."""
-        self._put(name, value, secret, None)
+        self._put(name, value, secret)
 
-    def _put(self, name: str, value: str, secret: bool, join: Any) -> None:
-        # ``join`` is a path addition's (separator, prepended, covered, appended), kept in the log
-        # so the same addition can be made onto another environment.
-        if self._log is not None:
-            self._log.append((name, value, secret, join))
+    def _put(self, name: str, value: str, secret: bool) -> None:
         key = self._key(name)
         if key is None:
             key = name
@@ -405,7 +400,6 @@ def _apply_paths(
             variable,
             separator.join(prepend + kept + append),
             env.is_secret(variable),
-            (separator, prepend, seen, append),
         )
 
 

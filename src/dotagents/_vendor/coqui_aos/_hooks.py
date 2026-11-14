@@ -69,6 +69,7 @@ _UNIX = frozenset(("macos", "linux", "freebsd", "openbsd", "netbsd"))
 _REFUSED_TEXT = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f‪-‮⁦-⁩]")
 _VARIABLE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _INT_MIN, _INT_MAX = -(2**63), 2**63 - 1
+_UNSET: Any = object()
 
 
 class _Word(str, enum.Enum):
@@ -106,7 +107,7 @@ class HookEvent(_Word):
 
     @property
     def outputs(self) -> "Tuple[str, ...]":
-        """What a hook of this event may output: ``context``, ``env``, ``block``, ``deny``, ``ask``."""
+        """What a hook of this event may output: ``context``, ``env``, ``block``, ``deny``, ``ask``, ``allow``, ``input``."""
         return _OUTPUTS[self.value]
 
     @property
@@ -135,7 +136,7 @@ _OUTPUTS = {
     "turn-end": (),
     "cd": ("env",),
     "pre-compact": ("context", "block"),
-    "pre-tool": ("context", "deny", "ask", "env"),
+    "pre-tool": ("context", "deny", "ask", "allow", "input", "env"),
     "post-tool": ("context",),
 }
 _REFUSAL = {
@@ -180,12 +181,15 @@ class Decision(_Word):
     BLOCK = "block"
     DENY = "deny"
     ASK = "ask"
+    ALLOW = "allow"
     REFUSE = "refuse"
 
     @property
     def rank(self) -> int:
-        """How tight it is: ``ask`` 1, every other 2."""
-        return 1 if self is Decision.ASK else 2
+        """How tight it is: ``allow`` 1, ``ask`` 2, every other 3."""
+        if self is Decision.ALLOW:
+            return 1
+        return 2 if self is Decision.ASK else 3
 
 
 def _rank(decision: "Optional[Decision]") -> int:
@@ -215,7 +219,6 @@ class HookFailure(_Word):
     TIMEOUT = "timeout"
     TOO_LARGE = "too-large"
     EXIT = "exit"
-    GRANT = "grant"
     OUTPUT = "output"
     EVENT_TIMEOUT = "event-timeout"
 
@@ -515,11 +518,13 @@ class HookOutput:
     reason: Optional[str] = dataclasses.field(default=None, repr=False)
     #: Text for the agent.
     context: Optional[str] = dataclasses.field(default=None, repr=False)
+    #: The call as rewritten, with ``Decision.ALLOW``: the whole object that replaces its input.
+    input: Optional[Dict[str, Any]] = dataclasses.field(default=None, repr=False)
     #: Variables to set, or ``None`` to unset, in the order given.
     env: Optional[Dict[str, Optional[str]]] = dataclasses.field(default=None, repr=False)
 
     def __repr__(self) -> str:
-        parts = [name for name in ("reason", "context", "env") if getattr(self, name) is not None]
+        parts = [name for name in ("reason", "context", "input", "env") if getattr(self, name) is not None]
         return "HookOutput(decision=%s, has=%s)" % (self.decision, parts)
 
 
@@ -587,7 +592,7 @@ def read_hook_output(
 
     ``pre-env`` reads as an env script's output. Every other event reads one JSON object, whose
     keys are those the event takes; a ``decision`` that is not one of the event's own is an
-    attempt to grant, and ``env`` may name only the variables ``sets`` lists.
+    ``output`` failure, so is an ``input`` that does not come with an allow, and ``env`` may name only the variables ``sets`` lists.
     """
     settings = settings or Settings()
     outputs = event.outputs
@@ -614,11 +619,11 @@ def read_hook_output(
     decision: "Optional[Decision]" = None
     if "decision" in value:
         word = value["decision"]
-        if isinstance(word, str) and word in ("block", "deny", "ask") and word in outputs:
+        if isinstance(word, str) and word in ("block", "deny", "ask", "allow") and word in outputs:
             decision = Decision(word)
         else:
-            raise HookError(HookFailure.GRANT)
-    if any(key not in ("context", "decision", "reason", "env") for key in value):
+            raise HookError(HookFailure.OUTPUT)
+    if any(key not in ("context", "decision", "reason", "input", "env") for key in value):
         raise HookError(HookFailure.OUTPUT)
     reason = context = None
     if "reason" in value:
@@ -629,6 +634,11 @@ def read_hook_output(
             or not _text_ok(reason)
             or not settings.allows("hook_reason_chars", len(reason))
         ):
+            raise HookError(HookFailure.OUTPUT)
+    rewritten: "Optional[Dict[str, Any]]" = None
+    if "input" in value:
+        rewritten = value["input"]
+        if "input" not in outputs or decision is not Decision.ALLOW or not isinstance(rewritten, dict):
             raise HookError(HookFailure.OUTPUT)
     if "context" in value:
         context = value["context"]
@@ -655,7 +665,7 @@ def read_hook_output(
             if item is not None and not (isinstance(item, str) and "\0" not in item):
                 raise HookError(HookFailure.OUTPUT)
             env[name] = item
-    return HookOutput(decision=decision, reason=reason, context=context, env=env)
+    return HookOutput(decision=decision, reason=reason, context=context, input=rewritten, env=env)
 
 
 def _ascii_upper(name: str) -> str:
@@ -721,7 +731,7 @@ class FiredEvent:
 
     #: The sources of the hooks that were started, those that failed to start excepted.
     ran: List[str] = dataclasses.field(default_factory=list)
-    #: The tightest decision any asked for.
+    #: The tightest decision any asked for: a deny, then an ask, then an allow.
     decision: Optional[Decision] = None
     #: The source of that decision.
     by: Optional[str] = None
@@ -734,6 +744,11 @@ class FiredEvent:
     reports: List[HookReport] = dataclasses.field(default_factory=list)
     #: ``(id, subject)``: ``env-sensitive``.
     non_defaults: List[Tuple[str, str]] = dataclasses.field(default_factory=list)
+    #: With a ``tool_input``: ``(source, input)`` for what each hook that ran was given.
+    seen: Optional[List[Tuple[str, Any]]] = dataclasses.field(default=None, repr=False)
+    #: With a ``tool_input``: the input the call runs with, ``None`` for the one it was given. Set
+    #: only for a combined allow.
+    input: Optional[Dict[str, Any]] = dataclasses.field(default=None, repr=False)
 
     def __repr__(self) -> str:
         return "FiredEvent(ran=%r, decision=%s, by=%r, context=%d, env=%d, reports=%d)" % (
@@ -753,16 +768,22 @@ def fire_event(
     settings: Optional[Settings] = None,
     windows: bool = False,
     context_used: int = 0,
+    tool_input: Any = _UNSET,
 ) -> FiredEvent:
     """Every hook of one event, in the order given, combined to the tightest result.
 
     ``applies`` are the outputs the consumer can apply on this harness (``context``, ``env``,
-    ``block``, ``deny``, ``ask``, ``refuse``); ``None`` is all the event takes, and refuse. A
+    ``block``, ``deny``, ``ask``, ``allow``, ``input``, ``refuse``); ``None`` is all the event takes, and refuse. A
     hook that would start after the event's own bound has passed fails as ``event-timeout``.
     ``windows`` makes a variable's name compare without case, keeping the spelling it was
     first given. ``context_used`` is what the session's context already holds, in bytes: a part
     of a hook's context that would take the total past ``settings.context_bytes`` is not added,
     whole, and is reported as ``hook-not-applied``; a later part that fits still is.
+    ``tool_input`` is the call's input as the harness gave it (a ``pre-tool`` event that may be
+    rewritten): ``seen`` then says what each hook was given, a hook's ``input`` replaces it for
+    the hooks after, and ``input`` is what the call runs with, set only by a combined allow. An
+    allow whose ``input`` the consumer cannot apply (``input`` not in ``applies``) is not applied
+    at all; one that an ask beat reports its rewrite as ``hook-not-applied``.
     """
     from ._names import is_sensitive_variable
 
@@ -771,12 +792,18 @@ def fire_event(
     bound = settings.hook_event_timeout
     spent = 0
     fired = FiredEvent()
+    current, rewriter = tool_input, None
+    rewriting = tool_input is not _UNSET
+    if rewriting:
+        fired.seen = []
     for run in runs:
         source = run.source
         try:
             if bound is not None and spent >= bound:
                 raise HookError(HookFailure.EVENT_TIMEOUT)
             fired.ran.append(source)
+            if rewriting:
+                fired.seen.append((source, current))
             spent += run.seconds
             out = hook_result(event, run, settings)
         except HookError as failure:
@@ -792,9 +819,15 @@ def fire_event(
         if decision is not None and decision.value not in can:
             fired.reports.append(HookReport("hook-not-applied", (source, event.value, decision.value)))
             decision = None
+        if out.input is not None and decision is Decision.ALLOW:
+            if "input" in can:
+                current, rewriter = out.input, source
+            else:
+                fired.reports.append(HookReport("hook-not-applied", (source, event.value, "input")))
+                decision = None
         if _rank(decision) > _rank(fired.decision):
             fired.decision, fired.by, fired.reason = decision, source, out.reason
-        if _rank(decision) == 2:
+        if _rank(decision) == 3:
             # The prompt, compaction, call or session does not happen: nothing else applies.
             fired.context.clear()
             fired.env.clear()
@@ -819,4 +852,9 @@ def fire_event(
                     key = next((held for held in fired.env if _ascii_upper(held) == folded), name)
                 fired.env[key] = value
     fired.non_defaults = sorted(("env-sensitive", name) for name in fired.env if is_sensitive_variable(name))
+    if rewriting and rewriter is not None:
+        if fired.decision is Decision.ALLOW:
+            fired.input = current
+        elif fired.decision is Decision.ASK:
+            fired.reports.append(HookReport("hook-not-applied", (rewriter, event.value, "input")))
     return fired
