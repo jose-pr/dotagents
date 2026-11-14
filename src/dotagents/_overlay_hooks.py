@@ -788,9 +788,9 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
                 return done
 
             runs.append({"source": overlay.name, "on_failure": entry["on_failure"], "start_after": start,
-                         "sets": entry["sets"]})
+                         "sets": entry["sets"], "match": entry["match"]})
     result = _aos.fire_event(event, runs, applies, dict(LIMITS, **(limits or {})), os.name == "nt",
-                             tool_input=tool_input)
+                             tool_input=tool_input, tool_kind=matching if event == "pre-tool" else None)
     return Fired(result, reports, errors)
 
 

@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   earlier hooks of its event set. A hook that outlives its timeout has its own process stopped, not its
   process group or job. `dotagents launch` no longer records `AGENTS_SESSION_BASE`. The vendored
   `coqui_aos` and the hook vectors move to the revision.
+- On a call of kind `other` (an MCP tool, any tool dotagents cannot place), a `pre-tool` hook still runs
+  whatever its `match`, and its deny and ask count, but its allow, and the input it carries, count only
+  when the hook has no `match` or names `other`; another's is reported `hook-not-applied` `allow`.
+  The vendored `coqui_aos` and the hook vectors move to specification revision c2f6d88.
 
 ### Added
 

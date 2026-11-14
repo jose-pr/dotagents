@@ -996,11 +996,12 @@ def hook_run(run: "dict[str, Any]", output_bytes: "Optional[int]" = None) -> "co
         seconds=run.get("seconds", 0), not_run=run.get("not_run", False),
         payload_size=run.get("payload_size", 0), timed_out=run.get("timed_out", False),
         exit=run.get("exit", 0), sets=tuple(run.get("sets", ())),
+        select=None if run.get("match") is None else tuple(run["match"]),
     )
 
 
 def _started(runs: "list[dict[str, Any]]", settings: "coqui_aos.Settings", event: "Optional[str]" = None,
-             tool_input: Any = None) -> "Iterable[coqui_aos.HookRun]":
+             tool_input: Any = None, tool_kind: "Optional[str]" = None) -> "Iterable[coqui_aos.HookRun]":
     """The runs as ``coqui_aos`` takes them, each made only when its loop turn comes: a run that
     holds ``start``, a function returning its own keys, is started then, so one after a block or a
     deny, or after the event's bound, never is. ``fire_event`` reads the event's bound before a
@@ -1031,23 +1032,26 @@ def _started(runs: "list[dict[str, Any]]", settings: "coqui_aos.Settings", event
             continue
         if out.env:
             left["env"].append(dict(out.env))
-        if out.input is not None and out.decision is coqui_aos.Decision.ALLOW:
+        scoped_out = tool_kind == "other" and held.select is not None and "other" not in held.select
+        if out.input is not None and out.decision is coqui_aos.Decision.ALLOW and not scoped_out:
             left["input"] = out.input
 
 
 def fire_event(event: str, runs: "list[dict[str, Any]]", applies: "Optional[Iterable[str]]" = None,
                limits: "Optional[dict[str, int]]" = None, windows: bool = False,
-               tool_input: Any = None, context_used: int = 0) -> "dict[str, Any]":
+               tool_input: Any = None, context_used: int = 0, tool_kind: "Optional[str]" = None) -> "dict[str, Any]":
     """:func:`coqui_aos.fire_event` over ``runs`` (``source``, ``on_failure``, ``seconds``, the
     run's keys as :func:`hook_run` reads them, optionally ``start``), its result as plain data:
     ``ran``, ``decision``, ``by``, ``reason``, ``context``, ``env``, ``reports`` (lists of id and
     what it is about) and ``non_defaults``. With ``tool_input`` (a ``pre-tool`` call's input) the
     result also holds ``seen`` (``[source, input]`` of each hook that ran) and ``input``, what the
-    call runs with: an object only when the hooks combined to an allow that rewrote it."""
+    call runs with: an object only when the hooks combined to an allow that rewrote it. A run's
+    ``match`` (its entry's) and the call's ``tool_kind`` decide whether an allow counts: on ``other``
+    only a run with no ``match``, or one naming ``other``, may allow."""
     settings = hook_settings(limits)
     given = {} if tool_input is None else {"tool_input": tool_input}
-    fired = coqui_aos.fire_event(coqui_aos.HookEvent(event), _started(runs, settings, event, tool_input), applies,
-                                 settings, windows, context_used, **given)
+    fired = coqui_aos.fire_event(coqui_aos.HookEvent(event), _started(runs, settings, event, tool_input, tool_kind),
+                                 applies, settings, windows, context_used, tool_kind=tool_kind, **given)
     data = coqui_aos.to_data(fired)
     if tool_input is None:
         data.pop("seen", None)

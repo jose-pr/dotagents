@@ -83,7 +83,7 @@ def test_hooks(case):
     else:
         got = _aos.fire_event(case["event"], case["runs"], case.get("applies"), case.get("limits"),
                               case.get("os") == "windows", tool_input=case.get("input"),
-                              context_used=case.get("context_used", 0))
+                              context_used=case.get("context_used", 0), tool_kind=case.get("kind"))
     assert strict(json.loads(json.dumps(got))) == strict(case["expect"])
 
 

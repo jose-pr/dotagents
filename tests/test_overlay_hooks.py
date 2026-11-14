@@ -512,3 +512,27 @@ def test_standard_error_goes_to_the_users_log_made_printable_and_never_to_the_ag
     assert "guard prompt: note?[31m red?" in log and chr(27) not in log
     assert "note" not in stdout and "note" not in stderr
     assert "note" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("scope,counts", [
+    ('match = ["read"] ', False), ("", True), ('match = ["read", "other"] ', True)])
+def test_on_a_tool_of_kind_other_only_a_hook_that_names_other_or_has_no_match_may_allow(tmp_path, scope, counts):
+    rig = Rig(tmp_path, "[hooks]\npre-tool = { %s}\n" % scope)
+    rig.allow()
+    answer = reply(rig.fire("claude-code", "pre-tool", tool("mcp__srv__run", command="x"),
+                            HOOK_OUT=out(decision="allow", reason="fine", input={"command": "y"}))[0])
+    body = answer.get("hookSpecificOutput", {})
+    assert [c["payload"]["tool"]["kind"] for c in rig.calls()] == ["other"]
+    if counts:
+        assert body["permissionDecision"] == "allow" and body["updatedInput"] == {"command": "y"}
+    else:
+        assert "permissionDecision" not in body and "updatedInput" not in body
+        assert "hook-not-applied guard pre-tool allow" in answer["systemMessage"]
+
+
+def test_a_read_scoped_deny_still_counts_on_a_tool_of_kind_other(tmp_path):
+    rig = Rig(tmp_path, '[hooks]\npre-tool = { match = ["read"] }\n')
+    rig.allow()
+    answer = reply(rig.fire("claude-code", "pre-tool", tool("mcp__srv__run", command="x"),
+                            HOOK_OUT=out(decision="deny", reason="no"))[0])
+    assert answer["hookSpecificOutput"]["permissionDecision"] == "deny"
