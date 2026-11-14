@@ -99,7 +99,7 @@ def test_a_snapshot_that_was_tampered_with_is_made_again_and_older_ones_are_kept
     rig = Rig(tmp_path, "[hooks]\nprompt = {}\n")
     rig.allow()
     rig.fire("claude-code", "prompt", PROMPT)
-    first = rig.calls()[0]["cwd"]
+    first = rig.calls()[0]["root"]
     write(Path(first) / "hook.py", "open(%r, 'w').write('tampered')\n" % str(tmp_path / "TAMPERED"))
     rig.log.unlink()
     rig.fire("claude-code", "prompt", PROMPT)
@@ -109,8 +109,8 @@ def test_a_snapshot_that_was_tampered_with_is_made_again_and_older_ones_are_kept
     write(rig.root / "hook.py", (rig.root / "hook.py").read_text(encoding="utf-8") + "# v2\n")
     rig.allow()
     rig.fire("claude-code", "prompt", PROMPT)
-    assert os.path.isdir(old_holder) and os.path.isdir(os.path.dirname(rig.calls()[-1]["cwd"]))
-    assert os.path.dirname(rig.calls()[-1]["cwd"]) != old_holder
+    assert os.path.isdir(old_holder) and os.path.isdir(os.path.dirname(rig.calls()[-1]["root"]))
+    assert os.path.dirname(rig.calls()[-1]["root"]) != old_holder
 
 
 # ---- 3: interpreters are never the working directory's or the project's ---------------------
@@ -262,7 +262,7 @@ def test_a_project_overlays_env_scripts_run_under_the_users_python_end_to_end(tm
     assert done.returncode == 0, done.stderr
     seen = rig.calls()[0]["paths"]
     assert os.path.normcase(seen["RAN_UNDER"]) == os.path.normcase(sys.executable)
-    assert os.path.realpath(rig.calls()[0]["cwd"]).startswith(snapshots(rig))
+    assert os.path.realpath(rig.calls()[0]["root"]).startswith(snapshots(rig))
 
 
 def test_a_guard_missing_from_the_overlay_denies_through_the_real_forwarder(tmp_path):

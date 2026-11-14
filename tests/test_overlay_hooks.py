@@ -130,9 +130,8 @@ def test_session_start_on_claude_adds_context_and_variables(rig, tmp_path):
     assert call["payload"]["session"].startswith("dotagents-") and "s" != call["payload"]["session"]
     block = env_file.read_text(encoding="utf-8")
     assert "export GREETING='it'\\''s $(touch pwned) `x`'" in block and "unset TWO" in block
-    # A hook runs from a snapshot of the bytes whose digest was allowed, not from the overlay's directory.
-    assert os.path.realpath(call["cwd"]).startswith(os.path.realpath(str(rig.store / ".cache" / "hook-snapshots")))
-    assert os.path.exists(os.path.join(call["cwd"], "hook.py"))
+    # A hook runs in the session's folder.
+    assert os.path.samefile(call["cwd"], tmp_path)
 
 
 def test_context_markers_are_not_imitable(rig, tmp_path):
@@ -274,16 +273,69 @@ def test_pre_tool_match_and_a_tool_of_unknown_kind(rig):
 
 
 @pytest.mark.parametrize("harness,name", [("claude-code", "Bash"), ("codex", "exec_command")])
-def test_pre_tool_never_approves_and_never_rewrites(rig, harness, name):
-    for attempt in (out(decision="allow"), out(decision="approve"), out(decision=""),
+def test_pre_tool_takes_no_approval_in_the_harnesss_own_words(rig, harness, name):
+    for attempt in (out(decision="approve"), out(decision=""),
                     out(hookSpecificOutput={"permissionDecision": "allow"}),
-                    out(updatedInput={"command": "true"}), out(permissionDecision="allow")):
+                    out(updatedInput={"command": "true"}), out(permissionDecision="allow"),
+                    out(decision="ask", input={"command": "true"}), out(input={"command": "true"}),
+                    out(decision="allow", updatedInput={"command": "true"}),
+                    out(decision="allow", input="true")):
         stdout, _ = rig.fire(harness, "pre-tool", tool(name, command="ls"), HOOK_OUT=attempt)
         answer = reply(stdout)
-        # on_failure = "refuse": the attempt fails, and a guard that fails denies.
+        # on_failure = "refuse": the attempt fails (output), and a guard that fails denies.
         assert answer["hookSpecificOutput"]["permissionDecision"] == "deny", attempt
-        assert "allow" not in json.dumps(answer).replace("hook-failed", "")
+        assert "allow" not in json.dumps(answer).replace("hook-failed", ""), attempt
         assert "updatedInput" not in stdout
+
+
+def test_pre_tool_allow_on_claude_is_answered_with_the_rewritten_input(rig):
+    plain = reply(rig.fire("claude-code", "pre-tool", tool("Bash", command="ls"),
+                           HOOK_OUT=out(decision="allow", reason="fine"))[0])["hookSpecificOutput"]
+    assert plain["permissionDecision"] == "allow" and "fine" in plain["permissionDecisionReason"]
+    assert "updatedInput" not in plain
+    rewritten = reply(rig.fire("claude-code", "pre-tool", tool("Bash", command="git push --force"),
+                               HOOK_OUT=out(decision="allow", input={"command": "git push"}))[0])["hookSpecificOutput"]
+    assert rewritten["permissionDecision"] == "allow" and rewritten["updatedInput"] == {"command": "git push"}
+    assert "allowed by the hook of overlay guard" in rewritten["permissionDecisionReason"]
+
+
+def test_pre_tool_allow_is_not_applied_on_codex_and_the_call_goes_as_it_would(rig):
+    answer = reply(rig.fire("codex", "pre-tool", tool("exec_command", command="ls"),
+                            HOOK_OUT=out(decision="allow", input={"command": "true"}))[0])
+    assert "hookSpecificOutput" not in answer
+    assert "hook-not-applied guard pre-tool allow" in answer["systemMessage"]
+
+
+def test_an_ask_beats_an_allow_and_drops_the_rewrite():
+    from dotagents import _aos
+
+    def run(source, text):
+        return {"source": source, "stdout": text}
+
+    fired = _aos.fire_event(
+        "pre-tool",
+        [run("a", out(decision="allow", input={"command": "git push"})), run("b", out(decision="ask", reason="check"))],
+        ["deny", "ask", "allow", "input"], tool_input={"command": "git push --force"})
+    assert fired["decision"] == "ask" and fired["input"] is None
+    assert ["hook-not-applied", "a", "pre-tool", "input"] in fired["reports"]
+    assert fired["seen"][1] == ["b", {"command": "git push"}]
+
+
+def test_a_later_hook_is_told_the_input_an_earlier_one_rewrote(tmp_path):
+    from dotagents import _aos
+
+    seen = []
+
+    def second(left):
+        seen.append(left["input"])
+        return {"stdout": ""}
+
+    fired = _aos.fire_event(
+        "pre-tool",
+        [{"source": "a", "stdout": out(decision="allow", input={"command": "git push"})},
+         {"source": "b", "start_after": second}],
+        ["allow", "input"], tool_input={"command": "git push --force"})
+    assert seen == [{"command": "git push"}] and fired["input"] == {"command": "git push"}
 
 
 def test_pre_tool_variables_are_reported_not_applied(rig):
@@ -397,13 +449,17 @@ def test_a_denying_hook_stops_the_hooks_after_it(tmp_path):
     assert len(rig.calls()) == 1
 
 
-def test_a_hook_runs_outside_the_sessions_environment(tmp_path):
+def test_a_hook_runs_with_the_sessions_environment_in_the_sessions_folder(tmp_path):
     rig = Rig(tmp_path, "[hooks]\nprompt = {}\n")
     rig.allow()
     other = tmp_path / "store" / "overlays" / "other"
     write(other / "overlay.cfg", "[env]\nSECRET_TOKEN = \"hunter2\"\n")
-    rig.fire("claude-code", "prompt", {"session_id": "s", "cwd": "/", "prompt": "x"})
-    assert "SECRET_TOKEN" not in rig.calls()[0]["saw"]
+    work = tmp_path / "work"
+    work.mkdir()
+    rig.fire("claude-code", "prompt", {"session_id": "s", "cwd": str(work), "prompt": "x"})
+    call = rig.calls()[0]
+    assert "SECRET_TOKEN" in call["saw"]
+    assert os.path.samefile(call["cwd"], work)
 
 
 def test_a_hook_script_that_leaves_the_overlay_is_not_run(tmp_path):

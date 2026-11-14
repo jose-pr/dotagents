@@ -57,7 +57,7 @@ def test_standard_error_is_kept_to_its_bound_and_never_blocks_the_hook():
     assert len(done["stderr"]) == 10
 
 
-def test_a_process_the_hook_started_ends_with_it(tmp_path):
+def test_a_process_the_hook_started_is_its_own_business(tmp_path):
     marker = tmp_path / "alive"
     code = (
         "import subprocess, sys\n"
@@ -68,7 +68,7 @@ def test_a_process_the_hook_started_ends_with_it(tmp_path):
     done = run(code)
     assert done["exit"] == 0
     time.sleep(4)
-    assert not marker.exists()
+    assert marker.exists()
 
 
 def test_the_environment_is_exactly_the_one_given():

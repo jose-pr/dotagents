@@ -204,8 +204,8 @@ def test_no_placeholder_reads_a_secret(store, caplog):
 
 
 def test_an_env_script_sees_the_value_as_substituted_for_the_session(store):
-    """An overlay's own processes get its values as they were substituted in
-    the order of application, never substituted again over another base."""
+    """An env script gets the stack as it stands at its step, each value as it was substituted
+    in the order of application, never substituted again over another base."""
     _write(store / "overlays" / "low" / "overlay.cfg", 'priority = 100\n[env]\nTOOL_HOME = "/opt/tool"\n')
     ov = store / "overlays" / "high"
     _write(ov / "overlay.cfg", 'priority = 900\n[env]\nTOOL_BIN = "${TOOL_HOME}/bin"\n')
@@ -213,7 +213,7 @@ def test_an_env_script_sees_the_value_as_substituted_for_the_session(store):
                           " 'HOME_SEEN': os.environ.get('TOOL_HOME', '')}))\n")
     env = _env_of(store)
     assert env["SEEN"] == "/opt/tool/bin"
-    assert env["HOME_SEEN"] == "", "another overlay's own values stay out of its processes"
+    assert env["HOME_SEEN"] == "/opt/tool", "overlays stack: a script sees what the earlier overlays left"
 
 
 def test_an_mcp_servers_env_is_substituted_against_what_it_receives(tmp_path):

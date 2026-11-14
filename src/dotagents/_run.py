@@ -233,7 +233,8 @@ def run_hook(argv: "list[str]", *, cwd: str, env: "dict[str, str]", timeout: int
     waiting on the hook, which may never read it), at most ``max_output`` bytes of its standard
     output are kept and a run that writes more is stopped, and at most ``max_stderr`` bytes of
     its standard error are kept, the rest read and dropped so it never blocks. It ends at
-    ``timeout`` seconds. Every process it started ends with it.
+    ``timeout`` seconds, when its own process is stopped; what it started is its own business, as
+    with a harness's own hooks.
 
     Returns ``exit``, ``stdout``, ``stderr``, ``timed_out``, ``too_large``, ``not_run`` (it could
     not start) and ``seconds``."""
@@ -244,26 +245,12 @@ def run_hook(argv: "list[str]", *, cwd: str, env: "dict[str, str]", timeout: int
                                    "too_large": False, "not_run": False, "seconds": 0.0}
     options: "dict" = {"cwd": cwd, "env": env, "stdin": subprocess.PIPE, "stdout": subprocess.PIPE,
                        "stderr": subprocess.PIPE}
-    job = None
-    if os.name == "nt":
-        try:
-            job = _Job()
-        except OSError:
-            job = None
-        options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | (_CREATE_SUSPENDED if job else 0)
-    else:
-        options["start_new_session"] = True
     started = time.monotonic()
     try:
         process = subprocess.Popen(argv, **options)
     except (OSError, ValueError):
-        if job is not None:
-            job.close()
         result["not_run"] = True
         return result
-    if job is not None and not job.add(process):
-        job.close()
-        job = None
     stopped = threading.Event()
 
     def write() -> None:
@@ -288,6 +275,7 @@ def run_hook(argv: "list[str]", *, cwd: str, env: "dict[str, str]", timeout: int
                 total += len(chunk)
                 if len(kept) < bound:
                     kept += chunk[:bound - len(kept)]
+                result[key] = bytes(kept)
                 if fatal and total > bound:
                     # More than the bound was written: the run stops and nothing more is read.
                     result["too_large"] = True
@@ -310,7 +298,11 @@ def run_hook(argv: "list[str]", *, cwd: str, env: "dict[str, str]", timeout: int
                 break
             stopped.wait(0.02)
     finally:
-        _end(process, job)
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:

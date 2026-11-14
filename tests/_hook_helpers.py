@@ -19,7 +19,7 @@ log = os.environ.get("HOOK_LOG")
 if log:
     with open(log, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"argv": sys.argv[1:], "event": os.environ.get("AOS_HOOK_EVENT"),
-                             "payload": payload, "cwd": os.getcwd(),
+                             "payload": payload, "cwd": os.getcwd(), "root": os.environ.get("AOS_OVERLAY_ROOT"),
                              "saw": sorted(k for k in os.environ if k.startswith(("SECRET_", "CLAUDE_", "CODEX_", "ENV_")) or k in ("SEEN", "AGENTS_SESSION_BASE")),
                              "paths": {k: os.environ.get(k) for k in ("PYTHONPATH", "NODE_PATH", "PATH", "RAN_UNDER", "ENV_CWD", "ENV_FILE")},
                              "isolated": sys.flags.isolated, "executable": sys.executable}) + "\\n")

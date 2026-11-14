@@ -220,8 +220,11 @@ TOOL_CACHE=${TOOL_CACHE_DIR:-${TOOL_HOME}/cache}
 TOOL_PROMPT='${USER}$ '
 ```
 
-An overlay's own processes (its env scripts, setup, MCP servers) get its values as they
-were substituted for the session. The launchers of its
+Overlays stack, as the layers of a filesystem overlay do: the layers apply in priority
+order, each sees what the earlier ones left, and a later layer's value sits on top. The session
+and every process an overlay runs once the stack is built (its setup, MCP servers, hooks) get the
+finished stack, with each value as it was substituted for the session; an env script gets the
+stack as it stands at its step. The launchers of its
 declared python `scripts` (in `<venv>/overlays/` of the agents' venv) go first on
 `PATH`. An overlay with a state directory also gets `$<NAME>_OVERLAY_STATE`.
 
@@ -232,7 +235,8 @@ routing line reads `$ENGINEERING_OVERLAY_ROOT/flows/PLAN.md`, never `~/.agents/f
 `<ENGINEERING_OVERLAY_ROOT>`, at assembly time for its stdout and JSON output; a file
 written by `context --write-agent` keeps the variable.
 
-An env script runs with the overlay's own environment and the root as its
+An env script runs with the environment built so far (the base, the earlier
+overlays' layers and its own declarations) and the root as its
 working directory, and prints one JSON object -- across several lines if it likes --
 or one object per line (`{"NAME": "value"}`, `null` to unset); a default one gets no
 command-line arguments. Its store can turn env scripts off

@@ -36,15 +36,13 @@ def decision(stdout: str):
 # ---- H1: the session's secrets and the harness's own variables ------------------------------
 
 
-def test_another_overlays_secret_in_the_session_does_not_reach_a_hook(tmp_path):
+def test_the_sessions_environment_reaches_a_hook_secrets_included(tmp_path):
     rig = Rig(tmp_path, "[hooks]\nprompt = {}\n")
     rig.allow()
-    base = json.dumps({"SECRET_TOKEN": None, "SECRET_KEPT": "from the user's own shell"})
     rig.fire("claude-code", "prompt", {"session_id": "s", "cwd": "/", "prompt": "x"},
-             SECRET_TOKEN="hunter2", SECRET_KEPT="overlay value", AGENTS_SESSION_BASE=base)
+             SECRET_TOKEN="hunter2", SECRET_KEPT="overlay value")
     saw = rig.calls()[0]["saw"]
-    assert "SECRET_TOKEN" not in saw and "AGENTS_SESSION_BASE" not in saw
-    assert "SECRET_KEPT" in saw, "a name the session overrode is the user's value again, not removed"
+    assert "SECRET_TOKEN" in saw and "SECRET_KEPT" in saw
 
 
 def test_the_harness_own_variables_do_not_reach_a_hook(tmp_path):
@@ -55,17 +53,16 @@ def test_the_harness_own_variables_do_not_reach_a_hook(tmp_path):
     assert not {"CLAUDE_ENV_FILE", "CLAUDE_CODE_OAUTH_TOKEN", "CODEX_API_KEY"} & set(rig.calls()[0]["saw"])
 
 
-def test_pre_env_hooks_start_from_the_base_too(tmp_path):
+def test_pre_env_hooks_see_the_base_and_the_roots(tmp_path):
     import logging
 
     from dotagents import _env
 
     rig = Rig(tmp_path, "[hooks]\npre-env = {}\n")
     rig.allow()
-    env = dict(os.environ, PATH="", HOOK_LOG=str(rig.log), SECRET_TOKEN="hunter2",
-               AGENTS_SESSION_BASE=json.dumps({"SECRET_TOKEN": None}))
+    env = dict(os.environ, PATH="", HOOK_LOG=str(rig.log), SECRET_TOKEN="hunter2")
     _env.get_environment(rig.scope, base_env=env, logger=logging.getLogger("t"))
-    assert "SECRET_TOKEN" not in rig.calls()[0]["saw"]
+    assert "SECRET_TOKEN" in rig.calls()[0]["saw"]
 
 
 # ---- H3: a guard that is off is a failed guard ----------------------------------------------
@@ -133,7 +130,7 @@ def test_the_snapshot_holds_exactly_the_hashed_bytes_and_no_unhashed_directory(t
                                                           "__pycache__/x.pyc": "evil", ".venv/lib/evil.pth": "x"})
     rig.allow()
     rig.fire("claude-code", "prompt", {"session_id": "s", "cwd": "/", "prompt": "x"})
-    root = rig.calls()[0]["cwd"]
+    root = rig.calls()[0]["root"]
     names = sorted(os.path.relpath(os.path.join(d, f), root).replace(os.sep, "/")
                    for d, _, files in os.walk(root) for f in files)
     assert names == ["hook.py", "overlay.cfg"]

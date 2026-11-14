@@ -46,7 +46,6 @@ overrides it.
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -249,12 +248,6 @@ class Launch(DotAgentsArgs):
         # plain env file) means the harness must not inherit it either.
         for key in getattr(changes, "removed", ()):
             os.environ.pop(key, None)
-        # What the session changed, and what each name held before: a hook of an overlay starts
-        # from the environment this was started from (`_overlay_hooks.session_base`), so another
-        # overlay's secrets, which every process of the session carries, do not reach it.
-        base = {key: before.get(key) for key in set(changes) | set(getattr(changes, "removed", ()))
-                if os.environ.get(key) != before.get(key)}
-        os.environ["AGENTS_SESSION_BASE"] = json.dumps(base)
         env = dict(os.environ)
 
         # 2. The harness, resolved before anything is written: a launch that

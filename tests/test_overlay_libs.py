@@ -56,7 +56,7 @@ def test_a_setup_script_imports_a_required_overlays_lib_and_sees_its_bin(tmp_pat
     assert rc == 0
     value, unrelated, path = marker.read_text(encoding="utf-8").split("|", 2)
     assert value == "from base"
-    assert unrelated == "-", "another overlay's env never reaches this overlay's setup"
+    assert unrelated == "set", "overlays stack: another overlay's env reaches this overlay's setup"
     assert str(store / "overlays" / "base" / "bin") in path.split(os.pathsep)
 
 

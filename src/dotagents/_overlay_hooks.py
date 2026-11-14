@@ -38,7 +38,7 @@ NO_HARNESS = "dotagents"
 class Harness(object):
     """What dotagents can do for hooks on one harness: the harness's own hook for each event it
     has, and the outputs it can apply there (``refuse`` and ``block`` are the event's own
-    refusal, ``deny`` and ``ask`` a call's). ``pre-env`` is never native: dotagents fires it
+    refusal, ``deny``, ``ask``, ``allow`` and an ``allow``'s rewritten ``input`` a call's). ``pre-env`` is never native: dotagents fires it
     when it builds the environment, on every harness."""
 
     def __init__(self, ident: str, native: "dict[str, str]", applies: "dict[str, tuple[str, ...]]",
@@ -61,7 +61,8 @@ class Harness(object):
 
 #: Claude Code: every event has a native hook (measured, Claude Code 2.1.318). A session start
 #: cannot be refused; variables reach only Bash, through the env file; a call's variables would
-#: need the rewrite of a command, which is not done, so they are reported.
+#: need the rewrite of a command, which is not done, so they are reported. A call's hooks may allow
+#: it, with a rewritten input (``PreToolUse``'s ``allow`` and ``updatedInput``).
 CLAUDE = Harness(
     "claude-code",
     {"session-start": "SessionStart", "session-end": "SessionEnd", "prompt": "UserPromptSubmit",
@@ -69,7 +70,7 @@ CLAUDE = Harness(
      "post-tool": "PostToolUse"},
     {"session-start": ("context", "env"), "session-end": (), "prompt": ("context", "block"),
      "turn-end": (), "cd": ("env",), "pre-compact": ("context", "block"),
-     "pre-tool": ("context", "deny", "ask"), "post-tool": ("context",)},
+     "pre-tool": ("context", "deny", "ask", "allow", "input"), "post-tool": ("context",)},
     {"startup": "new", "resume": "resume", "clear": "clear", "compact": "compact"},
 )
 
@@ -608,14 +609,17 @@ class Subject(object):
 
 def execute(subject: Subject, event: str, payload: bytes, env: "dict[str, str]", *,
             limits: "Optional[dict[str, int]]" = None, root: "Optional[str | os.PathLike[str]]" = None,
-            deadline: "Optional[float]" = None, base_path: "Optional[str]" = None) -> "dict[str, Any]":
+            deadline: "Optional[float]" = None, base_path: "Optional[str]" = None,
+            cwd: "Optional[str]" = None) -> "dict[str, Any]":
     """Start the hook and give its run in the model's terms (:func:`coqui_aos.hook_result`).
 
     The program is an interpreter followed by the script's absolute path and the event, an argv
-    list that no shell reads; its working directory is ``root`` (the overlay's snapshot, else the
-    overlay's own directory); ``env`` is exactly its environment, plus ``AOS_HOOK_EVENT``. The
+    list that no shell reads. The script is found in ``root`` (the overlay's snapshot, else the
+    overlay's own directory) and runs in ``cwd``, the session's folder (default: the root, when
+    that folder is not there); ``env`` is exactly its environment, plus ``AOS_HOOK_EVENT``. The
     script must be a regular file inside the root. ``deadline`` is a :func:`time.monotonic` time
-    the run may not pass: a hook that would start past it, or run past it, is stopped."""
+    the run may not pass: a hook that would start past it, or run past it, is stopped (its own
+    process; what it started is its own business)."""
     from dotagents import _run
     from dotagents._env import _spawn_env
 
@@ -658,7 +662,7 @@ def execute(subject: Subject, event: str, payload: bytes, env: "dict[str, str]",
         command = argv + ["-I", "-c", PYTHON_BOOT, child.get("PYTHONPATH", ""), script, event]
     else:
         command = argv + [script, event]
-    done = _run.run_hook(command, cwd=root, env=child, timeout=timeout, stdin=payload,
+    done = _run.run_hook(command, cwd=cwd if cwd and os.path.isdir(cwd) else root, env=child, timeout=timeout, stdin=payload,
                          max_output=limits["max_output"], max_stderr=limits["max_stderr"])
     run.update(stdout_bytes=done["stdout"], timed_out=done["timed_out"], too_large=done["too_large"],
                seconds=done["seconds"], **{"exit": done["exit"]})
@@ -723,15 +727,21 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
     snapshots are kept). A guard (``on_failure = "refuse"``) whose hooks are off is a failed guard:
     the event is refused as a failure of it would refuse it, and ``hook-not-allowed`` is reported.
     Each hook is started when its turn comes, and not after an earlier one denied, blocked or used up
-    the event's time. ``environment(overlay)`` is the environment of that overlay's own processes
-    (None: it cannot be built, the hook fails as ``not-run``)."""
+    the event's time. ``environment(overlay)`` is the session's environment for that overlay's
+    hook (None: it cannot be built, the hook fails as ``not-run``); what the hooks before it set,
+    where the harness takes variables, is on top of it, and a ``pre-tool`` hook is told the call's
+    input as an earlier hook's allow rewrote it. The result's ``input`` is what the call runs with."""
     reports: "list[list[str]]" = []
     errors: "list[tuple[str, str, str]]" = []
     limits = dict(LIMITS, **(limits or {}))
     runs: "list[dict[str, Any]]" = []
     matching = value_for_match(event, facts)
     model = coqui_aos.HookEvent(event)
-    payload = json.dumps(coqui_aos.hook_payload(model, facts), ensure_ascii=False).encode("utf-8")
+    tool = facts.get("tool")
+    tool_input = tool.get("input") if event == "pre-tool" and isinstance(tool, dict) else None
+    if not isinstance(tool_input, dict):
+        tool_input = None
+    applies = harness.applies.get(event, frozenset())
     for overlay, plan in plans:
         entries = [entry for entry in plan["hooks"] if entry["event"] == event]
         if not entries:
@@ -754,21 +764,33 @@ def fire(event: str, facts: "dict[str, Any]", plans: "list[tuple[Any, dict[str, 
                 continue
             subject = Subject(overlay, entry)
 
-            def start(subject=subject, snap=snap, snap_overlay=snap_overlay) -> "dict[str, Any]":
+            def start(left, subject=subject, snap=snap, snap_overlay=snap_overlay) -> "dict[str, Any]":
                 env = environment(snap_overlay if snap_overlay is not None else subject.overlay)
                 if env is None:
                     return {"not_run": True}
+                env = dict(env)
+                if "env" in applies:
+                    for earlier in left["env"]:
+                        for name, value in earlier.items():
+                            if value is None:
+                                env.pop(name, None)
+                            else:
+                                env[name] = value
+                told = facts
+                if tool_input is not None and left["input"] is not None:
+                    told = dict(facts, tool=dict(tool, input=left["input"]))
+                payload = json.dumps(coqui_aos.hook_payload(model, told), ensure_ascii=False).encode("utf-8")
                 done = execute(subject, event, payload, env, limits=limits, root=snap, deadline=deadline,
-                               base_path=base_path)
+                               base_path=base_path, cwd=facts.get("cwd"))
                 text = done.pop("stderr", b"")
                 if text:
                     errors.append((subject.overlay.name, event, printable(text)))
                 return done
 
-            runs.append({"source": overlay.name, "on_failure": entry["on_failure"], "start": start,
+            runs.append({"source": overlay.name, "on_failure": entry["on_failure"], "start_after": start,
                          "sets": entry["sets"]})
-    applies = harness.applies.get(event, frozenset())
-    result = _aos.fire_event(event, runs, applies, dict(LIMITS, **(limits or {})), os.name == "nt")
+    result = _aos.fire_event(event, runs, applies, dict(LIMITS, **(limits or {})), os.name == "nt",
+                             tool_input=tool_input)
     return Fired(result, reports, errors)
 
 
@@ -860,30 +882,10 @@ def shadowed_with_hooks(scope: Any) -> "list[Any]":
 
 
 def session_base(environ: "dict[str, str]") -> "dict[str, str]":
-    """The environment a hook starts from: the one the session was started from, not the session's.
-
-    ``dotagents launch`` records, in ``AGENTS_SESSION_BASE``, what each variable it changed held
-    before (null: it was not set), so another overlay's secret, which that session carries to every
-    process in it, is not handed to this overlay's hook. The names a harness keeps for itself
-    (``CLAUDE_ENV_FILE``, ``CLAUDE_CODE_*``, ``CODEX_*``) are dropped as well."""
+    """The environment a hook is built on: the one it was called with, which is the session's (a
+    secret granted to one overlay reaches every overlay's hooks, as the specification says), less the
+    names a harness keeps for itself (``CLAUDE_ENV_FILE``, ``CLAUDE_CODE_*``, ``CODEX_*``)."""
     env = dict(environ)
-    windows = os.name == "nt"
-    raw = env.pop("AGENTS_SESSION_BASE", None)
-    changed = {}
-    if raw:
-        try:
-            data = json.loads(raw)
-        except ValueError:
-            data = {}
-        if isinstance(data, dict):
-            changed = {str(k): v for k, v in data.items() if v is None or isinstance(v, str)}
-    for name, before in changed.items():
-        if name.upper() in KEEP_PROJECT:
-            continue
-        for key in [k for k in env if (k.upper() == name.upper() if windows else k == name)]:
-            del env[key]
-        if before is not None:
-            env[name] = before
     for key in list(env):
         upper = key.upper()
         if upper in _HARNESS_INTERNAL or upper.startswith(_HARNESS_INTERNAL_PREFIXES):
@@ -960,7 +962,8 @@ def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environmen
             ) -> "tuple[list[list[str]], list[list[str]]]":
     """Fire ``pre-env`` for the overlays in ``plans`` (composition order) and apply their output to
     ``session``, after the root variables and before any overlay's declarations. Each hook runs in
-    ``base`` (the base environment and the root variables) plus its own overlay's ``AOS_OVERLAY_*``.
+    ``base`` (the base environment and the root variables) plus what the ``pre-env`` hooks before it
+    set and its own overlay's ``AOS_OVERLAY_*``, in the folder the session will start in.
     Returns the reports and the non-default settings; raises :class:`dotagents._aos.Refused`
     (``hook-refused``) when a guard fails."""
     from dotagents import _activate
@@ -979,24 +982,31 @@ def pre_env(plans: "list[tuple[Any, dict[str, Any]]]", session: "_aos.Environmen
         if not entries or not plan["on"]:
             continue
         entry = entries[0]
-        env = session_base(base)
         snap = plan["snap"].path if plan.get("snap") is not None else None
-        if snap is not None:
-            env[overlay.root_var] = str(snap)
-        env["AOS_OVERLAY_ROOT"] = str(snap) if snap is not None else os.path.abspath(str(overlay.path))
-        env["AOS_OVERLAY_NAME"] = overlay.normalized_name
-        state = _activate.state_dir(overlay)
-        if state is not None:
-            state.mkdir(parents=True, exist_ok=True)
-            env["AOS_OVERLAY_STATE"] = str(state)
         subject = Subject(overlay, entry)
 
-        def start(subject=subject, env=env, snap=snap) -> "dict[str, Any]":
+        def start(left, subject=subject, overlay=overlay, snap=snap) -> "dict[str, Any]":
+            env = session_base(base)
+            for earlier in left["env"]:
+                for name, value in earlier.items():
+                    if value is None:
+                        env.pop(name, None)
+                    else:
+                        env[name] = value
+            if snap is not None:
+                env[overlay.root_var] = str(snap)
+            env["AOS_OVERLAY_ROOT"] = str(snap) if snap is not None else os.path.abspath(str(overlay.path))
+            env["AOS_OVERLAY_NAME"] = overlay.normalized_name
+            state = _activate.state_dir(overlay)
+            if state is not None:
+                state.mkdir(parents=True, exist_ok=True)
+                env["AOS_OVERLAY_STATE"] = str(state)
             return execute(subject, "pre-env", payload, env, root=snap, deadline=deadline, base_path=base_path,
-                           limits=limits_for(user_store) if user_store is not None else None)
+                           limits=limits_for(user_store) if user_store is not None else None,
+                           cwd=os.path.abspath(cwd or os.getcwd()))
 
         identities.append(overlay.name)
-        runs[overlay.name] = {"on_failure": entry["on_failure"], "start": start, "sets": []}
+        runs[overlay.name] = {"on_failure": entry["on_failure"], "start_after": start, "sets": []}
     reports: "list[list[str]]" = []
     non_defaults: "list[list[str]]" = []
     _aos.apply_pre_env(session, identities, runs, limits_for(user_store) if user_store is not None else LIMITS,

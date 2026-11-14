@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Overlay hooks run like the harness's own, from specification revision ea41520. A `pre-tool` hook may
+  answer `decision = "allow"`, with an `input` object that replaces the call's; on Claude Code dotagents
+  answers `allow` (and `updatedInput`) only when the hooks of the event combined to an allow, a deny or an ask
+  from any hook beating it, and a later hook is told the rewritten input. The `grant` failure cause is gone:
+  any other decision is an `output` failure. A hook runs in the session's working directory with the session's
+  environment, not its overlay's own: overlays stack, so an overlay's env scripts, setup, servers and hooks
+  see what the earlier overlays declared, the later one's value on top, and a secret granted to one overlay
+  reaches every overlay's hooks; a `pre-env` hook sees what earlier `pre-env` hooks set, and a hook what
+  earlier hooks of its event set. A hook that outlives its timeout has its own process stopped, not its
+  process group or job. `dotagents launch` no longer records `AGENTS_SESSION_BASE`. The vendored
+  `coqui_aos` and the hook vectors move to the revision.
+
 ### Added
 
 - An overlay's context reads its own names. `dotagents context` replaces `${AOS_OVERLAY_ROOT}`,

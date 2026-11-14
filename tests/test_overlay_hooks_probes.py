@@ -158,13 +158,13 @@ def test_the_session_s_own_agents_python_is_not_trusted_for_a_hook(tmp_path):
 # ---- the project's name for itself stays ----------------------------------------------------
 
 
-def test_the_session_base_keeps_the_projects_own_name_for_itself():
+def test_the_session_base_is_the_sessions_environment_less_the_harnesss_own():
     environ = {"AGENTS_PROJECT_ROOT": "/the/project", "CLAUDE_PROJECT_DIR": "/the/project", "SECRET_X": "s",
-               "AGENTS_SESSION_BASE": json.dumps({"AGENTS_PROJECT_ROOT": None, "CLAUDE_PROJECT_DIR": None,
-                                                   "SECRET_X": None})}
+               "CLAUDE_ENV_FILE": "/x", "CODEX_HOME": "/c"}
     base = _overlay_hooks.session_base(environ)
     assert base["AGENTS_PROJECT_ROOT"] == "/the/project" and base["CLAUDE_PROJECT_DIR"] == "/the/project"
-    assert "SECRET_X" not in base
+    assert base["SECRET_X"] == "s"
+    assert "CLAUDE_ENV_FILE" not in base and "CODEX_HOME" not in base
 
 
 # ---- bounds ---------------------------------------------------------------------------------

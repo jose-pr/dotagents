@@ -3,9 +3,10 @@
 The harness gives it its native payload on standard input; it fires the overlays' hooks of that
 event (:mod:`dotagents._overlay_hooks`) and answers the harness in the harness's own words.
 **Nothing a hook printed reaches the harness**: the answer is built here from the output
-:func:`coqui_aos.read_hook_output` accepted, and the only decisions it can state are
-``deny``, ``ask`` and ``block`` -- never an approval, never a rewritten input, never a reply that
-lets a stop or a tool call through that the harness would not have let through.
+:func:`coqui_aos.read_hook_output` accepted. The decisions it states are ``deny``, ``ask`` and
+``block``, and, for a Claude Code call, an ``allow`` (with the rewritten input when a hook gave one)
+only when the hooks of the event combined to an allow: a deny or an ask from any hook beats it, so
+the harness's own rules and prompts judge the call as they would without the hooks.
 """
 
 from __future__ import annotations
@@ -87,6 +88,8 @@ def _reason(fired: "_overlay_hooks.Fired") -> str:
     result = fired.result
     if result["reason"]:
         return "%s (overlay %s)" % (result["reason"], result["by"])
+    if result["decision"] == "allow":
+        return "allowed by the hook of overlay %s" % result["by"]
     failure = next((r for r in fired.reports if r[0] == "hook-failed" and r[1] == result["by"]), None)
     return "the hook of overlay %s failed%s" % (result["by"], " (%s)" % failure[3] if failure else "")
 
@@ -154,6 +157,8 @@ def answer(harness: "_overlay_hooks.Harness", event: str, fired: "_overlay_hooks
         if event == "pre-tool":
             out["hookSpecificOutput"] = {"hookEventName": native, "permissionDecision": decision,
                                          "permissionDecisionReason": reason}
+            if decision == "allow" and result.get("input") is not None:
+                out["hookSpecificOutput"]["updatedInput"] = result["input"]
         elif event == "pre-compact" and harness.id == "codex":
             out.update({"continue": False, "stopReason": reason})
         else:
@@ -221,9 +226,10 @@ def plans_for(scope: Any, harness: "_overlay_hooks.Harness", level: str,
 
 
 def hook_environment(scope: Any, overlay: Any, environ: "dict[str, str]") -> "Optional[dict[str, str]]":
-    """The environment of ``overlay``'s own processes for a hook: the base the session was started
-    from (:func:`dotagents._overlay_hooks.session_base`), the roots, this overlay's declarations --
-    and the user store's Python, never a project's venv."""
+    """The session's environment for ``overlay``'s hook: the base it was called with
+    (:func:`dotagents._overlay_hooks.session_base`), the roots and every active overlay's
+    declarations stacked in composition order -- and the user store's Python, never a project's
+    venv."""
     from dotagents import _env, _pyvenv
     from dotagents._scope import Scope
 

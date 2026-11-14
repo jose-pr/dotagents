@@ -17,15 +17,24 @@ A `hook.<ext>` at the overlay root (chosen by runtime, as `env.<ext>` is) receiv
 that carries no content by default. `prompt`, `pre-tool` and `post-tool` carry what you typed or
 what a tool was given, so they fire only for an event `[hooks]` names. The hook is told its event
 as its first argument and in `AOS_HOOK_EVENT`, and its payload as one JSON object on standard
-input; it answers with nothing or one JSON object (`context`, `decision`, `reason`, `env`).
+input; it answers with nothing or one JSON object (`context`, `decision`, `reason`, `input`,
+`env`).
 
-## A hook tightens and never grants
+## A hook may allow, and never past your own refusals
 
 Nothing a hook prints reaches the harness. dotagents reads the output, accepts only what the
-event takes, and answers the harness itself, in the harness's words. A `decision` other than
-`block`, `deny` or `ask` (`allow`, `approve`, anything) is a refused attempt to grant: the run
-fails (`grant`) and nothing of it applies. dotagents never states an approval and never rewrites
-a tool's input.
+event takes, and answers the harness itself, in the harness's words. A `pre-tool` hook may answer
+`decision = "allow"`, as the harness's own hook may, with an `input` object that replaces the call's
+arguments. Hooks combine to the tightest: a `deny` from any hook beats an `ask`, and an `ask` beats an
+`allow`. dotagents answers Claude Code with an `allow` (and the rewritten `input`, as `updatedInput`)
+only when the hooks of the event combined to an allow; with an `ask` the harness asks you about the
+call as it gave it (the rewrite is reported, `hook-not-applied`), and with no hook deciding the
+harness judges the call as it would without hooks. An allow answers the question you would have
+been asked and no other: Claude Code's own deny rules and a mode that refuses still win. A later hook
+is told the input as an earlier one rewrote it. Any other `decision` value (`approve`, `allow` on
+an event that does not take it) fails the run (`output`) and nothing of it applies. Codex's
+`PreToolUse` cannot take an allow: it is reported `hook-not-applied` and the call goes as it
+would have.
 
 ## Allowed by installing
 
@@ -85,14 +94,14 @@ missing must not let everything through.
 | `turn-end` | `Stop` (notification only) | `Stop` | cannot |
 | `cd` | `CwdChanged`: variables | no such event: cannot | cannot |
 | `pre-compact` | `PreCompact`: context, block | `PreCompact`: block (no context) | cannot |
-| `pre-tool` | `PreToolUse`: deny, ask, context | `PreToolUse`: deny, context (`ask` is applied as `deny`) | cannot |
+| `pre-tool` | `PreToolUse`: deny, ask, allow (with a rewritten input), context | `PreToolUse`: deny, context (`ask` is applied as `deny`; an `allow` is not applied) | cannot |
 | `post-tool` | `PostToolUse`: context | `PostToolUse`: context | cannot |
 
 What cannot fire is reported (`hook-unsupported`), as is an event that fires for only some
 occurrences (`hook-partial`: Claude Code's `PostToolUse` is for calls that ended well; Codex's
 tool hooks were measured on its shell tool), an output the harness cannot take
 (`hook-not-applied`: variables from `prompt` or `pre-tool`, context from Codex's `pre-compact`,
-refusing a session start), an `ask` turned into a `deny` (`hook-ask-denied`), a hook that is off
+refusing a session start, an `allow` on Codex, a rewrite that an `ask` beat), an `ask` turned into a `deny` (`hook-ask-denied`), a hook that is off
 (`hook-not-allowed`), and a failed run (`hook-failed`, with its cause, never its output). The
 reports reach you in the session-start message of the harness and in the log of `dotagents env`.
 `dotagents overlays hooks` lists the table above per hook.
@@ -107,9 +116,10 @@ writes that trust.
 
 ## Limits and failures
 
-Every hook runs with the overlay root as its working directory, outside the sandbox, in its own
-process group (a job object on Windows) that ends with it, with arguments as a list (no shell
-reads the overlay's strings) and the environment of that overlay's own processes. Defaults:
+Every hook runs in the session's working directory, outside the sandbox, as a child process of
+dotagents' entry, with arguments as a list (no shell reads the overlay's strings) and the
+session's environment (below). At its timeout the hook's own process is stopped; what it started
+is its own business, as with the harness's own hooks. Defaults:
 60 s a run (and the entry's `timeout`, default 30, if shorter), 120 s an event, 64 KiB of
 output (more stops the run), 64 KiB of standard error kept for the log, 1 MiB of payload. A
 failed hook applies nothing of its output; with `on_failure = "report"` the event goes on, with
@@ -174,11 +184,16 @@ forwarder (or by `pre-env`). It is the hardened path. It is not the whole of dot
 - **A project's Python.** A hook, and the env scripts that build its environment, run with the
   user store's Python chosen before any declaration runs, never a project's venv, and never the
   session's `AGENTS_PYTHON`.
-- **Other overlays' secrets.** `dotagents launch` records what it changed in
-  `AGENTS_SESSION_BASE`; a hook starts from the environment the session was started from, so a
-  secret another overlay was granted does not reach it. The harness's own variables
-  (`CLAUDE_ENV_FILE`, `CLAUDE_CODE_*`, `CODEX_*`) are dropped too. The project's own name for
-  itself (`AGENTS_PROJECT_ROOT`, `CLAUDE_PROJECT_DIR`) is kept.
+- **The session's environment.** Overlays stack, as the layers of a filesystem overlay do: each
+  overlay's declarations (and env scripts) see what the earlier ones left, and a later one's value
+  sits on top. A hook, like an overlay's setup, MCP servers and commands, runs with the finished
+  stack, so it reads a variable another overlay declared, and a secret granted to one overlay
+  reaches every overlay's hooks: choosing to install an overlay and allow its hooks is choosing to
+  run its code with that environment. A `pre-env` hook sees the base environment, the root
+  variables and what the `pre-env` hooks before it set; a hook sees what the earlier hooks of its
+  event set, where the harness takes variables. `AOS_OVERLAY_ROOT`, `AOS_OVERLAY_NAME` and
+  `AOS_OVERLAY_STATE` name the hook's own overlay. The harness's own variables
+  (`CLAUDE_ENV_FILE`, `CLAUDE_CODE_*`, `CODEX_*`) are dropped.
 - **The harness itself.** `dotagents launch` looks for a bare program name (`claude`) on the PATH
   the shell had, less the same places, not on the session's PATH that starts with the project's
   `.agents/bin`.
@@ -221,8 +236,8 @@ agent can clear its environment (`env -i`) and run the command. What keeps an ag
 its own hooks is that `allow-hooks` is not an MCP tool and that the allowance is in a store it
 cannot write.
 
-Smaller limits: a hook that detaches into a new session (`setsid`) can outlive the tree kill on
-POSIX; an overlay whose manifest is refused cannot show its guards; a hook can still read what
+Smaller limits: a process a hook starts is not ended with it (only at the deadline of the whole
+entry); an overlay whose manifest is refused cannot show its guards; a hook can still read what
 its overlay `requires` puts on its paths, live, and the packages an overlay's setup installed; an
 entry whose interpreter has been uninstalled cannot run to say so (`dotagents overlays hooks` and
 every `init` check the recorded one); and Codex asks you to trust an entry by its hash, which

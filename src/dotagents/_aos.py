@@ -927,6 +927,7 @@ _LIMIT_SETTINGS = {
     "event_timeout": "hook_event_timeout",
     "max_output": "hook_output_bytes",
     "max_payload": "hook_payload_bytes",
+    "context_bytes": "context_bytes",
 }
 
 
@@ -998,33 +999,59 @@ def hook_run(run: "dict[str, Any]", output_bytes: "Optional[int]" = None) -> "co
     )
 
 
-def _started(runs: "list[dict[str, Any]]", settings: "coqui_aos.Settings") -> "Iterable[coqui_aos.HookRun]":
+def _started(runs: "list[dict[str, Any]]", settings: "coqui_aos.Settings", event: "Optional[str]" = None,
+             tool_input: Any = None) -> "Iterable[coqui_aos.HookRun]":
     """The runs as ``coqui_aos`` takes them, each made only when its loop turn comes: a run that
     holds ``start``, a function returning its own keys, is started then, so one after a block or a
     deny, or after the event's bound, never is. ``fire_event`` reads the event's bound before a
-    run's content; this holds back the start the same way."""
+    run's content; this holds back the start the same way.
+
+    A run that holds ``start_after`` instead is given what the hooks before it left, ``{"env": [the
+    variables each set, in run order], "input": the call's input as an earlier allow rewrote it}``,
+    for a hook that runs with the session's environment and is told the call as it now stands."""
     spent = 0.0
     bound = settings.hook_event_timeout
+    left: "dict[str, Any]" = {"env": [], "input": tool_input}
     for run in runs:
         if bound is not None and spent >= bound:
             yield hook_run({"source": run["source"], "on_failure": run.get("on_failure")})
             continue
         if "start" in run:
             run = dict(run, **run["start"]())
+        elif "start_after" in run:
+            run = dict(run, **run["start_after"](left))
         held = hook_run(run, settings.hook_output_bytes)
         spent += held.seconds
         yield held
+        if event is None:
+            continue
+        try:
+            out = coqui_aos.hook_result(coqui_aos.HookEvent(event), held, settings)
+        except coqui_aos.HookError:
+            continue
+        if out.env:
+            left["env"].append(dict(out.env))
+        if out.input is not None and out.decision is coqui_aos.Decision.ALLOW:
+            left["input"] = out.input
 
 
 def fire_event(event: str, runs: "list[dict[str, Any]]", applies: "Optional[Iterable[str]]" = None,
-               limits: "Optional[dict[str, int]]" = None, windows: bool = False) -> "dict[str, Any]":
+               limits: "Optional[dict[str, int]]" = None, windows: bool = False,
+               tool_input: Any = None, context_used: int = 0) -> "dict[str, Any]":
     """:func:`coqui_aos.fire_event` over ``runs`` (``source``, ``on_failure``, ``seconds``, the
     run's keys as :func:`hook_run` reads them, optionally ``start``), its result as plain data:
     ``ran``, ``decision``, ``by``, ``reason``, ``context``, ``env``, ``reports`` (lists of id and
-    what it is about) and ``non_defaults``."""
+    what it is about) and ``non_defaults``. With ``tool_input`` (a ``pre-tool`` call's input) the
+    result also holds ``seen`` (``[source, input]`` of each hook that ran) and ``input``, what the
+    call runs with: an object only when the hooks combined to an allow that rewrote it."""
     settings = hook_settings(limits)
-    fired = coqui_aos.fire_event(coqui_aos.HookEvent(event), _started(runs, settings), applies, settings, windows)
+    given = {} if tool_input is None else {"tool_input": tool_input}
+    fired = coqui_aos.fire_event(coqui_aos.HookEvent(event), _started(runs, settings, event, tool_input), applies,
+                                 settings, windows, context_used, **given)
     data = coqui_aos.to_data(fired)
+    if tool_input is None:
+        data.pop("seen", None)
+        data.pop("input", None)
     data["reports"] = [[report["id"], *report["about"]] for report in data["reports"]]
     return data
 

@@ -1104,9 +1104,10 @@ def _apply_declarations(overlay, osenv: "dict[str, str]", own_base: "dict[str, s
     """``overlay``'s declarations applied over ``osenv``: the change set and
     the weakenings, or None (reported) when they cannot be applied, in which
     case nothing of the overlay applies. Its env scripts run in
-    ``own_base`` (the base environment and the root variables) with only
-    this overlay's declarations, each with the value it was substituted to
-    over ``osenv``, so another overlay's secrets never reach them.
+    ``own_base`` (the stack as it stands: the base environment, the root
+    variables and what the earlier overlays left) with this overlay's
+    declarations on top, each with the value it was substituted to over
+    ``osenv``.
     ``host_env`` is dotagents' own environment, where the ``env`` provider
     reads (default ``os.environ``). ``secret`` names the variables of
     ``osenv`` that hold a secret, which no placeholder may read; it is
@@ -1158,12 +1159,13 @@ def _apply_declarations(overlay, osenv: "dict[str, str]", own_base: "dict[str, s
 def overlay_process_env(scope: Scope, overlay, *, base_env: "Optional[dict[str, str]]" = None,
                         python_scope: "Optional[Scope]" = None, base_path: "Optional[str]" = None,
                         logger=None) -> "Optional[dict[str, str]]":
-    """The environment of a process ``overlay`` runs (its setup, an MCP
-    server): the base environment, dotagents' own variables, every active
-    overlay's root variable, the path additions of the overlays it requires,
-    this overlay's declarations, and the ``AOS_OVERLAY_*`` variables. No
-    other overlay's ``env``, env files or secrets. None (reported) when its
-    declarations cannot be applied.
+    """The session's environment for a process ``overlay`` runs (its setup, an MCP
+    server, a hook): the base environment, dotagents' own variables, every active
+    overlay's root variable, every active overlay's declarations stacked in
+    composition order (each sees what the earlier ones left, the later one's value on
+    top), and this overlay's ``AOS_OVERLAY_*`` variables. None (reported) when
+    ``overlay``'s own declarations cannot be applied; another overlay whose cannot
+    contributes nothing.
 
     ``python_scope`` names the scope whose venv supplies ``AGENTS_PYTHON`` (the one every env
     script runs under): a caller that must not run a project's Python gives the user scope, and
@@ -1192,35 +1194,19 @@ def overlay_process_env(scope: Scope, overlay, *, base_env: "Optional[dict[str, 
         state = _activate.state_dir(other)
         if state is not None:
             env[_aos.state_variable(other.name)] = str(state)
-    # The path additions -- directories, never values or secrets -- of the
-    # overlays it requires, so an overlay built on another's library or
-    # commands finds them.
-    required: "list" = []
-
-    def need(name: str) -> None:
-        other = active.get(name)
-        if other is None or other in required or other == overlay:
-            return
-        required.append(other)
-        for dep in other.read_manifest()["requires"]:
-            need(dep)
-
-    for dep in overlay.read_manifest()["requires"]:
-        need(dep)
-    windows = os.name == "nt"
-    for other in _ordered(required):
-        built = _aos.Environment(env, windows)
-        ctx = _activate.context(other)
-        _aos.apply_paths(built, _aos.paths_of(other.document(), ctx.files), ctx, [])
-        env = built.values
-    found = _apply_declarations(overlay, env, env, python=interpreter(env), logger=logger, base_path=base_path,
-                                host_env=dict(os.environ if base_env is None else base_env))
-    if found is None:
-        return None
-    changes, _weakenings = found
-    env.update(changes)
-    for name in changes.removed:
-        env.pop(name, None)
+    host_env = dict(os.environ if base_env is None else base_env)
+    secret: "set[str]" = set()
+    for other in _ordered(list(active.values())):
+        found = _apply_declarations(other, env, dict(env), python=interpreter(env), logger=logger,
+                                    base_path=base_path, host_env=host_env, secret=secret)
+        if found is None:
+            if other is overlay:
+                return None
+            continue
+        changes, _weakenings = found
+        env.update(changes)
+        for name in changes.removed:
+            env.pop(name, None)
     env["AOS_OVERLAY_ROOT"] = os.path.abspath(str(overlay.path))
     env["AOS_OVERLAY_NAME"] = overlay.normalized_name
     state = _activate.state_dir(overlay)
@@ -1519,7 +1505,7 @@ def get_environment(
     # be applied contributes nothing.
     weakenings: "list[tuple[str, str, str]]" = []
     python_now = osenv.get("AGENTS_PYTHON") or sys.executable
-    # Before any overlay's declarations: what an overlay's own processes start from.
+    # Before any overlay's declarations: what the `pre-env` hooks start from.
     own_base = dict(osenv)
     # Variables an overlay took from a secret reference: no later placeholder reads them.
     secret: "set[str]" = set()
@@ -1530,7 +1516,7 @@ def get_environment(
     for overlay in overlays:
         if not _activate.is_pinned(overlay):
             weakenings.append((overlay.name, "unpinned", ""))
-        found = _apply_declarations(overlay, osenv, own_base, python=python_now, logger=logger,
+        found = _apply_declarations(overlay, osenv, dict(osenv), python=python_now, logger=logger,
                                     host_env=host_env, secret=secret)
         if found is None:
             continue

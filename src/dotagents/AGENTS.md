@@ -293,7 +293,9 @@ How setup and env scripts run: their interpreter found on the base `PATH`
 (`python` is the scope venv's; `pwsh -NoLogo -NoProfile -NonInteractive -File` for
 `powershell`; Git's bash and sh on Windows; never a `.cmd` / `.bat`), arguments as
 a list, a timeout, and a process group (POSIX) or job object (Windows, the process
-started suspended until it is in the job) so nothing it started outlives it.
+started suspended until it is in the job) so nothing it started outlives it. A hook (`run_hook`)
+is the exception: its own process only is stopped at its timeout, and what it started is its own
+business.
 
 - `TIMED_OUT = 124`. `class InterpreterError(Exception)`.
   `interpreter_command(name, *, python, base_path) -> list[str]`, `can_run(name) -> bool`.
@@ -719,11 +721,11 @@ API:
   `resolve_env_files(scope) -> list[tuple[str, Path, Optional[Path]]]` (pre tier
   then main tier, stores only, as `Scope.paths` tuples).
 - `overlay_process_env(scope, overlay, *, base_env=None, logger=None) ->
-  Optional[dict]` — the environment of a process one overlay runs (its setup): the
-  base, `AGENTS_HOME` / `AGENTS_PYTHON` / `PYTHONPYCACHEPREFIX`, every active
-  overlay's root and state variable, the path additions of the overlays it
-  requires, its own declarations, `AOS_OVERLAY_ROOT` / `_NAME` / `_STATE`; None
-  when its declarations cannot be applied.
+  Optional[dict]` — the session's environment for a process one overlay runs (its
+  setup, a server, a hook): the base, `AGENTS_HOME` / `AGENTS_PYTHON` /
+  `PYTHONPYCACHEPREFIX`, every active overlay's root and state variable, every active
+  overlay's declarations stacked in composition order, `AOS_OVERLAY_ROOT` / `_NAME` /
+  `_STATE` of this overlay; None when its own declarations cannot be applied.
 - `apply_proxy_model(osenv) -> dict[str, str]` — the proxy changes described above.
 - `ENV_CACHE_TTL = 300.0` (seconds). `env_cache_key(scope, base_env, *parts) -> str`
   — a digest of what an assembly reads without running it: roots, cwd, interpreter,
@@ -975,10 +977,9 @@ its directory, bounded by `LIMITS`.
   interpreters (`pwsh`, `node`) are found; `shadowed_with_hooks(scope)` — the user's overlays
   with a hook that a nearer store's same-named folder hides (they still fire at `pre-env`).
 - Sessions: `KEEP_PROJECT` (the project's own names, `AGENTS_PROJECT_ROOT` and
-  `CLAUDE_PROJECT_DIR`, that `session_base` leaves alone), `session_base(environ)` — the environment a hook starts from: what `dotagents
-  launch` recorded in `AGENTS_SESSION_BASE` (each changed name's earlier value, null if unset)
-  undone, and the harness's own variables (`CLAUDE_ENV_FILE`, `CLAUDE_CODE_*`, `CODEX_*`)
-  dropped; `log_path`, `log_errors(user_store, errors)` and `LOG_LIMIT` — a hook's standard
+  `CLAUDE_PROJECT_DIR`, that `session_base` leaves alone), `session_base(environ)` — the environment a hook is built on: the one it was
+  called with (the session's) less the harness's own variables (`CLAUDE_ENV_FILE`,
+  `CLAUDE_CODE_*`, `CODEX_*`); `log_path`, `log_errors(user_store, errors)` and `LOG_LIMIT` — a hook's standard
   error goes to `<user store>/.cache/hooks.log`, never to the harness.
 
 ## `dotagents._hook_main`
@@ -992,8 +993,9 @@ takes `EVENT --harness H --level user|project --agents-dir DIR --nonce N`, build
 ## `dotagents._hook_dispatch`
 
 The program a harness's own hook runs (`dotagents hook`). Nothing a hook printed reaches the
-harness: the answer is built from the output that was accepted, and can only deny, ask or
-block.
+harness: the answer is built from the output that was accepted. It denies, asks or blocks, and
+on Claude Code a `pre-tool` call is allowed (with `updatedInput` for a rewrite) only when the
+hooks combined to an allow.
 
 - `scope_for(level, user_store)` — the scope a hook of `level` is looked for in: `user` has no
   project store in it (nothing a project holds can shadow a user hook, add commands or
@@ -1005,8 +1007,8 @@ block.
   `write_env_block(path, label, changes)` (single-quoted values of validated names into
   Claude's env file; the file is split at line feeds only and a value holding any of
   `LINE_SEPARATORS` is refused, `env_file_safe(changes)`), `hook_environment(scope, overlay,
-  environ)` (the overlay's process environment from `session_base`, with the user store's Python,
-  never a project's venv), `answer(harness, event, fired, env_file) -> (stdout, stderr)`,
+  environ)` (the session's environment for the overlay's hook, from `session_base`, with the user
+  store's Python, never a project's venv), `answer(harness, event, fired, env_file) -> (stdout, stderr)`,
   `refusal_answer(harness, event, why)`, `plans_for(scope, harness, level, event=None)`,
   `dispatch(harness_id, event, stdin, scope, level, environ) ->
   (stdout, stderr)`.

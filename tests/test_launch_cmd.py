@@ -374,10 +374,8 @@ def test_a_missing_harness_writes_nothing(launch_mod, monkeypatch, tmp_path):
     assert not (tmp_path / "project" / "GEMINI.md").exists()
 
 
-def test_launch_records_what_the_session_changed_so_a_hook_can_start_from_the_base(
+def test_launch_hands_the_session_environment_on_and_records_no_base_for_hooks(
         launch_mod, monkeypatch, tmp_path):
-    import json
-
     from dotagents import _overlay_hooks
 
     overlay = tmp_path / "store" / "overlays" / "sec"
@@ -390,11 +388,9 @@ def test_launch_records_what_the_session_changed_so_a_hook_can_start_from_the_ba
     _run(launch_mod, agent="claude", command=str(program))
     (_argv, env), = calls
     assert env["SECRET_TOKEN"] == "hunter2" and env["KEEP"] == "overlay"
-    base = json.loads(env["AGENTS_SESSION_BASE"])
-    assert base["SECRET_TOKEN"] is None and base["KEEP"] == "user"
-    started_from = _overlay_hooks.session_base(env)
-    assert "SECRET_TOKEN" not in started_from and started_from["KEEP"] == "user"
-    assert "AGENTS_SESSION_BASE" not in started_from
+    assert "AGENTS_SESSION_BASE" not in env
+    built_on = _overlay_hooks.session_base(env)
+    assert built_on["SECRET_TOKEN"] == "hunter2" and built_on["KEEP"] == "overlay"
 
 
 def test_the_harness_is_not_resolved_on_a_path_that_leads_with_the_projects_bin(launch_mod, monkeypatch, tmp_path):

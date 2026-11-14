@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 import pytest
 
@@ -31,7 +32,7 @@ def test_pre_env_output_is_an_env_scripts_and_applies_before_the_overlays_declar
     call = rig.calls()[0]
     assert call["event"] == "pre-env" and call["argv"] == ["pre-env"]
     assert call["payload"].keys() == {"event", "harness", "cwd"}
-    assert call["cwd"].startswith(str(rig.store / ".cache" / "hook-snapshots"))
+    assert os.path.samefile(call["cwd"], os.getcwd())
 
 
 def test_pre_env_runs_on_a_harness_with_no_native_hooks(tmp_path):
