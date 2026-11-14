@@ -1,2 +1,2 @@
 Boriken-Dev/agent-overlay-spec 6416a474f4d8c4b3da26901788443de294af02ad tests/vectors
-Boriken-Dev/agent-overlay-spec ea41520c9e6774940a59943803d977721363d523 tests/vectors hooks.json (the hook cases of validation.json and compose.json: hooks_validation.json, hooks_compose.json)
+Boriken-Dev/agent-overlay-spec c2f6d887ae397df46620aae36ef72048defea102 tests/vectors hooks.json (the hook cases of validation.json and compose.json: hooks_validation.json, hooks_compose.json)

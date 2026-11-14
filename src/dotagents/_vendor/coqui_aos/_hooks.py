@@ -694,6 +694,9 @@ class HookRun:
     exit: int = 0
     #: The variables its entry declares.
     sets: Tuple[str, ...] = ()
+    #: Its entry's ``match``, or ``None`` for every call: on a call of kind ``other`` only a hook
+    #: with none, or one naming ``other``, may allow.
+    select: Optional[Tuple[str, ...]] = None
 
     def __repr__(self) -> str:
         return "HookRun(source=%r, exit=%d, stdout=<%d bytes>)" % (self.source, self.exit, len(self.stdout))
@@ -769,6 +772,7 @@ def fire_event(
     windows: bool = False,
     context_used: int = 0,
     tool_input: Any = _UNSET,
+    tool_kind: Optional[str] = None,
 ) -> FiredEvent:
     """Every hook of one event, in the order given, combined to the tightest result.
 
@@ -783,7 +787,10 @@ def fire_event(
     rewritten): ``seen`` then says what each hook was given, a hook's ``input`` replaces it for
     the hooks after, and ``input`` is what the call runs with, set only by a combined allow. An
     allow whose ``input`` the consumer cannot apply (``input`` not in ``applies``) is not applied
-    at all; one that an ask beat reports its rewrite as ``hook-not-applied``.
+    at all; one that an ask beat reports its rewrite as ``hook-not-applied``. ``tool_kind`` is the
+    call's kind: on ``other``, a run whose ``select`` is given and does not name ``other`` still
+    runs and its deny and ask count, but its allow and input do not (``hook-not-applied``
+    ``allow``).
     """
     from ._names import is_sensitive_variable
 
@@ -819,6 +826,15 @@ def fire_event(
         if decision is not None and decision.value not in can:
             fired.reports.append(HookReport("hook-not-applied", (source, event.value, decision.value)))
             decision = None
+        if (
+            decision is Decision.ALLOW
+            and tool_kind == "other"
+            and run.select is not None
+            and "other" not in run.select
+        ):
+            fired.reports.append(HookReport("hook-not-applied", (source, event.value, "allow")))
+            decision = None
+            out = dataclasses.replace(out, input=None)
         if out.input is not None and decision is Decision.ALLOW:
             if "input" in can:
                 current, rewriter = out.input, source

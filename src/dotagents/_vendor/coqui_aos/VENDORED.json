@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/Boriken-Dev/coqui-aos",
-  "commit": "d1be62428eb2778cf67b18b6356496388185ea84",
+  "commit": "5176974f30f664a4a9c382fdd467d4a1ab87765b",
   "path": "python/src/coqui_aos",
   "version": "0.0.0a0",
   "files": {
@@ -18,7 +18,7 @@
     "_errors.py": "sha256:47dd3ab5fd69daaf26123d1060b47330c34e2bcb4de0ed4002b60a44e1d6de3d",
     "_front_matter.py": "sha256:232676bffa7ee3bcacf0de6b5736f5b9057427734ca20ce7298b7707f3a10902",
     "_fs.py": "sha256:5a7bc9d8d1baec5cf4daab7424b8073040dd8c42e823d99ee662830ee24dc4f2",
-    "_hooks.py": "sha256:7fdc6c66152486657dc1a8b92be2cbba7607414ce7df06a77c98d26f25a056e0",
+    "_hooks.py": "sha256:d66378718592680516885fb965bc73fc1e7271abce9c830ab3a921f4afae6af7",
     "_icon.py": "sha256:bf2e523b42de864d3e69b3ab17b19ef9508b1dd646f40a543905f07e01256191",
     "_names.py": "sha256:baebde8555d32ad509a8df4a32f49a4e29dab3b42efe50b2d887c465555d9aec",
     "_settings.py": "sha256:09add9988f476c100c981960ea76958712ba32076d5bfc407cda41ea798daa47",

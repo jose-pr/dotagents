@@ -1,5 +1,5 @@
 {
-  "description": "Hooks. A 'plan-' case gives a 'manifest' (or, with none, an overlay's 'files' by path and text, its manifest read from them) and the consumer's 'facts': os, files, interpreters (absent, all five), identity, scope ('overlay', the default, 'user' or 'project'), digest (the overlay's; absent, unknown), tree (for a project, every file of the directory holding its configuration, by path and text, whose tree digest is the digest), allowed (the one digest at which the user allowed its hooks), fires (the events the consumer can fire on this harness; absent, every one), partial (those it fires for only some occurrences) and limits ('timeout', the consumer's bound on a run, in seconds); 'expect' gives each hook in event order (event, path and interpreter, or null for a hook.<ext> none of which can run here; whether it 'runs' here; match, sets, timeout after the bound, on_failure, and the payload's keys), whether they are 'on', whether the overlay 'activates', the interpreters a probe 'needs', the 'reports' ([id, subject]) and 'non_defaults' ([id, subject]), and the manifest's 'issues' (pointers). A 'payload-' case gives an 'event' and what the consumer knows ('known'); 'expect' is the payload. An 'output-' case gives an 'event', one 'run' ('stdout', or 'stdout_base64', or 'stdout_parts' as [text, times]; 'exit', default 0; 'timed_out'; 'not_run'; 'payload_size'; 'sets', the variables its entry declares) and optional 'limits' ('max_output', 'max_payload'); 'expect' is the 'output' that applies, or the cause it 'failed' with. An 'event-' case gives an 'event', its 'runs' in order (each with its 'source', 'on_failure', default 'report', and the 'seconds' it took), what the consumer 'applies' on this harness ('context', 'env', 'block', 'deny', 'ask', 'allow', 'refuse'; absent, all the event takes, and refuse), 'limits' (also 'event_timeout') and 'os'; 'expect' gives the sources that 'ran', the 'decision' ('block', 'deny', 'ask', 'allow', 'refuse' or null), the source it was 'by' and the hook's own 'reason' (null for a refusal by failure), the 'context' as [source, text], the 'env' (null unsets), the 'reports' and the 'non_defaults'. A 'match-' case gives an 'event', a 'match' (or null) and the reason or tool kind ('value'); 'expect' says whether the hook 'runs'. A 'pre-tool' 'event-' case may give the call's 'input' (an object), and 'expect' then also gives what each hook 'seen' as [source, input] and the 'input' the call runs with (null: the one it was given). An 'event-' case may give 'context_used', the bytes the session's context already holds, and 'limits' may give 'context_bytes' (default 1 MiB). An 'order-' case gives 'overlays', 'requested', the overlays that 'has' a hook for the event and the 'scopes' (user, project) that have one; 'expect' is the 'order' of [scope, source] pairs. A 'process-' case gives a 'process' ('setup', 'server', 'command' or 'env-script') and the same 'overlays', 'requested', 'files', 'facts' and 'identity' as an 'environment-' case; 'expect' is the 'env' that process runs with: the session's, and for an env script the environment as it stands when it runs. An 'environment-' case gives an 'event', 'overlays', 'requested', optional 'files' (an overlay's env file texts), the compose 'facts' (os, base_env, roots, states, pre_env, grants, secrets, and 'earlier': the 'env' outputs earlier hooks of the event set, in run order, null unsetting) and the hook, an 'identity' or a 'scope' of user or project; 'expect' is the 'env' it runs with.",
+  "description": "Hooks. A 'plan-' case gives a 'manifest' (or, with none, an overlay's 'files' by path and text, its manifest read from them) and the consumer's 'facts': os, files, interpreters (absent, all five), identity, scope ('overlay', the default, 'user' or 'project'), digest (the overlay's; absent, unknown), tree (for a project, every file of the directory holding its configuration, by path and text, whose tree digest is the digest), allowed (the one digest at which the user allowed its hooks), fires (the events the consumer can fire on this harness; absent, every one), partial (those it fires for only some occurrences) and limits ('timeout', the consumer's bound on a run, in seconds); 'expect' gives each hook in event order (event, path and interpreter, or null for a hook.<ext> none of which can run here; whether it 'runs' here; match, sets, timeout after the bound, on_failure, and the payload's keys), whether they are 'on', whether the overlay 'activates', the interpreters a probe 'needs', the 'reports' ([id, subject]) and 'non_defaults' ([id, subject]), and the manifest's 'issues' (pointers). A 'payload-' case gives an 'event' and what the consumer knows ('known'); 'expect' is the payload. An 'output-' case gives an 'event', one 'run' ('stdout', or 'stdout_base64', or 'stdout_parts' as [text, times]; 'exit', default 0; 'timed_out'; 'not_run'; 'payload_size'; 'sets', the variables its entry declares) and optional 'limits' ('max_output', 'max_payload'); 'expect' is the 'output' that applies, or the cause it 'failed' with. An 'event-' case gives an 'event', its 'runs' in order (each with its 'source', 'match' (absent: none), 'on_failure', default 'report', and the 'seconds' it took), the tool 'kind' of a 'pre-tool' call (absent: one no run's match is checked against), what the consumer 'applies' on this harness ('context', 'env', 'block', 'deny', 'ask', 'allow', 'refuse'; absent, all the event takes, and refuse), 'limits' (also 'event_timeout') and 'os'; 'expect' gives the sources that 'ran', the 'decision' ('block', 'deny', 'ask', 'allow', 'refuse' or null), the source it was 'by' and the hook's own 'reason' (null for a refusal by failure), the 'context' as [source, text], the 'env' (null unsets), the 'reports' and the 'non_defaults'. A 'match-' case gives an 'event', a 'match' (or null) and the reason or tool kind ('value'); 'expect' says whether the hook 'runs'. A 'pre-tool' 'event-' case may give the call's 'input' (an object), and 'expect' then also gives what each hook 'seen' as [source, input] and the 'input' the call runs with (null: the one it was given). An 'event-' case may give 'context_used', the bytes the session's context already holds, and 'limits' may give 'context_bytes' (default 1 MiB). An 'order-' case gives 'overlays', 'requested', the overlays that 'has' a hook for the event and the 'scopes' (user, project) that have one; 'expect' is the 'order' of [scope, source] pairs. A 'process-' case gives a 'process' ('setup', 'server', 'command' or 'env-script') and the same 'overlays', 'requested', 'files', 'facts' and 'identity' as an 'environment-' case; 'expect' is the 'env' that process runs with: the session's, and for an env script the environment as it stands when it runs. An 'environment-' case gives an 'event', 'overlays', 'requested', optional 'files' (an overlay's env file texts), the compose 'facts' (os, base_env, roots, states, pre_env, grants, secrets, and 'earlier': the 'env' outputs earlier hooks of the event set, in run order, null unsetting) and the hook, an 'identity' or a 'scope' of user or project; 'expect' is the 'env' it runs with.",
   "spec": "spec/v0/hooks.md",
   "cases": [
     {
@@ -6418,6 +6418,171 @@
           ]
         ],
         "non_defaults": []
+      }
+    },
+    {
+      "id": "event-other-scoped-allow",
+      "description": "A call of kind other runs a hook scoped to read, but its allow does not count and nor does the input it carries: the call is left to the user, and the allow is reported.",
+      "event": "pre-tool",
+      "kind": "other",
+      "input": {
+        "command": "x"
+      },
+      "runs": [
+        {
+          "source": "a",
+          "match": [
+            "read"
+          ],
+          "stdout": "{\"decision\": \"allow\", \"reason\": \"ok\", \"input\": {\"command\": \"y\"}}"
+        }
+      ],
+      "expect": {
+        "ran": [
+          "a"
+        ],
+        "decision": null,
+        "by": null,
+        "reason": null,
+        "context": [],
+        "env": {},
+        "non_defaults": [],
+        "reports": [
+          [
+            "hook-not-applied",
+            "a",
+            "pre-tool",
+            "allow"
+          ]
+        ],
+        "seen": [
+          [
+            "a",
+            {
+              "command": "x"
+            }
+          ]
+        ],
+        "input": null
+      }
+    },
+    {
+      "id": "event-other-unscoped-allow",
+      "description": "A hook with no match may allow a call of kind other, with its input.",
+      "event": "pre-tool",
+      "kind": "other",
+      "input": {
+        "command": "x"
+      },
+      "runs": [
+        {
+          "source": "a",
+          "stdout": "{\"decision\": \"allow\", \"reason\": \"ok\", \"input\": {\"command\": \"y\"}}"
+        }
+      ],
+      "expect": {
+        "ran": [
+          "a"
+        ],
+        "decision": "allow",
+        "by": "a",
+        "reason": "ok",
+        "context": [],
+        "env": {},
+        "non_defaults": [],
+        "reports": [],
+        "seen": [
+          [
+            "a",
+            {
+              "command": "x"
+            }
+          ]
+        ],
+        "input": {
+          "command": "y"
+        }
+      }
+    },
+    {
+      "id": "event-other-matched-allow",
+      "description": "A hook whose match names other may allow a call of kind other.",
+      "event": "pre-tool",
+      "kind": "other",
+      "input": {
+        "command": "x"
+      },
+      "runs": [
+        {
+          "source": "a",
+          "match": [
+            "read",
+            "other"
+          ],
+          "stdout": "{\"decision\": \"allow\", \"reason\": \"ok\", \"input\": {\"command\": \"y\"}}"
+        }
+      ],
+      "expect": {
+        "ran": [
+          "a"
+        ],
+        "decision": "allow",
+        "by": "a",
+        "reason": "ok",
+        "context": [],
+        "env": {},
+        "non_defaults": [],
+        "reports": [],
+        "seen": [
+          [
+            "a",
+            {
+              "command": "x"
+            }
+          ]
+        ],
+        "input": {
+          "command": "y"
+        }
+      }
+    },
+    {
+      "id": "event-other-scoped-deny",
+      "description": "A hook scoped to read still runs on a call of kind other, and its deny counts.",
+      "event": "pre-tool",
+      "kind": "other",
+      "input": {
+        "command": "x"
+      },
+      "runs": [
+        {
+          "source": "a",
+          "match": [
+            "read"
+          ],
+          "stdout": "{\"decision\": \"deny\", \"reason\": \"no\"}"
+        }
+      ],
+      "expect": {
+        "ran": [
+          "a"
+        ],
+        "decision": "deny",
+        "by": "a",
+        "reason": "no",
+        "context": [],
+        "env": {},
+        "non_defaults": [],
+        "reports": [],
+        "seen": [
+          [
+            "a",
+            {
+              "command": "x"
+            }
+          ]
+        ],
+        "input": null
       }
     },
     {
