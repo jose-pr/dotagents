@@ -230,6 +230,16 @@ def test_stamp_never_emits_agents_agent():
     assert "AGENTS_AGENT" not in ident
 
 
+def test_stamp_never_emits_agents_account():
+    """`AGENTS_ACCOUNT` is set by a host, never stamped: no harness names its
+    account without opening its credentials. An inherited value stays as it is."""
+    assert "AGENTS_ACCOUNT" not in stamp_identity({"CLAUDECODE": "1"}, root=EMPTY_ROOT)
+    environ = {"CLAUDECODE": "1", "AGENTS_ACCOUNT": "work"}
+    assert "AGENTS_ACCOUNT" not in stamp_identity(environ, root=EMPTY_ROOT)
+    assert "AGENTS_ACCOUNT" not in stamp_identity(environ, explicit="codex")
+    assert environ["AGENTS_ACCOUNT"] == "work"
+
+
 def test_harness_ids_are_distinct_from_short_names():
     # The whole point of the bug fix: harness_id != short name where they differ.
     assert ClaudeAgent.harness_id == "claude-code" != ClaudeAgent.name

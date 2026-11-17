@@ -868,7 +868,10 @@ API:
 - `stamp_identity(environ, explicit=None, root=None) -> dict[str, str]` —
   `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENT` (= harness id) and `AGENTS_MODEL` when
   derivable, for the runtime agent only (`{}` in a plain shell); never replaces a
-  value in `environ` unless `explicit` names a known agent. `root` is unused.
+  value in `environ` unless `explicit` names a known agent. `root` is unused. It never
+  emits `AGENTS_ACCOUNT` (the label of the account a session runs under, never a secret):
+  no harness has a documented variable or file that names one without opening its
+  credentials, so a host that runs the harness, such as Canoa, sets it.
 
 - `Agent.wire_overlay_hooks(dest, *, dry_run, logger, config_root=None)` — wire the
   harness's own hooks to `dotagents hook` for the events the overlays installed in the
@@ -1269,7 +1272,8 @@ Read:
 - `AGENTS_OVERLAYS_REPO`, `AGENTS_OVERLAYS_REPO_<KEY>` — overlay repos (after
   `--repo`). `AGENTS_CMDS_PATH` — extra command dirs.
 - `AGENTS_HARNESS` — the running harness (registry name or harness id), for
-  identity. `AGENTS_PYTHON` — the interpreter for `env.py` and a `python` setup.
+  identity. `AGENTS_ACCOUNT` — set by a host such as Canoa, never by dotagents: the label
+  of the account the session uses, passed through untouched. `AGENTS_PYTHON` — the interpreter for `env.py` and a `python` setup.
   `AGENTS_PYTHONPATH` — the agent library dirs, highest precedence first.
   `AGENTS_NO_PYVENV` — turns the scope venvs off. `AGENTS_PIP_SOURCE` — a directory
   of wheels (or a URI to one) for pip, before the index. `PIP_INDEX_URL`,

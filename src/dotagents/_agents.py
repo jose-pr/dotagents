@@ -1517,6 +1517,10 @@ def stamp_identity(
     ``AGENT=claude-code`` into every command a Claude session runs), not a pin.
 
     ``AGENTS_AGENT`` (a named persona) is not emitted; nothing may branch on it.
+    ``AGENTS_ACCOUNT`` (the label of the account the session runs under, never
+    a secret) is not emitted either: no harness names its account in a variable
+    or file that can be read without opening its credentials, so a host that
+    runs the harness (Canoa) sets it.
 
     Runtime signals only (:func:`detect_runtime_agent`): in a plain shell --
     no explicit name, no ``$AGENTS_HARNESS``, no harness marker -- nothing is

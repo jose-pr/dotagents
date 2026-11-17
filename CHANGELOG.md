@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `AGENTS_ACCOUNT` is documented beside `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENT` and `AGENTS_MODEL`: the label of
+  the account a session runs under, never a secret, set by a host such as Canoa. dotagents does not stamp it, since no
+  harness names its account without opening its credentials.
+
 - An overlay's context reads its own names. `dotagents context` replaces `${AOS_OVERLAY_ROOT}`,
   `${AOS_OVERLAY_STATE}`, `${AOS_OVERLAY_NAME}`, `${AOS_OVERLAY_SCOPE}`, `${AOS_PROJECT_ROOT}` and the
   overlay's declared `options` in each overlay context file, per the specification's Templating

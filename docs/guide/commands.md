@@ -378,7 +378,12 @@ form and drop names that are not shell identifiers.
 
 1. **Identity** — `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENT`, `AGENTS_MODEL` for the
    harness running this process (none in a plain shell), never replacing a value
-   already set.
+   already set. `AGENTS_ACCOUNT` belongs to the same set but dotagents never
+   stamps it: no harness documents an account variable or file that can be read
+   without opening its credentials. A host that runs the harness, such as Canoa,
+   sets it to the label of the account the session uses (the name the person gave
+   it, never a token, key or other secret); like the rest, it is absent rather than
+   empty when the host has no account to name, and a value already set is kept.
 2. **Roots** — `AGENTS_HOME` and `AGENTS_PROJECT_ROOT` name the stores this run
    actually walked, as absolute paths: an inherited value naming the same directory
    holds, any other is replaced (with `-g`, which walks no project,
