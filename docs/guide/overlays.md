@@ -37,11 +37,11 @@ and ends in a letter or digit. It is case-insensitive, and `_` and `.` count as 
 ## Example overlays
 
 The example overlays below live on this repo's separate
-[`repo` branch](https://github.com/jose-pr/dotagents/tree/repo), not in `main` —
+[`Boriken-Dev/agent-overlays`](https://github.com/Boriken-Dev/agent-overlays) repository, not in `main` —
 they are **payloads riding on dotagents**, not part of the tool, so you swap them for
-your own. Name the branch as a repo to install any of them:
-`dotagents overlays add <name> --repo "https://github.com/jose-pr/dotagents.git@repo#overlays"`,
-or `--repo <checkout>/overlays` for a local checkout of the branch.
+your own. Name the repository as a repo to install any of them:
+`dotagents overlays add <name> --repo "https://github.com/Boriken-Dev/agent-overlays.git@main#overlays"`,
+or `--repo <checkout>/overlays` for a local checkout of the repository.
 
 | Overlay | What it carries |
 | --- | --- |
@@ -108,7 +108,7 @@ first repo that offers the name wins. (`sync` goes back to the repo each overlay
 installed from.) A repo is **always a collection** of overlays, in one of two shapes:
 
 - a **directory of overlays** — each subdirectory is an overlay, `<dir>/<name>/` (a
-  checkout of the `repo` branch has them under `overlays/`, any folder);
+  checkout of the `agent-overlays` repository has them under `overlays/`, any folder);
 - a **registry** — a JSON, TOML or YAML file mapping `<name-or-alias>` to the
   **source** of that one overlay (the whole document, or its `overlays` key). TOML
   uses `tomli` below Python 3.11 (installed with the package, bundled in the
@@ -121,11 +121,11 @@ force git); `<ref>` is a branch, tag or commit; `<path>` is inside it. The two d
 in what the path names:
 
 - for a **repo**, the collection: a directory (of overlays) or a registry file in the
-  checkout, the checkout root with no path — `--repo …/dotagents.git@repo#overlays`
-  names the `overlays/` directory of the `repo` branch;
+  checkout, the checkout root with no path — `--repo …/agent-overlays.git@main#overlays`
+  names the `overlays/` directory of its `main` branch;
 - for a **source** (a registry value), the overlay: the path is the overlay's root
   directory, and with no path **the repository root is the overlay** —
-  `…/dotagents.git@repo#overlays/net` is the `net` overlay itself. Given as `--repo`,
+  `…/agent-overlays.git@main#overlays/net` is the `net` overlay itself. Given as `--repo`,
   that form would list `net`'s own subdirectories as overlays.
 
 A `scheme://` location that is not git is a **uripath path** (pathapi's URI layer, the
@@ -169,8 +169,8 @@ that names them.
 ```toml
 # ~/.agents/dotagents.toml
 [overlays]
-engineering = "https://github.com/you/dotagents.git@repo#overlays/engineering"
-python      = "https://github.com/you/dotagents.git@repo#overlays/python"
+engineering = "https://github.com/you/agent-overlays.git@main#overlays/engineering"
+python      = "https://github.com/you/agent-overlays.git@main#overlays/python"
 mytool      = "git@github.com:you/mytool-overlay.git@v2"      # no path: the repo root is the overlay
 local       = "~/src/overlays/local"                           # a local overlay directory
 mine        = "./my-overlays/mine"                             # relative to this file: ~/.agents/my-overlays/mine
@@ -178,7 +178,7 @@ mine        = "./my-overlays/mine"                             # relative to thi
 
 ```bash
 dotagents overlays add engineering -g                                        # from the registry above
-dotagents overlays add net -g --repo https://github.com/you/dotagents.git@repo#overlays
+dotagents overlays add net -g --repo https://github.com/you/agent-overlays.git@main#overlays
 dotagents overlays sync -g                                                   # refetches from each recorded repo
 ```
 

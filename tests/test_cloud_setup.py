@@ -37,8 +37,8 @@ def _overlay_source(env: "dict[str, str]") -> "tuple[str, str]":
     return remote, ref
 
 
-def test_defaults_to_this_repo_s_repo_branch():
-    assert _overlay_source({}) == ("https://github.com/jose-pr/dotagents.git", "repo")
+def test_defaults_to_the_agent_overlays_repository():
+    assert _overlay_source({}) == ("https://github.com/Boriken-Dev/agent-overlays.git", "main")
 
 
 def test_reads_the_agents_names():

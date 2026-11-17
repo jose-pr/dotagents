@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The example overlays moved to their own repository, `Boriken-Dev/agent-overlays` (`overlays/<name>/`, branch
+  `main`). The documented `--repo` address is now
+  `https://github.com/Boriken-Dev/agent-overlays.git@main#overlays`, and `tools/cloud-setup.sh` and the test
+  workflow fetch from there by default. The `repo` branch here keeps the old history and a pointer.
 - Overlay hooks run like the harness's own, from specification revision ea41520. A `pre-tool` hook may
   answer `decision = "allow"`, with an `input` object that replaces the call's; on Claude Code dotagents
   answers `allow` (and `updatedInput`) only when the hooks of the event combined to an allow, a deny or an ask

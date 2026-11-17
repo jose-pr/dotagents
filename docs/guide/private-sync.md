@@ -42,7 +42,7 @@ The overlay goes into the user store, since the store is what it syncs:
 ```bash
 dotagents init -g                                             # base config in ~/.agents
 dotagents overlays add private-sync -g \
-  --repo "https://github.com/jose-pr/dotagents.git@repo#overlays"   # commands + kb + hooks
+  --repo "https://github.com/Boriken-Dev/agent-overlays.git@main#overlays"   # commands + kb + hooks
 
 # link-project / sync-project come FROM that overlay -- run `overlays add` first.
 dotagents link-project .   # check this project's store branch out at .agents
@@ -110,7 +110,7 @@ registry names (`overlays add '*'`, when it has one), links the project, and wir
 hooks into `~/.claude/settings.json` — driven by `AGENTS_REMOTE` /
 `DOTAGENTS_AGENTS_TOKEN` / `DOTAGENTS_CLI_INSTALL` environment variables (the token is
 never committed). `AGENTS_OVERLAYS_REMOTE` / `AGENTS_OVERLAYS_REF` choose where it
-fetches the `private-sync` overlay from (default: this repo's `repo` branch); the old
+fetches the `private-sync` overlay from (default: the `Boriken-Dev/agent-overlays` repository, branch `main`); the old
 `DOTAGENTS_OVERLAYS_REMOTE` / `DOTAGENTS_OVERLAYS_REF` names are still read when the
 new ones are unset. The full walkthrough ships with the `private-sync` overlay
 (`$PRIVATE_SYNC_OVERLAY_ROOT/kb/PRIVATE_SYNC.md`).

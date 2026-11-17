@@ -597,7 +597,7 @@ overlay into the user store first and they become available like any other
 subcommand:
 
 ```bash
-dotagents overlays add private-sync -g --repo "https://github.com/jose-pr/dotagents.git@repo#overlays"
+dotagents overlays add private-sync -g --repo "https://github.com/Boriken-Dev/agent-overlays.git@main#overlays"
 
 dotagents link-project .                       # symlink this project's .agents into its store
 dotagents link-project . --copy                # real-dir copy (no-symlink systems)

@@ -38,7 +38,7 @@ carry the opinions.
 <!-- quickstart:begin -->
 ```bash
 dotagents init -g   # the base config in ~/.agents, plus the Claude Code include and hooks
-export AGENTS_OVERLAYS_REPO="https://github.com/jose-pr/dotagents.git@repo#overlays"
+export AGENTS_OVERLAYS_REPO="https://github.com/Boriken-Dev/agent-overlays.git@main#overlays"
 dotagents overlays add engineering python -g   # cloned with git, so git must be on PATH
 dotagents overlays list -g
 ls ~/.agents/overlays/engineering/flows/PLAN.md
@@ -48,7 +48,7 @@ ls ~/.agents/overlays/engineering/flows/PLAN.md
 `init -g` writes the user store's `AGENTS.md` and wires your agent runner to it — for
 Claude Code, an include of that file in `~/.claude/CLAUDE.md` plus the session hooks.
 `AGENTS_OVERLAYS_REPO` names where overlays come from (here, the example overlays on
-this repo's `repo` branch); set it in your shell profile, or pass `--repo <spec>` to
+the `Boriken-Dev/agent-overlays` repository); set it in your shell profile, or pass `--repo <spec>` to
 each `overlays` command instead.
 
 Continue with the [Install](guide/install.md) guide, or jump to

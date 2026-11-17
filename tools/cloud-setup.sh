@@ -51,10 +51,10 @@
 #   CLAUDE_PROJECT_DIR       project to link (default: current directory)
 #   AGENTS_OVERLAYS_REPO     an overlay repo (a directory of overlays, a registry
 #                            file, or a git <repo>[@ref][#path]); set it to skip
-#                            the `repo` branch fetch in step 4 entirely
+#                            the overlays fetch in step 4 entirely
 #   AGENTS_OVERLAYS_REMOTE / AGENTS_OVERLAYS_REF
 #                            where to fetch the private-sync overlay from
-#                            (default: this repo, branch `repo`). The old names
+#                            (default: Boriken-Dev/agent-overlays, branch `main`). The old names
 #                            DOTAGENTS_OVERLAYS_REMOTE / DOTAGENTS_OVERLAYS_REF
 #                            are still read when the new ones are unset; they
 #                            were renamed because DOTAGENTS_* names are for
@@ -285,15 +285,15 @@ dg_cli() {
 # Skipped when already installed (and when the store already provides the command,
 # e.g. a user's own cmds module), so the common path costs nothing.
 #
-# The example overlays live on the dotagents repo's `repo` BRANCH, not in
-# main's tree -- so fetch that branch shallowly into a temp dir and point --repo
+# The example overlays live in the Boriken-Dev/agent-overlays repository, not in
+# this one -- so fetch its main branch shallowly into a temp dir and point --repo
 # at its overlays/ dir. AGENTS_OVERLAYS_REPO (or a pre-populated
 # <store>/overlays/private-sync) short-circuits the fetch entirely, for an
 # air-gapped or pinned setup.
 # AGENTS_* (non-secret, printable); the DOTAGENTS_* spellings are the old
 # names, still honoured as a fallback so an existing environment keeps working.
-_dg_ovl_remote="${AGENTS_OVERLAYS_REMOTE:-${DOTAGENTS_OVERLAYS_REMOTE:-https://github.com/jose-pr/dotagents.git}}"
-_dg_ovl_ref="${AGENTS_OVERLAYS_REF:-${DOTAGENTS_OVERLAYS_REF:-repo}}"
+_dg_ovl_remote="${AGENTS_OVERLAYS_REMOTE:-${DOTAGENTS_OVERLAYS_REMOTE:-https://github.com/Boriken-Dev/agent-overlays.git}}"
+_dg_ovl_ref="${AGENTS_OVERLAYS_REF:-${DOTAGENTS_OVERLAYS_REF:-main}}"
 
 _dg_have_link_project() {
     dg_cli --help 2>/dev/null | grep -q -- "link-project"

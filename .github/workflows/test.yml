@@ -10,7 +10,7 @@ name: Test
 #               scratch HOME;
 #   - pyz:      tools/pyz_smoke.sh against a fresh dotagents.pyz, on Linux
 #               and Windows.
-# The example overlays live on the `repo` branch, checked out into
+# The example overlays live in Boriken-Dev/agent-overlays, checked out into
 # ./overlays-src by the jobs that need them.
 #
 # release.yml runs this workflow as its test gate (workflow_call), so a
@@ -23,9 +23,9 @@ on:
         required: false
         default: ""
       overlays_ref:
-        description: "Ref of the example overlays (the `repo` branch, a tag, or a SHA)"
+        description: "Ref of the example overlays (a branch, a tag, or a SHA)"
         required: false
-        default: "repo"
+        default: "main"
   workflow_call:
     inputs:
       ref:
@@ -35,7 +35,7 @@ on:
       overlays_ref:
         type: string
         required: false
-        default: "repo"
+        default: "main"
   push:
     branches:
       - main
@@ -91,10 +91,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
-      - name: Fetch the example overlays (`repo` branch)
+      - name: Fetch the example overlays
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.overlays_ref || 'repo' }}
+          repository: Boriken-Dev/agent-overlays
+          ref: ${{ inputs.overlays_ref || 'main' }}
           path: overlays-src
       - uses: actions/setup-python@v7
         with:
@@ -119,10 +120,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
-      - name: Fetch the example overlays (`repo` branch)
+      - name: Fetch the example overlays
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.overlays_ref || 'repo' }}
+          repository: Boriken-Dev/agent-overlays
+          ref: ${{ inputs.overlays_ref || 'main' }}
           path: overlays-src
       - uses: actions/setup-python@v7
         with:
@@ -155,18 +157,19 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Fetch the example overlays (`repo` branch)
+      - name: Fetch the example overlays
         # The steps below resolve overlays via --repo overlays-src/overlays.
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.overlays_ref || 'repo' }}
+          repository: Boriken-Dev/agent-overlays
+          ref: ${{ inputs.overlays_ref || 'main' }}
           path: overlays-src
       - name: Install the dotagents CLI package
         run: python -m pip install -e .
       - name: The documented quick start runs as written
         # The block between the quickstart markers in README.md and in
         # docs/index.md, verbatim, each in its own scratch HOME and working
-        # directory. It clones the published `repo` branch, as a reader would.
+        # directory. It clones the published agent-overlays repository, as a reader would.
         run: |
           for doc in README.md docs/index.md; do
             block="$RUNNER_TEMP/quickstart-$(basename "$doc" .md).sh"
@@ -311,10 +314,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
-      - name: Fetch the example overlays (`repo` branch)
+      - name: Fetch the example overlays
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.overlays_ref || 'repo' }}
+          repository: Boriken-Dev/agent-overlays
+          ref: ${{ inputs.overlays_ref || 'main' }}
           path: overlays-src
       - uses: actions/setup-python@v7
         with:

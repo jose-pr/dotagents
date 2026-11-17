@@ -72,10 +72,11 @@ jobs:
         run: |
           python -m pip install -e .
           python -m dotagents build-pyz --out dist/dotagents.pyz
-      - name: Fetch the example overlays (`repo` branch)
+      - name: Fetch the example overlays
         uses: actions/checkout@v7
         with:
-          ref: repo
+          repository: Boriken-Dev/agent-overlays
+          ref: main
           path: overlays-src
       - name: Smoke-test the pyz being released
         shell: bash

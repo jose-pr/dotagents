@@ -47,8 +47,8 @@ them. Everything else is repo infrastructure.
 The **example overlays** — `engineering` (the planning/execution/review workflow set,
 its rules, repo templates and helper tools), the per-language `python` / `node` /
 `rust`, `release`, `private-sync`, `net` and `recovery` — live on a separate
-[`repo` branch](https://github.com/jose-pr/dotagents/tree/repo), not in `main`'s
-tree: they are swappable payloads, not part of the tool. Name that branch as a repo
+[`Boriken-Dev/agent-overlays`](https://github.com/Boriken-Dev/agent-overlays) repository, not in `main`'s
+tree: they are swappable payloads, not part of the tool. Name that repository as a repo
 (`--repo`, see below) to install them. See the
 [docs](https://jose-pr.github.io/dotagents/) for what each ships.
 
@@ -74,7 +74,7 @@ Or skip `pip` entirely with the self-contained downloadable `.pyz` (see below).
 <!-- quickstart:begin -->
 ```bash
 dotagents init -g   # the base config in ~/.agents, plus the Claude Code include and hooks
-export AGENTS_OVERLAYS_REPO="https://github.com/jose-pr/dotagents.git@repo#overlays"
+export AGENTS_OVERLAYS_REPO="https://github.com/Boriken-Dev/agent-overlays.git@main#overlays"
 dotagents overlays add engineering python -g   # cloned with git, so git must be on PATH
 dotagents overlays list -g
 ls ~/.agents/overlays/engineering/flows/PLAN.md
@@ -127,7 +127,7 @@ skills into the store's shared `skills/` dir. See below.
 `dotagents overlays` manages opt-in overlays **by name**. `add` resolves each name
 against **repos** in order — the first that offers the name wins. A repo is always a
 **collection** of overlays: a directory (each subdirectory an overlay, e.g. a checkout of
-the [`repo` branch](https://github.com/jose-pr/dotagents/tree/repo), whose overlays sit
+the [`agent-overlays` repository](https://github.com/Boriken-Dev/agent-overlays), whose overlays sit
 under `overlays/<name>`) or a
 JSON/TOML/YAML registry file mapping names to **sources**. It lives at a local path, an
 `http(s)://` URL (a registry file, fetched), or inside a git repository named
