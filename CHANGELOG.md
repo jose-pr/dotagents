@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `AGENTS_HOST=dotagents` is stamped with the rest of the identity (`AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENT`, `AGENTS_MODEL`),
+  which together with `AGENTS_PROJECT_ROOT` are the AOS session variables dotagents can source. A value already set is kept,
+  even for an explicit agent, so a host that runs dotagents inside its session (Canoa) keeps naming itself.
+  `AGENTS_ACCOUNT_KIND` and `AGENTS_ACCOUNT_PROVIDER` are documented beside `AGENTS_ACCOUNT` as a host's to set, never stamped.
+  None of these names is reserved: an overlay's `env` may set one like any variable and its value replaces the base environment's.
 - `AGENTS_ACCOUNT` is documented beside `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENT` and `AGENTS_MODEL`: the label of
   the account a session runs under, never a secret, set by a host such as Canoa. dotagents does not stamp it, since no
   harness names its account without opening its credentials.

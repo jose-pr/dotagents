@@ -313,5 +313,10 @@ def test_write_settings_is_lf_atomic_and_keeps_unicode(tmp_path):
 
 
 def test_unknown_explicit_agent_does_not_override_a_pinned_identity():
-    env = {"AGENTS_HARNESS": "codex", "AGENT": "codex", "AGENTS_VENDOR": "openai"}
+    env = {
+        "AGENTS_HOST": "dotagents",
+        "AGENTS_HARNESS": "codex",
+        "AGENT": "codex",
+        "AGENTS_VENDOR": "openai",
+    }
     assert _agents.stamp_identity(env, explicit="typo", root=Path("/nonexistent")) == {}

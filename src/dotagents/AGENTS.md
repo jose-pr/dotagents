@@ -866,12 +866,12 @@ API:
   `detect_runtime_agent`, else config-file `detect(root or cwd)`, else
   `ClaudeAgent()`.
 - `stamp_identity(environ, explicit=None, root=None) -> dict[str, str]` —
-  `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENT` (= harness id) and `AGENTS_MODEL` when
+  `AGENTS_HOST` (`dotagents`, left alone when a host already named itself), `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENT` (= harness id) and `AGENTS_MODEL` when
   derivable, for the runtime agent only (`{}` in a plain shell); never replaces a
   value in `environ` unless `explicit` names a known agent. `root` is unused. It never
-  emits `AGENTS_ACCOUNT` (the label of the account a session runs under, never a secret):
+  emits `AGENTS_ACCOUNT`, `AGENTS_ACCOUNT_KIND` or `AGENTS_ACCOUNT_PROVIDER` (the label of the account a session runs under, never a secret; how it signs in; who serves its models):
   no harness has a documented variable or file that names one without opening its
-  credentials, so a host that runs the harness, such as Canoa, sets it.
+  credentials, so a host that runs the harness, such as Canoa, sets them.
 
 - `Agent.wire_overlay_hooks(dest, *, dry_run, logger, config_root=None)` — wire the
   harness's own hooks to `dotagents hook` for the events the overlays installed in the
@@ -1272,7 +1272,7 @@ Read:
 - `AGENTS_OVERLAYS_REPO`, `AGENTS_OVERLAYS_REPO_<KEY>` — overlay repos (after
   `--repo`). `AGENTS_CMDS_PATH` — extra command dirs.
 - `AGENTS_HARNESS` — the running harness (registry name or harness id), for
-  identity. `AGENTS_ACCOUNT` — set by a host such as Canoa, never by dotagents: the label
+  identity. `AGENTS_HOST` — an outer host's name for itself, kept. `AGENTS_ACCOUNT`, `AGENTS_ACCOUNT_KIND`, `AGENTS_ACCOUNT_PROVIDER` — set by a host such as Canoa, never by dotagents: the label
   of the account the session uses, passed through untouched. `AGENTS_PYTHON` — the interpreter for `env.py` and a `python` setup.
   `AGENTS_PYTHONPATH` — the agent library dirs, highest precedence first.
   `AGENTS_NO_PYVENV` — turns the scope venvs off. `AGENTS_PIP_SOURCE` — a directory
@@ -1292,7 +1292,7 @@ Read:
   (the env loaders' once-per-process guard), `DOTAGENTS_HOOK_SHELL=posix|windows`
   (overrides the Codex env hook's platform check).
 
-Emitted by `env` (and applied by `launch`): `AGENTS_HARNESS`, `AGENTS_VENDOR`,
+Emitted by `env` (and applied by `launch`): `AGENTS_HOST`, `AGENTS_HARNESS`, `AGENTS_VENDOR`,
 `AGENT`, `AGENTS_MODEL`, `AGENTS_HOME`, `AGENTS_PROJECT_ROOT`, `AGENTS_PYTHON`,
 `AGENTS_PYVENV` (with a scope venv), `AGENTS_PYLIB` (from a `.pyz` only), `<NAME>_OVERLAY_ROOT`, `<NAME>_OVERLAY_STATE`, `PYTHONPYCACHEPREFIX`, `PATH`, `PYTHONPATH`, `AGENTS_PYTHONPATH`, `AGENTS_PROXY` and the mirrored
 proxy vars, plus what overlays declare and the stores' env files set. `AGENTS_AGENT` is never emitted.

@@ -1502,9 +1502,10 @@ def stamp_identity(
     explicit: Optional[str] = None,
     root: Optional[Path] = None,
 ) -> dict[str, str]:
-    """Return the standardized ``AGENTS_*`` / ``AGENT`` identity vars.
+    """Return the standardized ``AGENTS_*`` / ``AGENT`` identity vars (the AOS session variables).
 
-    Emits ``AGENTS_HARNESS`` (the harness_id, e.g. ``claude-code`` -- NOT the
+    Emits ``AGENTS_HOST`` (``dotagents``, unless a host already named itself, even
+    for an explicit agent), ``AGENTS_HARNESS`` (the harness_id, e.g. ``claude-code`` -- NOT the
     short name), ``AGENTS_VENDOR``, ``AGENT`` (= AGENTS_HARNESS, the ecosystem
     marker used by Goose/Amp; agentsmd/agents.md#136), and, when derivable,
     ``AGENTS_MODEL`` (from the adapter's vendor model var).
@@ -1545,5 +1546,9 @@ def stamp_identity(
     _set("AGENTS_VENDOR", active.vendor)
     _set("AGENT", active.harness_id or active.name)
     _set("AGENTS_MODEL", active.resolve_model(environ))
+    # The consumer that builds the environment. An outer host's own value (Canoa's session running dotagents) stays, even
+    # for an explicit agent: it names who set the session up, which `explicit` does not change.
+    if not environ.get("AGENTS_HOST"):
+        identity["AGENTS_HOST"] = "dotagents"
 
     return identity

@@ -376,14 +376,19 @@ form and drop names that are not shell identifiers.
 
 **What is assembled, in order:**
 
-1. **Identity** — `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENT`, `AGENTS_MODEL` for the
+1. **Identity** — `AGENTS_HOST` (`dotagents`), `AGENTS_HARNESS`, `AGENTS_VENDOR`, `AGENT`, `AGENTS_MODEL` for the
    harness running this process (none in a plain shell), never replacing a value
-   already set. `AGENTS_ACCOUNT` belongs to the same set but dotagents never
-   stamps it: no harness documents an account variable or file that can be read
+   already set (a host that set `AGENTS_HOST` keeps naming itself). With
+   `AGENTS_PROJECT_ROOT` below they are the AOS "session variables" (`spec/v0/environment.md`)
+   dotagents can source. `AGENTS_ACCOUNT`, `AGENTS_ACCOUNT_KIND` and
+   `AGENTS_ACCOUNT_PROVIDER` belong to the same set but dotagents never
+   stamps them: no harness documents an account variable or file that can be read
    without opening its credentials. A host that runs the harness, such as Canoa,
-   sets it to the label of the account the session uses (the name the person gave
-   it, never a token, key or other secret); like the rest, it is absent rather than
-   empty when the host has no account to name, and a value already set is kept.
+   sets them to the label of the account the session uses (the name the person gave
+   it, never a token, key or other secret), how it signs in and who serves its models;
+   like the rest, each is absent rather than
+   empty when the host has nothing to name, and a value already set is kept. They are the base
+   environment, not reserved names: an overlay's `env` may set one like any variable, and its value replaces this one.
 2. **Roots** — `AGENTS_HOME` and `AGENTS_PROJECT_ROOT` name the stores this run
    actually walked, as absolute paths: an inherited value naming the same directory
    holds, any other is replaced (with `-g`, which walks no project,

@@ -249,3 +249,41 @@ def test_harness_ids_are_distinct_from_short_names():
 def test_registry_covers_all_builtin_names():
     names = {a.name for a in _agents.get_all_agents()}
     assert names == {"claude", "gemini", "antigravity", "codex", "cursor", "copilot", "pi"}
+
+
+def test_stamp_sets_the_basic_session_variables_for_claude_code_and_codex():
+    """The names every AOS consumer provides, as dotagents can source them: the host, the
+    harness, its vendor, the ecosystem marker and the model. The account's three are a
+    running host's to set, and a project root is `env`'s."""
+    claude = stamp_identity(
+        {"CLAUDECODE": "1", "ANTHROPIC_MODEL": "claude-opus-4-8"}, root=EMPTY_ROOT
+    )
+    assert claude == {
+        "AGENTS_HOST": "dotagents",
+        "AGENTS_HARNESS": "claude-code",
+        "AGENTS_VENDOR": "anthropic",
+        "AGENT": "claude-code",
+        "AGENTS_MODEL": "claude-opus-4-8",
+    }
+    codex = stamp_identity(
+        {"CODEX_SANDBOX": "seatbelt", "OPENAI_MODEL": "gpt-5"}, root=EMPTY_ROOT
+    )
+    assert codex == {
+        "AGENTS_HOST": "dotagents",
+        "AGENTS_HARNESS": "codex",
+        "AGENTS_VENDOR": "openai",
+        "AGENT": "codex",
+        "AGENTS_MODEL": "gpt-5",
+    }
+    for name in ("AGENTS_ACCOUNT", "AGENTS_ACCOUNT_KIND", "AGENTS_ACCOUNT_PROVIDER"):
+        assert name not in claude and name not in codex
+
+
+def test_stamp_keeps_a_host_an_outer_consumer_already_named():
+    """A session another consumer set up keeps naming it, even for an explicit agent;
+    nothing is stamped in a plain shell."""
+    environ = {"CLAUDECODE": "1", "AGENTS_HOST": "canoa"}
+    assert "AGENTS_HOST" not in stamp_identity(environ, root=EMPTY_ROOT)
+    assert "AGENTS_HOST" not in stamp_identity(environ, explicit="codex")
+    assert environ["AGENTS_HOST"] == "canoa"
+    assert stamp_identity({}, root=EMPTY_ROOT) == {}
