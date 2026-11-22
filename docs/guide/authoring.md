@@ -301,7 +301,7 @@ import (a syntax error, an exception at import time) is skipped with a warning n
 it; it never takes the other commands down with it, and neither does a command whose
 parser cannot be built. The bundled `findings` and `launch` are ordinary command
 modules discovered from the package, and the private-sync overlay ships
-`link-project` / `sync-project` from its own `cmds/` the same way.
+its `private-sync` script as a skill, run without dotagents.
 
 **Prefer a command module to a loose script.** A script under `tools/` is something
 an agent has to find, quote and spawn. A command module is discovered, shows up in

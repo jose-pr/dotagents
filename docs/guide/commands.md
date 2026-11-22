@@ -49,9 +49,9 @@ So a command an overlay ships is overridden by one in the same store's
 `$AGENTS_CMDS_PATH` or `--cmdspath`. A checkout's own top-level `dotagents/cmds/` (outside
 `.agents/`) is never a source. Two consequences worth knowing:
 
-- `link-project` / `sync-project` (the per-project private-store workflow) come from
-  the opt-in **`private-sync` overlay**, which ships the commands and their logic
-  together — install it and they appear (see [link-project / sync-project](#link-project-sync-project)).
+- The per-project private-store workflow is the opt-in **`private-sync` overlay**'s
+  `private-sync` script, which ships with its logic and runs without dotagents (see
+  [private-sync](#private-sync-an-overlays-script)).
 - A personal command module dropped into a scope's `dotagents/cmds/` is discovered
   like any other, so tooling you keep private never has to live in this repo.
 
@@ -595,28 +595,25 @@ in the package or the `.pyz`.
 Scanning a repo for leaks before publishing it — machine paths, private plan names,
 `.agents/` refs, agent-session trailers in commit messages — enforces a convention
 rather than dotagents' own mechanism, so the package ships no such command. The
-opt-in `engineering` overlay does: `dotagents leak-check <repo>`. Its patterns for
+opt-in `engineering` overlay does, as its `leak-check` skill script (`leak-check <repo>`). Its patterns for
 what is personal to you stay in a machine-local file, never in a repository.
 
-## link-project / sync-project
+## private-sync (an overlay's script)
 
-The optional per-project private-store workflow. These are **not** dotagents
-commands: they are supplied by the `private-sync` overlay, together with the logic
-behind them, so a plain install carries no private-sync workflow at all. Install the
-overlay into the user store first and they become available like any other
-subcommand:
+The optional per-project private-store workflow. It is **not** a dotagents command:
+the `private-sync` overlay supplies the `private-sync` script (a skill, with its
+logic), so a plain install carries no private-sync workflow at all. It runs without
+dotagents (`$AGENTS_PYTHON -I $PRIVATE_SYNC_OVERLAY_ROOT/skills/private-sync/private_sync.py`);
+installing the overlay into the user store puts a `private-sync` launcher on `PATH`:
 
 ```bash
 dotagents overlays add private-sync -g --repo "https://github.com/Boriken-Dev/agent-overlays.git@main#overlays"
 
-dotagents link-project .                       # symlink this project's .agents into its store
-dotagents link-project . --copy                # real-dir copy (no-symlink systems)
-dotagents sync-project -m "msg"                # reconcile + hand off to the store's sync
-dotagents sync-project --remote <url> -m init  # one-command bootstrap
+private-sync link .                       # symlink this project's .agents into its store
+private-sync link . --copy                # real-dir copy (no-symlink systems)
+private-sync sync -m "msg"                # reconcile + hand off to the store's sync
+private-sync sync --remote <url> -m init  # one-command bootstrap
 ```
-
-(They were called `link` / `sync` before; the names now say what they act on — a
-project's `.agents` — and `sync-project` no longer reads like `overlays sync`.)
 
 See [Private sync](private-sync.md) for the full walkthrough.
 

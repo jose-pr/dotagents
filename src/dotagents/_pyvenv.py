@@ -4,7 +4,7 @@ Each store gets ``<store>/.pyvenv/<X.Y.Z>-<os>-<arch>/``, made from the
 interpreter running dotagents. A store's ``.pyvenv/`` holds the agents' venvs
 only -- where skills, overlay helpers and setup scripts run; a project's own
 code gets its venvs beside the store, in the project root's ``.pyvenv/`` (the
-python overlay's ``dotagents pyvenv``). The user store's venv always holds
+python overlay's ``pyvenv create``). The user store's venv always holds
 :data:`BASE_REQUIREMENTS` (duho, for every skill). A project gets its own venv
 only when one of its overlays has Python dependencies, a ``PYTHONPATH``
 directory or a script; otherwise a project session uses the user venv.

@@ -464,7 +464,7 @@ Every store has a Python venv, `<store>/.pyvenv/<X.Y.Z>-<os>-<arch>/` (for examp
 A store's `.pyvenv/` holds these **agents' venvs only**: skills, overlay helpers and
 setup scripts run there. A project's own code gets its venvs beside the store, in
 the project root's `.pyvenv/` (`<project>/.pyvenv/<version>-<os>-<arch>/`, which the
-python overlay's `dotagents pyvenv` creates); only a venv dotagents itself synced is
+python overlay's `pyvenv create` makes); only a venv dotagents itself synced is
 ever used as an agents' venv. `init` and every
 `overlays add` / `sync` / `remove` keep it current:
 

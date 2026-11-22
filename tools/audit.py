@@ -221,7 +221,7 @@ def check_templates(root: Path, overlays: Optional[Path] = None) -> List[str]:
         ck("README.md", lambda: has("README.md", ["img.shields.io", "## Install", "Optional", "## Development", "## License"]))
         ck("CHANGELOG.md", lambda: has("CHANGELOG.md", ["[Unreleased]", "## [", "]: http"]))
         # No "AGENTS.md" (D54: no repo-root one) and no trailing slash on
-        # .agents (D55: `dotagents link-project` makes it a symlink, which a
+        # .agents (D55: `private-sync link` makes it a symlink, which a
         # directory-only pattern would not match).
         ck(".gitignore", lambda: has(".gitignore",
                                      ["\n.agents\n", "*.local.*", "CLAUDE*", ".claude"]))

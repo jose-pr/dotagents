@@ -5,9 +5,9 @@ findings) in a single private git repo — synced across machines and cloud sess
 without ever committing any of it into the (often public) project repos.
 
 This workflow is entirely opt-in — and it is **not part of dotagents**. The two
-commands this model needs, `link-project` and `sync-project`, are shipped by the
-`private-sync` overlay itself (commands *and* the logic behind them). Installing the
-overlay is what makes them exist; a plain dotagents has no private-sync surface at all.
+script this model needs, `private-sync` (`link` and `sync`), is shipped by the
+`private-sync` overlay itself (the script *and* the logic behind it). Installing the
+overlay is what makes it exist; a plain dotagents has no private-sync surface at all.
 
 ## The idea
 
@@ -18,7 +18,7 @@ the project, and the project's `.agents` directory is a git worktree on that bra
 never lands in the public repo). `<name>` defaults to the project's basename, so a
 local checkout and a cloud checkout of the same project resolve to the same branch.
 
-That branch can live elsewhere: `link-project --store-repo self` keeps it on the
+That branch can live elsewhere: `private-sync link --store-repo self` keeps it on the
 project's own repository (branch `agents`), and `--store-repo <url>` on any other,
 such as a team account's (cloned into `.agents`); `--store-branch` names the branch.
 The choice is recorded in the config repo, so every machine links the project the
@@ -44,14 +44,14 @@ dotagents init -g                                             # base config in ~
 dotagents overlays add private-sync -g \
   --repo "https://github.com/Boriken-Dev/agent-overlays.git@main#overlays"   # commands + kb + hooks
 
-# link-project / sync-project come FROM that overlay -- run `overlays add` first.
-dotagents link-project .   # check this project's store branch out at .agents
+# private-sync comes FROM that overlay -- run `overlays add` first.
+private-sync link .   # check this project's store branch out at .agents
                            #   (an existing real .agents/ is adopted on the
                            #    first link)
-dotagents link-project . --store-repo self             # ...on the project's own repo
-dotagents link-project . --store-repo <team-repo-url>  # ...on another repo
-dotagents sync-project --project . -m "msg"   # commit / push the project's branch, then the config
-dotagents sync-project --remote <url> -m init   # one-command bootstrap
+private-sync link . --store-repo self             # ...on the project's own repo
+private-sync link . --store-repo <team-repo-url>  # ...on another repo
+private-sync sync --project . -m "msg"   # commit / push the project's branch, then the config
+private-sync sync --remote <url> -m init   # one-command bootstrap
 ```
 
 Where the store lives and how it reaches other machines are **conventions, not
@@ -61,13 +61,13 @@ leaves the machine is a perfectly valid setup.
 ## Safety behaviors
 
 - A project whose `.agents` is **itself a git checkout** is never adopted or copied
-  back — `link-project` / `sync-project` skip it (with a message) so a nested repo is
-  never swallowed. `link-project --force` backs the checkout up (git state intact) and
+  back — `private-sync link` and `private-sync sync` skip it (with a message) so a nested repo is
+  never swallowed. `private-sync link --force` backs the checkout up (git state intact) and
   links the store instead.
 - **Copy mode** (`--copy`) makes `.agents` a real directory rather than a symlink;
-  `sync-project` copies edits back into the store.
+  `private-sync sync` copies edits back into the store.
 - **Default ignore rules.** A project's `.agents/scratch/` lives inside the store, so
-  the built-in git path would commit it. The first `sync-project` on that path
+  the built-in git path would commit it. The first `private-sync sync` on that path
   appends a block to the store's `.gitignore` that leaves out `scratch/`, `tmp/`,
   `__pycache__/`, hidden files (`.*`, keeping `.gitignore`, `.gitattributes`,
   `.gitkeep`, `.ignore` and `.dotagents-install.json`) and the machine-local
