@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The base block's always-on rules are shorter: the same instructions without the explanatory prose.
 - The example overlays moved to their own repository, `Boriken-Dev/agent-overlays` (`overlays/<name>/`, branch
   `main`). The documented `--repo` address is now
   `https://github.com/Boriken-Dev/agent-overlays.git@main#overlays`, and `tools/cloud-setup.sh` and the test
