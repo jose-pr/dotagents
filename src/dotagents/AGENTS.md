@@ -61,7 +61,7 @@ and an error saying a command is required, and exits 2.
 | `path [-g] [--lib] [--format list\|native\|posix\|json]` | Print the dirs `env` adds to `PATH` -- each store's `bin` and each active overlay's `PATH` additions (`--lib`: the existing agent library dirs, `PYTHONPATH`) -- highest precedence first; runs no env file. `posix` is `:`-joined, MSYS2 form on Windows. |
 | `env [-g] [--format F] [--diff] [--cache] [--into FILE]` | Print the assembled environment (`--diff`: only what differs from the caller's; `--cache`: replay the previous output while `env_cache_key` holds, up to `ENV_CACHE_TTL`; `--into FILE`: write it into FILE as the one block this command owns there) in format `F`: `auto` (default: the calling shell), `export`/`posix`/`sh`/`bash`, `dotenv`/`env`, `powershell`/`pwsh`/`ps`, `cmd`/`bat`/`batch`, `fish`, `json`, `ini`, `yaml`. |
 | `launch [AGENT] [-g] [--command PROG] [--no-context] [--inline] [--write-agent] [--dry-run] [-- ARGS...]` | Run the agent's CLI with the env applied and the context handed over; the exit code is the harness's (`128+N` on signal N). |
-| `findings add\|list\|show\|done\|reopen\|remove\|index\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding, `done` moves it to `processed/` with a required resolution, `INDEX.md` regenerated on every change. The frontmatter is valid YAML (a value is double-quoted when it must be); `index --requote` fixes values written bare in existing files, touching nothing else. |
+| `findings add\|list\|query\|show\|set\|edit\|done\|reopen\|remove\|migrate\|requote\|providers\|path [-g] [--dir D]` | The findings queue at `<store>/findings/` (`--dir` overrides): one markdown file per finding with AI6-report frontmatter, in `active/` and `processed/`; `done` moves it to `processed/` with a required resolution, `query` runs read-only SQL over the frontmatter, `set` and `edit` change attributes and body. No `INDEX.md`: `migrate` moves legacy top-level files into `active/` and removes it. The frontmatter is valid YAML (a value is double-quoted when it must be); `requote` fixes values written bare in existing files, touching nothing else. `providers` reports the backend named in `records.toml`; every `findings` command works on the Markdown files whatever it says. |
 | `about [--json]` | `dotagents-cli <version>`, then `<distribution> <version>` per bundled (`.pyz`) or installed package. |
 | `build-pyz [--out P] [--python SHEBANG] [--duho-version V] [--pathapi-version V] [--extras a,b] [--with-pip]` | Build a zipapp from a source checkout; errors elsewhere. `--with-pip` vendors the pinned pip wheel (`_pipwheel`) as `dotagents/_vendor/`. |
 | `mcp [--prefix TEMPLATE] [--strict]` | Serve command and active overlay MCP tools over stdio (`--strict`, or the user store's `mcp.json` `{"strict": true}`: an `overlays add`/`sync` through it installs without allowing hooks); `{name}` in the template is the skill or server name. |
@@ -1241,6 +1241,34 @@ The pip wheel for a venv with no pip of its own.
   `AGENTS_PIP_SOURCE` for pip's `--find-links`, a URI pip cannot read copied locally.
 - `pip_config(environ=None) -> dict[str, str]` — `index-url`, `find-links`, `cert`,
   `trusted-host`, `proxy` from `PIP_*` over pip's config files.
+
+## `dotagents._records`
+
+Shared YAML-frontmatter record store, SQLite read-only query engine, and external
+provider selection (`markdown` default, which executes; `github`, `gitlab`, `jira`, `ai6` are recognised and
+validated, and a provider object refuses each operation (no adapter here); `findings` itself always uses the Markdown files; the engineering overlay's `records`
+skill runs the first three), kept standard-library-only for Python 3.9+.
+
+- Helpers: `fail(msg) -> SystemExit`, `today_iso()`, `write_text_lf(path, text)`,
+  `slugify(text)`, `slugify_name(text)`, `coerce_attr_value(raw)`.
+- Frontmatter & Markdown sections: `yaml_scalar(val)`, `yaml_value(raw)`,
+  `parse_frontmatter(text) -> (meta, body)`, `render_frontmatter(meta, key_order=())`,
+  `format_document(meta, body, key_order=())`, `requote_frontmatter(text, key_order=())`,
+  `split_sections(body)`, `section_range(body, heading)`, `set_section(body, heading, content)`.
+- `Record(name, path, meta, body, status="", is_complex=False, extras=())`: properties
+  `title`, `description`, `container_dir`, `folder`; methods `load`, `render`, `save`,
+  `section_text(heading)`, `append_to_section(heading, addition)`, `replace_in_body(old, new)`,
+  `as_dict()`.
+- `FolderStore(root, *, status_folders=None, default_status="active", key_order=(),
+  table_alias=None)`: `status_dir(status)`, `all`, `list`, `get`, `require`, `add`,
+  `set_attrs`, `edit_body`, `move`, `remove`, `query(sql=..., select=..., where=...,
+  order_by=..., group_by=..., limit=...)`; SQLite helpers `query_records`,
+  `format_query_result`.
+- `RecordProvider` (`capabilities`, `list_records`, `create`, `update`, `delete`),
+  `BUILTIN_PROVIDERS`, `load_provider_settings(agents_root, scope_key="records")`,
+  `open_provider(store, agents_root=None, scope_key="records") -> RecordProvider`:
+  `MarkdownProvider`, `ExternalTrackerProvider`, `GitHubProvider`, `GitLabProvider`,
+  `JiraProvider`, `Ai6Provider`.
 
 ## `dotagents._fs`
 
