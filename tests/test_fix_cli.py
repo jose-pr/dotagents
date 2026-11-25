@@ -297,7 +297,7 @@ def test_stdin_is_decoded_as_utf8_whatever_the_locale(findings_mod, tmp_path, mo
         sys, "stdin", io.TextIOWrapper(io.BytesIO(piped.encode("utf-8")), encoding="cp1252")
     )
     _run(F.Add, description="third", body_file=Path("-"), dir=d)
-    assert piped.strip() in (d / "third.md").read_text(encoding="utf-8")
+    assert piped.strip() in (d / "active" / "third.md").read_text(encoding="utf-8")
 
 
 def test_a_non_utf8_body_file_is_a_clean_error(findings_mod, tmp_path):
@@ -374,7 +374,7 @@ def test_paths_print_as_utf8_on_a_legacy_console(findings_mod, tmp_path, monkeyp
     monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="cp1252"))
     d = tmp_path / "q\u2192"
     assert _run(findings_mod.Findings.Add, description="arrow dir", dir=d) == 0
-    assert raw.getvalue().decode("utf-8").strip() == str(d / "arrow-dir.md")
+    assert raw.getvalue().decode("utf-8").strip() == str(d / "active" / "arrow-dir.md")
 
 
 # --------------------------------------------------------------------------- #

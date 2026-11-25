@@ -1,10 +1,6 @@
 """Tests for the bundled `findings` command module
-(`src/dotagents/_overlay/dotagents/cmds/findings.py`): the file/index model
-(`Finding`, `FindingsStore`) and the nested subcommands, driven the way
-`test_overlays_command.py` drives command classes (set fields, call).
-
-Filesystem-only (tmp_path). The module is loaded by file path exactly as
-discovery does (it is not an importable package member).
+(`src/dotagents/_overlay/dotagents/cmds/findings.py`): AI6-report frontmatter,
+status folders (`active/`, `processed/`), SQL query, set/edit/remove/migrate, no INDEX.md.
 """
 
 import importlib.util
@@ -22,9 +18,6 @@ MODULE_PATH = ROOT / "src" / "dotagents" / "_overlay" / "dotagents" / "cmds" / "
 
 @pytest.fixture(scope="module")
 def findings_mod():
-    # Registered in sys.modules BEFORE exec, exactly as discovery imports it:
-    # duho resolves a command's field annotations with `typing.get_type_hints`,
-    # which reads the class's module globals through `sys.modules[__module__]`.
     spec = importlib.util.spec_from_file_location("test_findings_module", MODULE_PATH)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = mod
@@ -35,10 +28,6 @@ def findings_mod():
         sys.modules.pop(spec.name, None)
 
 
-# --------------------------------------------------------------------------- #
-# slugify + Finding
-# --------------------------------------------------------------------------- #
-
 def test_slugify(findings_mod):
     s = findings_mod.slugify
     assert s("Context inlining missed bare refs!") == "context-inlining-missed-bare-refs"
@@ -48,8 +37,6 @@ def test_slugify(findings_mod):
 
 
 def test_finding_load_hand_written_note(findings_mod, tmp_path):
-    """A note with no frontmatter is still a finding: stem name, first heading
-    as description, status from its directory."""
     p = tmp_path / "findings" / "old-note.md"
     p.parent.mkdir(parents=True)
     p.write_text("\n# Old note title\n\nbody\n", encoding="utf-8")
@@ -77,21 +64,18 @@ def test_finding_render_roundtrip_is_lf_only(findings_mod, tmp_path):
     assert again.meta == f.meta and again.body == "body line\n"
 
 
-# --------------------------------------------------------------------------- #
-# FindingsStore: add / done / reopen / remove / index
-# --------------------------------------------------------------------------- #
-
-def test_store_add_done_reopen_remove(findings_mod, tmp_path):
+def test_store_add_done_reopen_remove_without_index(findings_mod, tmp_path):
     store = findings_mod.FindingsStore(tmp_path / "findings")
-    f = store.add("Bare refs were never inlined", body="details")
-    assert f.path == store.root / "bare-refs-were-never-inlined.md"
+    f = store.add(
+        "Bare refs were never inlined",
+        body="details",
+        attrs={"severity": "medium", "category": "docs"},
+    )
+    assert f.path == store.active_dir / "bare-refs-were-never-inlined.md"
     assert f.path.is_file()
-    assert store.index_path.is_file()
+    assert not (store.root / "INDEX.md").exists()
     assert [x.name for x in store.active()] == ["bare-refs-were-never-inlined"]
     assert store.processed() == []
-    idx = store.index_path.read_text(encoding="utf-8")
-    assert "- [bare-refs-were-never-inlined](bare-refs-were-never-inlined.md) — Bare refs were never inlined" in idx
-    assert "## Processed\n\n(none)" in idx
 
     # done: resolution appended, status/date set, file MOVED to processed/.
     d = store.done("bare-refs-were-never-inlined", "fixed in _context")
@@ -101,23 +85,19 @@ def test_store_add_done_reopen_remove(findings_mod, tmp_path):
     assert "status: processed" in text and "processed: " in text
     assert "## Resolution (" in text and text.rstrip().endswith("fixed in _context")
     assert store.active() == [] and [x.name for x in store.processed()] == ["bare-refs-were-never-inlined"]
-    idx = store.index_path.read_text(encoding="utf-8")
-    assert "## Active\n\n(none)" in idx
-    assert "(processed/bare-refs-were-never-inlined.md)" in idx and "(processed 20" in idx
-    # get() finds it in processed/ too, by name or file name.
+    assert not (store.root / "INDEX.md").exists()
     assert store.get("bare-refs-were-never-inlined.md").status == "processed"
-    assert store.get("Bare refs were never inlined") is not None  # slugified lookup
+    assert store.get("Bare refs were never inlined") is not None
 
-    # reopen: back to active, resolution history kept.
+    # reopen: back to active/, resolution history kept.
     r = store.reopen("bare-refs-were-never-inlined")
-    assert r.path == store.root / "bare-refs-were-never-inlined.md" and r.path.is_file()
+    assert r.path == store.active_dir / "bare-refs-were-never-inlined.md" and r.path.is_file()
     assert "## Resolution (" in r.path.read_text(encoding="utf-8")
     assert "processed:" not in r.render().split("---")[1]
 
-    # remove: gone, index updated.
+    # remove: gone
     gone = store.remove("bare-refs-were-never-inlined")
     assert not gone.exists()
-    assert "(none)" in store.index_path.read_text(encoding="utf-8")
 
 
 def test_store_done_requires_resolution_and_rejects_double(findings_mod, tmp_path):
@@ -139,7 +119,7 @@ def test_store_add_rejects_duplicates_and_empty(findings_mod, tmp_path):
         store.add("dup again", name="dup")
     store.done("dup", "r")
     with pytest.raises(SystemExit, match="already exists"):
-        store.add("dup", name="dup")  # a processed one blocks the name too
+        store.add("dup", name="dup")
     with pytest.raises(SystemExit, match="one-line description"):
         store.add("   ")
     with pytest.raises(SystemExit, match="no usable file name"):
@@ -147,7 +127,6 @@ def test_store_add_rejects_duplicates_and_empty(findings_mod, tmp_path):
 
 
 def test_store_add_rejects_a_name_taken_by_frontmatter(findings_mod, tmp_path):
-    """A hand-written `foo.md` whose frontmatter says `name: bar` owns `bar`."""
     root = tmp_path / "findings"
     root.mkdir()
     (root / "foo.md").write_text("---\nname: bar\ndescription: hand note\n---\nbody\n", encoding="utf-8")
@@ -164,14 +143,9 @@ def test_store_lists_hand_written_notes_and_skips_index(findings_mod, tmp_path):
     (root / "note.md").write_text("# A hand-written note\n", encoding="utf-8")
     store = findings_mod.FindingsStore(root)
     assert [f.name for f in store.active()] == ["note"]
-    # done on a hand-written note gives it a frontmatter.
     d = store.done("note", "handled")
     assert d.path.read_text(encoding="utf-8").startswith("---\nname: note\ndescription: A hand-written note\nstatus: processed\n")
 
-
-# --------------------------------------------------------------------------- #
-# The command classes: scope resolution + output shapes
-# --------------------------------------------------------------------------- #
 
 def test_cmd_scope_default_project_and_global(findings_mod, tmp_path, monkeypatch):
     F = findings_mod.Findings
@@ -179,38 +153,36 @@ def test_cmd_scope_default_project_and_global(findings_mod, tmp_path, monkeypatc
     home = tmp_path / "home"
     proj.mkdir(); home.mkdir()
     monkeypatch.setenv("AGENTS_PROJECT_ROOT", str(proj))
-    monkeypatch.chdir(proj)  # a write honours the pin only from inside it
+    monkeypatch.chdir(proj)
 
     assert _run(F.Add, description="Project finding") == 0
-    assert (proj / ".agents" / "findings" / "project-finding.md").is_file()
+    assert (proj / ".agents" / "findings" / "active" / "project-finding.md").is_file()
     assert _run(F.Add, description="Global finding", global_scope=True, agents_dir=home) == 0
-    assert (home / "findings" / "global-finding.md").is_file()
-    assert not (home / "findings" / "project-finding.md").exists()
-    # -g honours $AGENTS_HOME (the pinned store), like env/context -- it must
-    # never fall through to the real ~/.agents. Regression: it did, because
-    # resolve_scope() alone ignores the variable.
+    assert (home / "findings" / "active" / "global-finding.md").is_file()
+    assert not (home / "findings" / "active" / "project-finding.md").exists()
+
     pinned = tmp_path / "pinned-store"
     monkeypatch.setenv("AGENTS_HOME", str(pinned))
     assert _run(F.Add, description="Pinned finding", global_scope=True) == 0
-    assert (pinned / "findings" / "pinned-finding.md").is_file()
-    assert not (Path.home() / ".agents" / "findings" / "pinned-finding.md").exists()
-    # --agents-dir still beats $AGENTS_HOME.
+    assert (pinned / "findings" / "active" / "pinned-finding.md").is_file()
+    assert not (Path.home() / ".agents" / "findings" / "active" / "pinned-finding.md").exists()
+
     assert _run(F.Add, description="Explicit dir", global_scope=True, agents_dir=home) == 0
-    assert (home / "findings" / "explicit-dir.md").is_file()
-    assert not (pinned / "findings" / "explicit-dir.md").exists()
-    # --dir wins over both.
+    assert (home / "findings" / "active" / "explicit-dir.md").is_file()
+    assert not (pinned / "findings" / "active" / "explicit-dir.md").exists()
+
     elsewhere = tmp_path / "elsewhere"
     assert _run(F.Add, description="Elsewhere", dir=elsewhere) == 0
-    assert (elsewhere / "elsewhere.md").is_file()
+    assert (elsewhere / "active" / "elsewhere.md").is_file()
 
 
-def test_cmd_list_show_json_and_text(findings_mod, tmp_path, monkeypatch, capsys):
+def test_cmd_list_query_show_set_edit_and_migrate(findings_mod, tmp_path, capsys):
     F = findings_mod.Findings
     d = tmp_path / "q"
-    _run(F.Add, description="First", name="first", body="details of first", dir=d)
-    _run(F.Add, description="Second", name="second", dir=d)
+    _run(F.Add, description="First", name="first", severity="high", category="security", body="details of first", dir=d)
+    _run(F.Add, description="Second", name="second", severity="low", category="docs", dir=d)
     _run(F.Done, name="second", resolution="done because", dir=d)
-    capsys.readouterr()  # drain the paths add/done print
+    capsys.readouterr()
 
     _run(F.List, dir=d)
     assert capsys.readouterr().out == "first: First\n"
@@ -220,25 +192,22 @@ def test_cmd_list_show_json_and_text(findings_mod, tmp_path, monkeypatch, capsys
     _run(F.List, dir=d, processed=True)
     assert capsys.readouterr().out == "second: Second\n"
 
-    _run(F.List, dir=d, all=True, as_json=True)
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["dir"] == str(d)
-    assert [f["name"] for f in payload["findings"]] == ["first", "second"]
-    assert payload["findings"][1]["status"] == "processed"
-    assert "body" not in payload["findings"][0]
+    _run(F.Query, dir=d, sql="SELECT name, severity FROM findings WHERE severity = 'high'", fmt="json")
+    q_out = json.loads(capsys.readouterr().out)
+    assert q_out == [{"name": "first", "severity": "high"}]
 
-    _run(F.Show, name="first", dir=d)
-    out = capsys.readouterr().out
-    assert out.startswith("---\nname: first\n") and "details of first" in out
-    _run(F.Show, name="second", dir=d, as_json=True)
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "processed" and "done because" in payload["body"]
-    assert payload["path"].endswith("second.md")
+    _run(F.Set, name="first", attrs=["credibility=1", "links=[a,b]"], dir=d)
+    capsys.readouterr()
+    _run(F.Edit, name="first", append="## Extra\n\nverified", dir=d)
+    capsys.readouterr()
+    _run(F.Show, name="first", dir=d, as_json=True)
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["credibility"] == 1
+    assert shown["links"] == ["a", "b"]
+    assert "verified" in shown["body"]
 
     _run(F.PathCmd, dir=d)
     assert capsys.readouterr().out.strip() == str(d)
-    _run(F.Index, dir=d)
-    assert capsys.readouterr().out.strip() == str(d / "INDEX.md")
 
 
 def test_cmd_body_and_resolution_from_file_and_stdin(findings_mod, tmp_path, monkeypatch, capsys):
@@ -247,16 +216,16 @@ def test_cmd_body_and_resolution_from_file_and_stdin(findings_mod, tmp_path, mon
     body = tmp_path / "body.md"
     body.write_text("from a file\n", encoding="utf-8")
     _run(F.Add, description="Filed", name="filed", body_file=body, dir=d)
-    assert "from a file" in (d / "filed.md").read_text(encoding="utf-8")
+    assert "from a file" in (d / "active" / "filed.md").read_text(encoding="utf-8")
 
     import io
     monkeypatch.setattr(sys, "stdin", io.StringIO("resolved via stdin\n"))
     _run(F.Done, name="filed", resolution_file=Path("-"), dir=d)
     assert "resolved via stdin" in (d / "processed" / "filed.md").read_text(encoding="utf-8")
     _run(F.Reopen, name="filed", dir=d)
-    assert (d / "filed.md").is_file()
+    assert (d / "active" / "filed.md").is_file()
     _run(F.Remove, name="filed", dir=d)
-    assert not (d / "filed.md").exists()
+    assert not (d / "active" / "filed.md").exists()
     capsys.readouterr()
 
 
@@ -266,12 +235,10 @@ def test_cmd_done_without_resolution_fails(findings_mod, tmp_path):
     _run(F.Add, description="x", name="x", dir=d)
     with pytest.raises(SystemExit, match="resolution is required"):
         _run(F.Done, name="x", dir=d)
-    assert (d / "x.md").is_file()  # untouched
+    assert (d / "active" / "x.md").is_file()
 
 
 def test_subcommands_are_nested_not_module_level(findings_mod):
-    """Discovery collects module-level Cmd subclasses; the subcommands must NOT
-    be module-level or they'd register as top-level `dotagents add` etc."""
     from duho import Cmd
 
     module_level = [
@@ -280,22 +247,13 @@ def test_subcommands_are_nested_not_module_level(findings_mod):
     ]
     assert module_level == ["Findings"]
     names = [c._parsername_ for c in findings_mod.Findings._subcommands_]
-    assert names == ["add", "list", "show", "done", "reopen", "remove", "index", "path"]
-
-
-# --------------------------------------------------------------------------- #
-# Encodings and reserved names. Cases the module still gets wrong are strict
-# xfails naming the issue: a fix flips them to XPASS failures until the
-# marker goes.
-# --------------------------------------------------------------------------- #
-
-def _open(issue, why):
-    return pytest.mark.xfail(strict=True, reason="open (%s): %s" % (issue, why))
+    assert names == [
+        "add", "list", "query", "show", "set", "edit", "done",
+        "reopen", "remove", "requote", "migrate", "providers", "path",
+    ]
 
 
 def test_cmd_body_from_stdin_is_read_as_utf8_bytes(findings_mod, tmp_path, monkeypatch, capsys):
-    """What a pipe really delivers: bytes, behind a text layer that decodes
-    with the console code page (cp1252 on a default Windows shell)."""
     import io
 
     F = findings_mod.Findings
@@ -304,7 +262,7 @@ def test_cmd_body_from_stdin_is_read_as_utf8_bytes(findings_mod, tmp_path, monke
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(text.encode("utf-8")), encoding="cp1252"))
     _run(F.Add, description="Piped", name="piped", body_file=Path("-"), dir=d)
     capsys.readouterr()
-    assert text.strip() in (d / "piped.md").read_text(encoding="utf-8")
+    assert text.strip() in (d / "active" / "piped.md").read_text(encoding="utf-8")
 
 
 def test_a_non_utf8_note_does_not_break_the_queue(findings_mod, tmp_path):
@@ -326,21 +284,14 @@ def test_a_bom_note_keeps_its_frontmatter(findings_mod, tmp_path):
     assert [(f.name, f.description) for f in store.active()] == [("bom", "written by PowerShell 5")]
 
 
-def test_a_finding_named_like_the_index_is_refused(findings_mod, tmp_path):
-    """`add Index` wrote `index.md`, which `write_index()` then overwrote on a
-    case-insensitive filesystem (NTFS, APFS) -- the finding's body lost, rc 0.
-    The name is refused now, on every filesystem, before anything is written."""
+def test_a_finding_named_like_reserved_is_refused(findings_mod, tmp_path):
     root = tmp_path / "findings"
     store = findings_mod.FindingsStore(root)
-    for title in ("Index", "README"):
+    for title in ("Index", "README", "active", "processed"):
         with pytest.raises(SystemExit, match="reserved"):
             store.add(title, body="important details")
     assert not root.exists() or not [p for p in root.iterdir() if p.suffix == ".md"]
 
-
-# --------------------------------------------------------------------------- #
-# The frontmatter is YAML another tool can read
-# --------------------------------------------------------------------------- #
 
 AWKWARD = [
     "[low][correctness] off Linux, sniff with an interface name raises",
@@ -368,7 +319,6 @@ def test_any_description_is_frontmatter_yaml_can_read(findings_mod, tmp_path, te
     front = yaml.safe_load(finding.path.read_text(encoding="utf-8").split("---\n")[1])
     assert front["name"] == "x" and str(front["description"]) == text
     assert findings_mod.Finding.load(finding.path).description == text
-    assert "— %s\n" % text in store.index_path.read_text(encoding="utf-8")
 
 
 def test_a_plain_description_is_written_bare(findings_mod, tmp_path):
@@ -385,49 +335,26 @@ def test_a_plain_description_is_written_bare(findings_mod, tmp_path):
     '"a" and "b"',
 ])
 def test_a_finding_written_bare_still_reads_as_it_did(findings_mod, tmp_path, text):
-    """What an earlier version wrote: the description as typed, whatever it held."""
     path = tmp_path / "findings" / "old.md"
     path.parent.mkdir(parents=True)
     path.write_bytes(("---\nname: old\ndescription: %s\nstatus: active\n---\n\nbody\n" % text).encode("utf-8"))
     assert findings_mod.Finding.load(path).description == text
 
 
-def test_index_requote_changes_only_the_values_yaml_cannot_read(findings_mod, tmp_path, capsys):
+def test_migrate_and_requote_move_legacy_files_and_drop_index(findings_mod, tmp_path, capsys):
     yaml = pytest.importorskip("yaml")
     root = tmp_path / "findings"
     (root / "processed").mkdir(parents=True)
-    bad = root / "processed" / "bad.md"  # CRLF, odd spacing, blank lines: all kept
+    (root / "INDEX.md").write_text("# old\n", encoding="utf-8")
+    bad = root / "processed" / "bad.md"
     bad.write_bytes(b"---\r\nname: bad\r\ndescription: [low][api] a: b\r\nstatus: processed\r\n---\r\n\r\n\r\nbody kept  \r\n\r\n\r\n")
-    kept = {
-        root / "quoted.md": b'---\nname: quoted\ndescription: "already: quoted"\n---\nbody\n',
-        root / "plain.md": b"---\nname: plain\ndescription:   nothing to do\nextra: 1\n---\n\nbody\n",
-        root / "note.md": b"# a hand note\n\n---\nnot: [frontmatter\n---\n",
-    }
-    for path, data in kept.items():
-        path.write_bytes(data)
+    (root / "legacy.md").write_text("---\nname: legacy\ndescription: old active\n---\nbody\n", encoding="utf-8")
 
-    assert _run(findings_mod.Findings.Index, dir=root, requote=True) == 0
-    assert capsys.readouterr().out.strip() == str(root / "INDEX.md")
-
-    assert bad.read_bytes() == (
-        b'---\r\nname: bad\r\ndescription: "[low][api] a: b"\r\nstatus: processed\r\n---\r\n\r\n\r\nbody kept  \r\n\r\n\r\n')
+    assert _run(findings_mod.Findings.Migrate, dir=root) == 0
+    res = json.loads(capsys.readouterr().out)
+    assert res["removed_index"] is True
+    assert not (root / "INDEX.md").exists()
+    assert (root / "active" / "legacy.md").is_file()
+    assert not (root / "legacy.md").exists()
     assert yaml.safe_load(bad.read_bytes().decode().split("---\r\n")[1])["description"] == "[low][api] a: b"
-    for path, data in kept.items():
-        assert path.read_bytes() == data, path.name
-    assert "— [low][api] a: b" in (root / "INDEX.md").read_text(encoding="utf-8")
-    # A second pass has nothing left to do.
     assert findings_mod.FindingsStore(root).requote() == []
-
-
-def test_a_hand_written_index_is_kept_before_it_is_regenerated(findings_mod, tmp_path):
-    root = tmp_path / "findings"
-    root.mkdir()
-    (root / "INDEX.md").write_text("# My own index\n\n- evidence line\n", encoding="utf-8")
-    store = findings_mod.FindingsStore(root)
-    store.add("First problem", body="b")
-    kept = root / "INDEX.md.handwritten"
-    assert kept.read_text(encoding="utf-8") == "# My own index\n\n- evidence line\n"
-    assert "Regenerated by `dotagents findings`" in (root / "INDEX.md").read_text(encoding="utf-8")
-    store.add("Second problem", body="b")  # a generated index is not backed up again
-    assert sorted(p.name for p in root.iterdir() if "handwritten" in p.name) == ["INDEX.md.handwritten"]
-    assert [f.name for f in store.active()] == ["first-problem", "second-problem"]
