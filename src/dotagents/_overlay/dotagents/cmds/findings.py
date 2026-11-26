@@ -9,10 +9,12 @@ Layout::
         <status>/<name>.md      any extra status folder (e.g. `later/`, `duplicate/`)
 
 Every finding is a Markdown file with YAML frontmatter for structured fields and
-attributes (``name``, ``description``, ``status``, ``severity``, ``category``,
-``source``, ``credibility``, ``confidence``, ``where``, ``links``, ``created``,
-``updated``, ``processed``, plus arbitrary attributes) and context/evidence/resolution
-after the frontmatter. No ``INDEX.md`` is generated or maintained.
+attributes (``description``, ``severity``, ``category``, ``source``, ``credibility``,
+``confidence``, ``where``, ``links``, ``created``, ``updated``, ``processed``, plus
+arbitrary attributes) and context/evidence/resolution after the frontmatter. The file
+name is the finding's name and its folder its status, so neither is written into the
+frontmatter (``migrate`` removes them from older files). No ``INDEX.md`` is generated
+or maintained.
 """
 
 from __future__ import annotations
@@ -57,6 +59,9 @@ _META_KEYS = (
 )
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 _MAX_SLUG = 60
+
+_DERIVED_KEYS = ("name", "status")
+_DERIVED_KEY_RE = re.compile(r"^(?:name|status)[ \t]*:[^\r\n]*(?:\r?\n|\Z)", re.MULTILINE)
 
 STATUS_DIRS = {"active": ACTIVE_DIRNAME, "processed": PROCESSED_DIRNAME}
 
@@ -153,7 +158,8 @@ class Finding:
         return ""
 
     def render(self) -> str:
-        meta = dict(self.meta)
+        # The file name is the name and the folder the status: neither is written into the file.
+        meta = {k: v for k, v in self.meta.items() if k not in _DERIVED_KEYS}
         if "description" in meta and meta["description"] is not None:
             meta["description"] = str(meta["description"])
         return render_frontmatter(meta, self.body, key_order=_META_KEYS)
@@ -448,17 +454,28 @@ class FindingsStore:
         )
 
     def migrate(self, *, dry_run: bool = False) -> "dict[str, Any]":
-        """Move legacy top-level ``*.md`` into ``active/``, requote/normalize frontmatter, remove ``INDEX.md``."""
+        """Move legacy top-level ``*.md`` into ``active/``, requote/normalize frontmatter, drop the ``name`` and
+        ``status`` keys (the file name and the folder say them), remove ``INDEX.md``."""
         moved: "list[str]" = []
         requoted: "list[str]" = []
+        stripped: "list[str]" = []
         removed_index = False
         for finding in self.all():
+            text = finding.path.read_bytes().decode("utf-8")
             if not dry_run:
-                text = finding.path.read_bytes().decode("utf-8")
                 fixed = requote_frontmatter(text)
                 if fixed != text:
                     write_text_lf(finding.path, fixed)
                     requoted.append(finding.name)
+                    text = fixed
+            head = _FRONTMATTER_RE.match(text)
+            if head and _DERIVED_KEY_RE.search(head.group(1)):
+                if not dry_run:
+                    # Cut the two lines in place so the file keeps its line endings and every other byte.
+                    block = re.sub(r"\r?\n\Z", "", _DERIVED_KEY_RE.sub("", head.group(1) + "\n"))
+                    fixed = text[:head.start(1)] + block + text[head.end(1):]
+                    finding.path.write_bytes(fixed.encode("utf-8"))
+                stripped.append(finding.name)
             if finding.is_active and finding.path.parent == self.root:
                 dest = self.active_dir / finding.path.name
                 self._refuse_to_overwrite(finding, dest)
@@ -474,7 +491,7 @@ class FindingsStore:
             if not dry_run:
                 idx.unlink()
             removed_index = True
-        return {"moved": moved, "requoted": requoted, "removed_index": removed_index}
+        return {"moved": moved, "requoted": requoted, "stripped": stripped, "removed_index": removed_index}
 
     def provider_info(self, agents_root: "Optional[Path]" = None) -> "dict[str, Any]":
         fs = FolderStore(

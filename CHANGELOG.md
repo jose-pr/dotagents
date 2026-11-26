@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `dotagents findings` no longer writes `name:` or `status:` into a finding's frontmatter (the file name and the folder say them), and `findings migrate` removes both from existing files, keeping each file's line endings; its result lists them under `stripped`.
 - The base block's always-on rules are shorter: the same instructions without the explanatory prose.
 - The example overlays moved to their own repository, `Boriken-Dev/agent-overlays` (`overlays/<name>/`, branch
   `main`). The documented `--repo` address is now

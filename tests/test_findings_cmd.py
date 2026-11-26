@@ -59,7 +59,7 @@ def test_finding_render_roundtrip_is_lf_only(findings_mod, tmp_path):
     f.save()
     raw = f.path.read_bytes()
     assert b"\r\n" not in raw
-    assert raw.startswith(b"---\nname: f\ndescription: d\nstatus: active\ncreated: 2026-09-09\n---\n\nbody line\n")
+    assert raw.startswith(b"---\ndescription: d\ncreated: 2026-09-09\n---\n\nbody line\n")
     again = findings_mod.Finding.load(f.path)
     assert again.meta == f.meta and again.body == "body line\n"
 
@@ -82,7 +82,7 @@ def test_store_add_done_reopen_remove_without_index(findings_mod, tmp_path):
     assert d.path == store.processed_dir / "bare-refs-were-never-inlined.md"
     assert d.path.is_file() and not f.path.exists()
     text = d.path.read_text(encoding="utf-8")
-    assert "status: processed" in text and "processed: " in text
+    assert "status:" not in text and "processed: " in text
     assert "## Resolution (" in text and text.rstrip().endswith("fixed in _context")
     assert store.active() == [] and [x.name for x in store.processed()] == ["bare-refs-were-never-inlined"]
     assert not (store.root / "INDEX.md").exists()
@@ -144,7 +144,7 @@ def test_store_lists_hand_written_notes_and_skips_index(findings_mod, tmp_path):
     store = findings_mod.FindingsStore(root)
     assert [f.name for f in store.active()] == ["note"]
     d = store.done("note", "handled")
-    assert d.path.read_text(encoding="utf-8").startswith("---\nname: note\ndescription: A hand-written note\nstatus: processed\n")
+    assert d.path.read_text(encoding="utf-8").startswith("---\ndescription: A hand-written note\n")
 
 
 def test_cmd_scope_default_project_and_global(findings_mod, tmp_path, monkeypatch):
@@ -317,7 +317,7 @@ def test_any_description_is_frontmatter_yaml_can_read(findings_mod, tmp_path, te
     store = findings_mod.FindingsStore(tmp_path / "findings")
     finding = store.add(text, name="x")
     front = yaml.safe_load(finding.path.read_text(encoding="utf-8").split("---\n")[1])
-    assert front["name"] == "x" and str(front["description"]) == text
+    assert "name" not in front and str(front["description"]) == text
     assert findings_mod.Finding.load(finding.path).description == text
 
 
@@ -358,3 +358,32 @@ def test_migrate_and_requote_move_legacy_files_and_drop_index(findings_mod, tmp_
     assert not (root / "legacy.md").exists()
     assert yaml.safe_load(bad.read_bytes().decode().split("---\r\n")[1])["description"] == "[low][api] a: b"
     assert findings_mod.FindingsStore(root).requote() == []
+
+
+def test_migrate_strips_name_and_status_and_later_writes_keep_them_out(findings_mod, tmp_path, capsys):
+    root = tmp_path / "findings"
+    (root / "active").mkdir(parents=True)
+    (root / "processed").mkdir()
+    (root / "active" / "one.md").write_text("---\nname: one\ndescription: first\nstatus: active\nseverity: low\n---\n\nbody\n", encoding="utf-8")
+    (root / "processed" / "two.md").write_text("---\nname: two\ndescription: second\nstatus: processed\n---\n\nbody\n", encoding="utf-8")
+    assert _run(findings_mod.Findings.Migrate, dir=root, dry_run=True) == 0
+    assert sorted(json.loads(capsys.readouterr().out)["stripped"]) == ["one", "two"]
+    assert "name: one" in (root / "active" / "one.md").read_text(encoding="utf-8")
+
+    assert _run(findings_mod.Findings.Migrate, dir=root) == 0
+    assert sorted(json.loads(capsys.readouterr().out)["stripped"]) == ["one", "two"]
+    for path, status in ((root / "active" / "one.md", "active"), (root / "processed" / "two.md", "processed")):
+        head = path.read_text(encoding="utf-8").split("---\n")[1]
+        assert "name:" not in head and "status:" not in head and "description:" in head
+        found = findings_mod.FindingsStore(root).require(path.stem)
+        assert (found.name, found.status) == (path.stem, status)
+    assert "severity: low" in (root / "active" / "one.md").read_text(encoding="utf-8")
+
+    store = findings_mod.FindingsStore(root)
+    store.add("third thing")
+    store.done("one", "fixed")
+    for path in (root / "active" / "third-thing.md", root / "processed" / "one.md"):
+        head = path.read_text(encoding="utf-8").split("---\n")[1]
+        assert "name:" not in head and "status:" not in head
+    assert _run(findings_mod.Findings.Migrate, dir=root) == 0
+    assert json.loads(capsys.readouterr().out)["stripped"] == []
