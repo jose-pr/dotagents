@@ -285,7 +285,7 @@ def test_a_bom_does_not_hide_the_frontmatter(findings_mod, tmp_path):
 
     _run(F.Done, name="bommed", resolution="fixed", dir=d)
     text = (d / "processed" / "bommed.md").read_bytes().decode("utf-8")
-    assert text.startswith("---\nname: bommed\n")
+    assert text.startswith("---\ndescription: written by PowerShell 5\n")
     assert text.count("---\n") == 2, "one frontmatter, not one nested in the body"
 
 
