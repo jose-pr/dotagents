@@ -97,6 +97,24 @@ def wrapper_points_at_pyz(bin_dir: Path) -> bool:
     return False
 
 
+def foreign_interpreter_warning(store: Path, python: "str | None" = None) -> "str | None":
+    """A warning when ``python`` (default: the running interpreter) is not one of ``store``'s venvs.
+
+    Module wrappers record that interpreter, so running ``init`` from another environment repoints
+    the store's command at it. ``None`` when the store has no venv yet or ``python`` is in one."""
+    venvs = Path(store) / ".pyvenv"
+    if not venvs.is_dir() or not any(p.is_dir() for p in venvs.iterdir()):
+        return None
+    root = os.path.normcase(os.path.abspath(str(venvs))) + os.sep
+    exe = os.path.normcase(os.path.abspath(python or sys.executable))
+    prefix = os.path.normcase(os.path.abspath(sys.prefix))
+    if exe.startswith(root) or (python is None and prefix.startswith(root)):
+        return None
+    return ("the running interpreter (%s) is outside the store's venv (%s); the wrappers "
+            "written here will run it instead of the store's"
+            % (python or sys.executable, venvs))
+
+
 def write_module_wrappers(bin_dir: Path, python: "str | None" = None) -> "list[Path]":
     """Write both wrapper forms into `bin_dir` running `"<python>" -m dotagents`
     (``python`` defaults to ``sys.executable``, absolute -- see

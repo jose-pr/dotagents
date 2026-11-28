@@ -1142,6 +1142,9 @@ credentials, SSH agent or prompts.
 - `write_module_wrappers(bin_dir, python=None) -> list[Path]` — both forms running
   `"<python>" -m dotagents` (`python` defaults to `sys.executable`).
 - `wrapper_points_at_pyz(bin_dir) -> bool`.
+- `foreign_interpreter_warning(store, python=None) -> Optional[str]` — a warning when `python`
+  (default `sys.executable`) is not inside the store's `.pyvenv/`, which already holds a venv; `init`
+  logs it before module wrappers record that interpreter.
 - `check_path_warning(bin_dir) -> Optional[str]` — a warning with the PATH line to
   add, or `None` when `bin_dir` is on `PATH`.
 

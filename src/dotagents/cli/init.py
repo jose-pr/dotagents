@@ -134,6 +134,7 @@ class Init(DotAgentsArgs):
         else:
             from dotagents._wrappers import (
                 check_path_warning,
+                foreign_interpreter_warning,
                 wrapper_points_at_pyz,
                 write_module_wrappers,
                 write_wrappers,
@@ -163,6 +164,10 @@ class Init(DotAgentsArgs):
                             "replacing the .pyz wrappers in %s with ones running "
                             "this install (%s -m dotagents)", bin_dir, sys.executable,
                         )
+                    if bin_dir == targets[0][0]:
+                        foreign = foreign_interpreter_warning(dest)
+                        if foreign:
+                            self._logger_.warning(foreign)
                     written = write_module_wrappers(bin_dir)
                 for w in written:
                     self._logger_.info("wrapper: %s", w)

@@ -213,3 +213,29 @@ def test_a_plain_init_writes_module_wrappers_over_old_pyz_ones(tmp_path, monkeyp
     text = (store / "bin" / "dotagents.cmd").read_text(encoding="utf-8")
     assert "-m dotagents" in text and ".pyz" not in text
     assert "replacing the .pyz wrappers" in caplog.text
+
+
+def test_init_warns_when_this_interpreter_is_outside_the_stores_venv(tmp_path, monkeypatch, caplog):
+    from dotagents.cli.init import Init
+
+    store = tmp_path / "store"
+    (store / ".pyvenv" / "3.14.0-nt-arm64").mkdir(parents=True)
+    monkeypatch.setattr(sys, "argv", ["python -m dotagents"])
+    cmd = Init()
+    cmd.dest, cmd.from_, cmd.agents, cmd.no_hooks = store, None, ["codex"], True
+    cmd.dry_run, cmd.force, cmd.bin_dir = False, False, None
+    assert cmd() == 0
+    assert "outside the store's venv" in caplog.text
+    assert str(store / ".pyvenv") in caplog.text
+
+
+def test_no_warning_without_a_store_venv_or_inside_it(tmp_path, monkeypatch):
+    from dotagents._wrappers import foreign_interpreter_warning
+
+    store = tmp_path / "store"
+    assert foreign_interpreter_warning(store) is None
+    venv = store / ".pyvenv" / "3.14.0-nt-arm64"
+    venv.mkdir(parents=True)
+    exe = venv / ("Scripts" if os.name == "nt" else "bin") / "python"
+    assert foreign_interpreter_warning(store, python=str(exe)) is None
+    assert foreign_interpreter_warning(store, python=str(tmp_path / "elsewhere" / "python"))

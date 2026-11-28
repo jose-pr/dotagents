@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `dotagents init` run from an interpreter outside the store's `.pyvenv/` warns before it writes wrappers that run that interpreter in place of the store's.
 - `dotagents findings` no longer writes `name:` or `status:` into a finding's frontmatter (the file name and the folder say them), and `findings migrate` removes both from existing files, keeping each file's line endings; its result lists them under `stripped`.
 - The base block's always-on rules are shorter: the same instructions without the explanatory prose.
 - The example overlays moved to their own repository, `Boriken-Dev/agent-overlays` (`overlays/<name>/`, branch
